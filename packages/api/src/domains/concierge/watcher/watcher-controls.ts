@@ -14,7 +14,8 @@ export function effectiveWatcherState(
   now = Date.now(),
 ) {
   const control = parseWatcherThreadControl(thread.watcher);
-  const enabled = config.enabled && (config.scope === 'all' ? control.enabled !== false : control.enabled === true);
+  const allThreads = config.routing !== undefined || config.scope === 'all';
+  const enabled = config.enabled && (allThreads ? control.enabled !== false : control.enabled === true);
   const pausedUntil = control.pausedUntil !== undefined && control.pausedUntil > now ? control.pausedUntil : undefined;
   const labelMuted = thread.labels?.some((id) => quietLabels.includes(id)) ?? false;
   return { enabled, maySpeak: enabled && !pausedUntil && !labelMuted, pausedUntil, labelMuted };

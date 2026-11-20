@@ -63,6 +63,8 @@ export interface DesktopWindowLaunch {
   /** Present only for the exact verified public archive that carries the new contract. */
   readonly publicCompanionV2?: true;
   readonly companionContract?: CompanionArchiveContract['contract'];
+  /** F336 Phase C: the verified living body entry, served beside `url`; only on a livingBody line. */
+  readonly bodyUrl?: string;
   readonly signal: AbortSignal;
   readonly onClosed: (failure?: DesktopWindowFailure) => void;
   readonly request?: (input: unknown) => Promise<CompanionReply>;
@@ -82,6 +84,8 @@ export interface DesktopWindowHandle {
   /** Revoke only capture in the trusted child and await its acknowledgement. */
   revokeMedia?(): Promise<void>;
   navigate?(url: string): Promise<void>;
+  /** F336: ask the living body for its newest scene and write it while the bridge is still current. */
+  flushScene?(): Promise<void>;
   close(): Promise<void>;
 }
 export interface DesktopWindowPresence {

@@ -5,6 +5,17 @@ import type { ContentEditorProviderContribution, DesktopWindowContribution } fro
 import { readBoundedPackageFile } from './bounded-package-file.js';
 import type { VerifiedPluginPackage } from './types.js';
 
+/** The verified manifest's living body page; the Host's structural contribution type predates it. */
+export function livingBodyEntry(
+  contribution: ContentEditorProviderContribution | DesktopWindowContribution,
+): { readonly entrypoint: string; readonly integrity: string } | undefined {
+  if (contribution.type !== 'desktop-window') return undefined;
+  const body = (contribution as { readonly body?: unknown }).body;
+  if (!body || typeof body !== 'object') return undefined;
+  const { entrypoint, integrity } = body as Record<string, unknown>;
+  return typeof entrypoint === 'string' && typeof integrity === 'string' ? { entrypoint, integrity } : undefined;
+}
+
 function contained(root: string, path: string): boolean {
   const rel = relative(root, path);
   return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
@@ -41,9 +52,13 @@ export async function snapshotPluginSurfaceAssets(
       throw new Error('surface requires a package-local asset directory');
     }
     await walk(dirname(resolve(pkg.rootDir, entrypoint)));
-    const bytes = files.get(entrypoint);
-    if (!bytes || `sha256-${createHash('sha256').update(bytes).digest('base64')}` !== contribution.surface.integrity) {
-      throw new Error('surface integrity mismatch');
+    // F336: a living body entry (bridge 1.8.0) sits in the same directory and is verified the same way.
+    const body = livingBodyEntry(contribution);
+    for (const page of body ? [contribution.surface, body] : [contribution.surface]) {
+      const bytes = files.get(page.entrypoint);
+      if (!bytes || `sha256-${createHash('sha256').update(bytes).digest('base64')}` !== page.integrity) {
+        throw new Error('surface integrity mismatch');
+      }
     }
   }
   await pkg.verifyIntegrity();

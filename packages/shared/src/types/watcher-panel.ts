@@ -62,6 +62,8 @@ export const watcherPanelRoundSchema = z
     threadId: id,
     sourceInvocationId: id,
     sourceSettledSequence: z.number().int().nonnegative(),
+    /** Configuration that selected the observer; a later choice cannot release an old round's output. */
+    configRevision: z.number().int().nonnegative().optional(),
     workerCatId: id,
     /** The judged turn's reply; an anchor, not the lock — a reply is created early and written until settlement. */
     cutoffMessageId: id,
@@ -71,7 +73,7 @@ export const watcherPanelRoundSchema = z
     updatedAt: z.number().int().nonnegative(),
     status: z.enum(['running', 'completed', 'interrupted', 'coalesced']),
     /** Why this round looks but never delivers. */
-    quiet: z.enum(['paused', 'label_muted', 'woken_by_watcher']).optional(),
+    quiet: z.enum(['paused', 'label_muted', 'woken_by_watcher', 'same_family']).optional(),
     /** sha256 of the guidance text the members read; the experiment fixes it before the run. */
     guidanceDigest: z.string().max(100),
     members: z.array(watcherPanelMemberEntrySchema).max(5),

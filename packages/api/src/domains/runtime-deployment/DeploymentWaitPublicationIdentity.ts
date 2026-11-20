@@ -9,12 +9,15 @@ export function deploymentTransportAttempt(
   taskId: string,
   outcomeId: string,
   recoverySource?: DeploymentWaitStateV1['recoverySource'],
+  taskHandoffRef?: string | null,
 ): NonNullable<DeploymentWaitStateV1['transportAttempt']> {
   const original = deploymentNotificationKey(taskId, outcomeId);
   return {
     outcomeId,
-    idempotencyKey: recoverySource
-      ? `${original}:recovery:${encodeURIComponent(recoverySource.invocationId)}`
-      : original,
+    ...(taskHandoffRef ? { taskHandoffRef } : {}),
+    idempotencyKey:
+      original +
+      (recoverySource ? `:recovery:${encodeURIComponent(recoverySource.invocationId)}` : '') +
+      (taskHandoffRef ? `:assignment:${encodeURIComponent(taskHandoffRef)}` : ''),
   };
 }

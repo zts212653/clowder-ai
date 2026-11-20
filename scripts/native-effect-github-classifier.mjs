@@ -1,4 +1,4 @@
-import { ghOperation, ghOptionPolicy, isGhHelpRequest, isGhObservation } from './lib/secret-gh-options.mjs';
+import { ghOperation, isGhHelpRequest, isGhObservation } from './lib/secret-gh-options.mjs';
 import { shellInvocation, tokenizeSimpleShellCommand } from './native-effect-shell-tokenizer.mjs';
 
 /** Only reviewed built-ins may use the managed-wrapper carrier. Upload/API mutations
@@ -11,14 +11,10 @@ export function managedGhOperation(args) {
     const help = args.length === 2 && args[0] === 'api' && ['--help', '-h'].includes(args[1]);
     return help || Boolean(constrainedGhApiOperation(command, { payloadFree: true }));
   }
-  try {
-    if (ghOptionPolicy(operation).passthrough) return true;
-    return (
-      ['pr', 'issue'].includes(operation.group) && ['create', 'edit', 'review', 'comment'].includes(operation.action)
-    );
-  } catch {
-    return false;
-  }
+  return (
+    isGhObservation(args) ||
+    (['pr', 'issue'].includes(operation.group) && ['create', 'edit', 'review', 'comment'].includes(operation.action))
+  );
 }
 
 /** Only a literal bare command gains a lexical read effect; paths need identity proof. */

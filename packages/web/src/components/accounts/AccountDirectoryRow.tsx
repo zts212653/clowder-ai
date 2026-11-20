@@ -8,15 +8,23 @@ import { QuotaQueryDetails } from '../codex-accounts/QuotaQueryFeedback';
 import { quotaCopy } from '../codex-accounts/quota.shell-copy';
 import { nextQuotaAccount } from '../codex-accounts/quota-state';
 import type { AccountMember, ProfileItem } from '../hub-accounts.types';
+import { agyAccountQuotaReady } from '../shell/quota-pin/quota-pin-model';
 import { useShellCopy } from '../shell/shell-copy';
 import { useShellLanguage } from '../shell/shell-language';
 import { useConfirm } from '../useConfirm';
 import { AccountLoginDetails } from './AccountLoginDetails';
 import { AccountRowActions } from './AccountRowActions';
-import { accountDisplayName, accountStatus } from './account-directory-view';
+import {
+  accountDisplayName,
+  accountStatus,
+  canSwitchAccount,
+  isAgyOAuthAccount,
+  isKimiOAuthAccount,
+} from './account-directory-view';
 import { accountMessage } from './account-message';
 import { accountsCopy } from './accounts.shell-copy';
 import { ClaudeQuotaControl } from './ClaudeQuotaControl';
+import { CliAccountQuotaControl } from './CliAccountQuotaControl';
 
 export function AccountDirectoryRow({
   account,
@@ -137,7 +145,9 @@ export function AccountDirectoryRow({
       ? 'cancel'
       : account.codex && (failed || !status.ready)
         ? 'retry'
-        : (status.ready || (native && account.clientId === 'anthropic')) && (!used || !!suggestion)
+        : canSwitchAccount(account) &&
+            (status.ready || (native && account.clientId === 'anthropic')) &&
+            (!used || !!suggestion)
           ? 'switch'
           : '';
   return (
@@ -202,7 +212,19 @@ export function AccountDirectoryRow({
               <small>{t.noQuota}</small>
             )
           ) : account.clientId === 'anthropic' && account.authType === 'oauth' ? (
-            <ClaudeQuotaControl accountRef={account.id} observation={account.claudeQuota} reload={refresh} />
+            <ClaudeQuotaControl account={account} reload={refresh} />
+          ) : isAgyOAuthAccount(account) ? (
+            agyAccountQuotaReady(account) ? (
+              <CliAccountQuotaControl kind="agy" account={account} reload={refresh} />
+            ) : (
+              <small>{t.noQuota}</small>
+            )
+          ) : isKimiOAuthAccount(account) ? (
+            account.kimiLoginReady === true ? (
+              <CliAccountQuotaControl kind="kimi" account={account} reload={refresh} />
+            ) : (
+              <small>{t.noQuota}</small>
+            )
           ) : (
             <small>{account.authType === 'api_key' ? t.providerBalance : quota.unsupported}</small>
           )}

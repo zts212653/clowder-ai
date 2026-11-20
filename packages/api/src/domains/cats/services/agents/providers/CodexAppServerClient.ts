@@ -93,6 +93,8 @@ export interface CodexAppServerContextCompactionEvent {
 }
 
 export interface CodexAppServerRunInput {
+  /** Suppress every inherited global/project MCP server on start and resume. */
+  strictMcpConfig?: boolean;
   boundedWatcher?: import('./BoundedWatcherRunPort.js').BoundedWatcherRunPort;
   requireExactResume?: boolean;
   /** F317: explicit Host-owned continuous call. Ordinary invocations remain single-turn. */
@@ -385,7 +387,7 @@ export class CodexAppServerClient {
       accountCheckComplete = true;
       yield { type: 'app_server.account_check', stage: 'ready' };
 
-      if (input.live || input.boundedWatcher) {
+      if (input.live || input.boundedWatcher || input.strictMcpConfig) {
         // config/read without cwd sees global servers, while a resumed thread
         // also loads project servers at its persisted cwd. Fence the exact scope.
         let liveCwd = input.cwd;

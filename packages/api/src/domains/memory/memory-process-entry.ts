@@ -16,6 +16,7 @@ import {
 } from './memory-process-protocol.js';
 import type { MemoryReadDiagnostic } from './memory-read-execution.js';
 import { describePassageVectorRead } from './native-vector-read-context.js';
+import { openEvidenceDatabase } from './open-evidence-database.js';
 import { openVectorGeneration } from './open-vector-generation.js';
 import { projectEntityMentions } from './project-entity-mentions.js';
 import { reconcileVectorGenerationDatabase } from './reconcile-vector-generation.js';
@@ -75,6 +76,12 @@ async function execute(
   observeWindow: (snapshot: FileVectorReadWindowSnapshot) => void,
   vectorStarted: () => Promise<void>,
 ): Promise<unknown> {
+  if (job.kind === 'schema-initialize') {
+    started();
+    const db = openEvidenceDatabase(job.dbPath, 'schema');
+    db.close();
+    return;
+  }
   if (job.kind === 'scan') {
     started();
     const scanner = job.scanner === 'cat-cafe' ? new CatCafeScanner(job.excludes) : new GenericRepoScanner();
@@ -216,30 +223,45 @@ process.on('message', (message: ParentMessage) => {
     pending.delete(message.id);
     return;
   }
+  const receivedAt = performance.now();
   process.stderr.write(memoryProcessStderrBoundary(message.stderrToken, message.id, 'begin'));
   let readWindow: FileVectorReadWindowSnapshot | undefined;
+  const report = (diagnostic: MemoryReadDiagnostic) => {
+    try {
+      send({ type: 'read-diagnostic', id: message.id, diagnostic });
+    } catch {
+      /* Optional witness. */
+    }
+  };
   const finish = (result: Extract<ChildMessage, { type: 'result' }>) => {
+    if (message.job.kind === 'message-search')
+      report({ phase: 'result-ready', workerElapsedMs: performance.now() - receivedAt });
     process.stderr.write(memoryProcessStderrBoundary(message.stderrToken, message.id, 'end'));
     send({ ...result, ...(readWindow ? { readWindow } : {}) });
   };
   void execute(
     message.job,
     () => send({ type: 'started', id: message.id, pid: process.pid, ...(readWindow ? { readWindow } : {}) }),
-    (diagnostic) => {
-      try {
-        send({ type: 'read-diagnostic', id: message.id, diagnostic });
-      } catch {
-        /* Optional witness. */
-      }
-    },
+    report,
     (snapshot) => {
       readWindow = snapshot;
+      if (message.job.kind === 'message-search' && snapshot.active && snapshot.cleanup !== null)
+        report({
+          phase: 'read-window-finished',
+          readWindow: snapshot,
+          workerElapsedMs: performance.now() - receivedAt,
+        });
     },
     () =>
       new Promise<void>((resolve, reject) => {
         if (!process.connected) return reject(new Error('Message vector control channel disconnected'));
-        process.send?.({ type: 'message-vectors-started', id: message.id } satisfies ChildMessage, (error) =>
-          error ? reject(error) : resolve(),
+        process.send?.(
+          {
+            type: 'message-vectors-started',
+            id: message.id,
+            workerElapsedMs: performance.now() - receivedAt,
+          } satisfies ChildMessage,
+          (error) => (error ? reject(error) : resolve()),
         );
       }),
   ).then(

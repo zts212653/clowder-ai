@@ -1,6 +1,6 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { builtinAccountFamilyForRef } from '@cat-cafe/shared';
@@ -21,32 +21,28 @@ export const hasClaudeQuotaAuthOverride = (env: Readonly<Record<string, unknown>
   );
 
 /** Mirrors CLI 2.1.325's native secure-storage name. No network or credential mutation. */
-function nativeClaudeToken(): string | undefined {
+async function nativeClaudeToken(): Promise<string | undefined> {
   if (process.env.CLAUDE_CODE_OAUTH_TOKEN) return process.env.CLAUDE_CODE_OAUTH_TOKEN;
-  const secure = process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
-  const home =
-    secure !== undefined
-      ? secure || join(homedir(), '.claude')
-      : process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+  const configDir = process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR;
+  const home = configDir || join(homedir(), '.claude');
   try {
-    let raw: string;
+    let raw: string | undefined;
     if (process.platform === 'darwin') {
-      const custom = secure !== undefined ? !!secure : !!process.env.CLAUDE_CONFIG_DIR;
-      const suffix = custom ? `-${claudeCredentialFingerprint(home.normalize('NFC')).slice(0, 8)}` : '';
+      const suffix = configDir ? `-${claudeCredentialFingerprint(home.normalize('NFC')).slice(0, 8)}` : '';
       const user = process.env.USER || userInfo().username;
       if (!/^[A-Za-z0-9._-]+$/.test(user)) return undefined;
-      raw = execFileSync(
-        '/usr/bin/security',
-        ['find-generic-password', '-a', user, '-w', '-s', `Claude Code-credentials${suffix}`],
-        {
-          encoding: 'utf8',
-          timeout: 1500,
-          maxBuffer: 262144,
-          stdio: ['ignore', 'pipe', 'ignore'],
-        },
-      );
-    } else raw = readFileSync(join(home, '.credentials.json'), 'utf8');
-    if (raw.length > 262144) return undefined;
+      raw = await new Promise<string | undefined>((resolve) => {
+        const child = execFile(
+          '/usr/bin/security',
+          ['find-generic-password', '-a', user, '-w', '-s', `Claude Code-credentials${suffix}`],
+          { encoding: 'utf8', timeout: 1500, maxBuffer: 262144 },
+          // A child error can carry credential stdout/stderr. Keep it private.
+          (error, stdout) => resolve(error ? undefined : stdout),
+        );
+        child.stdin?.end();
+      });
+    } else raw = await readFile(join(home, '.credentials.json'), 'utf8');
+    if (!raw || raw.length > 262144) return undefined;
     const oauth = (JSON.parse(raw) as { claudeAiOauth?: { accessToken?: unknown } }).claudeAiOauth;
     return typeof oauth?.accessToken === 'string' && oauth.accessToken ? oauth.accessToken : undefined;
   } catch {
@@ -55,7 +51,7 @@ function nativeClaudeToken(): string | undefined {
   }
 }
 
-export function claudeQuotaCredentialVersion(account: ClaudeQuotaAccount): string | undefined {
+export async function claudeQuotaCredentialVersion(account: ClaudeQuotaAccount): Promise<string | undefined> {
   if (account.authType !== 'oauth' || account.baseUrl) return undefined;
   if (account.claude) {
     const token = account.envVars?.CLAUDE_CODE_OAUTH_TOKEN;
@@ -66,6 +62,6 @@ export function claudeQuotaCredentialVersion(account: ClaudeQuotaAccount): strin
   // Alternate native token transports cannot be joined safely to the OS store.
   if (process.env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR || process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST)
     return undefined;
-  const token = nativeClaudeToken();
+  const token = await nativeClaudeToken();
   return token ? claudeCredentialFingerprint(token) : undefined;
 }

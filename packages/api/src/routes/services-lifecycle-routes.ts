@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
+import { isManagedWhisperEndpoint, readWhisperSourceDigest } from '../domains/services/asr-source-identity.js';
 import { getServiceConfig, setServiceConfig } from '../domains/services/service-config.js';
 import {
   appendServiceLog,
@@ -184,6 +185,7 @@ async function probeServiceReadinessContract(input: {
   env: NodeJS.ProcessEnv;
   config: ServiceConfig | undefined;
   fetchHealth: FetchServiceHealth;
+  expectedAsrSource?: string;
 }): Promise<ServiceReadinessContract> {
   const endpoint = resolveServiceEndpoint(input.service, input.env, input.config);
   if (!endpoint) return { ready: false, stage: 'endpoint', reason: 'service endpoint is not configured' };
@@ -192,7 +194,7 @@ async function probeServiceReadinessContract(input: {
     if (!health.ok) {
       return { ready: false, stage: 'shallow', reason: health.error ?? `HTTP ${health.status ?? 'unknown'}` };
     }
-    const identity = serviceHealthIdentityMatches(input.service, input.config, health);
+    const identity = serviceHealthIdentityMatches(input.service, input.config, health, input.expectedAsrSource);
     if (!identity.matches) return { ready: false, stage: 'identity', reason: identity.reason };
     if (!input.service.deepHealthPath) return { ready: true };
 
@@ -827,11 +829,24 @@ export async function registerServiceLifecycleRoutes(
           return { error: `Service port ${startProbeService.port} is already owned by another process` };
         }
         if (portProbe.owned.length > 0) {
+          const endpoint = resolveServiceEndpoint(service, lifecycleEnv, startEffectiveCfg);
+          const expectedAsrSource =
+            service.id === 'whisper-stt' && isManagedWhisperEndpoint(endpoint, startProbeService.port)
+              ? await readWhisperSourceDigest().catch((error) => {
+                  app.log.warn(
+                    { err: error, serviceId: service.id },
+                    'could not verify the ASR checkout code fingerprint',
+                  );
+                  appendServiceLog(service.id, '[start] ASR code fingerprint unavailable in this checkout\n');
+                  return undefined;
+                })
+              : undefined;
           const readiness = await probeServiceReadinessContract({
             service,
             env: lifecycleEnv,
             config: startEffectiveCfg,
             fetchHealth: healthProbe,
+            expectedAsrSource,
           });
           logOwnedServiceReadinessFailure({ app, service, pids: portProbe.owned, readiness });
           if (readiness.ready) {

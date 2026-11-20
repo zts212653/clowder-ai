@@ -72,7 +72,7 @@ test('not_started receipt recovers visibility once, with no wake or active execu
   await sweep.runOnce();
   assert.equal(h.appended.length, 1);
   assert.equal(h.triggerCalls.length, 0);
-  assert.deepEqual(listManagedCommandExecutions([task]), []);
+  assert.deepEqual(await listManagedCommandExecutions([task]), []);
   assert.equal(task.params.holdLifecycle.managedCommand.state, 'not_started');
 });
 

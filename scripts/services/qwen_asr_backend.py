@@ -47,7 +47,7 @@ def transcribe(model, tmp_path: str, initial_prompt: str | None) -> str:
     try:
         kwargs = dict(model=model, audio=wav_path, output_path=output_file, verbose=False)
         if initial_prompt:
-            kwargs["context"] = initial_prompt
+            kwargs["system_prompt"] = initial_prompt
         result = generate_transcription(**kwargs)
         return result.text.strip() if hasattr(result, "text") else str(result).strip()
     finally:

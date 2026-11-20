@@ -5984,6 +5984,16 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       taskStore,
       registry,
       ...(opts.ordinaryTaskHandoffs ? { ordinaryTaskHandoffs: opts.ordinaryTaskHandoffs } : {}),
+      ...(opts.invocationQueue
+        ? {
+            ordinaryTaskResultDelivery: {
+              queue: opts.invocationQueue,
+              messages: messageStore,
+              log: app.log,
+              dispatchProposals: opts.dispatchProposalStore,
+            },
+          }
+        : {}),
       ...(opts.taskRecovery ? { taskRecovery: opts.taskRecovery } : {}),
       ...(opts.ownedWaitStatusReader ? { ownedWaitStatusReader: opts.ownedWaitStatusReader } : {}),
       messageStore: opts.messageStore,

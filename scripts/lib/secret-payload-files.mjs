@@ -5,8 +5,9 @@ import { scanSecretContent } from './secret-content-scan.mjs';
 import { isCredentialSource } from './secret-credential-paths.mjs';
 export const SECRET_PAYLOAD_MAX_BYTES = 64 * 1024 * 1024;
 
-export function assertSecretFree(content) {
-  if (scanSecretPayload(content).length) throw new Error('secret_content_detected');
+export function assertSecretFree(content, input) {
+  const [finding] = scanSecretPayload(content);
+  if (finding) throw Object.assign(new Error('secret_content_detected'), { finding, input });
 }
 
 export function scanSecretPayload(content) {
@@ -27,13 +28,14 @@ export function scanSecretPayload(content) {
 }
 
 /** Read an already opened regular file once; the executor only receives this copy. */
-export function readSecretPayload(path, cwd, credentialSources) {
+export function readSecretPayload(path, cwd, credentialSources, input) {
   if (isCredentialSource(path, cwd, credentialSources)) throw new Error('credential_source_blocked_before_read');
   let fd;
   try {
     fd = openSync(resolve(cwd ?? process.cwd(), path), 'r');
     const before = fstatSync(fd);
-    if (!before.isFile() || before.size > SECRET_PAYLOAD_MAX_BYTES) throw new Error('secret_payload_uninspectable');
+    if (!before.isFile()) throw new Error('secret_payload_uninspectable');
+    if (before.size > SECRET_PAYLOAD_MAX_BYTES) throw new Error('secret_payload_size_limit');
     const bytes = Buffer.alloc(before.size + 1);
     const length = readSync(fd, bytes, 0, bytes.length, 0);
     const after = fstatSync(fd);
@@ -46,7 +48,7 @@ export function readSecretPayload(path, cwd, credentialSources) {
       throw new Error('secret_payload_changed');
     }
     const content = bytes.subarray(0, length);
-    assertSecretFree(content);
+    assertSecretFree(content, input);
     return content;
   } finally {
     if (fd !== undefined) closeSync(fd);

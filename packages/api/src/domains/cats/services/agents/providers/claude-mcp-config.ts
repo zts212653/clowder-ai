@@ -1,9 +1,10 @@
 import type { ToolExecutionPolicy } from '../../types.js';
 import {
   captureProviderMcpConfig,
+  materializeProviderMcpConfig,
   type ProviderMcpConfigPlan,
-  resolveProviderMcpConfigResolution,
 } from './provider-mcp-config.js';
+import { watcherNativeMcpPlan } from './watcher-mcp-input.js';
 
 export type ClaudeMcpServerConfig = Record<string, unknown>;
 export interface ClaudeMcpConfigResolution {
@@ -21,7 +22,10 @@ export async function captureClaudeMcpConfig(input: {
   if (!input.mcpServerPath || input.toolExecutionPolicy?.mode === 'read_only') return {};
   return {
     frozenNativeMcpConfig: await captureProviderMcpConfig({
-      callbackEnv: { CAT_CAFE_CAT_ID: input.catId },
+      callbackEnv: {
+        CAT_CAFE_CAT_ID: input.catId,
+        ...(input.toolExecutionPolicy?.mode === 'watcher_panel' ? { CAT_CAFE_MCP_TRANSPORT: 'stdio' } : {}),
+      },
       workingDirectory: input.workingDirectory,
       mcpServerPath: input.mcpServerPath,
       provider: 'claude',
@@ -35,14 +39,28 @@ export async function resolveClaudeMcpConfig(input: {
   readonly workingDirectory?: string;
   readonly mcpServerPath?: string;
   readonly frozenNativeMcpConfig?: ProviderMcpConfigPlan;
+  readonly toolExecutionPolicy?: ToolExecutionPolicy;
 }): Promise<ClaudeMcpConfigResolution | undefined> {
   if (!input.callbackEnv || !input.mcpServerPath) return undefined;
-  const resolved = await resolveProviderMcpConfigResolution({
-    ...input,
-    callbackEnv: input.callbackEnv,
-    mcpServerPath: input.mcpServerPath,
-    provider: 'claude',
-  });
+  const policy = input.toolExecutionPolicy;
+  const callbackEnv =
+    policy?.mode === 'watcher_panel'
+      ? {
+          ...input.callbackEnv,
+          CAT_CAFE_MCP_TRANSPORT: 'stdio',
+          CAT_CAFE_ALLOWED_TOOL_NAMES: JSON.stringify(policy.allowedToolNames),
+        }
+      : input.callbackEnv;
+  const plan =
+    input.frozenNativeMcpConfig ??
+    (await captureProviderMcpConfig({
+      ...input,
+      callbackEnv,
+      mcpServerPath: input.mcpServerPath,
+      provider: 'claude',
+    }));
+  const selected = policy?.mode === 'watcher_panel' ? watcherNativeMcpPlan(plan, policy.allowedToolNames ?? []) : plan;
+  const resolved = materializeProviderMcpConfig(selected, { callbackEnv });
   // Claude inherits the CLI environment into stdio children. Empty inherited Host
   // identity only; each server's explicit environment (including managed binding)
   // wins, while CLI hooks retain their original environment and credential file.

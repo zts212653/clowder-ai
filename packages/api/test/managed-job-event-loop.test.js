@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, get } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import {
+  createActiveExecutionService,
+  listManagedCommandExecutions,
+} from '../dist/domains/cats/services/agents/invocation/active-execution-service.js';
 import { ManagedJobService } from '../dist/domains/managed-job/ManagedJobService.js';
 import {
   closeSupervisorStore,
@@ -156,4 +160,100 @@ test('a reconciliation scope reuses its database and releases it even on failure
   } finally {
     reopened.close();
   }
+});
+
+test(
+  'active command projection leaves HTTP responsive while its SQLite ledger is locked',
+  { timeout: 15_000 },
+  async (t) => {
+    const { root, service, path } = history(t, 3);
+    const previousRoot = process.env.CAT_CAFE_DATA_DIR;
+    process.env.CAT_CAFE_DATA_DIR = root;
+    t.after(() => {
+      if (previousRoot === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+      else process.env.CAT_CAFE_DATA_DIR = previousRoot;
+    });
+    const job = service.list()[0];
+    const database = openSupervisorStore(job);
+    try {
+      const record = JSON.parse(
+        database.prepare('SELECT record_json FROM managed_jobs WHERE job_id = ?').get(job.jobId).record_json,
+      );
+      record.state = 'running';
+      record.admissionMessageId = 'admitted-command';
+      record.descriptor.definition = { principal: job.wakeTarget, command: 'node private-command.js' };
+      database
+        .prepare('UPDATE managed_jobs SET state = ?, record_json = ? WHERE job_id = ?')
+        .run('running', JSON.stringify(record), job.jobId);
+    } finally {
+      database.close();
+    }
+    const releaseMarker = join(root, 'lock-released');
+    const child = fork(
+      new URL('./helpers/managed-job-lock-holder.mjs', import.meta.url),
+      [path, '1200', releaseMarker],
+      {
+        stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+        execArgv: [],
+      },
+    );
+    t.after(async () => {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill();
+        await once(child, 'close');
+      }
+    });
+    await once(child, 'message', { signal: AbortSignal.timeout(5000) });
+    const server = createServer((_req, response) => response.end(String(!existsSync(releaseMarker))));
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    t.after(() => new Promise((resolve) => server.close(resolve)));
+    const started = performance.now();
+    const response = new Promise((resolve, reject) => {
+      get(`http://127.0.0.1:${server.address().port}`, (res) => {
+        let body = '';
+        res.on('data', (chunk) => {
+          body += chunk;
+        });
+        res.once('end', () => resolve({ beforeRelease: body === 'true', elapsedMs: performance.now() - started }));
+      }).once('error', reject);
+    });
+    const [health, executions] = await Promise.all([response, listManagedCommandExecutions([])]);
+    await t.diagnostic(JSON.stringify({ scenario: 'active ledger lock', ...health, executions: executions.length }));
+    assert.deepEqual(
+      executions.map((entry) => entry.taskId),
+      [job.originTaskId],
+      'the admitted live job remains visible and terminal history stays excluded',
+    );
+    assert.equal(
+      health.beforeRelease,
+      true,
+      'unrelated HTTP must finish while the independently held ledger lock is still present',
+    );
+  },
+);
+
+test('a failed active ledger read leaves owner truth incomplete instead of claiming no work', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'managed-active-error-'));
+  const previousRoot = process.env.CAT_CAFE_DATA_DIR;
+  process.env.CAT_CAFE_DATA_DIR = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+    else process.env.CAT_CAFE_DATA_DIR = previousRoot;
+    rmSync(root, { recursive: true, force: true });
+  });
+  mkdirSync(join(root, 'managed-jobs'));
+  writeFileSync(join(root, 'managed-jobs/supervisor.sqlite'), 'not a SQLite database');
+  const service = createActiveExecutionService({
+    invocationTracker: { getActiveSlots: () => [], getUserId: () => null },
+    dynamicTaskStore: { getAll: () => [] },
+    log: { info() {}, warn() {} },
+  });
+  const snapshot = await service.buildSnapshot('owner');
+  assert.equal(snapshot.complete, false);
+  assert.equal(
+    snapshot.ownerTruthComplete,
+    false,
+    'an asynchronous ledger failure cannot turn unknown occupancy into idle',
+  );
 });

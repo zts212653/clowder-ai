@@ -94,6 +94,7 @@ export class ProposalStoreDelegateProvider implements TaskApprovedDelegateProvid
     tenantScope: string,
     currentDevelopmentScope?: DevelopmentScopeSnapshot,
     currentTaskTitle?: string,
+    currentOwnerRevision?: number,
   ): Promise<ReadonlyArray<ApprovedDelegate>> {
     // Step 1: Find every independently approved delegation binding for this
     // specific task. Thread proposals are durable approvals and the current
@@ -116,6 +117,7 @@ export class ProposalStoreDelegateProvider implements TaskApprovedDelegateProvid
           title: currentTaskTitle,
           threadId: taskThreadId,
           ownerCatId: currentOwnerCatId,
+          ownerRevision: currentOwnerRevision,
           userId: tenantScope,
           developmentScope: currentDevelopmentScope,
         };
@@ -123,7 +125,7 @@ export class ProposalStoreDelegateProvider implements TaskApprovedDelegateProvid
         if (!isApprovedDevelopmentProposalForTask(proposal, task) && !continuation) return [];
 
         // Step 8: preferredCats are the exact approved execution targets.
-        const authorizedCats = proposal.preferredCats;
+        const authorizedCats = continuation?.approval ? proposal.preferredCats?.slice(0, 1) : proposal.preferredCats;
         if (!authorizedCats || authorizedCats.length === 0) return [];
 
         return authorizedCats.map((catId) => ({

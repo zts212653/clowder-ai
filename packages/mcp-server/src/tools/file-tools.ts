@@ -295,6 +295,7 @@ export async function handleReadFileSlice(
   return {
     ...successResult(text),
     structuredContent: {
+      text, // Native clients may prefer structuredContent over the parallel text blocks.
       version,
       complete: !nextSlice,
       ...(nextSlice

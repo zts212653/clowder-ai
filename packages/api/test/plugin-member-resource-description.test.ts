@@ -49,7 +49,7 @@ function fixture({ supported = true, failSelected = false, nativeDefault = false
       resolve: (ref) => account(ref).entry,
       inspect: account,
     }),
-    freezeAccount: (input) => {
+    freezeAccount: async (input) => {
       freezes++;
       if (failSelected && input.accountSelection) throw new Error('SECRET_KEY_SENTINEL /private/credential-source');
       const ref = input.accountSelection?.accountRef ?? 'existing';

@@ -30,6 +30,7 @@ function fixture(program) {
 for (const [program, prefix] of [
   ['gh', ['issue', 'comment', '1', '--body-file']],
   ['gh', ['pr', 'review', '123', '-a', '-F']],
+  ['gh', ['pr', 'merge', '7274', '-m', '-F']],
   ['curl', null],
 ])
   test(`${program} ${prefix?.join(' ') ?? 'upload'} scans before a real delegate execution and only sends frozen bytes`, () => {
@@ -100,10 +101,11 @@ for (const program of ['gh', 'curl'])
       assert.equal(digest(result[stream]), digest(expected), 'preserve every binary byte');
     });
 
-test('release draft assets are rejected before the upload delegate executes', () => {
+test('replacement release assets are rejected before the upload delegate executes', () => {
   const f = fixture('gh');
+  const upload = ['release', 'upload', 'v1', '--clobber', f.body];
   writeFileSync(f.body, secret());
-  const result = spawnSync(resolve('scripts/guarded-bin/gh'), ['release', 'create', 'v1', '-d', f.body], {
+  const result = spawnSync(resolve('scripts/guarded-bin/gh'), upload, {
     cwd: f.dir,
     env: f.env,
     encoding: 'utf8',
@@ -112,7 +114,7 @@ test('release draft assets are rejected before the upload delegate executes', ()
   assert.ok(!existsSync(f.receipt));
   assert.ok(!`${result.stdout}${result.stderr}`.includes(secret()));
   writeFileSync(f.body, 'safe release asset');
-  const clean = spawnSync(resolve('scripts/guarded-bin/gh'), ['release', 'create', 'v1', '-d', f.body], {
+  const clean = spawnSync(resolve('scripts/guarded-bin/gh'), upload, {
     cwd: f.dir,
     env: f.env,
     encoding: 'utf8',
@@ -121,6 +123,36 @@ test('release draft assets are rejected before the upload delegate executes', ()
   const uploaded = JSON.parse(readFileSync(f.receipt, 'utf8'));
   assert.equal(uploaded.body, 'safe release asset');
   assert.notEqual(uploaded.args.at(-1), f.body);
+});
+
+test('wrapper reports distinguish a credential, a missing file, and generated PR content', () => {
+  for (const [program, args] of [
+    ['gh', (path) => ['pr', 'comment', '1', '--body-file', path]],
+    ['curl', (path) => ['--data-binary', `@${path}`, 'https://example.invalid']],
+  ]) {
+    const f = fixture(program);
+    const run = (argv) =>
+      spawnSync(resolve('scripts/guarded-bin', program), argv, {
+        cwd: f.dir,
+        env: f.env,
+        encoding: 'utf8',
+      });
+    const missing = run(args(f.body));
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /secret_send_input_error:.*ENOENT/);
+    writeFileSync(f.body, `fixture\n${secret()}`);
+    const credential = run(args(f.body));
+    assert.equal(credential.status, 1);
+    assert.match(credential.stderr, /secret_send_blocked:.*第 2 行.*github-token/);
+    assert.ok(!credential.stderr.includes(secret()));
+    if (program === 'gh') {
+      const generated = run(['pr', 'create', '--fill', '--head', 'topic']);
+      assert.equal(generated.status, 1);
+      assert.match(generated.stderr, /本地提交自动生成正文.*--title.*--body-file/);
+      assert.doesNotMatch(generated.stderr, /secret_send_blocked/);
+    }
+    assert.ok(!existsSync(f.receipt));
+  }
 });
 
 test('the real curl can copy a local file without treating the copy as an upload', () => {

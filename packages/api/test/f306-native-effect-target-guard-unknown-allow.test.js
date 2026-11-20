@@ -48,6 +48,19 @@ function decideBoth(command, cwd = mainRoot) {
 }
 
 describe('F306 AC-C7: an unrecognised command is not a dangerous one', () => {
+  test('a single shell call can prepare a PR, push with repository hooks, and pipe the publication result', () => {
+    const checkout = fileURLToPath(new URL('../../../', import.meta.url));
+    const command = [
+      "cat > /tmp/f306-pr-body.md <<'BODY'",
+      'Prepared release note.',
+      'BODY',
+      'git -c core.hooksPath=.githooks push origin HEAD &&',
+      "GIT_CONFIG_COUNT=0 gh pr create --title 'Guard fixture' --body-file /tmp/f306-pr-body.md | tail -1",
+    ].join('\n');
+    const verdict = decideBoth(command, checkout);
+    assert.equal(verdict.decision, 'allow', verdict.reasonCode);
+  });
+
   test('ordinary work that the parser cannot read is allowed', () => {
     for (const command of [
       // Read-only sweep denied as broad_root_irreversible (main checkout named via cd).
@@ -61,6 +74,17 @@ describe('F306 AC-C7: an unrecognised command is not a dangerous one', () => {
       `cd ${mainRoot} && node scripts/some-report.mjs --out /tmp/report.json`,
       // Prose that mentions the runtime sync branch is not a rewrite of it.
       "cat > /tmp/note.md <<'EOF'\nruntime/main-sync is You's\nEOF",
+    ]) {
+      const decision = decideBoth(command);
+      assert.equal(decision.decision, 'allow', `${command} → ${decision.reasonCode}`);
+    }
+  });
+
+  test('ordinary program lookups and computed paths can run from the main checkout', () => {
+    for (const command of [
+      `for p in /opt/homebrew/bin/python3.12 /usr/bin/python3; do "$p" -c 'import sys; print(sys.version)'; done`,
+      'for bin in rg git gh node pnpm; do echo "$bin -> $(command -v $bin || echo MISSING)"; done',
+      'T=/private/tmp/scratchpad/t2i; cd $T; $T/venv/bin/report --help 2>&1 | head -20',
     ]) {
       const decision = decideBoth(command);
       assert.equal(decision.decision, 'allow', `${command} → ${decision.reasonCode}`);

@@ -317,6 +317,55 @@ describe('MlxAudioTtsProvider', () => {
     assert.strictEqual(events[1].isFinalChunk, true, 'the final playable chunk must close the sentence boundary');
   });
 
+  it('can deliver native audio before the sidecar sends the next chunk', async () => {
+    const wave = pcmWav(0.48).toString('base64');
+    const encoder = new TextEncoder();
+    let writer;
+    globalThis.fetch = withHealth(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              writer = controller;
+              controller.enqueue(
+                encoder.encode(`${JSON.stringify({ type: 'chunk', audio_base64: wave, final: false })}\n`),
+              );
+            },
+          }),
+        ),
+    );
+    const provider = new MlxAudioTtsProvider({ baseUrl: 'http://test:9877' });
+    const firstNative = Promise.withResolvers();
+    const stream = provider
+      .stream(
+        {
+          text: '首块先发。',
+          voice: 'wanderer',
+          refAudio: '/voices/wanderer.wav',
+          refText: '参考转写',
+        },
+        { onEarlyChunk: firstNative.resolve },
+      )
+      [Symbol.asyncIterator]();
+    const ready = stream.next();
+    let timer;
+    try {
+      const packet = await Promise.race([
+        firstNative.promise,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('first native chunk waited for the next packet')), 500);
+        }),
+      ]);
+      assert.strictEqual(packet.type, 'chunk');
+      assert.strictEqual(packet.isFinalChunk, false);
+    } finally {
+      clearTimeout(timer);
+      writer?.close();
+      await ready;
+      await stream.return();
+    }
+  });
+
   it('propagates caller cancellation into the sidecar request', async () => {
     let requestSignal;
     let responseController;

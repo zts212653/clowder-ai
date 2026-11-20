@@ -95,6 +95,32 @@ describe('F335 SuggestionService', () => {
       ...input,
     });
 
+  it('resolves legacy action aliases without enumerating duplicate kinds or allowing alias chains', () => {
+    registry.registerAlias('video_comments', 'video-comments');
+    assert.equal(registry.get('video_comments'), video.handler);
+    assert.deepEqual(registry.kinds(), ['video-comments', 'scheduled-task']);
+    assert.throws(() => registry.registerAlias('missing', 'unregistered'));
+    assert.throws(() => registry.registerAlias('scheduled-task', 'video-comments'));
+    assert.throws(() => registry.registerAlias('video_comments', 'video-comments'));
+    assert.throws(() => registry.registerAlias('other_alias', 'video_comments'));
+  });
+
+  it('undoes a legacy stored kind and counts its canonical handler once in facts', async () => {
+    const result = await offer();
+    const applied = await service.apply(USER, result.value.id, result.value.revision);
+    const row = await store.get(applied.value.id);
+    const legacy = { ...row, kind: 'video_comments', revision: row.revision + 1 };
+    assert.equal((await store.swap(legacy, row.revision)).kind, 'swapped');
+    registry.registerAlias('video_comments', 'video-comments');
+    const undone = await service.undo(USER, legacy.id, legacy.revision);
+    assert.equal(undone.ok, true, JSON.stringify(undone));
+    assert.equal(video.calls.undo, 1);
+    assert.equal((await store.get(legacy.id)).kind, 'video_comments', 'do not rewrite historical kind identities');
+    const facts = await service.facts(ACTOR, {});
+    assert.equal(facts.ok, true, JSON.stringify(facts));
+    assert.equal(facts.value.kinds.filter((fact) => fact.kind === 'video-comments').length, 1);
+  });
+
   it('hangs under this turn’s reply by default and under a named message in the same conversation', async () => {
     const own = await offer();
     assert.equal(own.ok, true);

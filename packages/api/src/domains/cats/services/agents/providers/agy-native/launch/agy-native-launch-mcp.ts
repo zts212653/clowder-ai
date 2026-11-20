@@ -1,7 +1,12 @@
 import { join } from 'node:path';
 import { pluginMcpEnvironment } from '../../../../../../../config/capabilities/plugin-mcp-environment.js';
 import { findMonorepoRoot } from '../../../../../../../utils/monorepo-root.js';
-import { resolveProviderMcpConfig } from '../../provider-mcp-config.js';
+import {
+  captureProviderMcpConfig,
+  materializeProviderMcpConfig,
+  resolveProviderMcpConfig,
+} from '../../provider-mcp-config.js';
+import { watcherNativeMcpPlan } from '../../watcher-mcp-input.js';
 import { prepareAgyNativeCredentialFile } from '../agy-native-credential-file.js';
 import type { AgyNativeLaunchInput } from '../agy-native-launch.js';
 import { materializeAgyNativeMcpConfig } from '../agy-native-mcp-config.js';
@@ -30,16 +35,40 @@ export async function materializeAgyLaunchMcp(
   const ordinary = input.options?.toolExecutionPolicy?.mode !== 'read_only';
   const credential = ordinary && callbackEnv ? prepareAgyNativeCredentialFile(home, callbackEnv) : undefined;
   try {
+    const watcherPolicy =
+      input.options?.toolExecutionPolicy?.mode === 'watcher_panel' ? input.options.toolExecutionPolicy : undefined;
+    const watcher = Boolean(watcherPolicy);
+    const watcherEnv = {
+      ...callbackEnv,
+      CAT_CAFE_CAT_ID: input.catId,
+      CAT_CAFE_MCP_TRANSPORT: 'stdio',
+      CAT_CAFE_ALLOWED_TOOL_NAMES: JSON.stringify(watcherPolicy?.allowedToolNames ?? []),
+    };
+    const watcherPlan = watcher
+      ? watcherNativeMcpPlan(
+          input.options?.frozenNativeMcpConfig ??
+            (await captureProviderMcpConfig({
+              callbackEnv: watcherEnv,
+              workingDirectory: input.workspace,
+              provider: 'google',
+              mcpServerPath: join(runtimeRoot, 'packages/mcp-server/dist/index.js'),
+            })),
+          watcherPolicy?.allowedToolNames ?? [],
+        )
+      : undefined;
     const resolvedServers =
-      ordinary && credential
-        ? await resolveProviderMcpConfig({
-            callbackEnv: { ...callbackEnv, CAT_CAFE_CAT_ID: input.catId },
-            workingDirectory: input.workspace,
-            mcpServerPath: join(runtimeRoot, 'packages/mcp-server/dist/index.js'),
-            credentialFile: credential.path,
-            provider: 'google',
-          })
-        : undefined;
+      watcherPlan && credential
+        ? materializeProviderMcpConfig(watcherPlan, { callbackEnv: watcherEnv, credentialFile: credential.path })
+            .servers
+        : ordinary && credential
+          ? await resolveProviderMcpConfig({
+              callbackEnv: { ...callbackEnv, CAT_CAFE_CAT_ID: input.catId },
+              workingDirectory: input.workspace,
+              mcpServerPath: join(runtimeRoot, 'packages/mcp-server/dist/index.js'),
+              credentialFile: credential.path,
+              provider: 'google',
+            })
+          : undefined;
     materializeAgyNativeMcpConfig({
       profileHome: home,
       runtimeRoot,

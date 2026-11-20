@@ -32,9 +32,9 @@ function link(target: string, path: string): void {
  * The CLI writes through its token link (1.5.6 uses os.WriteFile); no token copy.
  * Called inside the existing profile preparation lease.
  */
-export function prepareAgyAccountDataView(profileHome: string, credentialHome: string): string {
-  assertAgyCredentialHome(credentialHome);
-  const account = realpathSync(credentialHome);
+export function prepareAgyAccountDataView(profileHome: string, credentialHome?: string): string {
+  if (credentialHome) assertAgyCredentialHome(credentialHome);
+  const account = realpathSync(credentialHome ?? profileHome);
   const data = join(profileHome, '.gemini', 'antigravity-cli');
   const views = join(profileHome, '.cat-cafe-account-views');
   const view = join(views, createHash('sha256').update(account).digest('hex'));

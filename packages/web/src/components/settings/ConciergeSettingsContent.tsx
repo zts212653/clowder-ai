@@ -24,7 +24,7 @@ interface ConciergeSettingsState {
   proactivePolicy: 'ambient' | 'quiet-badge';
   muted: boolean;
   behaviorEnabled: boolean;
-  skin: 'yarn-ball' | 'ragdoll-v1' | 'yanyan-codex' | 'xianxian-codex';
+  skin: 'yarn-ball' | 'ragdoll-v1' | 'yanyan-codex' | 'xianxian-codex' | 'xianxian-living';
   ballPosition: { x: number; y: number } | null;
   ballSize: number;
 }
@@ -185,6 +185,15 @@ export function ConciergeSettingsContent() {
             label="🐱 宪宪 v1"
             hint="9 态动画精灵图，宪宪专属皮肤（视频提取）。（默认）"
             onChange={() => updateConfig({ skin: 'xianxian-codex' })}
+          />
+          <RadioOption
+            name="skin"
+            value="xianxian-living"
+            checked={state.skin === 'xianxian-living'}
+            disabled={saving}
+            label="🐱 宪宪（活猫）"
+            hint="活猫代替猫猫球，在屏幕底边自己玩。桌面猫猫球的版本不支持活猫时，仍显示宪宪 v1。"
+            onChange={() => updateConfig({ skin: 'xianxian-living' })}
           />
         </div>
       </SettingsSection>

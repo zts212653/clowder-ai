@@ -1604,7 +1604,12 @@ export type {
   SessionUsageSnapshot,
   StrategyAction,
 } from './session.js';
-export type { SessionCacheObservation, SessionCacheWarmth } from './session-cache.js';
+export type {
+  CacheRetentionMemberStatus,
+  CacheRetentionSessionStatus,
+  SessionCacheObservation,
+  SessionCacheWarmth,
+} from './session-cache.js';
 export { sessionCacheWarmthSchema } from './session-cache.js';
 // Session handoff proposal types (F225 Cat-Initiated Session Handoff)
 export type {
@@ -1843,6 +1848,7 @@ export {
 } from './wait-termination.js';
 export * from './watcher.js';
 export * from './watcher-panel.js';
+export * from './watcher-routing.js';
 export type {
   CheckStatus,
   ResumeCapsule,

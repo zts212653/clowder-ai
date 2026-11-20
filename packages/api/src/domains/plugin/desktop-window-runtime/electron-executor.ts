@@ -10,6 +10,8 @@ import {
   validateHostCompanionReply as validateCompanionReply,
 } from './companion-private-wire.js';
 import { createDeskPipe } from './desk-pipe.js';
+import { companionContractHas } from './published-companion-v2.js';
+import { besideSurface, companionSurfaceUrl } from './surface-url.js';
 import type {
   DesktopWindowExecutor,
   DesktopWindowFailure,
@@ -41,19 +43,13 @@ export class ElectronDesktopWindowExecutor implements DesktopWindowExecutor {
 
   async open(launch: DesktopWindowLaunch): Promise<DesktopWindowHandle> {
     launch.signal.throwIfAborted();
-    const url = new URL(launch.url);
+    const url = companionSurfaceUrl(launch.url);
+    // F336: the living body page is served beside the surface, on a livingBody line only.
     if (
-      url.protocol !== 'http:' ||
-      !/^companion-[a-f0-9]{32}\.localhost$/.test(url.hostname) ||
-      !url.port ||
-      !url.pathname.startsWith('/packages/') ||
-      !url.pathname.endsWith('.html') ||
-      url.username ||
-      url.password ||
-      url.search ||
-      url.hash
+      launch.bodyUrl !== undefined &&
+      (!companionContractHas(launch.companionContract, 'livingBody') || !besideSurface(url, launch.bodyUrl))
     )
-      throw new Error('invalid desktop surface origin');
+      throw new Error('invalid desktop body page');
     const env: NodeJS.ProcessEnv = {};
     for (const key of [
       'HOME',
@@ -310,6 +306,7 @@ export class ElectronDesktopWindowExecutor implements DesktopWindowExecutor {
         presentation: launch.presentation,
         ...(launch.publicCompanionV2 ? { publicCompanionV2: true } : {}),
         ...(launch.companionContract ? { companionContract: launch.companionContract } : {}),
+        ...(launch.bodyUrl ? { bodyUrl: launch.bodyUrl } : {}),
         ...(launch.appAssist ? { appAssist: true } : {}),
         ...(launch.desk ? { desk: true } : {}),
       });
@@ -343,6 +340,13 @@ export class ElectronDesktopWindowExecutor implements DesktopWindowExecutor {
         navigate: async (url) => {
           await request('navigate', { url });
         },
+        ...(launch.bodyUrl
+          ? {
+              flushScene: async () => {
+                await request('flush-scene');
+              },
+            }
+          : {}),
         close,
       };
     } catch (error) {

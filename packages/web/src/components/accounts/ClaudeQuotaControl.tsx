@@ -1,7 +1,8 @@
 'use client';
-import { type ClaudeQuotaView, claudeQuotaWindows } from '@cat-cafe/shared';
-import { useEffect, useState } from 'react';
+import { claudeQuotaWindows } from '@cat-cafe/shared';
+import { useEffect, useRef, useState } from 'react';
 import { AccountRequestError, accountRequest } from '../codex-accounts/account-request';
+import type { ProfileItem } from '../hub-accounts.types';
 import { useShellCopy } from '../shell/shell-copy';
 import { useShellLanguage } from '../shell/shell-language';
 import { claudeQuotaCopy } from './claude-quota.shell-copy';
@@ -9,22 +10,21 @@ import '../codex-accounts/codex-quota.css';
 import './claude-quota.css';
 
 export function ClaudeQuotaControl({
-  accountRef,
-  observation,
+  account,
   reload,
 }: {
-  accountRef: string;
-  observation?: ClaudeQuotaView;
+  account: Pick<ProfileItem, 'id' | 'claudeQuota'>;
   reload: () => Promise<void>;
 }) {
   const t = useShellCopy(claudeQuotaCopy);
   const language = useShellLanguage();
-  const [quota, setQuota] = useState(observation);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [now, setNow] = useState(Date.now);
-  useEffect(() => setQuota(observation), [observation]);
-  const windows = claudeQuotaWindows(quota?.samples ?? {});
+  // A directory read replaces the account row even when both logins have no quota.
+  const latestAccount = useRef(account);
+  latestAccount.current = account;
+  const windows = claudeQuotaWindows(account.claudeQuota?.samples ?? {});
   const resetTimes = windows.flatMap((window) =>
     window.resetsAt && window.resetsAt * 1000 > now ? [window.resetsAt * 1000] : [],
   );
@@ -45,14 +45,9 @@ export function ClaudeQuotaControl({
     setBusy(true);
     setError('');
     try {
-      const result = await accountRequest<{ claudeQuota?: ClaudeQuotaView }>(
-        `/api/accounts/${encodeURIComponent(accountRef)}/claude/quota`,
-        {},
-      );
-      setQuota(result.claudeQuota);
-      setNow(Date.now());
-      await reload();
+      await accountRequest(`/api/accounts/${encodeURIComponent(account.id)}/claude/quota`, {});
     } catch (e) {
+      if (latestAccount.current !== account) return;
       setError(
         e instanceof AccountRequestError && e.status === 409
           ? t.changed
@@ -60,8 +55,10 @@ export function ClaudeQuotaControl({
             ? t.ownerUnknown
             : t.unavailable,
       );
-      await reload();
     } finally {
+      // The directory read checks the current login after the query finishes.
+      await reload().catch(() => undefined);
+      setNow(Date.now());
       setBusy(false);
     }
   }

@@ -27,6 +27,7 @@ import {
   type TurnOutputFenceVerdict,
 } from '../ports/TurnExecutionStore.js';
 import { TurnExecutionKeys } from '../redis-keys/turn-execution-keys.js';
+import { RedisTurnExecutionCacheFacts } from './RedisTurnExecutionCacheFacts.js';
 import { RedisTurnExecutionSettlement } from './RedisTurnExecutionSettlement.js';
 import { readAuthoritativeHash } from './redis-pipeline-reply.js';
 import { hydrateTurnExecution, type RedisTurnExecutionHash, sortTurnExecutions } from './turn-execution-redis-codec.js';
@@ -99,7 +100,10 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
     );
   }
 
-  constructor(private readonly redis: RedisClient) {}
+  readonly cacheFacts: RedisTurnExecutionCacheFacts;
+  constructor(private readonly redis: RedisClient) {
+    this.cacheFacts = new RedisTurnExecutionCacheFacts(redis, (id) => this.get(id));
+  }
 
   async createRunning(input: CreateTurnExecutionInput): Promise<CreateTurnExecutionResult> {
     assertCreateTurnExecutionInput(input);
@@ -232,14 +236,19 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
 
   async markProviderStarted(invocationId: string, at: number): Promise<boolean> {
     if (!Number.isFinite(at)) return false;
+    const record = await this.get(invocationId);
+    if (!record) return false;
+    const entryKeys = this.cacheFacts.entryKeys(record);
     return (
       Number(
         await this.redis.eval(
           ADVANCE_TURN_PROVIDER_LUA,
-          1,
+          1 + entryKeys.length,
           TurnExecutionKeys.record(invocationId),
+          ...entryKeys,
           'providerStartedAt',
           String(at),
+          invocationId,
         ),
       ) === 1
     );

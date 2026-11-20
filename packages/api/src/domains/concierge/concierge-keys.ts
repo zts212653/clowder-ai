@@ -3,6 +3,7 @@
  *
  * PR-A3b: added relay + confirmation keys (§1a/§1b state objects)
  * Phase B: added triage plan keys (§2 TriagePlan state object)
+ * F336 Phase C: added the companion scene key (scene/companion-scene-store.ts)
  */
 export const ConciergeKeys = {
   /** String (JSON): per-user ConciergeConfig */
@@ -33,4 +34,7 @@ export const ConciergeKeys = {
   investigationJobByPlan: (triagePlanId: string) => `concierge:investigation-plan:${triagePlanId}`,
   /** Set: per-user investigation job IDs (for listing) — Phase B2 */
   investigationJobIndex: (userId: string) => `concierge:investigation-idx:${userId}`,
+  /** String (JSON {revision, updatedAt, snapshot}): living-cat scene, CAS on revision, TTL=0, never cleared (F336).
+   * catId and sceneId are colon-free at the route, so the userId prefix stays unambiguous. */
+  companionScene: (userId: string, catId: string, sceneId: string) => `companion:scene:${userId}:${catId}:${sceneId}`,
 } as const;

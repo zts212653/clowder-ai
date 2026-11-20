@@ -91,19 +91,25 @@ test('xargs default and null transport retain different argv boundaries and laun
   }
 });
 
-test('reparsed worktree and generated-control segments keep their parent namespace state', () => {
+test('namespace changes preserve recognised effects without rejecting unknown commands', () => {
   verify(
     [
       'command() { shift; "$@"; }; command -v git worktree remove --force .',
       'source /tmp/unproved; command -v git worktree remove --force .',
-      'source /tmp/unproved; command -v "$UNPROVED_PROGRAM" arg1',
-      'alias command=eval; command -v "$UNPROVED_PROGRAM" arg1',
       'enable -n command; command -v "$(printf git)" reset --hard',
     ],
     'deny',
     main,
   );
-  verify(['command -v git worktree remove --force .'], 'allow', main);
+  verify(
+    [
+      'command -v git worktree remove --force .',
+      'source /tmp/unproved; command -v "$UNPROVED_PROGRAM" arg1',
+      'alias command=eval; command -v "$UNPROVED_PROGRAM" arg1',
+    ],
+    'allow',
+    main,
+  );
 });
 
 test('leading shell structure does not hide a function declaration', () => {

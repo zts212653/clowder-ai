@@ -46,13 +46,19 @@ export function staticEditorManifest(): PluginManifest {
   };
 }
 
-export async function staticEditorFixture(packageManifest: PluginManifest, body = html, worker?: string) {
+export async function staticEditorFixture(
+  packageManifest: PluginManifest,
+  body = html,
+  worker?: string,
+  extraFiles: Readonly<Record<string, string>> = {},
+) {
   const root = await mkdtemp(join(tmpdir(), 'f309-static-admission-'));
   const source = join(root, 'package');
   await mkdir(join(source, 'renderer'), { recursive: true });
   await writeFile(join(source, 'manifest.json'), JSON.stringify(packageManifest));
   await writeFile(join(source, 'renderer/index.html'), body);
   if (worker !== undefined) await writeFile(join(source, 'renderer/worker.js'), worker);
+  for (const [path, text] of Object.entries(extraFiles)) await writeFile(join(source, path), text);
   await promisify(execFile)('tar', ['czf', join(root, 'package.tgz'), '-C', root, 'package']);
   const bytes = await readFile(join(root, 'package.tgz'));
   const packageDigest = 'sha512-' + createHash('sha512').update(bytes).digest('base64');

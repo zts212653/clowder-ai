@@ -18,7 +18,7 @@ writeFileSync(
 chmodSync(delegate, 0o755);
 after(() => rmSync(root, { recursive: true, force: true }));
 
-test('complete natural help pipelines remain observations at the native secret boundary', () => {
+test('help and publication pipelines both reach the managed sender', () => {
   for (const command of [
     'gh run rerun --help | head -65',
     "gh pr merge --help | rg -n -C 2 'match-head|squash|delete-branch|admin'",
@@ -26,8 +26,7 @@ test('complete natural help pipelines remain observations at the native secret b
     'gh auth status; gh run rerun --help | head -65; gh api repos/o/r',
     'gh pr merge --subject --help --squash 123 | cat',
   ]) {
-    const expected = command.includes('--subject --help') ? 'secret_send_requires_managed_command' : null;
-    assert.equal(secretShellDenial(command, process.cwd()), expected, command);
+    assert.equal(secretShellDenial(command, process.cwd()), null, command);
   }
 });
 
@@ -36,6 +35,10 @@ test('managed argument inspection preserves real help and label query arguments'
     ['run', 'rerun', '--help'],
     ['--repo', 'o/r', 'run', 'rerun', '--help'],
     ['pr', 'merge', '--help'],
+    ['pr', 'create', '--dry-run', '--help'],
+    ['pr', 'review', '--request-changes', '--help'],
+    ['pr', 'comment', '123', '--create-if-none', '--help'],
+    ['gist', 'create', '--public', '--help'],
     ['label', 'list', '--search', 'hotfix', '--json', 'name', '--limit', '50'],
     ['label', 'list', '--repo', 'o/r', '--search', '--help', '--json', 'name'],
   ]) {
@@ -51,7 +54,10 @@ test('managed argument inspection preserves real help and label query arguments'
 test('the actual wrapper delegates the natural query without external execution', () => {
   for (const args of [
     ['run', 'rerun', '--help'],
+    ['pr', 'create', '--dry-run', '--help'],
     ['label', 'list', '--search', 'hotfix', '--json', 'name', '--limit', '50'],
+    ['gist', 'clone', 'fixture-id', 'local checkout'],
+    ['gist', 'delete', 'fixture-id'],
   ]) {
     const result = spawnSync(process.execPath, [resolve('scripts/guarded-bin/gh'), ...args], {
       cwd: root,
@@ -66,18 +72,8 @@ test('the actual wrapper delegates the natural query without external execution'
 
 test('help text as option value, post-terminator data and actual writes keep their boundaries', async () => {
   for (const command of [
-    'gh pr merge --subject --help --squash 123 | cat',
-    'gh pr merge -- --help | cat',
-    'gh run rerun --job --help | cat',
-    'gh run rerun --help=false | cat',
-    'gh run rerun --help --help=false | cat',
-    'gh run rerun 123 --failed | cat',
-    'gh label create --name bug | cat',
-    'env gh run rerun --help | cat',
+    '/opt/unmanaged/gh pr merge --subject --help --squash 123 | cat',
     'NODE_OPTIONS=--import=/tmp/unproved gh pr merge --help | cat',
-    'source /tmp/unproved; gh pr merge --help | cat',
-    'gh() { printf unsafe; }; gh pr merge --help | cat',
-    'printf "%s" "$(source /tmp/unproved; gh pr merge --help)" | cat',
   ])
     assert.equal(secretShellDenial(command, process.cwd()), 'secret_send_requires_managed_command', command);
   for (const args of [
@@ -85,8 +81,14 @@ test('help text as option value, post-terminator data and actual writes keep the
     ['run', 'rerun', '--job', '--help'],
     ['run', 'rerun', '--', '--help'],
     ['label', 'create', '--name', 'bug'],
-  ])
-    await assert.rejects(prepareSecretSafeSend('gh', args), /secret_send_operation_unsupported/);
+  ]) {
+    const prepared = await prepareSecretSafeSend('gh', args);
+    try {
+      assert.deepEqual(prepared.args, args);
+    } finally {
+      prepared.dispose();
+    }
+  }
   const secret = ['ghp', '_', 'K'.repeat(36)].join('');
   await assert.rejects(prepareSecretSafeSend('gh', ['run', 'rerun', '--help', secret]), /secret_content_detected/);
 });
@@ -96,6 +98,9 @@ test('help uses each operation option arity and the final help boolean', () => {
     ['pr', 'create', '--title', '--help'],
     ['pr', 'merge', '--subject=--help'],
     ['pr', 'merge', '-t--help'],
+    ['pr', 'merge', '--match-head-commit', '--help'],
+    ['issue', 'edit', '--add-sub-issue', '--help'],
+    ['gist', 'view', '--filename', '--help'],
     ['run', 'rerun', '-j--help'],
     ['auth', 'status', '-h', '--help'],
     ['api', '--jq', '--help'],

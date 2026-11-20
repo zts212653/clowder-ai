@@ -70,8 +70,18 @@ export function parseToolsetEnv(env: NodeJS.ProcessEnv = process.env): ToolsetEn
   )
     throw new Error('Live companion requires native invocation binding');
   let allowedToolNames: string[] | undefined;
-  if (env.CAT_CAFE_WATCHER_TOOL_NAMES !== undefined) {
-    const names: unknown = JSON.parse(env.CAT_CAFE_WATCHER_TOOL_NAMES);
+  // A stdio launch can clear an inherited marker only by assigning an empty
+  // value. Accept that clearing only alongside an explicit, validated policy;
+  // a standalone empty marker still fails rather than exposing ordinary tools.
+  const boundedSurface =
+    env.CAT_CAFE_ALLOWED_TOOL_NAMES !== undefined && env.CAT_CAFE_WATCHER_TOOL_NAMES === ''
+      ? undefined
+      : env.CAT_CAFE_WATCHER_TOOL_NAMES;
+  if (env.CAT_CAFE_ALLOWED_TOOL_NAMES !== undefined && boundedSurface !== undefined)
+    throw new Error('Conflicting tool surfaces');
+  const namedSurface = env.CAT_CAFE_ALLOWED_TOOL_NAMES ?? boundedSurface;
+  if (namedSurface !== undefined) {
+    const names: unknown = JSON.parse(namedSurface);
     if (
       !Array.isArray(names) ||
       !names.every((name) => typeof name === 'string' && CANONICAL_TOOL_REGISTRY.some((tool) => tool.name === name))
@@ -80,7 +90,7 @@ export function parseToolsetEnv(env: NodeJS.ProcessEnv = process.env): ToolsetEn
     allowedToolNames = [...new Set(names as string[])];
   }
   return {
-    watcher: allowedToolNames !== undefined,
+    watcher: boundedSurface !== undefined,
     ...(allowedToolNames ? { allowedToolNames } : {}),
     readonly: env.CAT_CAFE_READONLY === 'true',
     // Credential USABILITY, not env presence (#1494): a '{}' variant map, bad

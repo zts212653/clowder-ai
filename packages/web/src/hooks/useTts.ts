@@ -1,17 +1,9 @@
-/**
- * F34: TTS Hook — synthesize and play cat voice audio.
- *
- * Uses module-level singletons for Audio + AbortController so that
- * multiple hook instances (one per ChatMessage) share a single playback.
- * Only one audio can play at a time (global mutex via singleton Audio).
- *
- * R5-P1 fix: previous version used per-instance useState/useRef which
- * broke cross-message playback mutex when each ChatMessage had its own hook.
- */
-
-import type { TtsVoiceSelection } from '@cat-cafe/shared';
 import { useCallback, useSyncExternalStore } from 'react';
-import { peekPlaybackManager } from '@/services/playbackRuntime';
+import { type SynthesizedListenAsset, streamListenSynthesis } from '@/services/listenModeApi';
+import type { PlaybackManager, PlaybackSnapshot } from '@/services/PlaybackManager';
+import { getPlaybackManager } from '@/services/playbackRuntime';
+import type { ReadAloudPcm } from '@/services/ReadAloudPcm';
+import { useVoiceSessionStore } from '@/stores/voiceSessionStore';
 import { apiFetch } from '@/utils/api-client';
 import { showTtsVoiceWarning } from '@/utils/tts-voice-warning';
 
@@ -43,120 +35,113 @@ function subscribe(cb: () => void): () => void {
   };
 }
 
-/** Content-addressed asset URLs may reuse blobs after the server resolves the current voice. */
-const URL_CACHE_MAX = 20;
-const urlCache = new Map<string, string>();
-
-function cacheBlobUrl(assetUrl: string, blobUrl: string): void {
-  // Revoke if overwriting existing entry
-  const existing = urlCache.get(assetUrl);
-  if (existing) {
-    URL.revokeObjectURL(existing);
-    urlCache.delete(assetUrl); // re-insert at end for LRU ordering
-  }
-  // Evict oldest (first entry in Map) if at capacity
-  if (urlCache.size >= URL_CACHE_MAX) {
-    const oldest = urlCache.keys().next().value;
-    if (oldest) {
-      const oldUrl = urlCache.get(oldest);
-      if (oldUrl) URL.revokeObjectURL(oldUrl);
-      urlCache.delete(oldest);
-    }
-  }
-  urlCache.set(assetUrl, blobUrl);
+interface ReadAloudPlayback {
+  messageId: string;
+  manager: PlaybackManager;
+  controller: AbortController;
+  unsubscribe?: () => void;
 }
 
-/** Singleton audio element — guarantees only one playback at a time */
-let currentAudio: HTMLAudioElement | null = null;
-let currentAbort: AbortController | null = null;
+let currentPlayback: ReadAloudPlayback | null = null;
 
-function stopPlayback(): void {
-  if (currentAudio) {
-    currentAudio.pause();
-    currentAudio.onended = null;
-    currentAudio.onerror = null;
-    currentAudio = null;
+function stopPlayback(state: 'idle' | 'error' = 'idle'): void {
+  const playback = currentPlayback;
+  currentPlayback = null;
+  if (playback) {
+    playback.unsubscribe?.();
+    playback.controller.abort();
+    if (playback.manager.getSnapshot().source === 'read-aloud') playback.manager.interrupt();
   }
-  if (currentAbort) {
-    currentAbort.abort();
-    currentAbort = null;
-  }
-  emit({ state: 'idle', activeMessageId: null });
+  emit({ state, activeMessageId: state === 'error' ? (playback?.messageId ?? null) : null });
 }
 
-function playAudio(url: string, messageId: string): void {
-  const audio = new Audio(url);
-  currentAudio = audio;
-  emit({ state: 'playing', activeMessageId: messageId });
-  audio.onended = () => {
-    if (currentAudio === audio) stopPlayback();
-  };
-  audio.onerror = () => {
-    if (currentAudio === audio) emit({ state: 'error', activeMessageId: messageId });
-  };
-  audio.play().catch(() => {
-    // Browser autoplay policy blocked — transition to error so fallback UI shows
-    if (currentAudio === audio) emit({ state: 'error', activeMessageId: messageId });
+function observePlayback(playback: ReadAloudPlayback, snapshot: PlaybackSnapshot): void {
+  if (currentPlayback !== playback) return;
+  if (snapshot.source !== 'read-aloud') {
+    stopPlayback();
+  } else if (snapshot.state === 'playing' && store.state !== 'playing') {
+    emit({ state: 'playing', activeMessageId: playback.messageId });
+  }
+}
+
+async function queueReadAloudAsset(
+  playback: ReadAloudPlayback,
+  asset: SynthesizedListenAsset,
+  pcm: ReadAloudPcm | null,
+) {
+  showTtsVoiceWarning(asset.voiceSelection);
+  const fetchAsset = (url: string) => apiFetch(url, { signal: playback.controller.signal });
+  if (pcm) {
+    await pcm.finishSentence(asset.pcmChunkCount, async () => {
+      const response = await fetchAsset(asset.audioUrl);
+      if (!response.ok) throw new Error('Read-aloud audio could not be loaded');
+      return response.arrayBuffer();
+    });
+    return;
+  }
+  const queued = await playback.manager.enqueueUrl(asset.audioUrl, fetchAsset);
+  if (queued !== 'enqueued' && currentPlayback === playback) throw new Error('Read-aloud audio could not be loaded');
+}
+
+async function readAloud(playback: ReadAloudPlayback, text: string, catId?: string): Promise<void> {
+  const { manager, controller } = playback;
+  const beganAt = performance.now();
+  const streamPcm = typeof AudioContext === 'function' ? (true as const) : undefined;
+  const output: { pcm: ReadAloudPcm | null } = { pcm: null };
+  let outputChosen = false;
+  let receivedAudio = false;
+  const request = { text, catId, purpose: 'read-aloud' as const, streamPcm };
+  const events = streamListenSynthesis(request, controller.signal, () => {
+    // A device can block briefly while opening. The server can synthesize while it opens.
+    if (streamPcm && currentPlayback === playback) output.pcm = manager.prepareReadAloudPcm(beganAt);
   });
+  for await (const event of events) {
+    if (currentPlayback !== playback) return;
+    if (!outputChosen) {
+      outputChosen = true;
+      if (output.pcm && !output.pcm.ready) {
+        manager.discardReadAloudPcm(output.pcm);
+        output.pcm = null;
+      }
+    }
+    const { pcm } = output;
+    if (event.type === 'chunk') {
+      if (pcm && event.chunkIndex !== undefined) pcm.pushChunk({ ...event, chunkIndex: event.chunkIndex });
+      continue;
+    }
+    await queueReadAloudAsset(playback, event, pcm);
+    if (currentPlayback !== playback) return;
+    receivedAudio = true;
+  }
+  if (currentPlayback !== playback) return;
+  if (!receivedAudio) throw new Error('Read-aloud stream ended without audio');
+  manager.markDone();
+  if (manager.getState() === 'idle') stopPlayback();
 }
 
 function synthesize(messageId: string, text: string, catId?: string): void {
-  // Toggle off if already playing this message
-  if (store.activeMessageId === messageId && store.state === 'playing') {
+  if (store.activeMessageId === messageId && currentPlayback) {
     stopPlayback();
     return;
   }
 
-  // Stop any current playback first (global mutex)
-  peekPlaybackManager()?.interrupt();
   stopPlayback();
-
-  // Synthesize via API
+  const manager = getPlaybackManager();
+  useVoiceSessionStore.getState().stopAllAudio();
+  const playback: ReadAloudPlayback = { messageId, manager, controller: new AbortController() };
+  manager.beginBatch('read-aloud', () => {
+    if (currentPlayback === playback) stopPlayback('error');
+  });
+  manager.setPlaybackRate(1);
+  currentPlayback = playback;
   emit({ state: 'loading', activeMessageId: messageId });
-  const controller = new AbortController();
-  currentAbort = controller;
-  const isCurrent = () => currentAbort === controller && !controller.signal.aborted;
+  playback.unsubscribe = manager.subscribe((snapshot) => observePlayback(playback, snapshot));
 
-  apiFetch('/api/tts/synthesize', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, catId }),
-    signal: controller.signal,
-  })
-    .then((res) => {
-      if (!res.ok) throw new Error(`TTS API ${res.status}`);
-      return res.json();
-    })
-    .then((data: { audioUrl: string; voiceSelection?: TtsVoiceSelection }) => {
-      // Check if this request was superseded by another
-      if (!isCurrent()) return;
-      showTtsVoiceWarning(data.voiceSelection);
-      const cached = urlCache.get(data.audioUrl);
-      if (cached) {
-        playAudio(cached, messageId);
-        return;
-      }
-      // Fetch audio via apiFetch (carries auth header) → blob URL
-      return apiFetch(data.audioUrl, { signal: controller.signal })
-        .then((audioRes) => {
-          if (!audioRes.ok) throw new Error(`TTS audio ${audioRes.status}`);
-          if (!isCurrent()) return;
-          return audioRes.blob();
-        })
-        .then((blob) => {
-          if (!blob || !isCurrent()) return;
-          const blobUrl = URL.createObjectURL(blob);
-          cacheBlobUrl(data.audioUrl, blobUrl);
-          playAudio(blobUrl, messageId);
-        });
-    })
-    .catch((err) => {
-      if (err instanceof DOMException && err.name === 'AbortError') return;
-      console.error('[useTts] synthesis failed:', err);
-      if (isCurrent()) {
-        emit({ state: 'error', activeMessageId: messageId });
-      }
-    });
+  void readAloud(playback, text, catId).catch((error) => {
+    if (currentPlayback !== playback) return;
+    console.error('[useTts] read aloud failed:', error);
+    stopPlayback('error');
+  });
 }
 
 // ── Public hook ──

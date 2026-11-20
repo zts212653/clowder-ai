@@ -34,6 +34,8 @@ export async function startFinalAccountPreview({
   withClaude = false,
   withAgy = false,
   agyQuotaSampler,
+  agyKeychainIdentityInspector,
+  kimiQuotaSampler,
   routingSnapshot,
   withServicePreview = false,
   withStartupRecovery = false,
@@ -250,6 +252,8 @@ export async function startFinalAccountPreview({
   await app.register(accountsRoutes, {
     loginDriver: nativeLogin.driver,
     ...(agyQuotaSampler ? { agyQuotaSampler } : {}),
+    ...(agyKeychainIdentityInspector ? { agyKeychainIdentityInspector } : {}),
+    ...(kimiQuotaSampler ? { kimiQuotaSampler } : {}),
     quotaFetcher: async () =>
       quotaMode === 'body'
         ? Response.json({

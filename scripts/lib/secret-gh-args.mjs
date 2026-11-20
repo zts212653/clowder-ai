@@ -1,84 +1,76 @@
-import { ghOperation, ghOptionPolicy, isGhHelpRequest } from './secret-gh-options.mjs';
-import { sendArguments } from './secret-send-options.mjs';
+import { ghHelpEnabled, ghOperation, ghParameters } from './secret-gh-options.mjs';
+import { withSendValue } from './secret-send-options.mjs';
 
-const DERIVED = new Set([
-  '--editor',
-  '-e',
-  '--web',
-  '-w',
-  '--fill',
-  '-f',
-  '--fill-first',
-  '--fill-verbose',
-  '--recover',
-  '--template',
-  '-T',
-]);
+const AUTOFILL = new Set(['--fill', '-f', '--fill-first', '--fill-verbose']);
+const DERIVED = new Set(['--editor', '-e', '--web', '-w', '--recover', '--template', '-T']);
 
 export async function prepareGhArgs(args, freeze) {
-  if (isGhHelpRequest(args)) return args;
   const operation = ghOperation(args);
-  if (operation.action === 'new' && ['gist', 'release', 'pr', 'issue'].includes(operation.group))
-    operation.action = 'create';
-  const options = ghOptionPolicy(operation);
-  if (options.passthrough) return args;
-  const parameters = sendArguments(args, options.values, options.flags);
+  if (operation.unresolved || !operation.group) return args;
+  const parameters = ghParameters(args, operation);
+  if (ghHelpEnabled(parameters)) return args;
   const output = [];
+  let rewritten = false;
+  const inspect = (path) => {
+    rewritten = true;
+    return freeze(path);
+  };
   let positional = 0;
   for (const argument of parameters) {
     if (argument.kind === 'operand' && argument.index > operation.actionIndex) {
       const file = fileOperand(operation, positional++);
-      output.push(file ? await freezeAsset(argument.word, freeze) : argument.word);
+      if (!file) output.push(argument.word);
+      else output.push(await inspectOperand(operation, argument.word, inspect));
     } else {
-      output.push(...(await ghArgument(argument, operation, options.flags, freeze)));
+      output.push(...(await ghArgument(argument, operation, inspect)));
     }
   }
-  if (operation.group === 'gist' && operation.action === 'create' && positional === 0) output.push(await freeze('-'));
+  if (operation.group === 'gist' && operation.action === 'create' && positional === 0) output.push(await inspect('-'));
   const names = new Set(parameters.filter(({ kind }) => kind === 'flag' || kind === 'value').map(({ name }) => name));
   requireExplicitBody(operation, names, positional);
-  return output;
+  return rewritten ? output : args;
 }
 
-async function ghArgument(argument, operation, flags, freeze) {
+async function ghArgument(argument, operation, freeze) {
+  if (argument.kind === 'flag' || argument.kind === 'value') rejectDerived(argument.name, operation);
   if (argument.kind === 'value') {
-    rejectDerived(argument.name, operation);
     // pflag accepts -F=file; curl instead treats '=' as part of a short value.
     const value = /^-[^-]=/.test(argument.word) ? argument.value.slice(1) : argument.value;
-    return [argument.name, await ghValue(argument.name, value, operation, freeze)];
-  }
-  if (argument.kind === 'flag') {
-    rejectDerived(argument.name, operation);
-    if (flags && !flags.has(argument.name)) throw new Error('secret_send_option_unsupported');
+    return withSendValue(argument, await ghValue(argument.name, value, operation, freeze));
   }
   return [argument.word];
 }
 
 function rejectDerived(name, operation) {
-  if (
-    ['pr', 'issue'].includes(operation.group) &&
-    DERIVED.has(name) &&
-    ['create', 'comment', 'review', 'edit'].includes(operation.action)
-  )
-    throw new Error('secret_send_implicit_content_unsupported');
+  if (!['pr', 'issue'].includes(operation.group) || !['create', 'comment', 'review', 'edit'].includes(operation.action))
+    return;
+  if (operation.group === 'pr' && operation.action === 'create' && AUTOFILL.has(name))
+    throw new Error('secret_send_generated_pr_body');
+  if (DERIVED.has(name)) throw new Error('secret_send_implicit_content_unsupported');
 }
 
 function fileOperand(operation, positional) {
+  if (operation.group === 'ssh-key') return operation.action === 'add' && positional === 0;
   if (operation.group === 'gist')
     return operation.action === 'create' || (operation.action === 'edit' && positional > 0);
   return operation.group === 'release' && ['create', 'upload'].includes(operation.action) && positional > 0;
 }
 
-async function freezeAsset(value, freeze) {
+async function inspectOperand({ group }, value, freeze) {
+  if (group !== 'release') return freeze(value);
   const label = value.indexOf('#');
   if (label < 0) return freeze(value);
   return `${await freeze(value.slice(0, label))}${value.slice(label)}`;
 }
 
 async function ghValue(name, value, operation, freeze) {
+  if (usesBodyFile(operation) && ['--body-file', '-F'].includes(name)) return freeze(value);
   if (
-    ['--body-file', '--notes-file', '--input'].includes(name) ||
-    (name === '-F' && operation.group !== 'api') ||
-    (operation.group === 'gist' && ['--add', '-a'].includes(name))
+    (operation.group === 'release' &&
+      ['create', 'edit'].includes(operation.action) &&
+      ['--notes-file', '-F'].includes(name)) ||
+    (operation.group === 'gist' && operation.action === 'edit' && ['--add', '-a'].includes(name)) ||
+    (operation.group === 'api' && name === '--input')
   )
     return freeze(value);
   if (operation.group === 'api' && ['--field', '-F'].includes(name)) {
@@ -86,6 +78,11 @@ async function ghValue(name, value, operation, freeze) {
     if (marker >= 0) return `${value.slice(0, marker + 2)}${await freeze(value.slice(marker + 2))}`;
   }
   return value;
+}
+
+function usesBodyFile({ group, action }) {
+  if (group === 'pr' && ['review', 'merge'].includes(action)) return true;
+  return ['pr', 'issue'].includes(group) && ['create', 'edit', 'comment'].includes(action);
 }
 
 function requireExplicitBody(operation, names, positional) {

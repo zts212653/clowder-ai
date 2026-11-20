@@ -26,7 +26,7 @@ redis.call('HSET', KEYS[1],
 if ARGV[7] == 'watcher' then redis.call('HSET', KEYS[1], 'watcherModelAttempts', '{}') end
 redis.call('SADD', KEYS[2], ARGV[2])
 redis.call('SADD', KEYS[3], ARGV[2])
-if ARGV[7] ~= 'watcher' then redis.call('ZADD', KEYS[4], ARGV[8], ARGV[2]) end
+if ARGV[7] ~= 'watcher' and ARGV[7] ~= 'cache_retention' then redis.call('ZADD', KEYS[4], ARGV[8], ARGV[2]) end
 return 1
 `;
 
@@ -48,7 +48,8 @@ redis.call('HSET', KEYS[1],
 if ARGV[5] and ARGV[5] ~= '' then redis.call('HSET', KEYS[1], 'providerTeardownAt', ARGV[5]) end
 redis.call('SREM', KEYS[2], ARGV[4])
 redis.call('SADD', KEYS[3], ARGV[4])
-if (ARGV[1] == 'failed' and ARGV[3] == ARGV[6]) or ARGV[3] == ARGV[7] then redis.call('SADD', KEYS[4], ARGV[4]) end
+if redis.call('HGET', KEYS[1], 'executionKind') ~= 'cache_retention' and
+  ((ARGV[1] == 'failed' and ARGV[3] == ARGV[6]) or ARGV[3] == ARGV[7]) then redis.call('SADD', KEYS[4], ARGV[4]) end
 return 1
 `;
 
@@ -91,6 +92,11 @@ local started = redis.call('HGET', KEYS[1], 'startedAt')
 if not started or tonumber(ARGV[2]) < tonumber(started) then return 0 end
 if ARGV[1] == 'providerStartedAt' then
   if redis.call('HGET', KEYS[1], 'status') ~= 'running' or redis.call('HGET', KEYS[1], 'providerLifecycleTracked') ~= '1' then return 0 end
+  if #KEYS == 3 and redis.call('EXISTS', KEYS[3]) == 0 then
+    local sequence = redis.call('HINCRBY', KEYS[2], 'head', 1)
+    redis.call('HSET', KEYS[2], tostring(sequence), ARGV[3])
+    redis.call('SET', KEYS[3], tostring(sequence))
+  end
 end
 redis.call('HSETNX', KEYS[1], ARGV[1], ARGV[2])
 return 1

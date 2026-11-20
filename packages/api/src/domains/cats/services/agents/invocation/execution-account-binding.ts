@@ -127,7 +127,7 @@ export function providerProfileAccountSnapshot(
 }
 
 /** In-memory carrier only: never persist credentials in Queue/TurnExecution provenance. */
-export function freezeExecutionAccountBinding(input: {
+export async function freezeExecutionAccountBinding(input: {
   catId: string;
   catConfig?: CatConfig;
   model?: string;
@@ -136,7 +136,7 @@ export function freezeExecutionAccountBinding(input: {
   providerOptions?: FrozenExecutionBinding['providerOptions'];
   /** Trusted native source. Qualified Kimi only annotates the unchanged Host account; generic ACP owns its account. */
   nativeAccount?: RuntimeProviderProfile | null;
-}): FrozenExecutionBinding {
+}): Promise<FrozenExecutionBinding> {
   const selection = input.accountSelection ? { ...input.accountSelection } : undefined;
   if (
     selection &&
@@ -220,7 +220,7 @@ export function freezeExecutionAccountBinding(input: {
     resolvedAccount && codexAccountLaunch
       ? codexExecutionAccountSnapshot(resolvedAccount, codexAccountLaunch)
       : provider === 'anthropic' && resolvedAccount
-        ? claudeExecutionAccountSnapshot(resolvedAccount)
+        ? await claudeExecutionAccountSnapshot(resolvedAccount)
         : resolvedAccount
           ? providerProfileAccountSnapshot(provider!, resolvedAccount)
           : undefined;

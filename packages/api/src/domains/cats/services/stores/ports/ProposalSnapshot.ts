@@ -5,6 +5,7 @@ export function applyProposalOverrides(
   overrides: ProposalApproveOverrides | undefined,
 ): void {
   if (!overrides) return;
+  if (overrides.approvedChildPinned !== undefined) proposal.approvedChildPinned = overrides.approvedChildPinned;
   if (overrides.attentionGroupId !== undefined) proposal.attentionGroupId = overrides.attentionGroupId;
   if (overrides.title !== undefined) proposal.title = overrides.title;
   if (overrides.parentThreadId !== undefined) proposal.parentThreadId = overrides.parentThreadId;

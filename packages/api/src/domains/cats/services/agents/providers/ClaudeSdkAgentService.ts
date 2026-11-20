@@ -23,13 +23,14 @@ import { extractClaudeUsage, transformClaudeEvent } from './claude-ndjson-parser
 import { captureClaudeMemberOptions } from './claude-scoped-native.js';
 import { sdkCompactionHooks } from './claude-sdk-compaction-hooks.js';
 import { prepareClaudeSdkLaunch } from './claude-sdk-launch.js';
-import { loadClaudeSdkQuery } from './claude-sdk-query.js';
+import { assertClaudeSdkSendCurrent, loadClaudeSdkQuery } from './claude-sdk-query.js';
 import { type ClaudeSdkRuntime, captureClaudeSdkRuntime } from './claude-sdk-runtime.js';
 import { withActiveRunControlDeadline } from './claude-sdk-runtime-helpers.js';
 import { ClaudeSdkTurnInputState, createSdkUserMessage } from './claude-sdk-turn-input-state.js';
 import { type RawArchiveSink, sanitizeRawEvent } from './codex-audit-hooks.js';
 import { appendLocalImagePathHints } from './image-cli-bridge.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
+import { captureWatcherOptions } from './watcher-invocation-options.js';
 
 const log = createModuleLogger('claude-sdk-agent');
 
@@ -126,7 +127,15 @@ export class ClaudeSdkAgentService implements AgentService {
   }
 
   supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
-    return policy.mode === 'read_only' || (policy.mode === 'plugin_native' && Boolean(policy.memberSession));
+    return (
+      policy.mode === 'read_only' ||
+      policy.mode === 'watcher_panel' ||
+      (policy.mode === 'plugin_native' && Boolean(policy.memberSession))
+    );
+  }
+
+  watcherMemberCapability(): import('@cat-cafe/shared').WatcherMemberCapability {
+    return { supported: true, context: 'ordinary', readOnly: 'tools' };
   }
 
   freshnessCarrierCapability(): AgentFreshnessCarrierCapability {
@@ -153,7 +162,7 @@ export class ClaudeSdkAgentService implements AgentService {
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     const member = captureClaudeMemberOptions(options);
-    options = member ?? options;
+    options = member ?? captureWatcherOptions(options) ?? options;
     const abortController = new AbortController();
     const turnInputs = new ClaudeSdkTurnInputState();
     const inputReadCallbacks = new Map<string, () => Promise<void>>();
@@ -226,6 +235,13 @@ export class ClaudeSdkAgentService implements AgentService {
               if (!query.interrupt) return { accepted: false, reason: 'provider_rejected', acceptance: 'not_accepted' };
               await withActiveRunControlDeadline(query.interrupt(), this.activeRunControlTimeoutMs);
             }
+            assertClaudeSdkSendCurrent({
+              catId: this.catId,
+              model: this.model,
+              invocationId,
+              sessionId: activeSessionId,
+              retentionSourceInvocationId: options?.cacheRetentionReplay?.sourceInvocationId,
+            });
             const message = createSdkUserMessage(text, activeSessionId);
             if (dispatchInput.onInputRead) inputReadCallbacks.set(message.uuid, dispatchInput.onInputRead);
             if (!turnInputs.push(message)) {
@@ -269,6 +285,14 @@ export class ClaudeSdkAgentService implements AgentService {
         stderrBuffer = sanitizeCliStderr(`${stderrBuffer}${data}`).slice(-MAX_SDK_STDERR_CHARS);
       };
       await member?.pluginNativeLaunch?.assertCurrent();
+      await options?.cacheRetentionReplay?.assertSendCurrent?.();
+      assertClaudeSdkSendCurrent({
+        catId: this.catId,
+        model: prepared.model,
+        invocationId: options?.invocationId,
+        sessionId: sdkOptions.resume,
+        retentionSourceInvocationId: options?.cacheRetentionReplay?.sourceInvocationId,
+      });
       query = queryFn({ prompt: turnInputs.input, options: sdkOptions });
       turnInputs.push(createSdkUserMessage(prepared.prompt, activeSessionId, initialMessageId));
       archive({ type: 'sdk_input', kind: 'primary', uuid: initialMessageId });

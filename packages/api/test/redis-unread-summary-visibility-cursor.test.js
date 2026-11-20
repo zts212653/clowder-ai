@@ -406,6 +406,50 @@ describe('Redis unread summary visibility cursor contract', { skip: redisIsolati
     }
   });
 
+  it('counts ordinary unread messages without decoding their rich metadata', async (t) => {
+    const userId = 'unread-rich-owner';
+    const thread = new ThreadStore().create(userId, 'Unread projection');
+    const now = Date.now();
+    const appendMessage = (suffix, timestamp) =>
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId,
+          catId: 'opus',
+          content: `ordinary ${suffix}`,
+          mentions: [],
+          timestamp,
+          threadId: thread.id,
+          extra: { rich: { v: 1, blocks: [{ id: `card-${suffix}`, kind: 'card', v: 1, title: 'Rich content' }] } },
+        }),
+      );
+    const primary = await appendMessage('primary', now - 2000);
+    const anchor = await appendMessage('anchor', now - 1000);
+    const unread = await appendMessage('unread', now);
+    const anchorCursor = await messageStore.canonicalizeCursor(anchor.id, thread.id);
+    assert.ok(anchorCursor?.startsWith('v2:'));
+    assert.equal(await readStateStore.ack(userId, thread.id, primary.id, anchorCursor), true);
+    const richPayloads = new Set(
+      await Promise.all([anchor, unread].map((row) => redis.hget(`msg:${row.id}`, 'extra'))),
+    );
+    assert.equal(richPayloads.size, 2);
+    assert.ok([...richPayloads].every((payload) => typeof payload === 'string' && payload.includes('Rich content')));
+    let richDecodes = 0;
+    const parse = JSON.parse;
+    const monitor = t.mock.method(JSON, 'parse', (input, reviver) => {
+      if (richPayloads.has(input)) richDecodes += 1;
+      return parse(input, reviver);
+    });
+
+    try {
+      assert.deepEqual(await readStateStore.getUnreadSummaries(userId, [thread.id], messageStore), [
+        { threadId: thread.id, unreadCount: 1, hasUserMention: false },
+      ]);
+      assert.equal(richDecodes, 0, 'unread counting parsed rich metadata from ordinary messages');
+    } finally {
+      monitor.mock.restore();
+    }
+  });
+
   it('unread projection rejects a non-canonical anchor even when its message is owner-visible', async () => {
     const fixture = await createInvalidAnchorFixture('foreign', 'unread-non-canonical');
     await redis.hset(

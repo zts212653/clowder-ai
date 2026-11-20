@@ -10,6 +10,7 @@ import { captureCodexLaunchPolicy } from '../../../../config/codex-cli.js';
 import { resolveActiveProjectRoot } from '../../../../utils/active-project-root.js';
 import type { InvocationRegistry } from '../../../cats/services/agents/invocation/InvocationRegistry.js';
 import { classifyResumeFailure } from '../../../cats/services/agents/invocation/invoke-helpers.js';
+import { assertToolExecutionPolicySupported } from '../../../cats/services/agents/invocation/tool-execution-policy.js';
 import { captureInvocationL0Input } from '../../../cats/services/agents/providers/l0-input-capture.js';
 import { watcherPanelSessionChainKey } from '../../../cats/services/session/session-scope.js';
 import type { TranscriptWriter } from '../../../cats/services/session/TranscriptWriter.js';
@@ -62,13 +63,6 @@ const fail = (failure: string, extra: Partial<WatcherPanelMemberResult> = {}): W
   failure: failure.slice(0, 500),
 });
 
-/** Panel members are Codex sessions: read-only sandbox, ordinary L0, ordinary MCP behind the panel route fence. */
-export function watcherPanelMemberSupported(catId: string): boolean {
-  const config = catRegistry.tryGet(catId)?.config;
-  // A cloud-only member has no local CLI session to resume.
-  return config?.clientId === 'openai' && config.provider !== 'openai-chatgpt-pro';
-}
-
 /** Proposals, desk deliveries and memory writes are counted from successful tool results, not self-report. */
 const ACTION_TOOLS: Record<string, keyof NonNullable<WatcherPanelMemberEntry['actions']>> = {
   cat_cafe_offer_suggestion: 'proposed',
@@ -87,14 +81,17 @@ export async function runWatcherPanelMember(
 ): Promise<WatcherPanelMemberResult> {
   const { round, source, catId } = input;
   const catConfig = catRegistry.tryGet(catId)?.config;
-  if (!catConfig || !watcherPanelMemberSupported(catId)) return fail('watcher_panel_member_unsupported');
+  if (!catConfig) return fail('watcher_panel_member_unsupported');
   const base = owners.service(catId);
   if (!base) return fail('watcher_panel_member_service_unavailable');
   const service = base.forInvocation?.() ?? base;
+  if (service.watcherMemberCapability?.().supported !== true) return fail('watcher_panel_member_unsupported');
   let session: SessionRecord | undefined;
   let invocationId: string | undefined;
   let outcome: WatcherPanelMemberResult | undefined;
   try {
+    const toolExecutionPolicy = watcherPanelToolPolicy();
+    assertToolExecutionPolicySupported(service, toolExecutionPolicy);
     let accountSelection: { accountRef: string; authType: 'oauth' | 'api_key' } | undefined;
     if (input.accountRef) {
       const account = resolveByAccountRef(resolveActiveProjectRoot(process.cwd()), input.accountRef);
@@ -135,7 +132,7 @@ export async function runWatcherPanelMember(
       round.threadId,
       parentInvocationId,
       undefined,
-      watcherPanelToolPolicy(),
+      toolExecutionPolicy,
       input.cutoff.id,
       sourceAuth?.ownerAuthProvenance ?? 'unknown',
     );
@@ -167,13 +164,14 @@ export async function runWatcherPanelMember(
       CAT_CAFE_CAT_ID: catId,
       CAT_CAFE_THREAD_ID: round.threadId,
     };
-    const { workspace, binding, callbackEnv } = await watcherProviderLaunch(
+    const { workspace, binding, callbackEnv, providerOptions } = await watcherProviderLaunch(
       owners.threads,
       catConfig.id,
       source,
       scopeEnv,
       input.signal,
       accountSelection,
+      service,
     );
     const frozenL0Input = captureInvocationL0Input({ catId, catConfig, userId: round.userId });
     const prompt = watcherPanelPrompt({
@@ -197,6 +195,12 @@ export async function runWatcherPanelMember(
       workingDirectory: workspace.workingDirectory,
       callbackEnv,
       frozenL0Input,
+      accountEnv: binding.accountEnv,
+      executionPreferences: binding.executionPreferences,
+      ...providerOptions,
+      ...(binding.resolvedAccount?.claude ? { claudeTokenAccount: true } : {}),
+      ...(binding.resolvedAccount?.agy ? { agyAccount: binding.resolvedAccount.agy } : {}),
+      toolExecutionPolicy,
       codexLaunchPolicy: { ...captureCodexLaunchPolicy(), sandboxMode: 'read-only', approvalPolicy: 'never' },
       ...(binding.codexAccountLaunch ? { codexAccountLaunch: binding.codexAccountLaunch } : {}),
       ...(binding.executionAccount ? { executionAccount: binding.executionAccount } : {}),

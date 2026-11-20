@@ -90,9 +90,9 @@ export interface ManagedCommandExecution {
  * `createActiveExecutionService` 的 listManaged 与 feature doc）。可见性边界始终是
  * thread access，不在本枚举器。
  */
-export function listManagedCommandExecutions(
+export async function listManagedCommandExecutions(
   tasks: readonly Parameters<typeof parseManagedCommandWakeTask>[0][],
-): ManagedCommandExecution[] {
+): Promise<ManagedCommandExecution[]> {
   const executions: ManagedCommandExecution[] = [];
   for (const task of tasks) {
     // **两支都必须先过任务身份判别**（R5 P1-1）。
@@ -120,7 +120,7 @@ export function listManagedCommandExecutions(
       startedAt: parsed.command.startedAt,
     });
   }
-  for (const { job, startedAt } of new ManagedJobService().activeExecutions()) {
+  for (const { job, startedAt } of await new ManagedJobService().activeExecutions()) {
     executions.push({
       taskId: job.originTaskId,
       threadId: job.wakeTarget.threadId,
@@ -198,7 +198,7 @@ export interface ActiveExecutionService {
   /** live-invocation 面的 canonical 投影（queue / active-execution 两个 consumer 用）。 */
   resolveActiveInvocations(threadId: string, userId: string): Promise<ActiveInvocationProjection[]>;
   /** managed command 面的 owner truth。 */
-  listManagedCommandExecutions(userId: string): ManagedCommandExecution[];
+  listManagedCommandExecutions(userId: string): Promise<ManagedCommandExecution[]>;
   /** running child 面的候选（user-scoped，不经 parent 反查）。 */
   listRunningChildExecutions(userId: string): Promise<RunningChildExecutionProjection[]>;
   /** **每请求一次**：候选发现 + owner truth 物化。 */
@@ -250,10 +250,12 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
   // PR #3763 合流：底层枚举器 principal-blind（route 列表要显示 foreign 占用）；
   // service 消费面（Sidebar 定性/候选发现）保持 per-user 语义不变——是否把 foreign
   // 占用算进 working 是独立设计决策，不在 rebase 合流里夹带。
-  const listManaged = (userId: string): ManagedCommandExecution[] =>
+  const listManaged = async (userId: string): Promise<ManagedCommandExecution[]> =>
     deps.dynamicTaskStore
-      ? listManagedCommandExecutions(
-          deps.dynamicTaskStore.listManagedCommandCandidates?.() ?? deps.dynamicTaskStore.getAll(),
+      ? (
+          await listManagedCommandExecutions(
+            deps.dynamicTaskStore.listManagedCommandCandidates?.() ?? deps.dynamicTaskStore.getAll(),
+          )
         ).filter((e) => e.userId === userId)
       : [];
 
@@ -261,7 +263,13 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
     if (!deps.turnExecutionStore?.listRunningByUser) return [];
     const records = await deps.turnExecutionStore.listRunningByUser(userId);
     return records
-      .filter((record) => record.status === 'running' && record.userId === userId && record.executionKind !== 'watcher')
+      .filter(
+        (record) =>
+          record.status === 'running' &&
+          record.userId === userId &&
+          record.executionKind !== 'watcher' &&
+          record.executionKind !== 'cache_retention',
+      )
       .map((record) => ({
         invocationId: record.invocationId,
         parentInvocationId: record.parentInvocationId,

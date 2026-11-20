@@ -16,8 +16,8 @@ import { createSuggestionIntegration } from '../dist/domains/suggestions/composi
 import { watcherRoutes } from '../dist/routes/watcher.js';
 import { watcherWorld } from './helpers/watcher-world.js';
 
-test('new and pre-scope preferences default to selected; explicit all keeps the old inclusion rule', () => {
-  for (const raw of [undefined, { enabled: true, memberCatId: 'codex', revision: 7 }]) {
+test('existing pre-scope preferences keep selected; explicit all keeps the old inclusion rule', () => {
+  for (const raw of [{ enabled: true, memberCatId: 'codex', revision: 7 }]) {
     const config = parseWatcherConfig(raw);
     assert.equal(config.scope, 'selected');
     assert.equal(effectiveWatcherState(config, {}, []).enabled, false);
@@ -35,7 +35,7 @@ test('new and pre-scope preferences default to selected; explicit all keeps the 
 test('the real supervisor only dispatches selected threads and starts observing a newly selected thread after its old work', async () => {
   const w = await watcherWorld(),
     configs = new MemoryConciergeConfigStore();
-  await configs.updateWatcherConfig('watcher-owner', 0, { memberCatId: 'codex' });
+  await configs.updateWatcherConfig('watcher-owner', 0, { enabled: true, scope: 'selected', memberCatId: 'codex' });
   const selected = await w.threads.create('watcher-owner');
   await w.threads.updateWatcherControl(selected.id, 0, { enabled: true });
   const seen = [];
@@ -96,6 +96,8 @@ test('the actual settings/thread routes persist the scope and start first select
     turns = new InMemoryTurnExecutionStore();
   const thread = await threads.create(userId),
     app = Fastify();
+  // A saved legacy installation: scope controls remain readable without becoming a new settings entry.
+  await configs.patch(userId, { watcher: { enabled: true, scope: 'selected', memberCatId: 'codex', revision: 0 } });
   app.addHook('onRequest', async (request) => {
     request.sessionUserId = userId;
   });

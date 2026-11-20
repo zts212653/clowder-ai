@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { CatId } from '@cat-cafe/shared';
-import type { Thread } from './ThreadStore.js';
+import type { Thread, ThreadProposalAudit } from './ThreadStore.js';
 
 /** Host-owned operation coordinates; never a caller-selected execution address. */
 export interface OwnedThreadSeed {
@@ -12,6 +12,8 @@ export interface OwnedThreadSeed {
   readonly participants: readonly CatId[];
   readonly projectPath?: string;
   readonly parentThreadId?: string;
+  readonly proposalAudit?: ThreadProposalAudit;
+  readonly pinned?: boolean;
 }
 
 export function ownedThreadFromSeed(seed: OwnedThreadSeed): Thread {
@@ -30,6 +32,8 @@ export function ownedThreadFromSeed(seed: OwnedThreadSeed): Thread {
     participants: [...new Set(seed.participants)],
     createdAt: now,
     lastActiveAt: now,
+    ...seed.proposalAudit,
+    ...(seed.pinned ? { pinned: true, pinnedAt: now } : {}),
     ...(seed.parentThreadId ? { parentThreadId: seed.parentThreadId } : {}),
   };
 }

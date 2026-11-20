@@ -93,6 +93,10 @@ function scoped(base, entry, scope) {
     !isAbsolute(base.controlPath) ||
     resolve(base.controlPath) !== base.controlPath ||
     basename(base.controlPath) !== `cat-cafe-fsmonitor-${base.nonce}` ||
+    (base.coldSocket !== undefined &&
+      (base.identity !== null ||
+        typeof base.coldSocket !== 'string' ||
+        !/^\d+:\d+:\d+:\d+:\d+:\d+$/.test(base.coldSocket))) ||
     (!(base.identity === null && base.monitorPid === null && base.mode === null) &&
       (!Number.isSafeInteger(base.monitorPid) ||
         base.monitorPid < 1 ||
@@ -180,7 +184,7 @@ function reconcile(guard, entry, scope) {
     fsyncSync(guard.fd);
   }
   guard.base = base;
-  if (base.identity === null) return guard; // An absent-IPC lease never authorizes touching a later socket.
+  if (base.identity === null) return guard; // Startup-only guards never mutate the socket during recovery.
   const socket = join(scope.gitDir, IPC);
   const st = optionalStat(socket);
   if (st && (!st.isSocket() || identity(st) !== base.identity)) fail('IPC changed during admission recovery');
@@ -222,6 +226,7 @@ export function acquireAdmission(entry, scope, pid, session, receipt) {
     mode: scope.before ? scope.before.mode & 0o777 : null,
     executable: scope.executable,
     monitorPid: pid,
+    ...(scope.coldSocket ? { coldSocket: scope.coldSocket } : {}),
     finishPid: process.pid,
     nonce,
     controlPath: resolve(tmpdir(), `cat-cafe-fsmonitor-${nonce}`),

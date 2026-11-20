@@ -17,6 +17,9 @@ mkdirSync(ordinary);
 const main = join(root, 'projects/relay-station/cat-cafe');
 mkdirSync(main, { recursive: true });
 const wrapper = copyManagedGhCohort(runtime);
+const otherBin = join(root, 'external-bin');
+mkdirSync(otherBin);
+writeFileSync(join(otherBin, 'gh'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
 after(() => rmSync(root, { recursive: true, force: true }));
 
 const cases = [
@@ -28,7 +31,7 @@ const cases = [
     'deny',
   ],
   ['mutated-worktree', 'source /tmp/unproved; command -v git worktree remove --force .', 'deny', main],
-  ['mutated-generated-control', 'source /tmp/unproved; command -v "$UNPROVED_PROGRAM" arg1', 'deny', main],
+  ['unknown-after-source', 'source /tmp/unproved; command -v "$UNPROVED_PROGRAM" arg1', 'allow', main],
   ['proven-worktree-inquiry', 'command -v git worktree remove --force .', 'allow', main],
   ['proven-signal-inquiry', 'command -v kill -TERM 2147483647', 'allow'],
   ['lookup', 'command -v gh', 'allow'],
@@ -46,11 +49,7 @@ const cases = [
     `sqlite3 -readonly ${runtime}/evidence.sqlite "PRAGMA query_only=ON; DELETE FROM example;"`,
     'deny',
   ],
-  [
-    'path-selector',
-    `export PATH=/opt/homebrew/opt/node@24/bin:/opt/homebrew/bin:/usr/local/bin:$PATH; gh pr comment 1 --repo o/r --body safe`,
-    'deny',
-  ],
+  ['path-selector', `export PATH=${otherBin}:$PATH; gh pr comment 1 --repo o/r --body safe`, 'deny'],
   ['inline-loader', `NODE_OPTIONS=--import=/tmp/unproved.mjs ${wrapper} pr comment 1 --repo o/r --body safe`, 'deny'],
   ['function-shadow', `command() { shift; "$@"; }; command -v rm -rf ${runtime}`, 'deny'],
   ['shell-startup', `BASH_ENV=/tmp/unproved-functions bash -c 'command -v rm -rf ${runtime}'`, 'deny'],

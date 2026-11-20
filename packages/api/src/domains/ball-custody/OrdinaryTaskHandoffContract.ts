@@ -2,13 +2,22 @@ import type { TaskItem } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { OrdinaryTaskExpectation, TaskMutationActor } from '../cats/services/stores/ports/OrdinaryTaskMutation.js';
 
+export type OrdinaryTaskHandoffIssuer =
+  | TaskMutationActor
+  | {
+      readonly userId: string;
+      readonly catId: string;
+      readonly threadId: string;
+      readonly approval: { readonly proposalId: string; readonly receiptId: string };
+    };
+
 /** Immutable request on the existing source Message, not a second responsibility record. */
 export interface OrdinaryTaskHandoffRequest {
   readonly v: 1;
   readonly issuerCreatedAt?: number;
   readonly taskId: string;
   readonly expected: OrdinaryTaskExpectation;
-  readonly issuer: TaskMutationActor;
+  readonly issuer: OrdinaryTaskHandoffIssuer;
   readonly targetCatId: string;
   readonly targetThreadId: string;
   readonly ownerCatId: string;
@@ -19,7 +28,7 @@ export interface OrdinaryTaskHandoffRequest {
 export interface OrdinaryTaskHandoffInput {
   readonly taskId: string;
   readonly expectedOwnerRevision: number;
-  readonly actor: TaskMutationActor;
+  readonly actor: OrdinaryTaskHandoffIssuer;
   readonly issuerCreatedAt?: number;
   readonly targetCatId: string;
   readonly targetThreadId: string;
@@ -56,7 +65,17 @@ export const ordinaryTaskHandoffRequestSchema = z
         executionRef: execution.nullable(),
       })
       .strict(),
-    issuer: z.object({ userId: ref, catId: ref, threadId: ref, invocationId: ref }).strict(),
+    issuer: z.union([
+      z.object({ userId: ref, catId: ref, threadId: ref, invocationId: ref }).strict(),
+      z
+        .object({
+          userId: ref,
+          catId: ref,
+          threadId: ref,
+          approval: z.object({ proposalId: ref, receiptId: ref }).strict(),
+        })
+        .strict(),
+    ]),
     targetCatId: ref,
     targetThreadId: ref,
     ownerCatId: ref,

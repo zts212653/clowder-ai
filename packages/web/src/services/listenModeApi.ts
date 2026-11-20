@@ -10,6 +10,7 @@ export interface SynthesizedListenAsset {
   synthesisMs?: number;
   synthesisFingerprint?: string;
   reusable?: boolean;
+  pcmChunkCount?: number;
   voiceSelection?: TtsVoiceSelection;
   historical?: boolean;
   warnings?: readonly string[];
@@ -38,6 +39,7 @@ export type ListenSynthesisEvent =
       format: string;
       durationSec?: number;
       isFinalChunk: boolean;
+      chunkIndex?: number;
       voiceSelection?: TtsVoiceSelection;
     }
   | ({ type: 'asset' } & SynthesizedListenAsset);
@@ -98,6 +100,25 @@ export async function* readListenSynthesisEvents(response: Response): AsyncItera
   }
 }
 
+/** Shared synthesis stream for workspace listening and reading a chat message. */
+export async function* streamListenSynthesis(
+  input: { text: string; catId?: string; purpose?: 'read-aloud'; streamPcm?: true },
+  signal?: AbortSignal,
+  onOpen?: () => void,
+): AsyncIterable<ListenSynthesisEvent> {
+  const response = await requireOk(
+    await apiFetch('/api/tts/listen/stream', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+      signal,
+    }),
+    '生成语音失败',
+  );
+  onOpen?.();
+  yield* readListenSynthesisEvents(response);
+}
+
 export const listenModeApi: ListenModeApi = {
   async load(identity) {
     const params = new URLSearchParams(identity);
@@ -119,17 +140,8 @@ export const listenModeApi: ListenModeApi = {
     return (await response.json()) as LoadedListenDocument;
   },
 
-  async *stream(text, signal) {
-    const response = await requireOk(
-      await apiFetch('/api/tts/listen/stream', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text }),
-        signal,
-      }),
-      '生成语音失败',
-    );
-    yield* readListenSynthesisEvents(response);
+  stream(text, signal) {
+    return streamListenSynthesis({ text }, signal);
   },
 
   async linkAsset(identity, anchor, assetId, synthesisFingerprint) {

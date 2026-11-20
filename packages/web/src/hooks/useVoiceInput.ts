@@ -1,11 +1,12 @@
 'use client';
 
 import { deploymentDefaults } from '@cat-cafe/shared';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVoiceSettingsStore } from '@/stores/voiceSettingsStore';
 import { apiFetch } from '@/utils/api-client';
 import { correctTranscription, mergeTermEntries, type TermEntry } from '@/utils/transcription-corrector';
-import { useCoCreatorDisplay } from './useCoCreatorConfig';
+import { type MicrophoneIssue, microphoneAccessIssue } from './microphone-errors';
+import { monitorVoiceInputSignal, type VoiceInputSignal } from './voice-input-signal';
 
 function normalizeLoopbackUrl(endpoint: string): string {
   try {
@@ -25,11 +26,9 @@ const DEFAULT_LLM_POSTPROCESS_URL = normalizeLoopbackUrl(
   process.env.NEXT_PUBLIC_LLM_POSTPROCESS_URL || 'http://127.0.0.1:9878',
 );
 
-const defaultPrompt = (nickname: string) =>
-  `这是 ${deploymentDefaults.brand.displayName} 猫猫协作项目的对话。宪宪是布偶猫（Claude Opus），砚砚是缅因猫（Codex）。` +
-  `${nickname}经常说：帮我看看、开个 worktree、跑一下测试、review 一下、rebase 到 main。` +
-  '技术栈：MCP, Redis, Fastify, TypeScript, Whisper, NDJSON, Zustand, WebSocket, ' +
-  'InvocationRecord, Hindsight, Codex, Gemini, Claude, Opus, Sonnet, Haiku, ADR, Lua, CAS。';
+const DEFAULT_PROMPT =
+  `以下是 ${deploymentDefaults.brand.displayName} 的录音，聊天对象的名字写作「宪宪」「砚砚」，` +
+  '技术词：worktree、review、TypeScript、pull request、Redis、Slack、rebase、main。';
 
 /** Minimum recording duration (ms) to avoid accidental taps. */
 const MIN_RECORDING_MS = 500;
@@ -39,6 +38,10 @@ const STREAM_INTERVAL_MS = 3000;
 
 export type VoiceState = 'idle' | 'recording' | 'transcribing';
 
+function stopTracks(stream: MediaStream): void {
+  for (const track of stream.getTracks()) track.stop();
+}
+
 function buildFormData(blob: Blob, prompt: string, language: string): FormData {
   const formData = new FormData();
   formData.append('file', blob, 'recording.webm');
@@ -47,9 +50,9 @@ function buildFormData(blob: Blob, prompt: string, language: string): FormData {
   return formData;
 }
 
-async function resolveVoiceServiceEndpoint(serviceId: string, fallback: string): Promise<string> {
+async function resolveVoiceServiceEndpoint(serviceId: string, fallback: string, signal?: AbortSignal): Promise<string> {
   try {
-    const res = await apiFetch('/api/services/endpoints');
+    const res = await apiFetch('/api/services/endpoints', signal ? { signal } : undefined);
     if (!res.ok) return fallback;
     const payload: { endpoints?: Record<string, unknown> } = await res.json();
     const endpoint = payload.endpoints?.[serviceId];
@@ -62,11 +65,14 @@ async function resolveVoiceServiceEndpoint(serviceId: string, fallback: string):
   return fallback;
 }
 
-async function transcribeBlob(blob: Blob, prompt: string, language: string): Promise<string> {
-  const whisperUrl = await resolveVoiceServiceEndpoint('whisper-stt', DEFAULT_WHISPER_URL);
+async function transcribeBlob(blob: Blob, prompt: string, language: string, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
+  const whisperUrl = await resolveVoiceServiceEndpoint('whisper-stt', DEFAULT_WHISPER_URL, signal);
+  signal?.throwIfAborted();
   const res = await fetch(`${whisperUrl}/v1/audio/transcriptions`, {
     method: 'POST',
     body: buildFormData(blob, prompt, language),
+    signal,
   });
 
   if (!res.ok) throw new Error(`Whisper service error: ${res.status}`);
@@ -100,8 +106,7 @@ async function llmPostProcess(text: string): Promise<string> {
 export function useVoiceInput() {
   const settings = useVoiceSettingsStore((s) => s.settings);
 
-  const owner = useCoCreatorDisplay();
-  const prompt = settings.customPrompt || defaultPrompt(owner.nickname);
+  const prompt = settings.customPrompt || DEFAULT_PROMPT;
   const language = settings.language;
 
   // Rebuild merged term entries when custom terms change
@@ -114,19 +119,21 @@ export function useVoiceInput() {
   const [transcript, setTranscript] = useState('');
   const [partialTranscript, setPartialTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [microphoneIssue, setMicrophoneIssue] = useState<MicrophoneIssue | null>(null);
   const [duration, setDuration] = useState(0);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new input retires the previous attempt's warning
+  useEffect(() => {
+    setMicrophoneIssue(null);
+  }, [settings.microphoneDeviceId]);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const signalRef = useRef<VoiceInputSignal | null>(null);
+  const openingRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startTimeRef = useRef<number>(0);
   const versionRef = useRef(0);
-  const streamSeqRef = useRef(0);
-  // Snapshot settings at recording start to avoid mid-recording changes
-  const promptRef = useRef(prompt);
-  const languageRef = useRef(language);
-  const entriesRef = useRef(mergedEntries);
+  const previewRef = useRef<AbortController | null>(null);
 
   const clearTimers = useCallback(() => {
     if (timerRef.current) {
@@ -137,115 +144,171 @@ export function useVoiceInput() {
       clearInterval(streamTimerRef.current);
       streamTimerRef.current = null;
     }
+    previewRef.current?.abort();
+    previewRef.current = null;
   }, []);
 
+  useEffect(
+    () => () => {
+      versionRef.current++;
+      clearTimers();
+      signalRef.current?.close();
+      signalRef.current = null;
+      openingRef.current = false;
+      const recorder = mediaRecorderRef.current;
+      mediaRecorderRef.current = null;
+      if (recorder?.state === 'recording') recorder.stop();
+    },
+    [clearTimers],
+  );
+
+  const finishRecording = useCallback(
+    async (chunks: Blob[], startedAt: number, version: number, deviceLabel: string | null, isSilent: boolean) => {
+      if (version !== versionRef.current) return;
+      clearTimers();
+      if (isSilent || Date.now() - startedAt < MIN_RECORDING_MS) {
+        if (isSilent) setMicrophoneIssue({ kind: 'no-signal', deviceLabel });
+        setPartialTranscript('');
+        setState('idle');
+        return;
+      }
+
+      setState('transcribing');
+      try {
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const raw = await transcribeBlob(blob, prompt, language);
+        const refined = await llmPostProcess(raw);
+        if (version !== versionRef.current) return;
+        const text = refined.trim() ? correctTranscription(refined, mergedEntries) : '';
+        if (text.trim()) setTranscript(text);
+        else setMicrophoneIssue({ kind: 'no-transcript', deviceLabel });
+        setPartialTranscript('');
+      } catch (err) {
+        if (version === versionRef.current) {
+          setError(err instanceof Error ? err.message : 'Transcription failed');
+        }
+      } finally {
+        if (version === versionRef.current) setState('idle');
+      }
+    },
+    [clearTimers, prompt, language, mergedEntries],
+  );
+
+  const refreshPreview = useCallback(
+    async (recorder: MediaRecorder, chunks: Blob[], version: number) => {
+      const isRecording = () => version === versionRef.current && recorder.state === 'recording';
+      if (!isRecording() || previewRef.current || signalRef.current?.isSilent()) return;
+      const preview = new AbortController();
+      previewRef.current = preview;
+      try {
+        const chunkCount = chunks.length;
+        recorder.requestData();
+        // Give dataavailable a turn to deliver the requested recording data.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        if (!isRecording() || preview.signal.aborted || chunkCount === chunks.length) return;
+        const raw = await transcribeBlob(new Blob(chunks, { type: 'audio/webm' }), prompt, language, preview.signal);
+        if (isRecording() && !preview.signal.aborted) {
+          setPartialTranscript(correctTranscription(raw, mergedEntries));
+        }
+      } catch {
+        // A preview failure does not fail the recording.
+      } finally {
+        if (previewRef.current === preview) previewRef.current = null;
+      }
+    },
+    [prompt, language, mergedEntries],
+  );
+
   const startRecording = useCallback(async () => {
+    if (state !== 'idle' || openingRef.current || mediaRecorderRef.current) return;
+    const myVersion = ++versionRef.current;
+    openingRef.current = true;
+    let stream: MediaStream | undefined;
     try {
       setError(null);
+      setMicrophoneIssue(null);
       setTranscript('');
       setPartialTranscript('');
       setDuration(0);
-      versionRef.current++;
-      streamSeqRef.current = 0;
 
-      // Snapshot current settings
-      promptRef.current = prompt;
-      languageRef.current = language;
-      entriesRef.current = mergedEntries;
-
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      let recorder: MediaRecorder;
-      try {
-        const preferredMime = 'audio/webm;codecs=opus';
-        const mimeType = MediaRecorder.isTypeSupported(preferredMime) ? preferredMime : undefined;
-        recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
-      } catch (recErr) {
-        stream.getTracks().forEach((t) => t.stop());
-        throw recErr;
+      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+        setMicrophoneIssue({ kind: 'unsupported' });
+        return;
       }
+      const deviceId = settings.microphoneDeviceId;
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+      });
+      if (myVersion !== versionRef.current) {
+        stopTracks(stream);
+        return;
+      }
+
+      const preferredMime = 'audio/webm;codecs=opus';
+      const mimeType = MediaRecorder.isTypeSupported(preferredMime) ? preferredMime : undefined;
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
       mediaRecorderRef.current = recorder;
-      chunksRef.current = [];
+      const chunks: Blob[] = [];
+      const startedAt = Date.now();
+      const deviceLabel = stream.getAudioTracks()[0]?.label?.trim() || null;
 
       recorder.addEventListener('dataavailable', (e: BlobEvent) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
+        if (e.data.size > 0) chunks.push(e.data);
       });
 
-      recorder.addEventListener('stop', async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        clearTimers();
-
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-
-        if (Date.now() - startTimeRef.current < MIN_RECORDING_MS) {
-          setState('idle');
-          return;
+      recorder.addEventListener('stop', () => {
+        let isSilent = false;
+        if (mediaRecorderRef.current === recorder) {
+          isSilent = signalRef.current?.isSilent() ?? false;
+          signalRef.current?.close();
+          signalRef.current = null;
+          mediaRecorderRef.current = null;
         }
-
-        setState('transcribing');
-        const myVersion = versionRef.current;
-
-        try {
-          const raw = await transcribeBlob(blob, promptRef.current, languageRef.current);
-          const refined = await llmPostProcess(raw);
-          if (myVersion === versionRef.current) {
-            setTranscript(correctTranscription(refined, entriesRef.current));
-            setPartialTranscript('');
-          }
-        } catch (err) {
-          if (myVersion === versionRef.current) {
-            setError(err instanceof Error ? err.message : 'Transcription failed');
-          }
-        } finally {
-          if (myVersion === versionRef.current) setState('idle');
-        }
+        stopTracks(recorder.stream);
+        void finishRecording(chunks, startedAt, myVersion, deviceLabel, isSilent);
       });
 
+      signalRef.current = monitorVoiceInputSignal(stream);
       recorder.start();
-      startTimeRef.current = Date.now();
       setState('recording');
 
       // Duration timer
       timerRef.current = setInterval(() => {
-        setDuration(Math.floor((Date.now() - startTimeRef.current) / 1000));
+        setDuration(Math.floor((Date.now() - startedAt) / 1000));
       }, 1000);
 
       // Streaming: periodic intermediate transcription
-      const myVersion = versionRef.current;
-      streamTimerRef.current = setInterval(async () => {
-        if (recorder.state !== 'recording') return;
-        try {
-          recorder.requestData();
-          // Small delay to let dataavailable fire
-          await new Promise((r) => setTimeout(r, 50));
-          if (chunksRef.current.length === 0) return;
-          const seq = ++streamSeqRef.current;
-          const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-          const raw = await transcribeBlob(blob, promptRef.current, languageRef.current);
-          if (myVersion === versionRef.current && seq === streamSeqRef.current && recorder.state === 'recording') {
-            setPartialTranscript(correctTranscription(raw, entriesRef.current));
-          }
-        } catch {
-          // Streaming errors are non-fatal, final transcription will retry
-        }
+      streamTimerRef.current = setInterval(() => {
+        void refreshPreview(recorder, chunks, myVersion);
       }, STREAM_INTERVAL_MS);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Microphone access denied');
+      if (stream) stopTracks(stream);
+      if (myVersion !== versionRef.current) return;
+      signalRef.current?.close();
+      signalRef.current = null;
+      mediaRecorderRef.current = null;
+      const issue = microphoneAccessIssue(err);
+      if (issue) setMicrophoneIssue({ kind: issue });
+      else setError(err instanceof Error ? err.message : 'Could not start recording');
       setState('idle');
+    } finally {
+      if (myVersion === versionRef.current) openingRef.current = false;
     }
-  }, [clearTimers, prompt, language, mergedEntries]);
+  }, [finishRecording, refreshPreview, settings.microphoneDeviceId, state]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      clearTimers();
       mediaRecorderRef.current.stop();
     }
-  }, []);
+  }, [clearTimers]);
 
   return {
     state,
     transcript,
     partialTranscript,
     error,
+    microphoneIssue,
     duration,
     startRecording,
     stopRecording,

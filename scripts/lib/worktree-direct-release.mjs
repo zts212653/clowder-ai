@@ -17,7 +17,16 @@ function freeBytes(path) {
   return st.bavail * st.bsize;
 }
 
-export function removeFinishedWorktree({ repo, root, entry, validate, actor, authorizationRef, clock = Date.now }) {
+export function removeFinishedWorktree({
+  repo,
+  root,
+  entry,
+  validate,
+  actor,
+  authorizationRef,
+  coldSocketPath,
+  clock = Date.now,
+}) {
   if (typeof actor !== 'string' || !actor.trim() || typeof authorizationRef !== 'string' || !authorizationRef.trim())
     throw new Error('release actor and authorization source required');
   const txn = randomUUID();
@@ -50,7 +59,7 @@ export function removeFinishedWorktree({ repo, root, entry, validate, actor, aut
   let done;
   let manifest;
   try {
-    const archive = createReleaseArchive({ repo, entry, archivePath, txn });
+    const archive = createReleaseArchive({ repo, entry, archivePath, txn, coldSocketPath });
     manifest = archive.manifest;
     const { manifestSha256 } = archive;
     verifyReleaseArchive(archivePath, manifestSha256, repo);

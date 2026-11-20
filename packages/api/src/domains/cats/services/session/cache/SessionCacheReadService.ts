@@ -1,6 +1,7 @@
-import type { CatConfig, SessionCacheWarmth } from '@cat-cafe/shared';
+import type { CatConfig, SessionCacheWarmth, SessionRecord } from '@cat-cafe/shared';
 import { createCatId } from '@cat-cafe/shared';
 import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
+import type { CacheRetentionWarmProof } from './cache-retention-proof.js';
 import { sessionCacheRuntimeKey } from './session-cache-runtime.js';
 import { projectSessionCacheWarmth } from './session-cache-warmth.js';
 
@@ -32,6 +33,7 @@ export class SessionCacheReadService implements SessionCacheReadPort {
     private readonly getConfig?: (
       catId: string,
     ) => Pick<CatConfig, 'clientId' | 'carrier' | 'defaultModel'> | undefined,
+    private readonly readRetentionProof?: (record: SessionRecord) => Promise<CacheRetentionWarmProof | undefined>,
   ) {}
 
   async read(input: SessionCacheReadInput) {
@@ -71,6 +73,7 @@ export class SessionCacheReadService implements SessionCacheReadPort {
                     (config
                       ? { runtime: sessionCacheRuntimeKey(config) ?? '', model: config.defaultModel }
                       : undefined),
+                  owned && this.readRetentionProof ? await this.readRetentionProof(record) : undefined,
                 ),
                 bindingSource: binding
                   ? ('frozen_execution' as const)

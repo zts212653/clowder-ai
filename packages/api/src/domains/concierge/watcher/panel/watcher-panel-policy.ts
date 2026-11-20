@@ -1,5 +1,20 @@
 import { normalizeToolExecutionPolicy } from '../../../cats/services/agents/invocation/tool-execution-policy.js';
+import { WATCHER_TOOL_ROUTES } from '../../../cats/services/agents/invocation/WatcherToolTicket.js';
 import type { ToolExecutionPolicy } from '../../../cats/services/types.js';
+
+/** Named surface and its callback dependencies, shared by every ordinary watcher carrier. */
+export const WATCHER_PANEL_TOOL_ROUTES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  ...WATCHER_TOOL_ROUTES,
+  cat_cafe_search_evidence: ['GET /api/callbacks/search-evidence', 'GET /api/callbacks/memory-matters'],
+  cat_cafe_read_file_slice: [], // Local reader: no file-write or command entry exists in this surface.
+  cat_cafe_list_threads: ['GET /api/callbacks/list-threads'],
+  cat_cafe_get_thread_cats: ['GET /api/callbacks/thread-cats'],
+  cat_cafe_get_thread_metadata: ['GET /api/callbacks/thread-metadata'],
+  cat_cafe_list_tasks: ['GET /api/callbacks/list-tasks'],
+  cat_cafe_feat_index: ['GET /api/callbacks/feat-index'],
+  cat_cafe_get_workflow_sop: ['GET /api/callbacks/get-workflow-sop'],
+  cat_cafe_get_rich_block_rules: ['GET /api/callbacks/rich-block-rules'],
+});
 
 /**
  * F335 panel watcher callback surface, enforced by the callback auth hook per route template.
@@ -44,5 +59,9 @@ export const WATCHER_PANEL_CALLBACK_ROUTES = Object.freeze([
 ]);
 
 export function watcherPanelToolPolicy(): ToolExecutionPolicy {
-  return normalizeToolExecutionPolicy({ mode: 'watcher_panel', allowedCallbackRoutes: WATCHER_PANEL_CALLBACK_ROUTES });
+  return normalizeToolExecutionPolicy({
+    mode: 'watcher_panel',
+    allowedCallbackRoutes: WATCHER_PANEL_CALLBACK_ROUTES,
+    allowedToolNames: Object.keys(WATCHER_PANEL_TOOL_ROUTES),
+  });
 }

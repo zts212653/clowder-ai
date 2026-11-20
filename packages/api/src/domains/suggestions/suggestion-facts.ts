@@ -40,9 +40,11 @@ export async function readSuggestionFacts(
     : [...new Set([...deps.registry.kinds(), ...(await deps.store.listUserKinds(actor.userId))])].sort();
   const hidden = await deps.store.listHidden(actor.userId);
   const facts: SuggestionKindFacts[] = [];
+  const seen = new Set<string>();
   for (const kind of kinds) {
     const handler = deps.registry.get(kind);
-    if (!handler) continue;
+    if (!handler || seen.has(handler.kind)) continue;
+    seen.add(handler.kind);
     const stoppedAt = hidden.find((entry) => entry.kind === kind && entry.catId === actor.catId)?.hiddenAt;
     facts.push(await readSuggestionKindFacts(deps, actor.userId, handler, stoppedAt));
   }

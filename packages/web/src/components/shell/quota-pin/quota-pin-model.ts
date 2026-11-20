@@ -1,9 +1,4 @@
-import {
-  type AccountQuotaObservation,
-  accountQuotaOwnerMatches,
-  builtinAccountIdForClient,
-  claudeQuotaWindows,
-} from '@cat-cafe/shared';
+import { accountQuotaOwnerMatches, builtinAccountIdForClient, claudeQuotaWindows } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
 import {
   accountDisplayName,
@@ -16,7 +11,14 @@ import { accountMessage } from '../../accounts/account-message';
 import { accountsCopy } from '../../accounts/accounts.shell-copy';
 import { claudeQuotaCopy } from '../../accounts/claude-quota.shell-copy';
 import { remainingQuota } from '../../codex-accounts/quota-state';
-import type { AccountSelection, ProfileItem } from '../../hub-accounts.types';
+import type {
+  AccountSelection,
+  AgyAccountQuotaView,
+  KimiAccountQuotaView,
+  ProfileItem,
+} from '../../hub-accounts.types';
+
+export type { AgyAccountQuotaView, KimiAccountQuotaView };
 
 export const QUOTA_STALE_THRESHOLD_MS = 10 * 60_000;
 
@@ -31,30 +33,7 @@ export const QUOTA_FAMILY_COLOR_TOKEN: Readonly<Record<QuotaFamilyId, string>> =
   kimi: 'var(--family-turkish-van-ring)',
 };
 
-export interface KimiAccountQuotaView {
-  readonly owner: {
-    readonly accountRef: string;
-    readonly credentialVersion: string;
-  };
-  readonly observedAt: number;
-  readonly items: AccountQuotaObservation['items'];
-}
-
-export interface AgyAccountQuotaView {
-  readonly owner: {
-    readonly accountRef: string;
-    readonly credentialVersion: string;
-  };
-  readonly observedAt: number;
-  readonly items: AccountQuotaObservation['items'];
-}
-
-export type QuotaRingProfileItem = ProfileItem & {
-  readonly kimiLoginReady?: boolean;
-  readonly kimiQuota?: KimiAccountQuotaView;
-  readonly agyQuotaReady?: boolean;
-  readonly agyQuota?: AgyAccountQuotaView;
-};
+export type QuotaRingProfileItem = ProfileItem;
 
 export interface QuotaRingWindowView {
   readonly id: string;
@@ -242,7 +221,11 @@ function projectClaudeWindows(account: ProfileItem, now: number, language: 'zh' 
   });
 }
 
-function projectKimiWindows(account: QuotaRingProfileItem, now: number, language: 'zh' | 'en'): QuotaRingWindowView[] {
+export function projectKimiWindows(
+  account: QuotaRingProfileItem,
+  now: number,
+  language: 'zh' | 'en',
+): QuotaRingWindowView[] {
   const kimiQuota = account.kimiQuota;
   if (
     !account.kimiLoginReady ||
@@ -317,14 +300,18 @@ function selectionForFamily(
   return undefined;
 }
 
-function agyAccountQuotaReady(account: QuotaRingProfileItem): boolean {
+export function agyAccountQuotaReady(account: QuotaRingProfileItem): boolean {
   if (typeof account.agyQuotaReady === 'boolean') return account.agyQuotaReady;
   return Boolean(account.agy) && accountLoginReady(account);
 }
 
 const MIN_VALID_RESET_TIME_MS = Date.UTC(2000, 0, 1);
 
-function projectAgyWindows(account: QuotaRingProfileItem, now: number, language: 'zh' | 'en'): QuotaRingWindowView[] {
+export function projectAgyWindows(
+  account: QuotaRingProfileItem,
+  now: number,
+  language: 'zh' | 'en',
+): QuotaRingWindowView[] {
   const agyQuota = account.agyQuota;
   if (
     !agyAccountQuotaReady(account) ||

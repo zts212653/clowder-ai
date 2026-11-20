@@ -464,6 +464,7 @@ export interface AgentRouterOptions {
   threadStore?: IThreadStore;
   /** F24: Session chain store for context health tracking */
   sessionChainStore?: ISessionChainStore;
+  sessionCacheObservationListener?: import('../invocation/invoke-single-cat.js').InvocationDeps['sessionCacheObservationListener'];
   /** F296 B3b-1: persistent context epoch and cold/hot mode owner. */
   contextEpochOwner?: ContextEpochOwner;
   /** F296: authenticated Claude project-hook readiness from API bootstrap. */
@@ -593,6 +594,7 @@ export class AgentRouter {
   private deliveryCursorStore: DeliveryCursorStore;
   private threadStore: IThreadStore | null;
   private sessionChainStore: ISessionChainStore | undefined;
+  private sessionCacheObservationListener?: import('../invocation/invoke-single-cat.js').InvocationDeps['sessionCacheObservationListener'];
   private contextEpochOwner: ContextEpochOwner | undefined;
   private hookAuthenticationReady: boolean | (() => boolean);
   private claudeProjectHookCarrierReady: boolean | ((projectRoot: string) => boolean);
@@ -712,6 +714,7 @@ export class AgentRouter {
       options.deliveryCursorStore ?? new DeliveryCursorStore(options.sessionStore, canonicalizer);
     this.threadStore = options.threadStore ?? null;
     this.sessionChainStore = options.sessionChainStore;
+    this.sessionCacheObservationListener = options.sessionCacheObservationListener;
     this.contextEpochOwner = options.contextEpochOwner;
     this.hookAuthenticationReady = options.hookAuthenticationReady ?? false;
     this.claudeProjectHookCarrierReady = options.claudeProjectHookCarrierReady ?? false;
@@ -1466,6 +1469,9 @@ export class AgentRouter {
         ...(this.taskProgressStore ? { taskProgressStore: this.taskProgressStore } : {}),
         ...(this.ownerAskCorrectionDeliver ? { ownerAskCorrectionDeliver: this.ownerAskCorrectionDeliver } : {}),
         ...(this.sessionChainStore ? { sessionChainStore: this.sessionChainStore } : {}),
+        ...(this.sessionCacheObservationListener
+          ? { sessionCacheObservationListener: this.sessionCacheObservationListener }
+          : {}),
         ...(this.contextEpochOwner ? { contextEpochOwner: this.contextEpochOwner } : {}),
         hookAuthenticationReady: this.hookAuthenticationReady,
         claudeProjectHookCarrierReady: this.claudeProjectHookCarrierReady,

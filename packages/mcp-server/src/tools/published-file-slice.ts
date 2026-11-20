@@ -53,8 +53,10 @@ export async function handlePublishedFileSlice(
     const next = data.next
       ? `\nSource continues; next slice: cat_cafe_read_file_slice(${JSON.stringify({ path: input.path, ...data.next })})`
       : '';
+    const text = `Versioned source: ${data.sourcePath} · hash:${data.sourceHash} · version:${data.sourceVersion}\n${data.text}${next}`;
     return {
       structuredContent: {
+        text,
         version: data.sourceVersion,
         complete: !data.next,
         ...(data.next
@@ -72,7 +74,7 @@ export async function handlePublishedFileSlice(
       content: [
         {
           type: 'text' as const,
-          text: `Versioned source: ${data.sourcePath} · hash:${data.sourceHash} · version:${data.sourceVersion}\n${data.text}${next}`,
+          text,
         },
       ],
     };

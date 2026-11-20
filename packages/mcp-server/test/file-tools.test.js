@@ -38,6 +38,40 @@ describe('MCP file slice tools', () => {
     assert.ok(text.includes('3: gamma'));
     assert.ok(!text.includes('1: alpha'));
     assert.ok(!text.includes('4: delta'));
+    assert.equal(
+      result.structuredContent.text,
+      text,
+      'clients that prefer structured results must receive the source too',
+    );
+  });
+
+  test('published file slices retain source text in the structured result preferred by native clients', async (t) => {
+    const originalFetch = globalThis.fetch;
+    t.after(() => {
+      globalThis.fetch = originalFetch;
+    });
+    const sourcePath = join(tempDir, 'published-source.md');
+    writeFileSync(sourcePath, 'Published source');
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          text: '1: Published source',
+          sourceHash: 'a'.repeat(16),
+          sourceVersion: 'fixed-version',
+          sourcePath,
+          authorizationPath: sourcePath,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    const { handleReadFileSlice } = await import('../dist/tools/file-tools.js');
+    const result = await handleReadFileSlice({
+      path: 'cat-cafe://published/' + 'a'.repeat(16) + '/source',
+      startLine: 1,
+    });
+    assert.equal(result.isError, undefined);
+    assert.match(result.content[0].text, /1: Published source/);
+    assert.equal(result.structuredContent.text, result.content[0].text);
+    assert.equal(result.structuredContent.version, 'fixed-version');
   });
 
   test('F324: a 250k single line is bounded and exactly recoverable by charOffset', async () => {

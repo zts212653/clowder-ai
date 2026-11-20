@@ -40,8 +40,8 @@
 #   REDIS_PROFILE=dev
 #   REDIS_DATA_DIR=~/.cat-cafe/redis-dev
 #   REDIS_BACKUP_DIR=~/.cat-cafe/redis-backups/dev
-# Parallel 本地实例若仅改 REDIS_PORT，默认会自动隔离到独立目录:
-#   REDIS_PORT=6389 -> ~/.cat-cafe/redis-dev-6389
+# Linked / offset previews default to checkout-local .cat-cafe/redis-{profile}-{port}.
+# Explicit directories without an offset retain their existing reuse behavior.
 
 set -e
 set -o pipefail
@@ -273,6 +273,7 @@ if [ "${CAT_CAFE_DEPLOYMENT_ID:-}" = "runtime" ] && ! is_official_runtime_data_o
     unset CAT_CAFE_DEPLOYMENT_ID
 fi
 
+DEVELOPMENT_DATA_ROOT_ISOLATED=false
 apply_development_data_root_isolation() {
     # The official runtime is itself a linked worktree, but it owns the user's
     # canonical data root. Every other linked/offset development checkout must
@@ -287,10 +288,20 @@ apply_development_data_root_isolation() {
             return 2
         fi
         export CAT_CAFE_DATA_DIR="$isolated_root"
+        DEVELOPMENT_DATA_ROOT_ISOLATED=true
     fi
 }
 
 apply_development_data_root_isolation
+
+# Named Alpha already validates its fixed process/directory identity before
+# every Redis command. Preserve that owner instead of adding a second reader.
+PREVIEW_REDIS_DIRECTORY_CHECK=false
+PREVIEW_REDIS_SOCKET=""
+PREVIEW_REDIS_ENDPOINT_MODE=""
+if [ "$DEVELOPMENT_DATA_ROOT_ISOLATED" = true ] && [ -z "${CAT_CAFE_ALPHA_COORDINATES:-}" ]; then
+    PREVIEW_REDIS_DIRECTORY_CHECK=true
+fi
 
 # === F182 大赛 / 多 worktree 并发：WORKTREE_PORT_OFFSET 派生 + 主动覆盖 ===
 # 砚砚 review: cat-cafe/docs/plans/2026-04-30-worktree-port-offset.md
@@ -365,7 +376,7 @@ apply_worktree_port_offset
 apply_manual_download_source_overrides
 
 default_redis_port() {
-    if [ "$PROD_WEB" = true ]; then
+    if [ "$PROD_WEB" = true ] && [ "$DEVELOPMENT_DATA_ROOT_ISOLATED" != true ]; then
         echo "6399"
     else
         echo "6398"
@@ -448,6 +459,10 @@ WEB_PORT=${FRONTEND_PORT:-$DEFAULT_WEB_PORT}
 export CAT_CAFE_RUNTIME_WEB_PORT="$WEB_PORT"
 REDIS_PORT=${REDIS_PORT:-$(default_redis_port)}
 normalize_raw_dev_redis_defaults
+if [ "$USE_REDIS" = true ] && [ "$DEVELOPMENT_DATA_ROOT_ISOLATED" = true ] && [ "$REDIS_PORT" = "6399" ]; then
+    echo '[start-dev] preview Redis cannot use production port 6399; choose a development port or WORKTREE_PORT_OFFSET' >&2
+    exit 2
+fi
 if [ "$REDIS_PORT" = "6397" ] && [ "${CAT_CAFE_DEPLOYMENT_ID:-}" != "alpha" ]; then
     echo "[start-dev] Alpha Redis port 6397 is reserved for the Alpha deployment" >&2
     exit 2
@@ -519,15 +534,17 @@ default_redis_storage_key() {
 }
 
 default_redis_data_dir() {
-    local key
+    local key root="${HOME}/.cat-cafe"
+    if [ "$DEVELOPMENT_DATA_ROOT_ISOLATED" = true ]; then root="$CAT_CAFE_DATA_DIR"; fi
     key=$(default_redis_storage_key "${1:-$REDIS_PROFILE}" "${2:-$REDIS_PORT}")
-    printf '%s/.cat-cafe/redis-%s' "$HOME" "$key"
+    printf '%s/redis-%s' "$root" "$key"
 }
 
 default_redis_backup_dir() {
-    local key
+    local key root="${HOME}/.cat-cafe"
+    if [ "$DEVELOPMENT_DATA_ROOT_ISOLATED" = true ]; then root="$CAT_CAFE_DATA_DIR"; fi
     key=$(default_redis_storage_key "${1:-$REDIS_PROFILE}" "${2:-$REDIS_PORT}")
-    printf '%s/.cat-cafe/redis-backups/%s' "$HOME" "$key"
+    printf '%s/redis-backups/%s' "$root" "$key"
 }
 
 REDIS_STORAGE_KEY=$(default_redis_storage_key "$REDIS_PROFILE" "$REDIS_PORT")
@@ -545,6 +562,11 @@ elif [ -n "$CLI_REDIS_PORT_OVERRIDE" ]; then
     REDIS_BACKUP_DIR="$(default_redis_backup_dir "$REDIS_PROFILE" "$REDIS_PORT")"
 else
     REDIS_BACKUP_DIR=${REDIS_BACKUP_DIR:-"$(default_redis_backup_dir "$REDIS_PROFILE" "$REDIS_PORT")"}
+fi
+if [ "$USE_REDIS" = true ] && [ "$DEVELOPMENT_DATA_ROOT_ISOLATED" = true ]; then
+    printf '[start-dev] preview Redis data directory: %s\n' "$REDIS_DATA_DIR"
+    printf '[start-dev] preview Redis backup directory: %s\n' "$REDIS_BACKUP_DIR"
+    echo '[start-dev] same-checkout restarts reuse these paths; explicit REDIS_DATA_DIR/REDIS_BACKUP_DIR + REDIS_PORT without WORKTREE_PORT_OFFSET retain configured reuse'
 fi
 REDIS_DBFILE=${REDIS_DBFILE:-dump.rdb}
 REDIS_PIDFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.pid"
@@ -629,6 +651,11 @@ probe_port_with_nc() {
 # `timeout` returns 127 and healthy Redis is incorrectly seen as down.
 redis_ping() {
     named_alpha_redis_is_owned || return 1
+    if [ "${PREVIEW_REDIS_DIRECTORY_CHECK:-false}" = true ]; then
+        [ -n "$PREVIEW_REDIS_SOCKET" ] || return 1
+        [ "$(cat_cafe_redis_ping_command -s "$PREVIEW_REDIS_SOCKET" --raw ping 2>/dev/null)" = PONG ]
+        return $?
+    fi
     if command -v timeout >/dev/null 2>&1; then
         timeout 2 redis-cli -p "$REDIS_PORT" ping &> /dev/null
     else
@@ -679,6 +706,14 @@ if [ -n "${CAT_CAFE_ALPHA_COORDINATES:-}" ]; then
         case "${@: -1}" in
             ping|PING) cat_cafe_redis_ping_command "$@" ;;
             *) command redis-cli "$@" ;;
+        esac
+    }
+elif [ "$PREVIEW_REDIS_DIRECTORY_CHECK" = true ]; then
+    redis-cli() {
+        [ -n "$PREVIEW_REDIS_SOCKET" ] || { echo '[start-dev] private Redis endpoint not selected' >&2; return 1; }
+        case "${@: -1}" in
+            ping|PING) cat_cafe_redis_ping_command -s "$PREVIEW_REDIS_SOCKET" "$@" ;;
+            *) command redis-cli -s "$PREVIEW_REDIS_SOCKET" "$@" ;;
         esac
     }
 fi
@@ -1218,6 +1253,37 @@ sanitize_lockfiles() {
 }
 
 ensure_redis_dirs() {
+    if [ "$DEVELOPMENT_DATA_ROOT_ISOLATED" = true ]; then
+        local defaults=()
+        # Explicit directory selections retain their existing semantics. Only
+        # implicit checkout defaults must never redirect into an old shared root.
+        if [ "$REDIS_DATA_DIR" = "$(default_redis_data_dir)" ]; then defaults+=("$REDIS_DATA_DIR"); fi
+        if [ "$REDIS_BACKUP_DIR" = "$(default_redis_backup_dir)" ]; then defaults+=("$REDIS_BACKUP_DIR"); fi
+        node - "$PROJECT_DIR" "${defaults[@]}" <<'NODE' || return $?
+const { lstatSync, realpathSync } = require('node:fs');
+const { resolve, relative, join, sep } = require('node:path');
+const project = resolve(process.argv[2]);
+try {
+    const physical = realpathSync(project);
+    for (const directory of process.argv.slice(3)) {
+        const path = relative(project, resolve(directory));
+        if (!path.startsWith(`.cat-cafe${sep}`)) throw new Error(`outside checkout data root: ${directory}`);
+        let current = physical;
+        for (const part of path.split(sep)) {
+            current = join(current, part);
+            try {
+                if (lstatSync(current).isSymbolicLink()) throw new Error(`symlink: ${current}`);
+            } catch (error) {
+                if (error.code !== 'ENOENT') throw error;
+            }
+        }
+    }
+} catch (error) {
+    console.error(`[start-dev] preview Redis default refused (${error.message}); choose a real checkout-local directory or configure an explicit reuse path`);
+    process.exitCode = 2;
+}
+NODE
+    fi
     mkdir -p "$REDIS_DATA_DIR" "$REDIS_BACKUP_DIR"
 }
 
@@ -1343,16 +1409,25 @@ prune_redis_backups() {
 
 archive_redis_snapshot() {
     local reason="${1:-manual}"
-    ensure_redis_dirs
+    ensure_redis_dirs || return 2
 
     local source=""
     local dir=""
     local dbfile=""
 
     if redis_ping; then
+        if [ "${PREVIEW_REDIS_DIRECTORY_CHECK:-false}" = true ]; then
+            assert_preview_redis_runtime_dir || return 2
+        fi
         redis-cli -p "$REDIS_PORT" bgsave &> /dev/null || true
         sleep 0.2
-        dir=$(redis-cli -p "$REDIS_PORT" config get dir 2>/dev/null | sed -n '2p' || true)
+        if [ "${PREVIEW_REDIS_DIRECTORY_CHECK:-false}" = true ]; then
+            # Keep the copy at the selected root even if the listener changes
+            # after BGSAVE; a later CONFIG reply cannot redirect its source.
+            dir="$REDIS_DATA_DIR"
+        else
+            dir=$(redis-cli -p "$REDIS_PORT" config get dir 2>/dev/null | sed -n '2p' || true)
+        fi
         dbfile=$(redis-cli -p "$REDIS_PORT" config get dbfilename 2>/dev/null | sed -n '2p' || true)
         if [ -n "$dir" ] && [ -n "$dbfile" ]; then
             source="$dir/$dbfile"
@@ -1589,6 +1664,45 @@ redis_startup_data_allows_save() {
     fi
 }
 
+assert_preview_redis_runtime_dir() {
+    [ "${PREVIEW_REDIS_DIRECTORY_CHECK:-false}" = true ] || return 0
+    local port="${1:-$REDIS_PORT}" selected_dir="${2:-$REDIS_DATA_DIR}"
+    local actual expected
+    actual="$(redis-cli -h 127.0.0.1 -p "$port" --raw config get dir)" || actual=""
+    actual="$(printf '%s\n' "$actual" | sed -n '2p')"
+    if [ -z "$actual" ] || ! actual="$(cd "$actual" 2>/dev/null && pwd -P)"; then
+        printf '[start-dev] preview Redis directory unreadable on port %s; selected=%s; existing service left unchanged\n' "$port" "$selected_dir" >&2
+        return 2
+    fi
+    expected="$(cd "$selected_dir" && pwd -P)" || return 2
+    if [ "$actual" != "$expected" ]; then
+        printf '[start-dev] preview Redis directory mismatch on port %s: running=%s selected=%s; use a free port AND an independent directory for a new preview. Reusing data requires its original owner to stop Redis normally first. Existing Redis left running; no save sent.\n' "$port" "$actual" "$expected" >&2
+        return 2
+    fi
+}
+
+prepare_preview_redis_endpoint() {
+    [ "$PREVIEW_REDIS_DIRECTORY_CHECK" = true ] || return 0
+    local endpoint
+    endpoint="$(node "$SCRIPT_DIR/lib/preview-redis-endpoint.mjs" prepare "$REDIS_DATA_DIR" "$REDIS_PORT" "$$")" || return 2
+    IFS=$'\t' read -r PREVIEW_REDIS_ENDPOINT_MODE PREVIEW_REDIS_SOCKET <<< "$endpoint"
+    if [ "$PREVIEW_REDIS_ENDPOINT_MODE" = fresh ] && port_is_listening "$REDIS_PORT"; then
+        echo '[start-dev] preview Redis TCP port is occupied; refusing TCP-only reuse. For a new preview choose a free port AND an independent data directory. To reuse this data, ask its original owner to stop Redis normally, then restart with the same directory.' >&2
+        return 2
+    fi
+    export REDIS_URL="unix://127.0.0.1:$REDIS_PORT$PREVIEW_REDIS_SOCKET"
+    printf '[start-dev] preview Redis fixed endpoint: %s (%s)\n' "$REDIS_URL" "$PREVIEW_REDIS_ENDPOINT_MODE"
+    if [ "$PREVIEW_REDIS_ENDPOINT_MODE" = reuse ] && ! redis_ping; then
+        echo '[start-dev] recorded Redis endpoint is unavailable; refusing to rebind its old socket. Retry after its owner has normally stopped Redis.' >&2
+        return 2
+    fi
+}
+
+record_preview_redis_endpoint() {
+    node "$SCRIPT_DIR/lib/preview-redis-endpoint.mjs" record "$REDIS_DATA_DIR" "$REDIS_PORT" \
+        "$PREVIEW_REDIS_SOCKET" "$$" "$(cat "$REDIS_PIDFILE")"
+}
+
 setup_storage() {
     if [ "$USE_REDIS" = false ]; then
         echo -e "${YELLOW}  ⚡ 内存模式 (--memory)，重启丢数据${NC}"
@@ -1603,22 +1717,31 @@ setup_storage() {
     fi
 
     ensure_redis_dirs
-    archive_redis_snapshot "pre-start"
+    prepare_preview_redis_endpoint || exit 2
+    archive_redis_snapshot "pre-start" || exit 2
 
     # 默认: 尝试 Redis 持久化 (专属端口，避免与系统 Redis 冲突)
     if redis_ping; then
+        if [ "${PREVIEW_REDIS_DIRECTORY_CHECK:-false}" = true ]; then
+            assert_preview_redis_runtime_dir || exit 2
+        fi
         assert_alpha_redis_runtime_dir || exit 1
         echo -e "${GREEN}  ✓ Redis 已运行 (端口 $REDIS_PORT)${NC}"
-        if [ -z "${CAT_CAFE_ALPHA_COORDINATES:-}" ]; then export REDIS_URL="redis://localhost:$REDIS_PORT"; fi
+        if [ -z "${CAT_CAFE_ALPHA_COORDINATES:-}" ] && [ "$PREVIEW_REDIS_DIRECTORY_CHECK" = false ]; then export REDIS_URL="redis://localhost:$REDIS_PORT"; fi
         print_redis_runtime_info
         return
     fi
 
+    if [ "$PREVIEW_REDIS_ENDPOINT_MODE" = reuse ]; then
+        echo '[start-dev] private Redis disconnected during reuse; refusing to start a replacement at its old address' >&2
+        exit 2
+    fi
     echo -e "${YELLOW}  ⚠ Redis 未运行，尝试在端口 $REDIS_PORT 启动...${NC}"
     if command -v redis-server &> /dev/null; then
         maybe_quarantine_stale_aof_dir
         local ownership_args=()
         if [ -n "${CAT_CAFE_ALPHA_COORDINATES:-}" ]; then ownership_args+=(--named-alpha-ownership); fi
+        if [ "${PREVIEW_REDIS_DIRECTORY_CHECK:-false}" = true ]; then ownership_args+=(--preview-directory-check --unixsocket "$PREVIEW_REDIS_SOCKET"); fi
         cat_cafe_redis_start_daemon \
             --port "$REDIS_PORT" \
             --bind 127.0.0.1 \
@@ -1633,10 +1756,14 @@ setup_storage() {
             --logfile "$REDIS_LOGFILE" "${ownership_args[@]}" \
             || exit 1
         if redis_startup_ping; then
+            if [ "${PREVIEW_REDIS_DIRECTORY_CHECK:-false}" = true ]; then
+                assert_preview_redis_runtime_dir || exit 2
+                record_preview_redis_endpoint || exit 2
+            fi
             assert_alpha_redis_runtime_dir || exit 1
             STARTED_REDIS=true
             echo -e "${GREEN}  ✓ Redis 已启动 (端口 $REDIS_PORT)${NC}"
-            if [ -z "${CAT_CAFE_ALPHA_COORDINATES:-}" ]; then export REDIS_URL="redis://localhost:$REDIS_PORT"; fi
+            if [ -z "${CAT_CAFE_ALPHA_COORDINATES:-}" ] && [ "$PREVIEW_REDIS_DIRECTORY_CHECK" = false ]; then export REDIS_URL="redis://localhost:$REDIS_PORT"; fi
             print_redis_runtime_info
         else
             if [ -n "${CAT_CAFE_ALPHA_COORDINATES:-}" ]; then
@@ -1691,19 +1818,22 @@ cleanup() {
             echo "[start-dev] preserving unproven or replaced named Alpha Redis; no protocol command or signal sent" >&2
             CLEANUP_STATUS=1
         elif redis_ping; then
-            if ! redis_startup_data_allows_save; then
+            if [ "${PREVIEW_REDIS_DIRECTORY_CHECK:-false}" = true ] && ! assert_preview_redis_runtime_dir; then
                 CLEANUP_STATUS=1
+            elif ! redis_startup_data_allows_save; then
+                CLEANUP_STATUS=1
+            elif ! archive_redis_snapshot "pre-stop"; then
+                CLEANUP_STATUS=1
+            elif [ "${PREVIEW_REDIS_DIRECTORY_CHECK:-false}" = true ] && ! assert_preview_redis_runtime_dir; then
+                CLEANUP_STATUS=1
+            elif shutdown_output="$(redis-cli -e -p "$REDIS_PORT" shutdown save 2>&1)"; then
+                echo "  Redis (端口 $REDIS_PORT) 已关闭"
             else
-                archive_redis_snapshot "pre-stop"
-                if shutdown_output="$(redis-cli -e -p "$REDIS_PORT" shutdown save 2>&1)"; then
-                    echo "  Redis (端口 $REDIS_PORT) 已关闭"
-                else
-                    shutdown_status=$?
-                    printf '[start-dev] Redis shutdown save failed (port %s, exit %s): %s\n' \
-                        "$REDIS_PORT" "$shutdown_status" "$shutdown_output" >&2
-                    if [ -n "${CAT_CAFE_ALPHA_COORDINATES:-}" ]; then
-                        CLEANUP_STATUS=1
-                    fi
+                shutdown_status=$?
+                printf '[start-dev] Redis shutdown save failed (port %s, exit %s): %s\n' \
+                    "$REDIS_PORT" "$shutdown_status" "$shutdown_output" >&2
+                if [ -n "${CAT_CAFE_ALPHA_COORDINATES:-}" ] || [ "$PREVIEW_REDIS_DIRECTORY_CHECK" = true ]; then
+                    CLEANUP_STATUS=1
                 fi
             fi
         elif [ -n "${CAT_CAFE_ALPHA_COORDINATES:-}" ]; then
@@ -1712,11 +1842,16 @@ cleanup() {
         fi
     fi
     remove_redis_dev_lease
+    if [ "$PREVIEW_REDIS_ENDPOINT_MODE" = fresh ] && [ -n "$PREVIEW_REDIS_SOCKET" ]; then
+        node "$SCRIPT_DIR/lib/preview-redis-endpoint.mjs" release "$PREVIEW_REDIS_SOCKET" || CLEANUP_STATUS=1
+    fi
     if [ "$CLEANUP_STATUS" -eq 0 ]; then
         remove_named_alpha_redis_lease || CLEANUP_STATUS=1
     fi
     if [ "$CLEANUP_STATUS" -ne 0 ]; then
-        echo "[start-dev] cleanup incomplete; preserving named Alpha lease and data" >&2
+        local redis_label="Redis"
+        if [ -n "${CAT_CAFE_ALPHA_COORDINATES:-}" ]; then redis_label="named Alpha"; fi
+        printf '[start-dev] cleanup incomplete; preserving %s lease and data\n' "$redis_label" >&2
     fi
     wait 2>/dev/null || true
     # Only remove PID file if we are the daemon that wrote it (avoid orphaning a parallel daemon)

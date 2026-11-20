@@ -55,8 +55,8 @@ test('lookup does not exempt redirections, substitutions, later sends, or extern
     `command -v $(/opt/unmanaged/gh pr comment 1 --body unsafe)`,
     `command -v gh; /opt/unmanaged/gh pr comment 1 --body unsafe`,
     `command -p /opt/unmanaged/gh pr comment 1 --body unsafe`,
-    `${root}/command -v gh pr comment 1 --body unsafe`,
-    'env command -v gh pr comment 1 --body unsafe',
+    `${root}/command -v /opt/unmanaged/gh pr comment 1 --body unsafe`,
+    'env command -v /opt/unmanaged/gh pr comment 1 --body unsafe',
   ]) {
     assert.notEqual(secretShellDenial(command, ordinary), null, command);
     admission(command, 'deny');

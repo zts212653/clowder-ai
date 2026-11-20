@@ -12,8 +12,8 @@ export interface ConciergeConfig {
   watcher?: import('./watcher.js').WatcherConfig;
   /** 是否启用前台猫 (default true) */
   enabled: boolean;
-  /** 皮肤 — E1: xianxian-codex 默认；yanyan-codex / ragdoll-v1 / yarn-ball 可选 */
-  skin: 'yarn-ball' | 'ragdoll-v1' | 'yanyan-codex' | 'xianxian-codex';
+  /** 皮肤 — E1: xianxian-codex 默认；yanyan-codex / ragdoll-v1 / yarn-ball 可选；F336 xianxian-living 活猫（无 livingBody 的契约线读到 xianxian-codex，存值不改） */
+  skin: 'yarn-ball' | 'ragdoll-v1' | 'yanyan-codex' | 'xianxian-codex' | 'xianxian-living';
   /** 前台猫显示名（KD-6: per-deployment 可配置，本家 Phase A 落地投票） */
   displayName: string;
   /** 一句话人设基调（注入岗位 prompt） */

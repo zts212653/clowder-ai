@@ -7,7 +7,7 @@ import type { CodexBindingSelection } from './codex-account-binding.js';
 import { isLocalAccountMember, readLocalAccountSelection } from './local-account-selection.js';
 
 /** Same explicit preview/commit contract as Codex; no login or credential writes. */
-export function planClaudeAccountBinding(root: string, catalog: CatCafeConfig, selection: CodexBindingSelection) {
+export async function planClaudeAccountBinding(root: string, catalog: CatCafeConfig, selection: CodexBindingSelection) {
   const cats = toAllCatConfigs(catalog);
   const previous = readLocalAccountSelection(catalog, 'anthropic');
   const local = (id: string) => !!cats[id] && isLocalAccountMember(cats[id], 'anthropic');
@@ -40,7 +40,7 @@ export function planClaudeAccountBinding(root: string, catalog: CatCafeConfig, s
     const error = validateRuntimeProviderBinding('anthropic', profile, cats[id].defaultModel);
     if (error) throw new Error(error);
   }
-  const snapshot = claudeExecutionAccountSnapshot(profile);
+  const snapshot = await claudeExecutionAccountSnapshot(profile);
   return {
     previewToken: createHash('sha256')
       .update(JSON.stringify({ catalog, selection, targets, revision: snapshot.accountRevision }))

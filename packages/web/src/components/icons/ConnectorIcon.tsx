@@ -1,7 +1,7 @@
 import type { ConnectorIconSpec } from '@cat-cafe/shared';
 import type { ComponentType } from 'react';
 import { HubIcon } from '../hub-icons';
-import { SuggestionAvatar } from '../suggestions/SuggestionAvatar';
+import { WatcherMessageAvatar } from '../watcher/WatcherMessageAvatar';
 import {
   AuthKeyIcon,
   ConnectorImage,
@@ -19,7 +19,6 @@ import { BallotIcon } from './VoteIcons';
 
 const SVG_ICON_MAP: Record<string, ComponentType<{ className?: string }>> = {
   github: GitHubIcon,
-  watcher: () => <SuggestionAvatar watcher />,
   ballot: BallotIcon,
   users: UsersIcon,
   scheduler: SchedulerIcon,
@@ -36,16 +35,19 @@ const SVG_ICON_MAP: Record<string, ComponentType<{ className?: string }>> = {
 export function ConnectorIcon({
   iconSpec,
   fallbackIcon,
+  watcherRoundId,
   className = 'w-4 h-4',
 }: {
   iconSpec?: ConnectorIconSpec;
   fallbackIcon?: string;
+  watcherRoundId?: string;
   className?: string;
 }) {
   if (iconSpec && 'src' in iconSpec && iconSpec.src) {
     return <ConnectorImage src={iconSpec.src} alt="connector" className={className} />;
   }
   if (iconSpec?.type === 'svg') {
+    if (iconSpec.iconId === 'watcher') return <WatcherMessageAvatar roundId={watcherRoundId} />;
     const Icon = SVG_ICON_MAP[iconSpec.iconId];
     if (Icon) return <Icon className={className} />;
   }

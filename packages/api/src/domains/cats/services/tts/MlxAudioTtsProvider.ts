@@ -348,6 +348,7 @@ export class MlxAudioTtsProvider implements ITtsProvider {
           if (!line.trim()) continue;
           const event = this.parseStreamEvent(line, request, model, referenceAudio);
           if (event.type === 'chunk') {
+            options.onEarlyChunk?.(event);
             if (pendingChunk) yield pendingChunk;
             if (event.isFinalChunk) {
               pendingChunk = undefined;

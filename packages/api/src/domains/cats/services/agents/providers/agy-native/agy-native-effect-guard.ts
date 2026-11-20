@@ -14,6 +14,7 @@ export function materializeAgyNativeEffectGuard(input: {
   /** Host-admitted command directory; legacy hook callers can omit it. */
   workspaceRoot?: string;
   pluginServerName?: string;
+  watcherTools?: Readonly<Record<string, readonly string[]>>;
   requireApproval?: boolean;
   allowWorkspaceWrites?: boolean;
   approvalBridgeFile?: string;
@@ -26,11 +27,18 @@ export function materializeAgyNativeEffectGuard(input: {
     process.execPath,
     script,
     homedir(),
-    input.pluginServerName !== undefined ? 'plugin-native' : input.readOnly ? 'read-only' : 'normal',
+    input.watcherTools
+      ? 'watcher'
+      : input.pluginServerName !== undefined
+        ? 'plugin-native'
+        : input.readOnly
+          ? 'read-only'
+          : 'normal',
     input.accountHome ?? input.profileHome,
     ...(input.workspaceRoot !== undefined ? [realpathSync(input.workspaceRoot)] : []),
     ...(input.pluginServerName !== undefined ? [input.pluginServerName] : []),
     ...(input.credentialHome !== undefined ? [`--credential-home=${input.credentialHome}`] : []),
+    ...(input.watcherTools ? [`--watcher-tools=${JSON.stringify(input.watcherTools)}`] : []),
     ...(input.requireApproval ? ['--require-approval'] : []),
     ...(input.allowWorkspaceWrites ? ['--allow-workspace-writes'] : []),
     ...(input.approvalBridgeFile !== undefined ? [`--approval-bridge-file=${input.approvalBridgeFile}`] : []),

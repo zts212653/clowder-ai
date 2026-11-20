@@ -26,7 +26,7 @@ beforeEach(() => {
   mockLocalStorage.clear();
   vi.clearAllMocks();
   useVoiceSettingsStore.setState({
-    settings: { customTerms: [], customPrompt: null, language: 'zh' },
+    settings: { customTerms: [], customPrompt: null, language: 'zh', microphoneDeviceId: null },
   });
 });
 
@@ -36,6 +36,24 @@ describe('voiceSettingsStore', () => {
     expect(settings.customTerms).toEqual([]);
     expect(settings.customPrompt).toBeNull();
     expect(settings.language).toBe('zh');
+    expect(settings.microphoneDeviceId).toBeNull();
+  });
+
+  it('round-trips the chosen microphone and loads older voice settings with the browser default', () => {
+    const store = useVoiceSettingsStore.getState();
+    mockStorage['cat-cafe-voice-settings'] = JSON.stringify({ language: 'en', customPrompt: 'hint' });
+    store.loadSettings();
+    expect(useVoiceSettingsStore.getState().settings.microphoneDeviceId).toBeNull();
+    store.setMicrophoneDeviceId('built-in-mic');
+    store.loadSettings();
+    expect(useVoiceSettingsStore.getState().settings).toMatchObject({
+      microphoneDeviceId: 'built-in-mic',
+      language: 'en',
+      customPrompt: 'hint',
+    });
+    store.setMicrophoneDeviceId(null);
+    store.loadSettings();
+    expect(useVoiceSettingsStore.getState().settings.microphoneDeviceId).toBeNull();
   });
 
   it('adds a custom term and persists to localStorage', () => {

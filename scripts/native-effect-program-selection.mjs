@@ -6,10 +6,12 @@ import { commandName } from './native-effect-shell-tokenizer.mjs';
 import { classifyNativeTarget } from './native-effect-target-classifier.mjs';
 
 // Exact reviewed repository wrapper, not a name-based exemption for runtime code.
-const GH_WRAPPER_SHA256 = new Set([
-  '9ad0a60faa0a433f7af63e73ee71d3dff39ecfae23ebcda9882dccfbf4ac5d47',
+const GH_WRAPPER_STAGE = new Map([
+  ['9ad0a60faa0a433f7af63e73ee71d3dff39ecfae23ebcda9882dccfbf4ac5d47', false],
+  ['3e1b5ba041c712c4f194e10525b950179352557ee7d26e86f629c1629105a93b', true],
+  ['b782940842dec18ad764e1336528ebca517e134a6953a07ffa69b1301aba7a38', false],
   // prepare-secret-runtime rewrites the reviewed deployment-defaults import .ts -> .mjs.
-  '3e1b5ba041c712c4f194e10525b950179352557ee7d26e86f629c1629105a93b',
+  ['b3bec1dcb57dd3d672d622167e91733ce8b4b64b8decaefe805e9243ce41df97', true],
 ]);
 const ordinary = (path) => classifyNativeTarget(path, undefined, 'unknown').kind === 'ordinary';
 const literal = (value) => typeof value === 'string' && !/[$`*?[\]{}\n\r]/.test(value);
@@ -20,7 +22,7 @@ function environmentValue(environment, name) {
 }
 
 /** Observe the first executable, including symlinks. Never run it to classify it. */
-function selectedExecutable(program, path, cwd) {
+export function selectedExecutable(program, path, cwd) {
   if (!literal(program) || typeof path !== 'string') return null;
   return program.includes('/') ? selectedDirectExecutable(program, cwd) : selectedPathExecutable(program, path);
 }
@@ -102,14 +104,8 @@ function verifiedGhWrapper(selected, call, path, seen = new Set()) {
   try {
     if (statSync(selected.realpath).size > 64 * 1024) return null;
     const wrapperHash = createHash('sha256').update(readFileSync(selected.realpath)).digest('hex');
-    if (!GH_WRAPPER_SHA256.has(wrapperHash)) return null;
-    if (
-      !verifiedGhCohort(
-        selected.realpath,
-        wrapperHash === '3e1b5ba041c712c4f194e10525b950179352557ee7d26e86f629c1629105a93b',
-      )
-    )
-      return null;
+    const stage = GH_WRAPPER_STAGE.get(wrapperHash);
+    if (stage === undefined || !verifiedGhCohort(selected.realpath, stage)) return null;
     const node = selectedExecutable('node', path, call.cwd);
     if (!ordinaryExecutableChain(node, path, call.cwd)) return null;
     const delegatePath = path
@@ -132,6 +128,11 @@ function verifiedGhWrapper(selected, call, path, seen = new Set()) {
 /** Match the reviewed wrapper and its real delegation chain, never its directory name. */
 export function provedManagedGhInvocation(call) {
   if (call.delegated || call.environment?.length || call.wrappers?.length) return false;
+  if (hasProgramLoader((name) => environmentValue(call.environment, name))) return false;
+  return proveProgramSelection(call)?.kind === 'repository_gh_wrapper';
+}
+
+export function hasProgramLoader(valueFor) {
   const loaders = [
     'NODE_OPTIONS',
     'NODE_PATH',
@@ -143,8 +144,13 @@ export function provedManagedGhInvocation(call) {
     'BASH_ENV',
     'ENV',
   ];
-  if (loaders.some((name) => environmentValue(call.environment, name))) return false;
-  return proveProgramSelection(call)?.kind === 'repository_gh_wrapper';
+  return loaders.some((name) => {
+    const value = valueFor(name);
+    if (typeof value !== 'string') return false;
+    if (name === 'NODE_OPTIONS')
+      return /(?:^|\s)(?:-r|--(?:require|import|(?:experimental-)?loader))(?:\s|=|$)/.test(value ?? '');
+    return Boolean(value);
+  });
 }
 
 /** PATH can leave target text only after its actual program selection is observed.

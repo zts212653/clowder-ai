@@ -34,6 +34,7 @@ export const GH_COHORT_FILES = Object.freeze([
   'scripts/lib/shell-text.mjs',
   'scripts/lib/shell-wrappers.mjs',
   'scripts/native-auth-effect.mjs',
+  'scripts/native-effect-copy-namespace.mjs',
   'scripts/native-effect-find-classifier.mjs',
   'scripts/native-effect-gh-cohort.mjs',
   'scripts/native-effect-git-fetch.mjs',
@@ -83,8 +84,13 @@ const PUBLISHED_6988_COHORT = '1f3f4ef41ccbe34810a6aed19a77d2482a45de18a85288e8c
 // Reviewed #7025, merged 1534161048: retain the deployed wrapper's complete
 // scanner identity while this guard upgrades its query argument grammar.
 const PUBLISHED_7025_COHORT = 'c0ed34b83f30656894d2aaea8d45189bb4167ca35381819fe1c7886d5dfaf7d4';
+// The prior main and deployed source agree on this complete 50-file cohort.
+const PUBLISHED_PRE_RELIEF_COHORT = '63e51e7589500f0b90b81bed9a3a3195476c22543db1e331b697b3a7e65d8048';
+// Reviewed #7270, merged b4a5887e77. Cats can load PR1 before this wrapper update.
+const PUBLISHED_GUARD_RELIEF_COHORT = 'cb4f1f4bb587176f28d6c1c787c98ac8cf8ebcced76f44e1b789acbe376346c2';
+const PRE_RELIEF_FILES = GH_COHORT_FILES.filter((file) => file !== 'scripts/native-effect-copy-namespace.mjs');
 const LEGACY_FILES = [
-  ...GH_COHORT_FILES.filter((file) => file !== 'scripts/native-effect-gh-cohort.mjs'),
+  ...PRE_RELIEF_FILES.filter((file) => file !== 'scripts/native-effect-gh-cohort.mjs'),
   'scripts/native-effect-invocation-targets.mjs',
 ].sort();
 let ownCohort;
@@ -141,13 +147,19 @@ export function verifiedGhCohort(entry, stage) {
   const root = resolve(dirname(entry), '../..');
   const current = existsSync(resolve(root, 'scripts/native-effect-gh-cohort.mjs'));
   const selected = cohort(root, stage, current ? GH_COHORT_FILES : LEGACY_FILES);
-  if (!selected) return false;
   if (current) {
-    if (GH_COHORT_FILES.every((file) => selected.get(file) === ownCohort.get(file))) return true;
-    const published = cohortDigest(selected, GH_COHORT_FILES);
-    return [PUBLISHED_6899_COHORT, PUBLISHED_6988_COHORT, PUBLISHED_7025_COHORT].includes(published);
+    if (selected) {
+      if (GH_COHORT_FILES.every((file) => selected.get(file) === ownCohort.get(file))) return true;
+      if (cohortDigest(selected, GH_COHORT_FILES) === PUBLISHED_GUARD_RELIEF_COHORT) return true;
+    }
+    const previous = selected ?? cohort(root, stage, PRE_RELIEF_FILES);
+    if (!previous) return false;
+    const published = cohortDigest(previous, PRE_RELIEF_FILES);
+    return [PUBLISHED_6899_COHORT, PUBLISHED_6988_COHORT, PUBLISHED_7025_COHORT, PUBLISHED_PRE_RELIEF_COHORT].includes(
+      published,
+    );
   }
-  return cohortDigest(selected, LEGACY_FILES) === PREVIOUS_COHORT;
+  return Boolean(selected && cohortDigest(selected, LEGACY_FILES) === PREVIOUS_COHORT);
 }
 
 function cohortDigest(selected, files) {

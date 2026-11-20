@@ -1,10 +1,11 @@
 ---
 feature_ids: [F325]
-tips_exempt: "Renewed 2026-10-24 for restoring the existing Native host tool environment and unattended Git behavior, alongside the member tool discovery repair; no new setting or user action is introduced. Overall parity and natural-use limits remain recorded separately."
+tips_exempt: "Renewed 2026-11-18: daily doc guard records PR #6837 (member settings DSH discovery/save evidence retention), PR #6841 (Context Briefing quiet receipts, foreground History catch-up, and NewConversation image draft recovery), PR #6842 (fallback to installed resource readers when project links are unreadable), PR #6870 (timer hold deadline cutoff and original-card failure status), and PR #6917 (first-run NativePartnerCard onboarding intake). The 2026-10-24 Native host tool environment exemption remains in force; no new setting or user action is introduced."
 related_features: [F053, F061, F143, F149, F161, F174, F178, F194, F201, F203, F210, F211, F241, F254, F261, F286, F296, F299, F306, F318, F320, F323, F324]
 topics: [antigravity, acp, native-carrier, parity, migration, managed-job]
 doc_kind: spec
 created: 2026-09-29
+updated: 2026-11-18
 description: "让暹罗与其他 AGY 猫在家里稳定对话、持续工作和恢复现场，统一原生接入、身份、安全与长任务体验，并退役旧执行载体。"
 description_source: human
 description_author: codex-astra

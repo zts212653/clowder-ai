@@ -31,7 +31,7 @@ import {
   rankLexicalBackfillRows,
   splitLexicalBackfillWords,
 } from './lexical-backfill.js';
-import { runMemoryRead, runMemoryVectorRepack } from './MemoryProcess.js';
+import { runMemoryRead, runMemorySchemaInitialization, runMemoryVectorRepack } from './MemoryProcess.js';
 import type { EmbeddingSnapshot, MemoryProcessJob } from './memory-process-protocol.js';
 import { searchMessagePassages } from './message-passage-search.js';
 import type { MessagePassageSearchExecution, MessagePassageSearchOptions } from './message-passage-search-types.js';
@@ -39,20 +39,19 @@ import { readMessagePassageState } from './message-passage-state.js';
 import { normalizeMessageSearchDates } from './message-search-dates.js';
 import { readWithMessageVectorBudget } from './message-vector-budget.js';
 import { applyMMR } from './mmr.js';
+import { openEvidenceDatabase } from './open-evidence-database.js';
 import { type PassageVectorStore, parsePassageVectorKey, passageVectorKey } from './PassageVectorStore.js';
 import { withProjectionCheckpoints } from './projection-checkpoints.js';
 import { publishEntityMentions, recoverEntityMentionProjections } from './publish-entity-mentions.js';
 import { applyPullOnlyDownrank } from './pull-only-ranking.js';
 import { computeRecencyDecay } from './recency-decay.js';
 import { repackPassageVectors, type VectorRepackResult } from './repack-passage-vectors.js';
-import { applyMigrations } from './schema.js';
 import { createSearchEmbeddingCapability, type SearchEmbeddingCapability } from './search-embedding-capability.js';
 import type { VectorStore } from './VectorStore.js';
 import { vectorIdentityMatches } from './vector-generation-identity.js';
 import {
   generationInvalidationCurrent,
   generationInvalidationState,
-  prepareGenerationInvalidationConnection,
   quarantineRecoveredSince,
 } from './vector-generation-invalidation.js';
 import {
@@ -252,6 +251,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   private readonly onMessageVectorStart?: SqliteEvidenceStoreOptions['onMessageVectorStart'];
   private detachReadDiagnostics?: () => void;
   private initialization?: Promise<void>;
+  private initializationController?: AbortController;
   private sourceRoot?: string;
   private sourceRef?: string;
   private entityRegistry?: EntityRegistryStore;
@@ -362,29 +362,27 @@ export class SqliteEvidenceStore implements IEvidenceStore {
 
   initialize(): Promise<void> {
     if (!this.initialization) {
-      const attempt = this.initializeDatabase().catch((error: unknown) => {
-        if (this.initialization === attempt) this.initialization = undefined;
-        throw error;
-      });
+      const controller = new AbortController();
+      this.initializationController = controller;
+      const attempt = this.initializeDatabase(controller.signal)
+        .catch((error: unknown) => {
+          if (this.initialization === attempt) this.initialization = undefined;
+          throw controller.signal.aborted ? controller.signal.reason : error;
+        })
+        .finally(() => {
+          if (this.initializationController === controller) this.initializationController = undefined;
+        });
       this.initialization = attempt;
     }
     return this.initialization;
   }
 
-  private async initializeDatabase(): Promise<void> {
-    this.db = new Database(this.dbPath, {
-      readonly: this.workerMode === 'read',
-      fileMustExist: Boolean(this.workerMode),
-    });
-    if (!this.workerMode) this.db.pragma('journal_mode = WAL');
-    this.db.pragma('foreign_keys = ON');
-    this.db.pragma('busy_timeout = 5000');
-
+  private async initializeDatabase(signal: AbortSignal): Promise<void> {
+    const isolated = this.usesIsolatedProcesses();
+    if (isolated) await runMemorySchemaInitialization(this.dbPath, signal);
+    signal.throwIfAborted();
+    this.db = openEvidenceDatabase(this.dbPath, this.workerMode ? 'read' : isolated ? 'prepared' : 'schema');
     if (!this.workerMode) {
-      // Existing source triggers can run during schema repair itself.
-      prepareGenerationInvalidationConnection(this.db);
-      applyMigrations(this.db);
-      prepareGenerationInvalidationConnection(this.db);
       try {
         this.detachReadDiagnostics = this.readDiagnostics?.(this.db);
       } catch {
@@ -394,11 +392,13 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     this.entityRegistry = new EntityRegistryStore(this.db);
     if (!this.workerMode) {
       await recoverEntityMentionProjections(this.db);
+      signal.throwIfAborted();
       const pending = this.db.prepare('SELECT doc_anchor FROM entity_mention_pending_docs').all() as {
         doc_anchor: string;
       }[];
       if (pending.length) await this.refreshEntityMentions(pending.map((row) => row.doc_anchor));
     }
+    signal.throwIfAborted();
   }
 
   async upsertEntities(entities: EntityRecord[], context: EntityMutationContext = { source: 'system' }): Promise<void> {
@@ -2618,6 +2618,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   }
 
   close(): void {
+    this.initializationController?.abort(new Error('SqliteEvidenceStore closed during initialization'));
+    this.initializationController = undefined;
     try {
       this.detachReadDiagnostics?.();
     } catch {

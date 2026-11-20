@@ -4,7 +4,7 @@ import { withoutInterpreterSource } from './native-effect-interpreter-source.mjs
 import { invocationTargetView, observedReadProgram } from './native-effect-invocation-targets.mjs';
 import { physicalWriteTarget } from './native-effect-media-classifier.mjs';
 import { classifyShellSegment } from './native-effect-shell-classifier.mjs';
-import { commandName, shellInvocation, shellWords } from './native-effect-shell-tokenizer.mjs';
+import { commandName, isFileOutputRedirection, shellInvocation, shellWords } from './native-effect-shell-tokenizer.mjs';
 import { fileProgramAnalysis } from './native-effect-write-effects.mjs';
 
 /**
@@ -72,7 +72,7 @@ function readOutputTargets(roles, command) {
   // redirecting their output never certifies the program as readonly.
   const effect = classifyShellSegment(body);
   if (!['read', 'unknown'].includes(effect)) return null;
-  const outputs = (call.redirections ?? []).filter((redirect) => /^(?:\d*|&)(?:>|>>|>\||<>)$/.test(redirect.operator));
+  const outputs = (call.redirections ?? []).filter(isFileOutputRedirection);
   if (!outputs.length) return null;
   const paths = outputs.map((redirect) => {
     if (!redirect.operand?.literal) return null;

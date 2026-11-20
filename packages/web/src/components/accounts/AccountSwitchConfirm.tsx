@@ -26,7 +26,12 @@ export function AccountSwitchConfirm({
 }) {
   const t = useShellCopy(accountsCopy);
   const language = useShellLanguage();
-  const tool = account.clientId === 'anthropic' ? 'claude' : account.agy ? 'agy' : 'codex';
+  const tool =
+    account.clientId === 'anthropic'
+      ? 'claude'
+      : account.clientId === 'google' && !account.googleCloud
+        ? 'agy'
+        : 'codex';
   const [includeOverrides, setIncludeOverrides] = useState(false);
   const [preview, setPreview] = useState<Preview>();
   const [error, setError] = useState('');

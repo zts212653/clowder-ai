@@ -85,6 +85,7 @@ import {
   MemberConfigurationConflict,
   MemberConfigurationRevisionRequired,
   memberConfigurationRevision,
+  readMemberConfigurationRevisions,
   updateMemberWithRevision,
 } from '../config/member-config-revision.js';
 import { createOwnedRuntimeCat, MemberCreateConflict, memberCreationReceipt } from '../config/member-create-receipt.js';
@@ -499,6 +500,7 @@ function resolveProjectRoot(): string {
 
 interface CatResponseMetadata {
   roster: RosterEntry | null;
+  readConfigurationRevision?: (catId: string) => string | undefined;
 }
 
 function buildCatResponseMetadataResolver(projectRoot: string) {
@@ -821,7 +823,9 @@ async function toCatResponse(
         // Only the non-secret Desktop HOME binding is needed by the member draft.
         ...(cat.env?.DSH_HOME ? { env: { DSH_HOME: cat.env.DSH_HOME } } : {}),
         agentProvider: cat.agentProvider,
-        configurationRevision: memberConfigurationRevision(projectRoot, cat.id),
+        configurationRevision: metadata.readConfigurationRevision
+          ? metadata.readConfigurationRevision(cat.id)
+          : memberConfigurationRevision(projectRoot, cat.id),
         clientId: cat.clientId,
         defaultModel: cat.defaultModel,
         isDefaultResponder: cat.id === getDefaultCatId(),
@@ -1055,13 +1059,16 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     const projectRoot = resolveProjectRoot();
     const resolveMetadata = buildCatResponseMetadataResolver(projectRoot);
     const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver();
+    const cats = Object.values(getResolvedCats(projectRoot));
+    if (cats.length === 0) return { cats: [] };
+    const readConfigurationRevision = readMemberConfigurationRevisions(projectRoot);
     return {
       cats: await Promise.all(
-        Object.values(getResolvedCats(projectRoot)).map((cat) =>
+        cats.map((cat) =>
           toCatResponse(
             cat,
             projectRoot,
-            resolveMetadata(cat.id),
+            { ...resolveMetadata(cat.id), readConfigurationRevision },
             resolveEffectiveAccountRef,
             opts.resolveContextCapacitySnapshot,
             opts.resolveCarrierCapability,

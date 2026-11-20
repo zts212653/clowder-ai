@@ -19,22 +19,25 @@ const payload = (command, tool_name = 'Bash') => ({
   tool_input: { command, cmd: command },
   tool_use_id: 'inert-code-origin',
 });
-const generatedScripts = [
+const destructiveScripts = [
   `eval "$(printf 'git reset --hard')"`,
   `bash -c "$(printf 'git reset --hard')"`,
   `sh -c "$(printf 'git reset --hard')"`,
   `bash -c "echo $(printf 'OK; git reset --hard')"`,
   `eval echo "$(printf 'OK; git reset --hard')"`,
-  'bash -c "echo $(date)"',
-  'eval "$(ssh-agent -s)"',
   `timeout 2 bash -xc "echo $(printf 'OK; git reset --hard')"`,
   `env -S "bash -c 'echo $(printf 'OK; git reset --hard')'"`,
   `pnpm exec bash -c "echo $(printf 'OK; git reset --hard')"`,
   `npm exec --call="echo $(printf 'OK; git reset --hard')"`,
   `V=$(printf 'OK; git reset --hard'); bash -c "echo $V"`,
+  `bash -c 'eval "$1"' _ "$(printf 'git reset --hard')"`,
+];
+const opaqueScripts = [
+  'bash -c "echo $(date)"',
+  'eval "$(ssh-agent -s)"',
   'bash -c "echo $SCRIPT"',
   `bash -c "echo \${SCRIPT:-fallback}"`,
-  `bash -c 'eval "$1"' _ "$(printf 'git reset --hard')"`,
+  String.raw`bash -c "echo \"$(printf 'OK; git reset --hard')\""`,
 ];
 const dataScripts = [
   `bash -c 'echo "$(date)"'`,
@@ -45,7 +48,7 @@ const dataScripts = [
 ];
 
 test('the reader records generated code operands separately from completeness', () => {
-  for (const command of generatedScripts)
+  for (const command of [...destructiveScripts, ...opaqueScripts])
     assert.ok(
       executedInvocations(command)
         .pipelines.flat()
@@ -60,8 +63,8 @@ test('the reader records generated code operands separately from completeness', 
       command,
     );
 });
-test('whole and partial generated code cannot defer to ordinary policy in shared main', () => {
-  for (const command of generatedScripts)
+test('recognised destructive actions in generated code are denied in shared main', () => {
+  for (const command of destructiveScripts)
     for (const provider of ['Bash', 'exec_command'])
       assert.equal(
         decideNativeHookPayload(payload(command, provider), { selfHost: () => ({ confidence: 'none' }) }).decision,
@@ -69,8 +72,8 @@ test('whole and partial generated code cannot defer to ordinary policy in shared
         command,
       );
 });
-test('fixed scripts receive generated data without treating it as new shell syntax', () => {
-  for (const command of dataScripts)
+test('opaque code and data arguments follow ordinary policy', () => {
+  for (const command of [...dataScripts, ...opaqueScripts])
     for (const provider of ['Bash', 'exec_command'])
       assert.equal(
         decideNativeHookPayload(payload(command, provider), { selfHost: () => ({ confidence: 'none' }) }).decision,
@@ -83,8 +86,8 @@ test('actual provider hook entries consume the same generated-code origin fact',
   t.after(() => rmSync(home, { recursive: true, force: true }));
   for (const [program, script, provider] of nativeHookPrograms())
     for (const [commands, expected] of [
-      [generatedScripts, true],
-      [dataScripts, false],
+      [destructiveScripts, true],
+      [[...dataScripts, ...opaqueScripts], false],
     ])
       for (const command of commands) {
         const actual = spawnSync(program, [script], {

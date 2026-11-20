@@ -1,9 +1,20 @@
+/** F336: the living body follows the same trusted values the panel reads (skin, behaviorEnabled). */
+function livingValues(reply) {
+  if (reply.kind === 'state') return reply;
+  if (reply.kind === 'settings' && reply.status === 'available') return reply.values;
+  return undefined;
+}
+
 /** Native policy consumes only trusted Host replies. Media preparation is a
  * separate authority; neither renderer preferences nor call state can arm it. */
-function createWindowPreferences({ motion, setBallSize }) {
+function createWindowPreferences({ motion, setBallSize, observe = () => {} }) {
   let behaviorEnabled = false;
   let epoch = 0;
   const sequences = { state: 0, settings: 0 };
+  // F336: skin and behaviorEnabled for the living body come from both groups, so a reply that began
+  // before one already observed (in either group) is never observed after it.
+  let begun = 0;
+  let observed = 0;
   let panelBlocked = false;
   let dragActive = false;
   let disabled = false;
@@ -40,7 +51,7 @@ function createWindowPreferences({ motion, setBallSize }) {
         behaviorEnabled = false;
         motion.revoke('preference_change_pending');
       }
-      const ticket = { epoch, group, sequence: ++sequences[group], mutation };
+      const ticket = { epoch, group, sequence: ++sequences[group], order: ++begun, mutation };
       if (mutation) pendingMutations.add(ticket);
       return ticket;
     },
@@ -59,6 +70,11 @@ function createWindowPreferences({ motion, setBallSize }) {
       // Geometry follows the latest trusted settings read even if showing the
       // window revoked its motion epoch while the request was in flight.
       const geometry = reply.kind === 'settings' && reply.status === 'available' && setBallSize(reply.values.ballSize);
+      const living = livingValues(reply);
+      if (living && ticket.order > observed) {
+        observed = ticket.order;
+        observe({ skin: living.skin, behaviorEnabled: living.behaviorEnabled });
+      }
       if (ticket.epoch !== epoch || suspended.size) return;
       if (reply.kind === 'state') {
         behaviorEnabled = reply.behaviorEnabled === true;

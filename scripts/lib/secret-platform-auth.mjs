@@ -1,5 +1,5 @@
 import { assertSecretFree } from './secret-payload-files.mjs';
-import { CURL_FLAGS, CURL_VALUES, sendArguments } from './secret-send-options.mjs';
+import { curlArguments } from './secret-send-options.mjs';
 
 const AUTH_HEADERS = new Set(['authorization', 'x-api-key', 'x-goog-api-key']);
 const HEADER_OPTIONS = new Set(['-H', '--header', '--proxy-header']);
@@ -58,7 +58,7 @@ function assertInlineHeaders(parsed, auth) {
 
 /** A narrowly scoped authentication exception; all other request bytes are still inspected. */
 export async function platformCurlAuthentication(args) {
-  const parsed = sendArguments(args, CURL_VALUES, CURL_FLAGS);
+  const parsed = curlArguments(args);
   const headers = parsed.filter((x) => x.kind === 'value' && (x.name === '-H' || x.name === '--header'));
   const auth = headers.filter((x) => AUTH_HEADERS.has(x.value.split(':', 1)[0].toLowerCase()));
   if (!auth.length) return { scanArgs: args, credentials: [] };
@@ -80,7 +80,7 @@ export async function platformCurlAuthentication(args) {
     /* Without the host's account owner there is no authentication exception. */
   }
   if (verdict === 'unrecognized') {
-    assertSecretFree(auth[0].value);
+    assertSecretFree(auth[0].value, '命令行鉴权参数');
     return { scanArgs: args, credentials: [] };
   }
   if (verdict !== 'allowed') throw new Error('platform_auth_destination_denied');

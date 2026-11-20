@@ -11,6 +11,7 @@ import { apiFetch } from '@/utils/api-client';
 import { BindNewSessionSection } from './BindNewSessionSection';
 import { CloudConversationLink } from './CloudConversationLink';
 import { ContextHealthBar } from './ContextHealthBar';
+import { SessionCacheStatus } from './SessionCacheStatus';
 import { BindSessionInput, SessionIdTag } from './SessionChainInputs';
 import { settingsResourceCardClass } from './SettingsResourceCard';
 import { deriveSessionColors, type SessionColors } from './session-chain-colors';
@@ -24,6 +25,7 @@ import { useSessionChainCompletionRevision } from './useSessionChainCompletionRe
 
 /** Minimal session record from API GET /api/threads/:id/sessions */
 export interface SessionSummary {
+  cacheWarmth?: import('@cat-cafe/shared').SessionCacheWarmth;
   id: string;
   cliSessionId?: string;
   catId: string;
@@ -651,6 +653,7 @@ export function SessionChainPanel({
                 )}
                 {/* Context health bar (already shows % internally, no duplicate text) */}
                 {health && <ContextHealthBar catId={session.catId} health={health} />}
+                <SessionCacheStatus warmth={session.cacheWarmth} />
                 <div className="mt-1 flex flex-wrap items-center gap-1.5">
                   {session.cliSessionId && (
                     <button

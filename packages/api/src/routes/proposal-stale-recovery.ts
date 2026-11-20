@@ -15,6 +15,7 @@ import type { FastifyReply } from 'fastify';
 import type { IProposalStore } from '../domains/cats/services/stores/ports/ProposalStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
+import { recoverApprovedTaskChild } from './proposal-approved-child.js';
 
 /**
  * Age threshold past which an `approving` claim is considered abandoned
@@ -62,7 +63,10 @@ export async function handleApproveStaleClaim(args: {
     // the pre-override path (honors the AC-Z2 projectPath audit-sync contract on the recovery
     // path). recordCreatedThread now also checkpoints approve-time overrides before this window,
     // so non-thread-truth fields such as reportingMode are already carried by `proposal`.
-    const recoveredThread = await threadStore.get(proposal.createdThreadId);
+    const recoveredThread =
+      proposal.taskStartOwnerRevision !== undefined
+        ? await recoverApprovedTaskChild(threadStore, proposal)
+        : await threadStore.get(proposal.createdThreadId);
     const recovered = await proposalStore.finalizeApproval({
       proposalId: proposal.proposalId,
       createdThreadId: proposal.createdThreadId,
@@ -125,6 +129,14 @@ export async function handleRejectStaleClaim(args: {
     // the thread's actual ownership. Other approval overrides are preserved by the
     // recordCreatedThread checkpoint when the normal approve route reached Stage 1.5.
     const recoveredThread = await threadStore.get(proposal.createdThreadId);
+    if (!recoveredThread && proposal.taskStartOwnerRevision !== undefined) {
+      reply.status(409);
+      return {
+        kind: 'cannot_reject',
+        status: 409,
+        body: { error: 'Approval already reserved its execution child; retry the original approval' },
+      };
+    }
     const recovered = await proposalStore.finalizeApproval({
       proposalId: proposal.proposalId,
       createdThreadId: proposal.createdThreadId,

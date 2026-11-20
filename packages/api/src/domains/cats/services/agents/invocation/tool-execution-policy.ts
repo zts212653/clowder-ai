@@ -88,13 +88,23 @@ export function normalizeToolExecutionPolicy(policy: ToolExecutionPolicy): ToolE
   }
   if (policy.mode === 'watcher_panel') {
     if (
+      (policy.allowedToolNames !== undefined &&
+        (!Array.isArray(policy.allowedToolNames) ||
+          policy.allowedToolNames.length > 64 ||
+          !policy.allowedToolNames.every((name) => /^cat_cafe_[a-z0-9_]+$/.test(name)))) ||
       !Array.isArray(policy.allowedCallbackRoutes) ||
       policy.allowedCallbackRoutes.length === 0 ||
       policy.allowedCallbackRoutes.length > MAX_WATCHER_PANEL_ROUTES ||
       !policy.allowedCallbackRoutes.every((route) => typeof route === 'string' && CALLBACK_ROUTE_TEMPLATE.test(route))
     )
       throw new Error('invalid watcher panel policy');
-    return { mode: 'watcher_panel', allowedCallbackRoutes: [...new Set(policy.allowedCallbackRoutes)].sort() };
+    return {
+      mode: 'watcher_panel',
+      allowedCallbackRoutes: [...new Set(policy.allowedCallbackRoutes)].sort(),
+      ...(policy.allowedToolNames === undefined
+        ? {}
+        : { allowedToolNames: [...new Set(policy.allowedToolNames)].sort() }),
+    };
   }
   if (policy.mode === 'plugin_native') {
     if (!nativeCoordinate(policy.pluginInstanceId) || !nativeCoordinate(policy.contributionId))
@@ -177,7 +187,10 @@ export function toolExecutionPolicyDenial(
   if (policy.mode === 'watcher_panel') {
     const normalized = normalizeToolExecutionPolicy(policy);
     if (normalized.mode !== 'watcher_panel') throw new Error('invalid watcher panel policy');
-    return normalized.allowedCallbackRoutes.includes(rawToolName)
+    const allowed = /^(GET|POST) /.test(rawToolName)
+      ? normalized.allowedCallbackRoutes.includes(rawToolName)
+      : (normalized.allowedToolNames ?? []).includes(normalizeToolExecutionName(rawToolName));
+    return allowed
       ? null
       : { reason: 'callback_allowlist_tool_policy', toolName: normalizeToolExecutionName(rawToolName) };
   }
@@ -211,8 +224,8 @@ export function toolExecutionPolicyDenial(
 /**
  * Project a durable invocation policy onto the exact tool names an in-process
  * carrier may advertise and execute. `undefined` means the invocation has no
- * durable policy (the family surface applies). Every current durable mode
- * denies the MCP gateway surface: read_only denies all tools, while
+ * durable policy (the family surface applies). Watcher policies carry explicit
+ * names. read_only denies all tools, while
  * callback_allowlist and plugin_native are callback-route/plugin-action
  * boundaries that an MCP tool name cannot represent, so they fail closed.
  */
@@ -224,9 +237,10 @@ export function toolExecutionPolicyAllowedToolNames(
   switch (normalized.mode) {
     case 'watcher':
       return normalized.allowedToolNames;
+    case 'watcher_panel':
+      return normalized.allowedToolNames ?? [];
     case 'read_only':
     case 'callback_allowlist':
-    case 'watcher_panel':
     case 'plugin_native':
       return [];
   }

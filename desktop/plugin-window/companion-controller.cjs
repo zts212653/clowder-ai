@@ -33,6 +33,10 @@ function createCompanionController({ request, publish, resize, stopCapture = () 
     get armed() {
       return armed && !ended;
     },
+    /** A screen is shared or a pick is pending: the page shows its stop badge (F336 living mode keeps it clickable). */
+    get screenShown() {
+      return !ended && (screen.active || Boolean(screen.selectionId));
+    },
     display(permission, mediaTypes) {
       return (
         !ended &&

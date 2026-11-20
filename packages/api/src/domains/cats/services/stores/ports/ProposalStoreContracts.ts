@@ -57,6 +57,7 @@ export interface CreateProposalInput {
    * derived by the server at creation time. Never caller-supplied.
    */
   approvedDevelopmentScope?: DevelopmentScopeV1;
+  taskStartOwnerRevision?: number;
 }
 
 export interface ClaimForApprovalInput {

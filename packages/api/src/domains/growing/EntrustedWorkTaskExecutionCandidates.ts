@@ -52,6 +52,7 @@ async function addChildCandidates(
   const sameThreadChildren = runningChildren.filter(
     (child) =>
       child.executionKind !== 'watcher' &&
+      child.executionKind !== 'cache_retention' &&
       child.threadId === lease.holderThreadId &&
       child.userId === userId &&
       child.status === 'running',

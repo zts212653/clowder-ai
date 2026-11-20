@@ -51,7 +51,7 @@ test(
       const requests = f.requests.length;
       const launches = f.state.nativeLaunchPids.length;
       const configs = new MemoryConciergeConfigStore();
-      await configs.updateWatcherConfig(source.userId, 0, { scope: 'all', memberCatId: 'codex' });
+      await configs.updateWatcherConfig(source.userId, 0, { enabled: true, scope: 'all', memberCatId: 'codex' });
       const reports = [];
       let finished = false;
       supervisor = new WatcherSupervisor({

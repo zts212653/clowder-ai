@@ -36,6 +36,7 @@ import {
   type TurnExecutionTerminalInput,
   type TurnOutputFenceVerdict,
 } from '../ports/TurnExecutionStore.js';
+import { InMemoryTurnExecutionCacheFacts } from './InMemoryTurnExecutionCacheFacts.js';
 
 function sortRecords(records: TurnExecutionRecord[]): TurnExecutionRecord[] {
   return records.sort(
@@ -44,6 +45,7 @@ function sortRecords(records: TurnExecutionRecord[]): TurnExecutionRecord[] {
 }
 
 export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
+  readonly cacheFacts = new InMemoryTurnExecutionCacheFacts((id) => this.get(id));
   settledHead(userId: string, threadId?: string): number {
     let head = 0;
     for (const record of this.records.values())
@@ -170,7 +172,7 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     )
       return false;
     record.providerStartedAt ??= at;
-    return true;
+    return this.cacheFacts.enter(record);
   }
 
   recordProviderTeardown(invocationId: string, at: number): void {
@@ -199,8 +201,9 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     if (input.providerTeardownAt !== undefined) record.providerTeardownAt = input.providerTeardownAt;
     this.responsePending.add(invocationId);
     if (
-      (input.status === 'failed' && input.terminalReason === HOST_SLEEP_TERMINAL_REASON) ||
-      input.terminalReason === RESTART_SHUTDOWN_TERMINAL_REASON
+      record.executionKind !== 'cache_retention' &&
+      ((input.status === 'failed' && input.terminalReason === HOST_SLEEP_TERMINAL_REASON) ||
+        input.terminalReason === RESTART_SHUTDOWN_TERMINAL_REASON)
     ) {
       this.owedContinuations.add(invocationId);
     }
@@ -265,6 +268,7 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
         record.threadId === query.threadId &&
         record.catId === query.catId &&
         record.executionKind !== 'watcher' &&
+        record.executionKind !== 'cache_retention' &&
         record.startedAt > query.startedAfter
       )
         return true;

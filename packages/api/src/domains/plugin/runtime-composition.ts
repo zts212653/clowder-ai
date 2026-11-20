@@ -718,6 +718,8 @@ export function createDormantPluginRuntimeComposition(
   const lifecycle = new ExternalPluginLifecycleService({
     store: inventoryStore,
     supervisor,
+    // F336: the companion's living body writes its last scene before disable or uninstall revokes it.
+    ...(desktopWindows ? { beforeStop: (id: string) => desktopWindows.flushScene(id) } : {}),
     ...(options.now === undefined ? {} : { now: options.now }),
     ...(options.onPluginStartFailure === undefined ? {} : { onStartFailure: options.onPluginStartFailure }),
   });
@@ -781,6 +783,7 @@ export function createDormantPluginRuntimeComposition(
     async shutdown(reason = 'host_shutdown') {
       lifecycle.cancelRestartRecovery();
       try {
+        await desktopWindows?.flushScene(); // F336: before stopAll fences the companion's bridge
         await supervisor.stopAll(reason);
       } finally {
         await lifecycle.drainRestartRecovery();

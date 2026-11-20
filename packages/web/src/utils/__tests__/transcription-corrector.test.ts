@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   applyTermDictionary,
   correctTranscription,
+  mergeTermEntries,
   refreshSpeechAliases,
   removeFillers,
 } from '@/utils/transcription-corrector';
@@ -63,19 +64,8 @@ describe('applyTermDictionary', () => {
     expect(applyTermDictionary('不偶猫很可爱')).toBe('布偶猫很可爱');
   });
 
-  it('corrects nickname homophones (砚砚 yàn variants)', () => {
-    expect(applyTermDictionary('艳艳帮我看')).toBe('砚砚帮我看');
-    expect(applyTermDictionary('雁雁出来')).toBe('砚砚出来');
-    expect(applyTermDictionary('燕燕 review')).toBe('砚砚 review');
-    expect(applyTermDictionary('研研在吗')).toBe('砚砚在吗');
-    expect(applyTermDictionary('岩岩')).toBe('砚砚');
-  });
-
-  it('corrects nickname homophones (宪宪 xiàn variants)', () => {
-    expect(applyTermDictionary('现现你看')).toBe('宪宪你看');
-    expect(applyTermDictionary('弦弦')).toBe('宪宪');
-    expect(applyTermDictionary('险险帮忙')).toBe('宪宪帮忙');
-    expect(applyTermDictionary('闲闲')).toBe('宪宪');
+  it('preserves literal homophones in ordinary speech', () => {
+    expect(applyTermDictionary('线线中间有空隙，我先先停一下。')).toBe('线线中间有空隙，我先先停一下。');
   });
 
   it('corrects AI model and brand names', () => {
@@ -191,6 +181,55 @@ describe('correctTranscription', () => {
     const input = '嗯让免因猫帮我 review 一下那个克劳德的 web socket 代码';
     const expected = '让缅因猫帮我 review 一下 Claude的 WebSocket 代码';
     expect(correctTranscription(input)).toBe(expected);
+  });
+
+  it.each([
+    '这个汤咸咸的，味道不错。',
+    '把盒子包得严严实实。',
+    '他险险逃过一劫，我闲闲地坐了一会儿。',
+    '我同事叫艳艳，燕燕下周也要来。',
+    '线线中间有空隙，我先先停一下。',
+    '宪宪，你看这两条线线。砚砚，帮我包严严实实。',
+  ])('preserves ordinary words and names once transcribed: %s', (input) => {
+    expect(correctTranscription(input)).toBe(input);
+    expect(correctTranscription(input, mergeTermEntries([{ from: 'git hub', to: 'GitHub' }]))).toBe(input);
+  });
+
+  it('corrects nickname homophones only in explicit spoken mentions', () => {
+    expect(correctTranscription('at 咸咸 review 和 艾特 严严 出来')).toBe('@宪宪 review 和 @砚砚 出来');
+    expect(correctTranscription('at 严严实实')).toBe('at 严严实实');
+  });
+
+  it.each([
+    ['先先', '宪宪'],
+    ['献献', '宪宪'],
+    ['嫌嫌', '宪宪'],
+    ['咸咸', '宪宪'],
+    ['现现', '宪宪'],
+    ['弦弦', '宪宪'],
+    ['险险', '宪宪'],
+    ['闲闲', '宪宪'],
+    ['严严', '砚砚'],
+    ['言言', '砚砚'],
+    ['烟烟', '砚砚'],
+    ['眼眼', '砚砚'],
+    ['艳艳', '砚砚'],
+    ['雁雁', '砚砚'],
+    ['燕燕', '砚砚'],
+    ['研研', '砚砚'],
+    ['岩岩', '砚砚'],
+  ])('recognizes the old spelling %s when used to mention %s', (spelling, nickname) => {
+    expect(correctTranscription(`艾特 ${spelling}，帮我看看`)).toBe(`@${nickname}，帮我看看`);
+  });
+
+  it('requires a registered target to repair a spoken nickname', () => {
+    refreshSpeechAliases([]);
+    expect(correctTranscription('艾特 先先，帮我看看')).toBe('艾特 先先，帮我看看');
+  });
+
+  it('keeps an exact registered alias ahead of a nickname homophone', () => {
+    refreshSpeechAliases([{ mentionPatterns: ['@宪宪', '@咸咸'] }]);
+    expect(correctTranscription('at 咸咸 出来')).toBe('@咸咸 出来');
   });
 
   it('normalizes speech-style at-mentions for cat nicknames', () => {

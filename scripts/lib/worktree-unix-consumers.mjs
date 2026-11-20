@@ -1,5 +1,12 @@
-/** Darwin Unix connection identities, scoped by a previously proven native Git PID. */
+/** Darwin Unix connection identities for worktree fsmonitor cleanup. */
 import { spawnSync } from 'node:child_process';
+import { accessSync, constants, lstatSync, realpathSync } from 'node:fs';
+import { basename, dirname, isAbsolute, resolve } from 'node:path';
+import { identity, nativeMonitor } from './worktree-fsmonitor-identity.mjs';
+
+const NETSTAT_COLUMNS =
+  'Address Type Recv-Q Send-Q Inode Conn Refs Nextref rxbytes txbytes rhiwat shiwat process:pid state options gencnt flags flags1 usecnt rtncnt fltrs Addr';
+const SO_ACCEPTCONN = 0x0002;
 
 const fail = (message) => {
   throw new Error(`fsmonitor: ${message}; preserve live/unknown IPC consumers`);
@@ -22,23 +29,31 @@ function unixConnections() {
   const lines = result.stdout.trim().split('\n');
   if (
     lines.shift() !== 'Active LOCAL (UNIX) domain sockets' ||
-    !/^Address\s+Type\s+Recv-Q\s+Send-Q\s+Inode\s+Conn\s+Refs\s+Nextref\s+rxbytes\s+txbytes\s+rhiwat\s+shiwat\s+process:pid\s/.test(
-      lines.shift() ?? '',
-    )
+    lines.shift()?.trim().replaceAll(/\s+/g, ' ') !== NETSTAT_COLUMNS
   )
     fail('Unix connection format unknown');
   const rows = new Map();
   for (const line of lines) {
-    const fields = line.trim().split(/\s+/);
-    // These first twelve columns are numeric except for the socket type. Names may contain spaces.
-    const owner = fields
-      .slice(12)
-      .join(' ')
-      .match(/^.*?:(\d+)\s+[0-9a-f]+\s+[0-9a-f]+\s/i);
-    const address = pcb(fields[0]);
-    const peer = pcb(fields[5]);
-    if (!address || address === '0' || !peer || !owner || rows.has(address)) fail('Unix connection identity unknown');
-    rows.set(address, { address, peer, pid: Number(owner[1]) });
+    // The first twelve columns have no embedded spaces. Preserve the pathname from the raw tail.
+    const fixed = line.match(/^\s*(\S+)\s+(\S+)\s+\d+\s+\d+\s+(\S+)\s+(\S+)(?:\s+\S+){6}\s+(.*)$/);
+    const owner = fixed?.[5].match(
+      /^.*?:(?<pid>\d+)\s+(?<state>[0-9a-f]+)\s+(?<options>[0-9a-f]+)\s+(?<generation>[0-9a-f]+)(?:\s+[0-9a-f]+){5}(?:\s(?<name>.+))?$/i,
+    )?.groups;
+    const address = pcb(fixed?.[1]);
+    const vnode = pcb(fixed?.[3]);
+    const peer = pcb(fixed?.[4]);
+    if (!fixed || !address || address === '0' || !vnode || !peer || !owner || rows.has(address))
+      fail('Unix connection identity unknown');
+    rows.set(address, {
+      address,
+      peer,
+      pid: Number(owner.pid),
+      type: fixed[2],
+      bound: vnode !== '0',
+      listening: (Number.parseInt(owner.options, 16) & SO_ACCEPTCONN) !== 0,
+      generation: BigInt(`0x${owner.generation}`),
+      name: owner.name,
+    });
   }
   return rows;
 }
@@ -82,5 +97,92 @@ export function requireNoUnixConsumers(pid, refs, { controlPid } = {}) {
   for (const row of connections.values()) {
     if (!target.has(row.address) && !target.has(row.peer)) continue;
     requireExclusiveEndpoint(allowed, row, connections, owners);
+  }
+}
+
+function underneath(path, dir) {
+  return path === dir || path.startsWith(`${dir}/`);
+}
+
+function darwinAddressPath(address) {
+  const systemAlias = address.match(/^\/(?:tmp|var)(?=\/)/)?.[0];
+  if (!systemAlias) return address;
+  const stat = lstatSync(systemAlias);
+  return stat.isSymbolicLink() && stat.uid === 0 ? `/private${address}` : address;
+}
+
+function renameableByOwner(parent, entry, owner) {
+  const directory = lstatSync(parent, { bigint: true });
+  if (directory.uid === owner) return true;
+  if ((directory.mode & 0o1000n) !== 0n && entry.uid !== owner) return false;
+  try {
+    accessSync(parent, constants.W_OK | constants.X_OK);
+    return true;
+  } catch (error) {
+    if (error.code === 'EACCES' || error.code === 'EPERM' || error.code === 'EROFS') return false;
+    throw error;
+  }
+}
+
+function externalPathPredatesSocket(path, socket) {
+  // Renaming an ancestor can restore the old literal address without touching
+  // the listener's inode or its immediate parent.
+  for (let dir = dirname(path); dir !== '/'; dir = dirname(dir)) {
+    const entry = lstatSync(dir, { bigint: true });
+    if (!entry.isDirectory()) return false;
+    if (entry.ctimeNs >= socket.birthtimeNs && renameableByOwner(dirname(dir), entry, socket.uid)) return false;
+  }
+  return true;
+}
+
+function confirmedForeignAddress(address, entry, scope, sameProcess) {
+  // An absolute alias of the native name can be rebound without moving its inode.
+  if (!isAbsolute(address) || basename(address).toLowerCase() === basename(scope.socket)) return false;
+  try {
+    if (resolve(address) !== address) return false;
+    const path = realpathSync.native(address);
+    // Compare the entire address, including the final component. Only the
+    // standard root-owned Darwin aliases may differ from the physical path.
+    if (path !== darwinAddressPath(address)) return false;
+    if ([address, path].some((value) => underneath(value, entry.path) || underneath(value, scope.common))) return false;
+    const file = lstatSync(path, { bigint: true });
+    // A replacement at the same name can have an earlier socket generation
+    // than the accepted FD. The current binding and movable pathname entries
+    // must also predate the target socket.
+    return (
+      file.isSocket() &&
+      identity(file) !== identity(scope.before) &&
+      file.ctimeNs < scope.before.birthtimeNs &&
+      (file.uid !== scope.before.uid || sameProcess) &&
+      externalPathPredatesSocket(path, scope.before)
+    );
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false;
+    throw error;
+  }
+}
+
+function independentListener(row, listeners, entry, scope, refs) {
+  const earlier = listeners.filter((listener) => listener.generation < row.generation);
+  if (!earlier.length) return false;
+  // A native Git daemon owns a single listener. requireIdle already excluded a daemon holding this checkout.
+  const sameProcess = earlier.some((listener) => listener.pid === row.pid);
+  if (sameProcess && nativeMonitor(row.pid, refs, scope.executable)) return true;
+  return confirmedForeignAddress(row.name, entry, scope, sameProcess);
+}
+
+/** Accepted stream endpoints retain the original bind name even after their listener closes or is renamed. */
+export function requireNoDetachedUnixConsumers(entry, scope, refs) {
+  const named = [...unixConnections().values()].filter((row) => row.type === 'stream' && row.name);
+  const listeners = new Map();
+  for (const row of named) {
+    if (!row.bound || !row.listening) continue;
+    const group = listeners.get(row.name) ?? [];
+    group.push(row);
+    listeners.set(row.name, group);
+  }
+  for (const row of named) {
+    if (!row.bound && !independentListener(row, listeners.get(row.name) ?? [], entry, scope, refs))
+      fail(`detached Unix IPC endpoint with unresolved checkout scope pid=${row.pid}`);
   }
 }

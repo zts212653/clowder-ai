@@ -1,13 +1,6 @@
-import { catRegistry, type SessionRecord, type TurnExecutionRecord } from '@cat-cafe/shared';
-import {
-  type ExecutionAccountSelection,
-  freezeExecutionAccountBinding,
-} from '../../cats/services/agents/invocation/execution-account-binding.js';
-import { freezeExecutionWorkspace } from '../../cats/services/agents/invocation/execution-workspace.js';
-import { extractUserEnvTemplates, resolveEnvMap } from '../../cats/services/agents/providers/env-map.js';
+import type { SessionRecord, TurnExecutionRecord } from '@cat-cafe/shared';
 import type { ISessionChainStore } from '../../cats/services/stores/ports/SessionChainStore.js';
 import { awaitStoreRead } from '../../cats/services/stores/ports/StoreReadOptions.js';
-import type { IThreadStore } from '../../cats/services/stores/ports/ThreadStore.js';
 import type { WatcherInvocationOwners, WatcherRunState } from './watcher-invocation-contract.js';
 import { watcherSourceExecution, watcherSourceParent } from './watcher-source-result.js';
 import { watcherToolSurface } from './watcher-surface.js';
@@ -82,41 +75,7 @@ export async function watcherInvocationAuthority(
   return { scopeEnv, configuredSurface, parentInvocationId, auth };
 }
 
-/** Account/workspace ownership is frozen by the original provider owners. */
-export async function watcherProviderLaunch(
-  threads: IThreadStore,
-  catId: SessionRecord['catId'],
-  source: TurnExecutionRecord,
-  scopeEnv: Record<string, string>,
-  signal: AbortSignal,
-  accountSelection?: ExecutionAccountSelection,
-) {
-  const workspace = await freezeExecutionWorkspace({
-    threadStore: threads,
-    threadId: source.threadId,
-    userId: source.userId,
-    provider: 'openai',
-    signal,
-  });
-  const binding = freezeExecutionAccountBinding({
-    catId: catId,
-    catConfig: catRegistry.tryGet(catId)?.config,
-    workspace,
-    ...(accountSelection ? { accountSelection } : {}),
-  });
-  const account = binding.resolvedAccount;
-  const providerEnv =
-    account?.authType === 'api_key'
-      ? resolveEnvMap(
-          'openai',
-          undefined,
-          { apiKey: account.apiKey, baseUrl: account.baseUrl, baseModel: binding.catConfig?.defaultModel },
-          extractUserEnvTemplates(account.envVars ?? {}),
-        )
-      : {};
-  const callbackEnv = { ...scopeEnv, ...providerEnv, ...(account ? { CODEX_AUTH_MODE: account.authType } : {}) };
-  return { workspace, binding, callbackEnv };
-}
+export { watcherProviderLaunch } from './watcher-provider-launch.js';
 
 /** Only the watcher role's exact session and an owner-settled ordinary source may enter this invocation. */
 export async function loadWatcherInvocationSession(

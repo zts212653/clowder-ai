@@ -54,6 +54,7 @@ const QUIET_REASON: Record<NonNullable<WatcherPanelRound['quiet']>, string> = {
   paused: '这条线程的守望暂停中，这一轮只看，递不了话，也不提议',
   label_muted: '这条线程打了免打扰标签，这一轮只看，递不了话，也不提议',
   woken_by_watcher: '刚结束的这一轮是被守望猫的话叫起来的，这一轮只看，递不了话，也不提议',
+  same_family: '干活的猫和主守望猫同家，设置选择了不看这一轮',
 };
 
 /** The instruction verbatim, then this round's facts and material. */

@@ -65,6 +65,19 @@ function finish() {
 function quit() {
   if (finish()) void appAssistClosed.finally(() => app.quit());
 }
+// F336 U2: a native quit (this app's own quit, or the last window gone after a crash) first
+// flushes the living cat's scene (ask the body ≤ 300 ms, ACK ≤ 2 s) while the API still reads
+// the pipe. When the API ended us (SIGTERM, stdin closed, stdout lost) the pipe is already gone:
+// quit at once; the window's close logs any scene that was not acknowledged.
+let flushingScene = false;
+function quitAfterSceneFlush() {
+  if (ended || flushingScene) return;
+  if (window?.sceneIdle() !== false) return quit();
+  flushingScene = true;
+  void Promise.resolve(window.flushScene('quit'))
+    .catch(() => undefined)
+    .then(quit);
+}
 function fatal() {
   if (!finish()) return;
   stdio.diagnostic('[desktop-executor] invalid_or_unavailable_window\n');
@@ -122,6 +135,9 @@ async function handle(message) {
       onFailure: (reason) => {
         if (!ended) stdio.diagnostic(`[desktop-runtime] ${reason}\n`);
       },
+      // Also after the protocol closed: an unsaved scene is never silent.
+      onSceneLog: (line) => stdio.diagnostic(`[companion-scene] ${line}\n`),
+      onBodyLog: (line) => stdio.diagnostic(`[companion-body] ${line}\n`),
       request: async (command) => {
         if (ended) return { kind: 'error', code: 'cancelled' };
         stage('bridge-requested');
@@ -146,9 +162,16 @@ async function handle(message) {
   } else {
     if (
       !window ||
-      !['poll', 'show', 'close', 'navigate', 'revoke-media', 'app-assist-policy', 'desk-changed'].includes(
-        message.method,
-      ) ||
+      ![
+        'poll',
+        'show',
+        'close',
+        'navigate',
+        'revoke-media',
+        'app-assist-policy',
+        'desk-changed',
+        'flush-scene',
+      ].includes(message.method) ||
       (!['navigate', 'app-assist-policy'].includes(message.method) && message.params !== null)
     )
       throw new Error('Protocol');
@@ -157,6 +180,9 @@ async function handle(message) {
     if (message.method === 'revoke-media') await window.revokeMedia();
     if (message.method === 'navigate') await window.navigate(message.params);
     if (message.method === 'desk-changed') desk?.changed();
+    // F336: the API stops the companion next (settings disable, uninstall, its own shutdown). The scene goes
+    // out first, while the bridge is still current: ask the body (≤ 300 ms), write, wait for the ACK (≤ 2 s).
+    if (message.method === 'flush-scene') await window.flushScene('stop');
     if (message.method === 'app-assist-policy') {
       if (
         !appAssist ||
@@ -214,8 +240,13 @@ process.stdin.on('end', quit);
 process.stdin.on('error', quit);
 process.on('SIGTERM', quit);
 app.on('before-quit', (event) => {
+  if (!ended && window?.sceneIdle() === false) {
+    event.preventDefault();
+    quitAfterSceneFlush();
+    return;
+  }
   if (!finish() || !appAssist) return;
   event.preventDefault();
   void appAssistClosed.finally(() => app.quit());
 });
-app.on('window-all-closed', quit);
+app.on('window-all-closed', quitAfterSceneFlush);

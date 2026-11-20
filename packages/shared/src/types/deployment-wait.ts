@@ -104,6 +104,7 @@ export interface DeploymentWaitStateV1 {
   readonly transportAttempt?: {
     readonly outcomeId: string;
     readonly idempotencyKey: string;
+    readonly taskHandoffRef?: string;
     readonly messageId?: string;
   };
 }

@@ -2,7 +2,7 @@ import type { TaskItem, ThreadProposal } from '@cat-cafe/shared';
 
 type Binding = Pick<ThreadProposal, 'subjectTaskId' | 'subjectTaskTitle' | 'approvedDevelopmentScope'>;
 type Lookup = { get(taskId: string): TaskItem | null | Promise<TaskItem | null> };
-type Resolution = { ok: true; binding: Binding } | { ok: false; status: 400 | 403; error: string };
+type Resolution = { ok: true; binding: Binding; task?: TaskItem } | { ok: false; status: 400 | 403; error: string };
 
 /** Re-read both explicit and inherited Task authority; an omitted field cannot erase an entrusted binding. */
 export async function resolveProposalTaskBinding(
@@ -19,6 +19,7 @@ export async function resolveProposalTaskBinding(
   const scope = task.entrustedWork?.developmentScope;
   return {
     ok: true,
+    task,
     binding: {
       subjectTaskId: task.id,
       ...(task.title ? { subjectTaskTitle: task.title } : {}),

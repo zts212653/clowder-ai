@@ -119,6 +119,12 @@ export function decideAgyNativeHookPayload(payload, options = {}) {
   const { name, args } = payload.toolCall;
   if (typeof name !== 'string' || !args || typeof args !== 'object' || Array.isArray(args))
     return deny('invalid AGY tool arguments');
+  if (options.watcherTools !== undefined) {
+    const allowed = options.watcherTools?.[args.ServerName];
+    return name === 'call_mcp_tool' && Array.isArray(allowed) && allowed.includes(args.ToolName)
+      ? { decision: 'allow' }
+      : deny('watcher invocation permits only named MCP tools');
+  }
   if (options.pluginServerName !== undefined) {
     return /^[A-Za-z0-9_.-]+$/.test(options.pluginServerName) &&
       name === 'call_mcp_tool' &&
@@ -308,6 +314,13 @@ async function main() {
         ?.slice('--approval-bridge-file='.length),
       ...(workspaceArg !== undefined ? { workspaceRoot: workspaceArg } : {}),
       readOnly: process.argv[3] === 'read-only',
+      ...(process.argv[3] === 'watcher'
+        ? {
+            watcherTools: JSON.parse(
+              extraFlags.find((arg) => arg.startsWith('--watcher-tools='))?.slice('--watcher-tools='.length) ?? 'null',
+            ),
+          }
+        : {}),
       ...(process.argv[3] === 'plugin-native' ? { pluginServerName: process.argv[6] ?? '' } : {}),
       selfHost: () => readSelfHostFacet({ ...(hostHome ? { homeDir: hostHome } : {}) }),
       onTargetDecision: (payload, verdict) =>

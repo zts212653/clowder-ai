@@ -9,10 +9,15 @@ function pauseTime(until: number) {
 export function WatcherChip({ threadId }: { threadId: string }) {
   const { state, error } = useWatcher(threadId);
   const { getCatById } = useCatData();
-  const panel = state?.config.panel?.enabled ? state.config.panel : undefined;
-  if (!state || error || !state.rolloutEnabled || !state.enabled || (!panel && !state.capability.supported))
+  const routing = state?.config?.routing;
+  const panel = !routing && state?.config?.panel?.enabled ? state.config.panel : undefined;
+  if (!state || error || !state.rolloutEnabled || !state.enabled || (!panel && !routing && !state.capability.supported))
     return null;
-  const members = panel?.members.map(({ catId }) => catId) ?? [state.config.memberCatId];
+  const members = state.reviewingCatIds?.length
+    ? [...new Set(state.reviewingCatIds)]
+    : routing
+      ? [routing.primary.catId]
+      : (panel?.members.map(({ catId }) => catId) ?? [state.config.memberCatId]);
   const names = members
     .map((catId) => {
       const cat = getCatById(catId);
@@ -27,11 +32,11 @@ export function WatcherChip({ threadId }: { threadId: string }) {
         ? '查看中'
         : '';
   return (
-    <span className="w-chip" role="status" data-testid="watcher-chip" title={panel ? names : undefined}>
+    <span className="w-chip" role="status" data-testid="watcher-chip" title={names}>
       {members.map((catId) => (
         <SuggestionAvatar key={catId} catId={catId} watcher />
       ))}
-      守望猫 · {panel ? `${members.length} 只` : state.memberName}
+      守望猫 · {members.length > 1 ? `${members.length} 只` : names}
       {suffix && (
         <span className="inline-flex items-center gap-1.5 pl-0.5 text-cafe-secondary">
           {state.reviewing && !state.pausedUntil && !state.labelMuted && (
@@ -46,7 +51,10 @@ export function WatcherChip({ threadId }: { threadId: string }) {
 export function WatcherThreadCard({ threadId }: { threadId: string }) {
   const { state, error, saving, update } = useWatcher(threadId);
   const selected =
-    state && (state.config.scope === 'all' ? state.control.enabled !== false : state.control.enabled === true);
+    state &&
+    (state.config.routing || state.config.scope === 'all'
+      ? state.control.enabled !== false
+      : state.control.enabled === true);
   return (
     <div
       className="watcher-thread-card mb-2 rounded-xl border border-cafe-subtle px-3 py-2"
@@ -65,9 +73,11 @@ export function WatcherThreadCard({ threadId }: { threadId: string }) {
         <span aria-hidden="true" className={`watcher-switch ${selected ? 'is-on' : ''}`} />
       </button>
       <a href="/settings?s=concierge#watcher" className="mt-1 block text-xs text-cafe-secondary">
-        {state?.config.panel?.enabled
+        {!state?.config?.routing && state?.config?.panel?.enabled
           ? `守望猫 · ${state.config.panel.members.length} 只`
-          : (state?.memberName ?? '加载中')}{' '}
+          : state
+            ? state.memberName || '选择主守望猫'
+            : '加载中'}{' '}
         ›
       </a>
       {state?.pausedUntil && (

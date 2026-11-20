@@ -1,148 +1,140 @@
-import { realpathSync } from 'node:fs';
+import { existsSync } from 'node:fs';
+import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ghOperation, isGhObservation } from './lib/secret-gh-options.mjs';
+import { gitInvocationArguments } from './lib/git-invocation.mjs';
+import { kernelPath, unfoldedJoin } from './lib/shell-directory.mjs';
 import { executedInvocations } from './lib/shell-invocation.mjs';
-import { leadingShellControl, nativeBuiltinContext } from './lib/shell-program-tokens.mjs';
-import { constrainedGhApiOperation, managedGhOperation } from './native-effect-github-classifier.mjs';
+import { programNamespaceStability } from './native-effect-copy-namespace.mjs';
 import { hereDocumentView } from './native-effect-heredoc.mjs';
-import { provedManagedGhInvocation } from './native-effect-program-selection.mjs';
+import { hasProgramLoader, proveProgramSelection, selectedExecutable } from './native-effect-program-selection.mjs';
 import { segmentCommandText, segmentContexts } from './native-effect-segment-locations.mjs';
-import { classifyShellSegment, splitShellExecutionSegmentsWithSeparators } from './native-effect-shell-classifier.mjs';
-import { isLocalProgramBinding } from './native-effect-shell-expansion.mjs';
-import { commandName } from './native-effect-shell-tokenizer.mjs';
+import { splitShellExecutionSegmentsWithSeparators } from './native-effect-shell-classifier.mjs';
+import { commandName, isFileOutputRedirection } from './native-effect-shell-tokenizer.mjs';
 
 export function secretShellDenial(command, cwd) {
-  // Non-shell interpreter input is source, not another shell command stream.
-  const host = hereDocumentView(command).judged;
-  const parts = splitShellExecutionSegmentsWithSeparators(host);
-  const builtinContexts = namespaceContexts(parts);
-  const contexts = segmentContexts(parts, cwd, process.env, builtinContexts);
-  for (const invocation of contextualInvocations(parts, contexts, builtinContexts)) {
-    const reason = invocationDenial(invocation);
-    if (reason) return reason;
+  const parts = splitShellExecutionSegmentsWithSeparators(hereDocumentView(command).judged);
+  // Builtin context distinguishes a lookup from execution. It does not
+  // decide whether a normal environment or pipeline may run a managed sender.
+  const builtins = programNamespaceStability(parts.map(({ text }) => ({ segment: text })));
+  const contexts = segmentContexts(parts, cwd, process.env, builtins);
+  const written = new Set();
+  for (let index = 0; index < parts.length; index++) {
+    let end = index;
+    while (['|', '|&'].includes(parts[end + 1]?.separator)) end++;
+    const pipeline = parts
+      .slice(index, end + 1)
+      .map((part, offset) =>
+        offset ? `${part.separator} ${segmentCommandText(part.text)}` : segmentCommandText(part.text),
+      )
+      .join(' ');
+    for (const { directory, bindings, parameters } of contexts[index]) {
+      const calls = executedInvocations(pipeline, {
+        cwd: directory,
+        bindings,
+        parameters,
+        builtinContext: builtins[index],
+      }).pipelines.flat();
+      recordOutputPaths(calls, written);
+      for (const call of calls) {
+        const reason = invocationDenial(call, bindings, written);
+        if (reason) return reason;
+      }
+    }
+    index = end;
   }
   return null;
 }
 
-function namespaceContexts(parts) {
-  let stable = nativeBuiltinContext(
-    !parts.some(
-      (part) =>
-        part.separator === '&' || ['for', 'while', 'until', 'function'].includes(leadingShellControl(part.text)),
-    ),
-  );
-  return parts.map((part) => {
-    const before = stable;
-    stable &&=
-      classifyShellSegment(part.text, { builtinContext: stable }) === 'read' || isLocalProgramBinding(part.text);
-    return before;
-  });
+function recordOutputPaths(calls, written) {
+  for (const call of calls)
+    for (const { operand } of (call.redirections ?? []).filter(isFileOutputRedirection)) {
+      const path = operand.literal && resolvedPath(operand.value, call.cwd);
+      if (path) written.add(path);
+    }
 }
 
-function contextualInvocations(parts, contexts, builtinContexts) {
-  return parts.flatMap((part, index) => {
-    if (['|', '|&'].includes(part.separator)) return [];
-    let end = index;
-    while (['|', '|&'].includes(parts[end + 1]?.separator)) end++;
-    // Keep producer/consumer code evidence together within each pipeline.
-    const pipeline = parts
-      .slice(index, end + 1)
-      .map((item, offset) => `${offset ? item.separator : ''} ${segmentCommandText(item.text)}`)
-      .join(' ');
-    const calls = contexts[index]
-      .flatMap(({ directory, bindings, parameters }) =>
-        executedInvocations(pipeline, {
-          cwd: directory,
-          bindings,
-          parameters,
-          builtinContext: builtinContexts[index] && index === end,
-        }).pipelines.flat(),
-      )
-      .map((call) => ({
-        ...call,
-        namespaceStable: builtinContexts[index] && index === end,
-        // A nested script owns its namespace; the outer pipeline cannot prove it.
-        programNamespaceStable: builtinContexts[index] && call.parameterScope === 0,
-      }));
-    return calls;
-  });
-}
-
-function invocationDenial(invocation) {
-  const program = commandName(invocation.program ?? invocation.name);
-  const operands = invocation.programOperands ?? invocation.operands;
-  if (
-    program === 'git' &&
-    operands.includes('push') &&
-    operands.some((arg) => arg === '--no-verify' || /core\.hooksPath/i.test(arg))
-  )
-    return 'secret_git_hook_bypass_blocked';
-  if (['gh', 'curl'].includes(program) && unguardedSender(invocation, program))
+function invocationDenial(call, bindings, written) {
+  const program = commandName(call.program ?? call.name);
+  if (program === 'git' && skipsPushHook(call, bindings)) return 'secret_git_hook_bypass_blocked';
+  if (['gh', 'curl'].includes(program) && selectsUnmanagedSender(call, program, bindings, written))
     return 'secret_send_requires_managed_command';
   return null;
 }
 
-function unguardedSender(invocation, program) {
-  if (program === 'gh' && plainGhRead(invocation)) return false;
-  if (program === 'gh') {
-    if (
-      !invocation.namespaceStable ||
-      invocation.delegated ||
-      invocation.environment?.length ||
-      invocation.wrappers?.length
-    )
-      return true;
-    // Bare gh retains the launcher-owned carrier contract, not a new program
-    // certificate. No inline environment or delegated carrier inherits it.
-    if (!(invocation.program ?? '').includes('/')) return false;
-    return !(
-      managedGhOperation(invocation.programOperands ?? invocation.operands) && provedManagedGhInvocation(invocation)
-    );
-  }
-  if (invocation.environment?.some((item) => item.startsWith('PATH='))) return true;
-  if (!(invocation.program ?? '').includes('/'))
-    return invocation.wrappers?.some(
-      (wrapper) => commandName(wrapper.program) === 'command' && wrapper.options.includes('-p'),
-    );
-  try {
-    if (
-      realpathSync(invocation.program) ===
-      realpathSync(fileURLToPath(new URL(`./guarded-bin/${program}`, import.meta.url)))
-    )
-      return false;
-  } catch {
-    // A copied wrapper can still prove its identity through the shared reader.
-  }
-  return true;
+function skipsPushHook(call, bindings) {
+  const { args, directories, configuration, coordinateKnown } = gitInvocationArguments(
+    call.programOperands ?? call.operands,
+  );
+  if (args?.[0] !== 'push') return false;
+  const separator = args.indexOf('--');
+  if (args.slice(1, separator < 0 ? undefined : separator).includes('--no-verify')) return true;
+  const hooks = configuration.findLast(({ value }) => /^core\.hookspath(?:=|$)/i.test(value));
+  if (!hooks) return false;
+  const operand = hooks.value.slice('core.hooksPath='.length);
+  const paths = hooks.fromEnv ? environmentValues(call, bindings, operand) : [operand];
+  const directory = directories.reduce(
+    (base, part) => (part && base ? kernelPath(unfoldedJoin(base, part)) : base),
+    call.cwd,
+  );
+  const root = checkoutRoot(directory);
+  if (!coordinateKnown || !call.coordinateKnown || !root || !paths?.length) return true;
+  const canonicalHook = join(root, '.githooks', 'pre-push');
+  return paths.some(
+    (path) => !path || kernelPath(unfoldedJoin(unfoldedJoin(root, path), 'pre-push')) !== canonicalHook,
+  );
 }
 
-function plainGhRead(invocation) {
-  const args = invocation.programOperands ?? invocation.operands;
-  const operation = ghOperation(args);
-  if (
-    invocation.programNamespaceStable &&
-    invocation.argvComplete &&
-    !invocation.environment?.length &&
-    !invocation.delegated &&
-    !invocation.wrappers?.length &&
-    isGhObservation(args) &&
-    (invocation.program === 'gh' || provedManagedGhInvocation(invocation))
-  )
-    return true;
-  // Bare, payload-free API observations share the launcher's existing read
-  // carrier (including readonly loops). This never certifies an explicit path.
-  if (
-    !(invocation.program ?? '').includes('/') &&
-    invocation.argvComplete &&
-    !invocation.environment?.length &&
-    !invocation.delegated &&
-    !invocation.wrappers?.length
-  ) {
-    const query = ['gh', ...args].map((word) => `'${word.replaceAll("'", "'\\''")}'`).join(' ');
-    if (constrainedGhApiOperation(query, { payloadFree: true })) return true;
+function checkoutRoot(directory) {
+  for (let current = directory && kernelPath(directory); current; current = dirname(current)) {
+    if (existsSync(join(current, '.git'))) return current;
+    if (current === dirname(current)) break;
   }
+  return null;
+}
+
+function inlineEnvironmentValue(call, name) {
+  return call.environment?.findLast((word) => word.startsWith(`${name}=`))?.slice(name.length + 1);
+}
+
+function environmentValues(call, bindings, name) {
+  const assigned = inlineEnvironmentValue(call, name);
+  if (assigned !== undefined) return [assigned];
+  return bindings.has(name) ? bindings.get(name) : [process.env[name]];
+}
+
+function resolvedPath(value, cwd) {
+  const path = isAbsolute(value) ? value : cwd && unfoldedJoin(cwd, value);
+  return path && kernelPath(path);
+}
+
+function selectsUnmanagedSender(call, program, bindings, written) {
+  const override = (name) => inlineEnvironmentValue(call, name) ?? bindings.get(name)?.at(-1);
+  if (hasProgramLoader((name) => override(name) ?? process.env[name])) return true;
+  const delegate = override('CAT_CAFE_REAL_GH_PATH');
+  if (program === 'gh' && delegate && delegate !== process.env.CAT_CAFE_REAL_GH_PATH) return true;
+  const command = call.program ?? call.name;
+  if (command.includes('/')) {
+    return !isManagedSender(resolvedPath(command, call.cwd), program, call, written);
+  }
+  const pathOverride = override('PATH');
+  const selected = pathOverride && selectedExecutable(program, pathOverride, call.cwd);
+  if (selected && !isManagedSender(selected.realpath, program, { ...call, program: selected.path }, written))
+    return true;
+  // Explicitly selecting the system path is distinct from inheriting PATH.
+  return Boolean(
+    call.wrappers?.some(
+      ({ program: wrapper, options }) => commandName(wrapper) === 'command' && options.includes('-p'),
+    ),
+  );
+}
+
+function isManagedSender(executable, program, call, written) {
+  if (!executable || written.has(executable)) return false;
+  const packaged = kernelPath(fileURLToPath(new URL(`./guarded-bin/${program}`, import.meta.url)));
+  const bin = process.env.CAT_CAFE_VERDICT_GH_GUARD_BIN;
   return (
-    ['pr', 'issue', 'run', 'repo'].includes(operation.group) &&
-    ['view', 'list', 'checks', 'status', 'diff'].includes(operation.action)
+    executable === packaged ||
+    (bin && executable === kernelPath(join(bin, program))) ||
+    (program === 'gh' && proveProgramSelection(call)?.kind === 'repository_gh_wrapper')
   );
 }

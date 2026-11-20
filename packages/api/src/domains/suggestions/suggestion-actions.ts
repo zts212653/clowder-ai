@@ -67,11 +67,19 @@ export class SuggestionActionRegistry {
     this.handlers.set(handler.kind, handler);
   }
 
+  /** Resolve old persisted keys to an existing canonical action; aliases never chain. */
+  registerAlias(alias: string, kind: string): void {
+    if (this.handlers.has(alias)) throw new Error(`Suggestion kind already registered: ${alias}`);
+    const handler = this.handlers.get(kind);
+    if (!handler || handler.kind !== kind) throw new Error(`Unknown canonical suggestion kind: ${kind}`);
+    this.handlers.set(alias, handler);
+  }
+
   get(kind: string): SuggestionActionHandler | undefined {
     return this.handlers.get(kind);
   }
 
   kinds(): string[] {
-    return [...this.handlers.keys()];
+    return [...new Set([...this.handlers.values()].map((handler) => handler.kind))];
   }
 }

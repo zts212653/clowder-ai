@@ -7,15 +7,16 @@ import { EntityConflictInvalidResolutionError, EntityConflictStaleError } from '
 import { type EntitySurfaceConflictDetails, EntitySurfaceConflictError } from './entity-registry-mutation.js';
 import type { IEmbeddingService } from './interfaces.js';
 import { MemoryProcessDiagnostics } from './memory-process-diagnostics.js';
+import { handleMemoryEmbeddingRequest } from './memory-process-embedding.js';
 import {
   type ChildMessage,
-  encodeProcessError,
   type MemoryProcessJob,
   type ParentMessage,
   type ProcessError,
   type WalCheckpointResult,
 } from './memory-process-protocol.js';
 import { MemoryReadExecution, type MemoryReadSnapshot } from './memory-read-execution.js';
+import { MESSAGE_SEARCH_ADMISSION_RESERVE_MS } from './message-search-time-budgets.js';
 import { ReadStopError } from './read-stop-diagnostics.js';
 import type { VectorRepackResult } from './repack-passage-vectors.js';
 import type { TastePullRecallRow } from './taste/taste-pull-recall-rows.js';
@@ -67,7 +68,10 @@ class MemoryProcess {
     this.pending++;
     const execution = job.kind === 'message-search' ? new MemoryReadExecution(job.kind) : undefined;
     const ownsNativeWrite =
-      job.kind === 'checkpoint' || job.kind === 'vector-repack' || job.kind === 'vector-generation-reconcile';
+      job.kind === 'schema-initialize' ||
+      job.kind === 'checkpoint' ||
+      job.kind === 'vector-repack' ||
+      job.kind === 'vector-generation-reconcile';
     return new Promise<T>((resolve, reject) => {
       const controller = new AbortController();
       let settled = false;
@@ -76,6 +80,7 @@ class MemoryProcess {
       const complete = (error?: unknown, value?: T) => {
         if (settled) return;
         settled = true;
+        execution?.settled();
         execution?.annotate(error);
         if (execution) {
           try {
@@ -90,6 +95,7 @@ class MemoryProcess {
         error === undefined ? resolve(value as T) : reject(error);
       };
       const abort = () => {
+        execution?.cancelled();
         const reason =
           options?.signal?.reason ?? new ReadStopError('deadline_exceeded', 'Memory search deadline exceeded');
         controller.abort(reason);
@@ -138,6 +144,7 @@ class MemoryProcess {
             const onMessage = (message: ChildMessage) => {
               if (ownsNativeWrite && controller.signal.aborted) return;
               if (message.type === 'message-vectors-started' && message.id === id) {
+                execution?.onMessage(message, id);
                 options?.onVectorStart?.();
                 return;
               }
@@ -148,11 +155,13 @@ class MemoryProcess {
                 return;
               }
               if (execution?.onMessage(message, id)) {
-                // Existing CJK progress/finish, plus at most one native-input start and final completion.
+                // Bounded CJK/native progress, safe scope end, result preparation and final completion.
                 if (
                   message.type === 'read-diagnostic' &&
                   message.id === id &&
                   (message.diagnostic.phase === 'cjk-read' ||
+                    message.diagnostic.phase === 'read-window-finished' ||
+                    message.diagnostic.phase === 'result-ready' ||
                     (message.diagnostic.phase === 'sql-start' && message.diagnostic.sql.native && !nativeStartObserved))
                 ) {
                   if (message.diagnostic.phase === 'sql-start') nativeStartObserved = true;
@@ -167,9 +176,7 @@ class MemoryProcess {
               if (message.type === 'started') {
                 channel('cat-cafe.memory-process').publish({ kind: job.kind, pid: message.pid, id });
               } else if (message.type === 'embedding') {
-                void this.handleEmbedding(child, message, options?.embedding, controller.signal).finally(() =>
-                  execution?.embeddingFinished(message.id),
-                );
+                void handleMemoryEmbeddingRequest(child, message, options?.embedding, controller.signal, execution);
               } else if (message.type === 'result' && message.id === id) {
                 complete(message.error ? decodeError(message.error) : undefined, message.value as T);
               }
@@ -223,48 +230,15 @@ class MemoryProcess {
     this.child = child;
     return child;
   }
-
-  private async handleEmbedding(
-    child: ChildProcess,
-    message: Extract<ChildMessage, { type: 'embedding' }>,
-    embedding?: IEmbeddingService,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    try {
-      if (!embedding) throw new Error('Embedding service unavailable');
-      const value =
-        message.method === 'embed'
-          ? await embedding.embed(message.texts ?? [], signal)
-          : await embedding[message.method](signal);
-      if (child.connected)
-        child.send(
-          {
-            type: 'embedding-result',
-            id: message.id,
-            value,
-            ready: embedding.isReady(),
-            model: embedding.getModelInfo(),
-          } satisfies ParentMessage,
-          () => {},
-        );
-    } catch (error) {
-      if (child.connected)
-        child.send(
-          {
-            type: 'embedding-result',
-            id: message.id,
-            ready: false,
-            error: encodeProcessError(error),
-          } satisfies ParentMessage,
-          () => {},
-        );
-    }
-  }
 }
 
 const reads = [new MemoryProcess(), new MemoryProcess()] as const;
 const projections = new MemoryProcess();
 const scans = new MemoryProcess();
+/** Startup shares the native writer pool; cancellation settles only after its child closes. */
+export function runMemorySchemaInitialization(dbPath: string, signal: AbortSignal): Promise<void> {
+  return projections.run<void>({ kind: 'schema-initialize', dbPath }, { signal });
+}
 export function runMemoryRead<T>(
   job: Extract<MemoryProcessJob, { kind: 'search' | 'message-search' }>,
   options?: Parameters<MemoryProcess['run']>[1],
@@ -272,7 +246,7 @@ export function runMemoryRead<T>(
   const [first, second] = reads;
   // Fewer jobs first. With equal loads, the one whose worker is already running: the other may
   // have been killed by a cancelled job, or never started, and would fork before it reads.
-  const idle =
+  const reader =
     first.load !== second.load
       ? first.load < second.load
         ? first
@@ -280,7 +254,17 @@ export function runMemoryRead<T>(
       : second.warm && !first.warm
         ? second
         : first;
-  return idle.run<T>(job, options);
+  if (reader.load > 0 && scans.load === 0 && job.kind === 'message-search' && job.options.mode !== 'semantic') {
+    // A request already within the final admission reserve cannot start optional vectors.
+    // Bound the loan by both the original request and the parent-enforced worker deadline.
+    const requestDeadline = job.options.requestDeadlineAt ?? job.options.deadlineAt ?? Infinity;
+    const workerDeadline = options?.deadlineAt ?? Infinity;
+    if (Math.max(requestDeadline, workerDeadline) <= Date.now() + MESSAGE_SEARCH_ADMISSION_RESERVE_MS) {
+      // load includes queued scans. Once one arrives, the next reader cannot get ahead of it.
+      return scans.run<T>(job, options);
+    }
+  }
+  return reader.run<T>(job, options);
 }
 export function runMemoryProjection<T>(job: Extract<MemoryProcessJob, { kind: 'project-mentions' }>): Promise<T> {
   return projections.run<T>(job);

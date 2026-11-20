@@ -31,6 +31,10 @@ function fixture(t, instance, serviceStub = false) {
   const initial = f.run(['init', ...args]);
   assert.equal(initial.status, 0, initial.stderr);
   const socket = join(f.git(['rev-parse', '--absolute-git-dir'], path), 'fsmonitor--daemon.ipc');
+  assert.doesNotMatch(f.git(['config', '--worktree', '--list'], path), /^core\.fsmonitor=/m);
+  assert.equal(existsSync(socket), false, 'initialization started a native monitor');
+  // Subsequent Alpha operations must preserve an opt-in made on the Alpha itself.
+  f.git(['config', '--worktree', 'core.fsmonitor', 'true'], path);
   return { ...f, path, args, socket, alphaBranch: `alpha/${instance}-main-sync` };
 }
 

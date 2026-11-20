@@ -4,15 +4,18 @@ import type { ActionSuccessorLease } from './action-successor-state-machine.js';
 import { matchesApprovedTaskIdentity } from './approved-development-proposal.js';
 import { approvedGenericTaskContinuation } from './approved-generic-task-proposal.js';
 import type { ApprovedTaskContinuationDiagnostic } from './approved-task-continuation-diagnostics.js';
-import { deriveApprovedTaskContract } from './approved-task-contract.js';
+import { autoStartsApprovedTask, deriveApprovedTaskContract } from './approved-task-contract.js';
 import type { ApprovedTaskImplementationHistory } from './approved-task-implementation-history.js';
 
-/** Actor coordinates come exclusively from callback authentication. */
-export interface ApprovedTaskContinuationInput {
+/** Only the approval route can submit the approval branch. Callback schemas accept neither actor. */
+export type ApprovedTaskContinuationInput = {
   proposalId: string;
   taskId: string;
   clientRequestId: string;
-  actor: { userId: string; catId: string; threadId: string };
+} & ({ actor: { userId: string; catId: string; threadId: string } } | { approvalUserId: string });
+
+export function continuationUserId(input: ApprovedTaskContinuationInput): string {
+  return 'actor' in input ? input.actor.userId : input.approvalUserId;
 }
 
 export interface ContinuationChild {
@@ -20,6 +23,8 @@ export interface ContinuationChild {
   createdBy: string;
   parentThreadId?: string;
   createdFromProposalId?: string;
+  approvedBy?: string;
+  approvedAt?: number;
   deletedAt?: number | null;
   projectPath: string;
 }
@@ -83,7 +88,7 @@ export function implementationUsedProposal(
   );
 }
 
-function isOriginalOwnerContinuation(
+function isCurrentContinuationAuthority(
   input: ApprovedTaskContinuationInput,
   proposal: ThreadProposal,
   task: TaskItem,
@@ -95,10 +100,17 @@ function isOriginalOwnerContinuation(
     task.status !== 'done' &&
     matchesApprovedTaskIdentity(proposal, task) &&
     proposal.subjectTaskTitle === task.title &&
-    input.actor.userId === task.userId &&
-    input.actor.catId === task.ownerCatId &&
-    input.actor.threadId === task.threadId &&
-    matchesContinuationChild(proposal, child)
+    continuationUserId(input) === task.userId &&
+    matchesContinuationChild(proposal, child) &&
+    ('actor' in input
+      ? input.actor.catId === task.ownerCatId && input.actor.threadId === task.threadId
+      : autoStartsApprovedTask(proposal) &&
+        proposal.sourceThreadId === task.threadId &&
+        proposal.approvedTaskContract !== undefined &&
+        proposal.publication?.state === 'anchored' &&
+        proposal.taskStartOwnerRevision === (task.ownerRevision ?? 0) &&
+        child.approvedBy === input.approvalUserId &&
+        Number.isFinite(child.approvedAt))
   );
 }
 
@@ -114,10 +126,15 @@ export function decideApprovedTaskContinuation(
     reason: Extract<ApprovedTaskContinuationResult, { outcome: 'rejected' }>['reason'],
   ): ApprovedTaskContinuationResult => ({ outcome: 'rejected', reason });
   if (!proposal || !task || !child) return reject('unavailable');
+  if (!task.ownerCatId) return reject('authority_mismatch');
   if (proposal.approvalContractInvalid) return reject('contract_invalid');
   if (proposal.approvedDevelopmentScope !== undefined || task.entrustedWork?.developmentScope !== undefined)
     return reject('scope_present');
-  if (!isOriginalOwnerContinuation(input, proposal, task, child)) return reject('authority_mismatch');
+  if (!isCurrentContinuationAuthority(input, proposal, task, child)) return reject('authority_mismatch');
+  const fromApproval = 'approvalUserId' in input;
+  if (proposal.taskStartOwnerRevision !== undefined && proposal.declaredWorkMode === 'investigation')
+    return reject('contract_invalid');
+  if (fromApproval !== autoStartsApprovedTask(proposal)) return reject('authority_mismatch');
   if (proposal.publication && !['anchored', 'legacy_unanchored'].includes(proposal.publication.state))
     return reject('contract_invalid');
   const contract = deriveApprovedTaskContract(proposal);
@@ -128,7 +145,8 @@ export function decideApprovedTaskContinuation(
   if (receipt) {
     if (receipt.clientRequestId !== input.clientRequestId || receipt.taskId !== input.taskId)
       return reject('idempotency_conflict');
-    if (!approvedGenericTaskContinuation(proposal, task)) return reject('contract_drift');
+    if (!approvedGenericTaskContinuation(proposal, { ...task, ownerRevision: task.ownerRevision ?? 0 }))
+      return reject('contract_drift');
     return { outcome: 'replayed', receipt: structuredClone(receipt) };
   }
   if (implementationUsedProposal(implementation, proposal)) return reject('already_implemented');
@@ -140,13 +158,21 @@ export function decideApprovedTaskContinuation(
       proposalId: proposal.proposalId,
       taskId: task.id,
       taskTitle: task.title,
-      ownerCatId: input.actor.catId,
+      ownerCatId: task.ownerCatId,
       ownerThreadId: task.threadId,
-      userId: input.actor.userId,
+      userId: continuationUserId(input),
       childThreadId: child.id,
       targetCatIds: [...proposal.preferredCats],
       contractDigest: contract.digest,
       approvalContractKind: proposal.approvedTaskContract ? 'frozen' : 'legacy',
+      ...(fromApproval
+        ? {
+            approval: {
+              ownerRevision: task.ownerRevision ?? 0,
+              previousHandoffMessageRef: task.lastAppliedHandoffMessageRef ?? null,
+            },
+          }
+        : {}),
       clientRequestId: input.clientRequestId,
       issuedAt: Date.now(),
     },

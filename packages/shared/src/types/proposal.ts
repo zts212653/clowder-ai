@@ -77,6 +77,8 @@ export interface ThreadProposal {
   /** A suggestion only. Membership is written exclusively by owner approval. */
   suggestedGroupId?: string;
   suggestedPinned?: boolean;
+  /** Required to reconstruct a reserved approved child after a lost creation reply. */
+  approvedChildPinned?: boolean;
   groupSuggestionReason?: 'source-thread' | 'feature-title' | 'explicit' | 'none';
   /** Owner's final approval-time choice, checkpointed for crash recovery. */
   attentionGroupId?: string | null;
@@ -132,6 +134,8 @@ export interface ThreadProposal {
    */
   approvedDevelopmentScope?: DevelopmentScopeV1;
   /** Full generic contract frozen at approval; old approvals remain unchanged. */
+  /** Owner revision captured when the current owner proposed an ordinary execution child. */
+  taskStartOwnerRevision?: number;
   approvedTaskContract?: ApprovedTaskContractV1;
   /** One permanent, owner-requested continuation of this exact approved contract. */
   taskContractContinuation?: TaskContractContinuationV1;
@@ -166,6 +170,7 @@ export interface ThreadProposal {
  * `undefined` means "keep the proposal's prefilled value".
  */
 export interface ProposalApproveOverrides {
+  approvedChildPinned?: boolean;
   attentionGroupId?: string | null;
   title?: string;
   parentThreadId?: string;

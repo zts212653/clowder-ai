@@ -13,12 +13,14 @@ export interface VoiceSettings {
   customTerms: CustomTerm[];
   customPrompt: string | null; // null = use default
   language: 'zh' | 'en' | ''; // '' = auto-detect
+  microphoneDeviceId: string | null; // null = browser default
 }
 
 const DEFAULT_SETTINGS: VoiceSettings = {
   customTerms: [],
   customPrompt: null,
   language: 'zh',
+  microphoneDeviceId: null,
 };
 
 const VALID_LANGUAGES = new Set<VoiceSettings['language']>(['zh', 'en', '']);
@@ -44,7 +46,9 @@ function normalizeSettings(parsed: unknown): VoiceSettings {
     ? (obj.language as VoiceSettings['language'])
     : 'zh';
 
-  return { customTerms, customPrompt, language };
+  const microphoneDeviceId =
+    typeof obj.microphoneDeviceId === 'string' && obj.microphoneDeviceId ? obj.microphoneDeviceId : null;
+  return { customTerms, customPrompt, language, microphoneDeviceId };
 }
 
 function loadFromStorage(): VoiceSettings {
@@ -75,6 +79,7 @@ interface VoiceSettingsState {
   updateTerm: (index: number, from: string, to: string) => void;
   setCustomPrompt: (prompt: string | null) => void;
   setLanguage: (language: VoiceSettings['language']) => void;
+  setMicrophoneDeviceId: (id: string | null) => void;
   loadSettings: () => void;
   resetAll: () => void;
 }
@@ -122,6 +127,13 @@ export const useVoiceSettingsStore = create<VoiceSettingsState>((set) => ({
   setLanguage: (language) =>
     set((state) => {
       const next = { ...state.settings, language };
+      saveToStorage(next);
+      return { settings: next };
+    }),
+
+  setMicrophoneDeviceId: (microphoneDeviceId) =>
+    set((state) => {
+      const next = { ...state.settings, microphoneDeviceId };
       saveToStorage(next);
       return { settings: next };
     }),

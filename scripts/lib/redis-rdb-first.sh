@@ -40,6 +40,9 @@ cat_cafe_redis_wait_for_ping() {
   local port="$1"
   local attempts="${2:-300}"
   local delay="${3:-0.1}"
+  local socket="${4:-}"
+  local address=(-h 127.0.0.1 -p "$port")
+  [ -z "$socket" ] || address=(-s "$socket")
   local deadline=$((SECONDS + 30))
   local response status
 
@@ -49,9 +52,9 @@ cat_cafe_redis_wait_for_ping() {
     # Keep the shell-local named ownership wrapper on every observation.
     # Redis error replies can have CLI status 0: only PONG proves readiness.
     if [ "$(type -t redis-cli)" = function ]; then
-      response="$(redis-cli -h 127.0.0.1 -p "$port" --raw ping 2>&1)" || status=$?
+      response="$(redis-cli "${address[@]}" --raw ping 2>&1)" || status=$?
     else
-      response="$(cat_cafe_redis_ping_command -h 127.0.0.1 -p "$port" --raw ping 2>&1)" || status=$?
+      response="$(cat_cafe_redis_ping_command "${address[@]}" --raw ping 2>&1)" || status=$?
     fi
     [ "$SECONDS" -lt "$deadline" ] || break
     if [ "$status" -eq 0 ] && [ "$response" = PONG ]; then
@@ -61,6 +64,11 @@ cat_cafe_redis_wait_for_ping() {
       : # A loading reply is retryable, never permission for DBSIZE or AOF.
     elif [ "$status" -ne 0 ] && [ "$response" = "Could not connect to Redis at 127.0.0.1:$port: Connection refused" ]; then
       : # The generic daemon may not have opened its listener yet.
+    elif [ "$status" -ne 0 ] && [ -n "$socket" ] && {
+      [ "$response" = "Could not connect to Redis at $socket: No such file or directory" ] ||
+      [ "$response" = "Could not connect to Redis at $socket: Connection refused" ];
+    }; then
+      : # A newly allocated Unix socket may not exist until Redis finishes binding.
     else
       echo "[redis-rdb-first] PING refused on port $port (status $status): $response" >&2
       return 1
@@ -73,7 +81,9 @@ cat_cafe_redis_wait_for_ping() {
 
 cat_cafe_redis_read_dbsize() {
   local size
-  size="$(redis-cli -h 127.0.0.1 -p "$1" --raw dbsize)" || return 1
+  local address=(-h 127.0.0.1 -p "$1")
+  [ -z "${2:-}" ] || address=(-s "$2")
+  size="$(redis-cli "${address[@]}" --raw dbsize)" || return 1
   if ! [[ "$size" =~ ^[0-9]+$ ]]; then
     echo "[redis-rdb-first] dbsize is unreadable on port $1; refusing to infer an empty database" >&2
     return 1
@@ -85,31 +95,34 @@ cat_cafe_redis_enable_aof_after_rdb_boot() {
   local port="$1"
   local dump_path="$2"
   local appendfsync="$3"
+  local socket="${4:-}"
+  local address=(-p "$port")
+  [ -z "$socket" ] || address=(-s "$socket")
 
   local dbsize dump_size
   REDIS_STARTUP_DATA_UNVERIFIED=true
-  dbsize="$(cat_cafe_redis_read_dbsize "$port")" || return 1
+  dbsize="$(cat_cafe_redis_read_dbsize "$port" "$socket")" || return 1
   dump_size="$(cat_cafe_file_size_bytes "$dump_path")"
 
   if [ "${dump_size:-0}" -ge 1024 ] && [ "${dbsize:-0}" = "0" ]; then
     echo "[redis-rdb-first] refusing to enable AOF after suspicious empty RDB load: dump=${dump_size}B dbsize=0" >&2
-    redis-cli -e -p "$port" shutdown nosave >/dev/null 2>&1 || true
+    redis-cli -e "${address[@]}" shutdown nosave >/dev/null 2>&1 || true
     return 1
   fi
 
   REDIS_STARTUP_DATA_UNVERIFIED=false
   local response
-  response="$(redis-cli -e -p "$port" config set appendfsync "$appendfsync")" || {
+  response="$(redis-cli -e "${address[@]}" config set appendfsync "$appendfsync")" || {
     echo "[redis-rdb-first] appendfsync configuration refused: $response" >&2
     return 1
   }
-  response="$(redis-cli -e -p "$port" config set appendonly yes)" || {
+  response="$(redis-cli -e "${address[@]}" config set appendonly yes)" || {
     echo "[redis-rdb-first] appendonly configuration refused: $response" >&2
     return 1
   }
   # CONFIG SET changes the enabled flag synchronously; the initial rewrite
   # may still run in the background. A failed identity/read is never a retry.
-  response="$(redis-cli -e -p "$port" --raw config get appendonly)" || return 1
+  response="$(redis-cli -e "${address[@]}" --raw config get appendonly)" || return 1
   if [ "$(printf '%s\n' "$response" | sed -n '2p')" = yes ]; then return 0; fi
 
   echo "[redis-rdb-first] appendonly did not become yes on port $port" >&2
@@ -140,6 +153,8 @@ cat_cafe_redis_start_daemon() {
   local pidfile=""
   local logfile=""
   local named_alpha_ownership=false
+  local preview_directory_check=false
+  local unixsocket=""
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -156,6 +171,8 @@ cat_cafe_redis_start_daemon() {
       --pidfile) pidfile="$2"; shift 2 ;;
       --logfile) logfile="$2"; shift 2 ;;
       --named-alpha-ownership) named_alpha_ownership=true; shift ;;
+      --preview-directory-check) preview_directory_check=true; shift ;;
+      --unixsocket) unixsocket="$2"; shift 2 ;;
       *)
         echo "[redis-rdb-first] unknown arg: $1" >&2
         return 2
@@ -169,6 +186,10 @@ cat_cafe_redis_start_daemon() {
   fi
   if [ "$named_alpha_ownership" = true ] && [ "$(type -t named_alpha_capture_redis_identity)" != function ]; then
     echo "[redis-rdb-first] named Alpha requires its fixed native ownership callback" >&2
+    return 2
+  fi
+  if [ "$preview_directory_check" = true ] && [ "$(type -t assert_preview_redis_runtime_dir)" != function ]; then
+    echo "[redis-rdb-first] preview requires its fixed directory-check callback" >&2
     return 2
   fi
 
@@ -209,6 +230,7 @@ cat_cafe_redis_start_daemon() {
   [ -n "$bind_addr" ] && args+=(--bind "$bind_addr")
   [ -n "$pidfile" ] && args+=(--pidfile "$pidfile")
   [ -n "$logfile" ] && args+=(--logfile "$logfile")
+  [ -z "$unixsocket" ] || args+=(--unixsocket "$unixsocket" --unixsocketperm 600)
 
   # A readiness refusal must never allow EXIT cleanup to save over this input.
   [ ! -f "$dump_path" ] || REDIS_STARTUP_DATA_UNVERIFIED=true
@@ -219,12 +241,17 @@ cat_cafe_redis_start_daemon() {
   if [ "$named_alpha_ownership" = true ]; then
     named_alpha_capture_redis_identity "$port" "$dir" "$pidfile" || return 1
   fi
-  if ! cat_cafe_redis_wait_for_ping "$port"; then
+  if ! cat_cafe_redis_wait_for_ping "$port" 300 0.1 "$unixsocket"; then
     REDIS_STARTUP_READINESS_FAILED=true
     return 1
   fi
+  # A newly ready listener may belong to a concurrent launcher. Verify it
+  # before RDB-first boot can issue CONFIG SET to enable AOF.
+  if [ "$preview_directory_check" = true ]; then
+    assert_preview_redis_runtime_dir "$port" "$dir" || return 1
+  fi
 
   if [ "$rdb_first" = true ]; then
-    cat_cafe_redis_enable_aof_after_rdb_boot "$port" "$dump_path" "$appendfsync" || return 1
+    cat_cafe_redis_enable_aof_after_rdb_boot "$port" "$dump_path" "$appendfsync" "$unixsocket" || return 1
   fi
 }

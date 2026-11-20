@@ -182,7 +182,7 @@ test('the carrier stays frozen across a later account switch and cannot consume 
   const { freezeExecutionAccountBinding } = await import(
     '../dist/domains/cats/services/agents/invocation/execution-account-binding.js'
   );
-  const carrier = freezeExecutionAccountBinding({
+  const carrier = await freezeExecutionAccountBinding({
     catId: 'first',
     catConfig: { ...f.configs.first, mcpSupport: false },
     workspace: { usesDefaultWorkspace: false, workingProjectRoot: f.root },

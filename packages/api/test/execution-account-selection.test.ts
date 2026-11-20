@@ -35,10 +35,10 @@ function fixture(t: TestContext) {
   return { input, cat, accounts, save, file: join(dir, 'accounts.json') };
 }
 
-test('an execution chooses an existing API account without changing the member or the next ordinary invocation', (t) => {
+test('an execution chooses an existing API account without changing the member or the next ordinary invocation', async (t) => {
   const f = fixture(t);
   const before = readFileSync(f.file, 'utf8');
-  const game = freezeExecutionAccountBinding({
+  const game = await freezeExecutionAccountBinding({
     ...f.input,
     accountSelection: { accountRef: 'paid', authType: 'api_key' },
   });
@@ -48,7 +48,7 @@ test('an execution chooses an existing API account without changing the member o
   assert.equal(game.catConfig?.defaultModel, 'gpt-6.1-sol');
   assert.equal(f.cat.accountRef, 'subscription');
   assert.equal(readFileSync(f.file, 'utf8'), before);
-  const outside = freezeExecutionAccountBinding(f.input);
+  const outside = await freezeExecutionAccountBinding(f.input);
   assert.equal(outside.executionAccount?.accountRef, 'subscription');
   assert.equal(outside.executionAccount?.authType, 'oauth');
   f.cat.defaultModel = 'later-model';
@@ -57,7 +57,7 @@ test('an execution chooses an existing API account without changing the member o
   assert.ok(!JSON.stringify(game.executionAccount).includes('fixture-key'));
 });
 
-test('member env is frozen per execution while the selected account keeps final precedence', (t) => {
+test('member env is frozen per execution while the selected account keeps final precedence', async (t) => {
   const f = fixture(t);
   const previous = process.env.ROLE_EXECUTION_ENDPOINT;
   process.env.ROLE_EXECUTION_ENDPOINT = 'before';
@@ -72,30 +72,34 @@ test('member env is frozen per execution while the selected account keeps final 
     catConfig: { ...f.cat, env: { CUSTOM_ENDPOINT: '${ROLE_EXECUTION_ENDPOINT}', ACCOUNT_ROUTE: 'member' } },
     accountSelection: { accountRef: 'paid', authType: 'api_key' as const },
   };
-  const first = freezeExecutionAccountBinding(input);
+  const first = await freezeExecutionAccountBinding(input);
   assert.equal(first.accountEnv?.CUSTOM_ENDPOINT, 'before');
   assert.equal(first.accountEnv?.ACCOUNT_ROUTE, 'account-owned');
   assert.ok(Object.isFrozen(first.accountEnv));
   process.env.ROLE_EXECUTION_ENDPOINT = 'after';
-  const next = freezeExecutionAccountBinding(input);
+  const next = await freezeExecutionAccountBinding(input);
   assert.equal(first.accountEnv?.CUSTOM_ENDPOINT, 'before');
   assert.equal(next.accountEnv?.CUSTOM_ENDPOINT, 'after');
   assert.equal(
-    freezeExecutionAccountBinding({ ...input, catConfig: { ...input.catConfig, agyProfile: { enabled: false } } })
-      .accountEnv?.CUSTOM_ENDPOINT,
+    (
+      await freezeExecutionAccountBinding({
+        ...input,
+        catConfig: { ...input.catConfig, agyProfile: { enabled: false } },
+      })
+    ).accountEnv?.CUSTOM_ENDPOINT,
     'after',
   );
-  assert.throws(
+  await assert.rejects(
     () => freezeExecutionAccountBinding({ ...input, catConfig: { ...input.catConfig, agyProfile: { enabled: true } } }),
     /isolated AGY/,
   );
   assert.equal(f.cat.accountRef, 'subscription');
 });
 
-test('remote and API-loop carriers do not pretend to apply a process environment', (t) => {
+test('remote and API-loop carriers do not pretend to apply a process environment', async (t) => {
   const f = fixture(t);
   for (const clientId of ['a2a', 'catagent'] as const) {
-    assert.throws(
+    await assert.rejects(
       () =>
         freezeExecutionAccountBinding({
           ...f.input,
@@ -112,21 +116,21 @@ test('remote and API-loop carriers do not pretend to apply a process environment
   }
 });
 
-test('an explicit choice never falls back on deletion, missing credentials, a changed auth type or a foreign provider', (t) => {
+test('an explicit choice never falls back on deletion, missing credentials, a changed auth type or a foreign provider', async (t) => {
   const f = fixture(t);
   const choose = (accountRef: string, authType: 'oauth' | 'api_key') =>
     freezeExecutionAccountBinding({ ...f.input, accountSelection: { accountRef, authType } });
-  for (const accountRef of ['', ' paid', 'absent', 'foreign']) assert.throws(() => choose(accountRef, 'oauth'));
-  assert.throws(() => choose('paid', 'oauth'), /auth/i);
-  assert.throws(() => choose('subscription', 'api_key'), /auth/i);
+  for (const accountRef of ['', ' paid', 'absent', 'foreign']) await assert.rejects(choose(accountRef, 'oauth'));
+  await assert.rejects(choose('paid', 'oauth'), /auth/i);
+  await assert.rejects(choose('subscription', 'api_key'), /auth/i);
   writeFileSync(join(f.file, '..', 'credentials.json'), '{}');
-  assert.throws(() => choose('paid', 'api_key'), /key/i);
+  await assert.rejects(choose('paid', 'api_key'), /key/i);
   assert.equal(f.cat.accountRef, 'subscription');
 });
 
-test('a previously frozen choice requires the same account revision on the next execution', (t) => {
+test('a previously frozen choice requires the same account revision on the next execution', async (t) => {
   const f = fixture(t);
-  const first = freezeExecutionAccountBinding({
+  const first = await freezeExecutionAccountBinding({
     ...f.input,
     accountSelection: { accountRef: 'paid', authType: 'api_key' },
   });
@@ -136,8 +140,11 @@ test('a previously frozen choice requires the same account revision on the next 
     authType: 'api_key' as const,
     expectedRevision: first.executionAccount.accountRevision,
   };
-  assert.equal(freezeExecutionAccountBinding({ ...f.input, accountSelection: selection }).effectiveAccountRef, 'paid');
-  assert.throws(
+  assert.equal(
+    (await freezeExecutionAccountBinding({ ...f.input, accountSelection: selection })).effectiveAccountRef,
+    'paid',
+  );
+  await assert.rejects(
     () =>
       freezeExecutionAccountBinding({
         ...f.input,
@@ -147,40 +154,40 @@ test('a previously frozen choice requires the same account revision on the next 
   );
   f.accounts.paid = { ...f.accounts.paid, clientId: 'anthropic' };
   f.save();
-  assert.throws(() => freezeExecutionAccountBinding({ ...f.input, accountSelection: selection }));
+  await assert.rejects(freezeExecutionAccountBinding({ ...f.input, accountSelection: selection }));
 });
 
-test('Kimi native source metadata tags its unchanged Host account and ordinary execution stays unchanged', (t) => {
+test('Kimi native source metadata tags its unchanged Host account and ordinary execution stays unchanged', async (t) => {
   const f = fixture(t);
   f.cat.clientId = 'kimi';
   f.cat.defaultModel = 'kimi-code/k3.1-pro';
   f.accounts.subscription.clientId = 'kimi';
   f.save();
-  const original = freezeExecutionAccountBinding(f.input);
+  const original = await freezeExecutionAccountBinding(f.input);
   assert.ok(original.resolvedAccount);
   const nativeAccount = { ...original.resolvedAccount, nativeSourceRevision: 'a'.repeat(64) };
-  const projected = freezeExecutionAccountBinding({ ...f.input, nativeAccount });
+  const projected = await freezeExecutionAccountBinding({ ...f.input, nativeAccount });
   assert.notEqual(projected.executionAccount?.accountRevision, original.executionAccount?.accountRevision);
   assert.equal(projected.executionAccount?.accountRef, original.executionAccount?.accountRef);
-  assert.deepEqual(freezeExecutionAccountBinding(f.input).executionAccount, original.executionAccount);
+  assert.deepEqual((await freezeExecutionAccountBinding(f.input)).executionAccount, original.executionAccount);
   for (const delta of [
     { id: 'foreign' },
     { authType: 'api_key' as const, apiKey: 'EXAMPLE' },
     { baseUrl: 'https://changed.example.test' },
     { nativeSourceRevision: 'invalid' },
   ]) {
-    assert.throws(
+    await assert.rejects(
       () => freezeExecutionAccountBinding({ ...f.input, nativeAccount: { ...nativeAccount, ...delta } }),
       /native account carrier mismatch/,
     );
   }
 });
 
-test('a Kimi source annotation cannot replace another builtin carrier account path', (t) => {
+test('a Kimi source annotation cannot replace another builtin carrier account path', async (t) => {
   const f = fixture(t),
-    original = freezeExecutionAccountBinding(f.input);
+    original = await freezeExecutionAccountBinding(f.input);
   assert.ok(original.resolvedAccount);
-  assert.throws(
+  await assert.rejects(
     () =>
       freezeExecutionAccountBinding({
         ...f.input,

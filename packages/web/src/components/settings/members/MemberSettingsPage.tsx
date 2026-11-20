@@ -14,6 +14,7 @@ import { useShellLanguage } from '../../shell/shell-language';
 import { settingsDetailCopy } from '../settings-detail.shell-copy';
 import { DshConnectionStatus } from './DshConnectionStatus';
 import { MemberAdditionalFields } from './MemberAdditionalFields';
+import { MemberCacheRetention } from './MemberCacheRetention';
 import { MemberChangeSummary } from './MemberChangeSummary';
 import { MemberCloudIdentity } from './MemberCloudIdentity';
 import { MemberCodexOptions } from './MemberCodexOptions';
@@ -245,6 +246,7 @@ export function MemberSettingsPage({
                   {baseline && dshMember(baseline) && (
                     <DshConnectionStatus key={baseline.configurationRevision} member={baseline} />
                   )}
+                  {baseline?.clientId === 'anthropic' && <MemberCacheRetention key={baseline.id} catId={baseline.id} />}
                 </div>
               )}
               {section === 'runtime' ? (

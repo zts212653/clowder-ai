@@ -4,12 +4,12 @@ related_features: [F064, F027, F055, F122, F168, F246, F280]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
-updated: 2026-11-17
+updated: 2026-11-19
 description: "A2A 串行协作链质量护栏：乒乓球熔断、虚空传球拦截、命令托管持球、跨线程真核验与 Task 责任交接。"
 description_source: human
 description_author: gemini-argon
 description_updated_at: 2026-11-14T14:22:00Z
-tips_exempt: "Renewed 2026-11-17: daily doc guard records PR #6765 (approved generic Task continuation across _invalidRaw recovery envelopes) and PR #6849 (approved cross-project Task child handoff authority). Task remains the responsibility source; these internal custody and continuation repairs add no end-user action or new approval step."
+tips_exempt: "Renewed 2026-11-19: daily doc guard records PR #6852 (intake clowder-ai#1895 ordinary public A2A manual Queue target selection and continuation), PR #7036 (intake clowder-ai#1832 Task resume reader three-sentence continuation guidance clarification), PR #7210 (intake clowder-ai#2013 Windows Stop/Steer handoff teardown ordering and R10 conversation-claim retry boundary), and PR #7283 (approved ordinary Task single native handoff auto-start, deployment-wait single writer, and final-report evidence preservation). Existing user-facing controls and tips are unchanged."
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F167-a2a-chain-quality.md"
@@ -1031,3 +1031,7 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | operator 2026-06-29 | 结构化事件已唤醒/满足等待后，旧 hold timer 仍过期唤醒；前端仍显示定时任务/可取消 | AC-Q1~Q7 | ✅ Phase Q PR #2690 + AC-Q7 follow-up PR #2696 merged |
 | codex-sol 2026-07-10 | grounding sample test 硬编码日期过 8 天 rolling window 导致静默失败 | Phase O test hygiene | ✅ hotfix PR #2849 (`94e1ead0d`) |
 | 2026-09-01 | **Terminal reason mismatch fix（PR #4193）** — cloud review P1 #2 from PR #4187: `ExternalReviewRecoveryService` only checked community projection terminal reason, missed bootstrap path `'bootstrap observation reports a terminal PR'`. Fix: explicit `TERMINAL_PR_REASONS` enumeration. codex-sol local review, 0 P1/P2. |
+| 2026-11-09 | **普通公开 A2A 消息手动队列目标选择与续办回流（PR [#6852](https://github.com/zts212653/clowder-ai/pull/6852)，merge `1d0f44b297`，回流 [clowder-ai#1895](https://github.com/zts212653/clowder-ai/pull/1895) `694e7cc63b`）** — 修复既有 Queue 控制在目标选择或继续前拒绝普通公开 A2A 消息的问题（`InvocationQueue.ts`、`routes/queue.ts`），不重建缺失 A2A 源行，保持载体、owner、身份与非抢占投递规则（API/Queue 170 项与独立 Redis 回归通过） | — | ✅ PR #6852 |
+| 2026-11-13 | **Task 续接读取器指引澄清回流（PR [#7036](https://github.com/zts212653/clowder-ai/pull/7036)，merge `0f25f5e756`，回流 [clowder-ai#1832](https://github.com/zts212653/clowder-ai/pull/1832) `6c0b617c56`）** — 在 `callback-tools.ts` 与 `mcp-surface-baseline.json` 保留经审查的三句续接指引（对未决工作或权限先澄清、已获授权工作直接推进），并重新生成家内摘要且不引入公开专属状态 | — | ✅ PR #7036 |
+| 2026-11-17 | **Windows Stop/Steer 停机交接与会话认领重试边界回流（PR [#7210](https://github.com/zts212653/clowder-ai/pull/7210)，merge `134762e8c0`，回流 [clowder-ai#2013](https://github.com/zts212653/clowder-ai/pull/2013) `16ea58ecc5`）** — 防止 Windows Stop/Steer 在旧 Queue producer 停机完成前提前释放并过早启动替换任务（`QueueProcessor.ts`、`WindowsJobStopRecovery.ts`、`invoke-single-cat.ts`、`routes/queue.ts`）：同一持久化输入等待确切前序 producer 结束后仅启动一次，仅释放已证过期的 Windows owner 凭据，已流式输出的终态错误不再二次广播，并为恢复期间会话源/目标读取与原子认领失败保留单条目退避重试（最终整合 106/106 零跳过通过） | — | ✅ PR #7210 |
+| 2026-11-19 | **已批普通 Task 单次原生交接自动启动与终态证据保留（PR [#7283](https://github.com/zts212653/clowder-ai/pull/7283)，merge `9b8a20f7ea`）** — 首条获批普通 Task 消息在 provider 启动前携带当前 Task 权限（`OrdinaryTaskHandoffAuthority.ts`、`OrdinaryTaskHandoffService.ts`、`ordinary-task-deployment-wait.ts`、`callback-ordinary-task-result.ts`），跨部署等待保持单一 writer，并在持久化终态报告投递或重试时保留已保存的结果附件与富块 | — | ✅ PR #7283 |

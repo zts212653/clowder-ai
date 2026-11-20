@@ -14,22 +14,50 @@ vi.mock('@/utils/transcription-corrector', () => ({
   mergeTermEntries: () => [],
 }));
 
+let microphoneDeviceId: string | null = null;
 vi.mock('@/stores/voiceSettingsStore', () => ({
   useVoiceSettingsStore: (selector: (s: unknown) => unknown) =>
     selector({
-      settings: { customTerms: [], customPrompt: null, language: 'zh' },
+      settings: { customTerms: [], customPrompt: null, language: 'zh', microphoneDeviceId },
     }),
 }));
 
 /* ── Mock infrastructure ── */
 
 function createMockTrack() {
-  return { stop: vi.fn(), kind: 'audio' as const };
+  return { stop: vi.fn(), kind: 'audio' as const, label: 'BlackHole 2ch', readyState: 'live' };
 }
 
 function createMockStream() {
   const track = createMockTrack();
-  return { getTracks: () => [track], _track: track };
+  return { getTracks: () => [track], getAudioTracks: () => [track], _track: track };
+}
+
+function mockInputLevel(amplitude: () => number, audioTime = () => performance.now() / 1000) {
+  const close = vi.fn(async () => {});
+  vi.stubGlobal(
+    'AudioContext',
+    class {
+      state = 'running';
+      sampleRate = 48000;
+      get currentTime() {
+        return audioTime();
+      }
+      createMediaStreamSource() {
+        return { connect: vi.fn(), disconnect: vi.fn() };
+      }
+      createAnalyser() {
+        return {
+          fftSize: 2048,
+          getFloatTimeDomainData: (samples: Float32Array) => samples.fill(amplitude()),
+          disconnect: vi.fn(),
+        };
+      }
+      resume = vi.fn(async () => {});
+      close = close;
+    },
+  );
+  return close;
 }
 
 type Listener = (...args: unknown[]) => void;
@@ -89,6 +117,7 @@ const mockApiFetch = vi.mocked(apiFetch);
 
 beforeEach(() => {
   vi.useFakeTimers();
+  microphoneDeviceId = null;
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -125,6 +154,7 @@ afterEach(() => {
   document.body.removeChild(container);
   captured = null;
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -189,6 +219,89 @@ describe('useVoiceInput', () => {
     });
     expect(hook().state).toBe('idle');
     expect(hook().error).toBe('Permission denied');
+  });
+
+  it('requests the saved input exactly and reports when the browser cannot open it', async () => {
+    microphoneDeviceId = 'unplugged-device';
+    act(() => root.render(React.createElement(HookHost)));
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValue(new DOMException('disconnected', 'NotFoundError'));
+    await act(async () => hook().startRecording());
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledExactlyOnceWith({
+      audio: { deviceId: { exact: 'unplugged-device' } },
+    });
+    expect(hook().microphoneIssue).toEqual({ kind: 'device-unavailable' });
+  });
+
+  it('reports near-zero input with the capture track name and keeps it off ASR', async () => {
+    const close = mockInputLevel(() => 0.00001);
+    mockFetchOk('');
+    await act(async () => hook().startRecording());
+    await act(async () => vi.advanceTimersByTimeAsync(4200));
+    await act(async () => hook().stopRecording());
+    expect(hook().microphoneIssue).toEqual({ kind: 'no-signal', deviceLabel: 'BlackHole 2ch' });
+    expect(hook().state).toBe('idle');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mockStream._track.stop).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it('retires the last recording’s microphone warning when another input is selected', async () => {
+    mockInputLevel(() => 0);
+    await act(async () => hook().startRecording());
+    await act(async () => vi.advanceTimersByTimeAsync(1800));
+    await act(async () => hook().stopRecording());
+    expect(hook().microphoneIssue?.kind).toBe('no-signal');
+    microphoneDeviceId = 'built-in-device';
+    act(() => root.render(React.createElement(HookHost)));
+    expect(hook().microphoneIssue).toBeNull();
+  });
+
+  it('sends the final recording when speech starts after a long silent prefix', async () => {
+    let amplitude = 0;
+    mockInputLevel(() => amplitude);
+    mockFetchOk('宪宪，帮我看看 TypeScript API');
+    await act(async () => hook().startRecording());
+    await act(async () => vi.advanceTimersByTimeAsync(3200));
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    amplitude = 0.004;
+    await act(async () => vi.advanceTimersByTimeAsync(350));
+    await act(async () => hook().stopRecording());
+    expect(hook().microphoneIssue).toBeNull();
+    expect(hook().transcript).toContain('TypeScript API');
+  });
+
+  it('preserves ASR when the browser cannot confirm the level', async () => {
+    mockStream._track.label = '';
+    mockFetchOk('');
+    await act(async () => hook().startRecording());
+    await act(async () => vi.advanceTimersByTimeAsync(1600));
+    await act(async () => hook().stopRecording());
+    expect(globalThis.fetch).toHaveBeenCalled();
+    expect(hook().microphoneIssue).toEqual({ kind: 'no-transcript', deviceLabel: null });
+  });
+
+  it('preserves the captured audio when the meter clock misses part of the recording', async () => {
+    mockInputLevel(
+      () => 0,
+      () => Math.max(0, performance.now() - 500) / 1000,
+    );
+    mockFetchOk('宪宪');
+    await act(async () => hook().startRecording());
+    await act(async () => vi.advanceTimersByTimeAsync(2200));
+    await act(async () => hook().stopRecording());
+    expect(hook().microphoneIssue).toBeNull();
+    expect(hook().transcript).toContain('宪宪');
+  });
+
+  it('releases the meter and stream if recording cannot start after attaching the meter', async () => {
+    const close = mockInputLevel(() => 0);
+    vi.spyOn(MockMediaRecorder.prototype, 'start').mockImplementationOnce(() => {
+      throw new Error('Recording could not start');
+    });
+    await act(async () => hook().startRecording());
+    expect(mockStream._track.stop).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+    expect(hook().error).toBe('Recording could not start');
   });
 
   it('cleans up stream on MediaRecorder constructor failure', async () => {
@@ -508,45 +621,54 @@ describe('useVoiceInput', () => {
     expect(hook().partialTranscript).toBe('');
   });
 
-  it('slow streaming response does not overwrite newer partialTranscript', async () => {
-    // Simulate: request 1 (slow, 200ms) returns "older", request 2 (fast, 50ms) returns "newer"
-    // Without sequence protection, "older" overwrites "newer" → bug
-    let resolveOlder!: (v: { ok: boolean; json: () => Promise<{ text: string }> }) => void;
-    const olderPromise = new Promise<{ ok: boolean; json: () => Promise<{ text: string }> }>((r) => {
-      resolveOlder = r;
+  it('allows one client preview in flight and submits the final after aborting it', async () => {
+    let resolvePreview!: (v: { ok: boolean; json: () => Promise<{ text: string }> }) => void;
+    const preview = new Promise<{ ok: boolean; json: () => Promise<{ text: string }> }>((resolve) => {
+      resolvePreview = resolve;
     });
-
-    (globalThis.fetch as ReturnType<typeof vi.fn>)
-      .mockReturnValueOnce(olderPromise) // 1st: slow
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ text: 'newer' }) }) // 2nd: fast
-      .mockResolvedValue({ ok: true, json: () => Promise.resolve({ text: 'final' }) }); // final
-
-    const now = Date.now();
-    vi.setSystemTime(now);
+    const fetchMock = vi.mocked(fetch);
+    mockFetchOk('final');
+    fetchMock.mockReturnValueOnce(preview as Promise<Response>);
 
     await act(async () => {
       await hook().startRecording();
+      await vi.advanceTimersByTimeAsync(9500);
     });
 
-    // Trigger 1st streaming interval (t=3000) — request starts, doesn't resolve yet
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const previewSignal = fetchMock.mock.calls[0][1]?.signal;
+    expect(previewSignal?.aborted).toBe(false);
+
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(3100);
+      hook().stopRecording();
     });
 
-    // Trigger 2nd streaming interval (t=6000) — resolves fast with "newer"
+    expect(previewSignal?.aborted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(3); // preview, full recording, post-processing
+    expect(hook().transcript).toBe('[corrected] final');
+
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(3100);
+      resolvePreview({ ok: true, json: () => Promise.resolve({ text: 'stale preview' }) });
     });
 
-    expect(hook().partialTranscript).toBe('[corrected] newer');
+    expect(hook().partialTranscript).toBe('');
+    expect(hook().transcript).toBe('[corrected] final');
+  });
 
-    // Now resolve the slow 1st request with "older" — must NOT overwrite "newer"
+  it('does not submit a preview if recording stops while waiting for dataavailable', async () => {
+    mockFetchOk('final');
+
     await act(async () => {
-      resolveOlder({ ok: true, json: () => Promise.resolve({ text: 'older' }) });
-      await Promise.resolve();
-      await Promise.resolve();
+      await hook().startRecording();
+      await vi.advanceTimersByTimeAsync(3000);
+      hook().stopRecording();
+      await vi.advanceTimersByTimeAsync(50);
     });
 
-    expect(hook().partialTranscript).toBe('[corrected] newer');
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toEqual([
+      'http://127.0.0.1:9876/v1/audio/transcriptions',
+      'http://127.0.0.1:9878/v1/text/refine',
+    ]);
+    expect(hook().transcript).toBe('[corrected] final');
   });
 });

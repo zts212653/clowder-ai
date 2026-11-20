@@ -7,10 +7,26 @@ import type {
   ThreadUnreadProjectionCursor,
 } from '../ports/MessageStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
-import { isDurableOwnerReadEvidence, isSystemUserMessage, passesManagedHoldViewerBoundary } from '../visibility.js';
+import {
+  isDurableOwnerReadEvidence,
+  isManagedHoldConnectorMessage,
+  isSystemUserMessage,
+  passesManagedHoldViewerBoundary,
+} from '../visibility.js';
 import { safeParseConnectorSource, safeParseExtra, safeParseMessageFrom } from './redis-message-parsers.js';
 
 type PipelineResults = Array<[Error | null, unknown]> | null;
+
+function passesUnreadViewerBoundary(
+  message: Parameters<typeof passesManagedHoldViewerBoundary>[0],
+  userId: string,
+  rawExtra: string | null | undefined,
+): boolean {
+  // Only managed hold messages use extra to decide visibility. Keep the same
+  // Redis row for that check without hydrating rich metadata on ordinary rows.
+  if (!isManagedHoldConnectorMessage(message)) return true;
+  return passesManagedHoldViewerBoundary({ ...message, extra: safeParseExtra(rawExtra ?? undefined) }, userId);
+}
 
 function readPipelineValue<T>(results: PipelineResults, index: number, label: string): T {
   if (!results) throw new Error(`${label} pipeline returned no results`);
@@ -40,14 +56,13 @@ function resolveViewerBoundProjectionCursor(
     from: safeParseMessageFrom(fromRaw),
     threadId: threadId ?? '',
     source: safeParseConnectorSource(source ?? undefined),
-    extra: safeParseExtra(extra ?? undefined),
     ...(deliveryStatus ? { deliveryStatus } : {}),
     ...(origin ? { origin } : {}),
   } as StoredMessage;
   const eligible =
     message.threadId === cursor.threadId &&
     isDurableOwnerReadEvidence(message) &&
-    passesManagedHoldViewerBoundary(message, userId);
+    passesUnreadViewerBoundary(message, userId, extra);
   return eligible ? cursor : { threadId: cursor.threadId, afterId: cursor.fallbackAfterId };
 }
 
@@ -237,9 +252,8 @@ function isProjectedUnread(fields: Array<string | null>, userId: string): { unre
     from,
     threadId: threadId ?? '',
     source: safeParseConnectorSource(source ?? undefined),
-    extra: safeParseExtra(extra ?? undefined),
   };
-  if (!passesManagedHoldViewerBoundary(managedHoldMessage, userId)) {
+  if (!passesUnreadViewerBoundary(managedHoldMessage, userId, extra)) {
     return { unread: false, mentioned: false };
   }
   const visibleToUser = messageUserId === userId || isSystemUserMessage({ userId: messageUserId ?? '', catId, from });

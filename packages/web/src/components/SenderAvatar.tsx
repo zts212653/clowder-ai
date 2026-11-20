@@ -61,6 +61,7 @@ export function SenderAvatar({
         <ConnectorIcon
           iconSpec={sender.icon}
           fallbackIcon={sender.fallbackIcon}
+          watcherRoundId={sender.watcherRoundId}
           className={fullSize ? 'w-5 h-5' : className}
         />
       )}

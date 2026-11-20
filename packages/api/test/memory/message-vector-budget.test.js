@@ -34,7 +34,7 @@ test('the vector budget starts after lexical work and returns only the new lexic
   t.mock.timers.tick(6000);
   assert.equal(vectorSignal.aborted, false, 'lexical work has no vector timer');
   start();
-  t.mock.timers.tick(1999);
+  t.mock.timers.tick(3999);
   assert.equal(vectorSignal.aborted, false);
   t.mock.timers.tick(1);
   const actual = await read;
@@ -57,7 +57,7 @@ for (const mode of ['lexical', 'semantic']) {
         assert.equal(selected, mode);
         assert.equal(signal, original.signal);
         assert.equal(start, undefined);
-        t.mock.timers.tick(3000);
+        t.mock.timers.tick(5000);
         return value;
       },
     );
@@ -84,25 +84,28 @@ test('client cancellation and an expired overall deadline never start a lexical 
       cause === 'client' ? (error) => error === failure : { name: 'TimeoutError' },
     );
     if (cause === 'client') controller.abort(failure);
-    else t.mock.timers.tick(2000);
+    else t.mock.timers.tick(4000);
     await rejected;
     assert.equal(calls, 1);
   }
 });
 
-test('fast hybrid results clear the timer and unrelated failures are not relabelled', async (t) => {
+test('a three-second hybrid read returns its vectors, clears the timer and preserves unrelated failures', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   let signal;
   const value = result('hybrid');
   assert.equal(
-    await readWithMessageVectorBudget(options(), async (_mode, current, start) => {
+    await readWithMessageVectorBudget(options(), async (mode, current, start) => {
+      if (mode === 'lexical') return result();
       signal = current;
       start();
+      t.mock.timers.tick(3000);
+      current.throwIfAborted();
       return value;
     }),
     value,
   );
-  t.mock.timers.tick(2000);
+  t.mock.timers.tick(5000);
   assert.equal(signal.aborted, false);
   const failure = new Error('read failed before the vector deadline');
   let calls = 0;

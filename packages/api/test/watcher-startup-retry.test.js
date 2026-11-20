@@ -111,7 +111,7 @@ test('the failing invocation closes its own unbound wake and still reports the o
 test('automatic native recovery backs off, caps launches across restart, and never relaunches while disabled', async () => {
   const f = await failed({ bound: true });
   const configs = new MemoryConciergeConfigStore();
-  await configs.updateWatcherConfig('watcher-owner', 0, { scope: 'all', memberCatId: 'codex' });
+  await configs.updateWatcherConfig('watcher-owner', 0, { enabled: true, scope: 'all', memberCatId: 'codex' });
   let now = Date.now();
   f.owners.now = () => now;
   const errors = [];

@@ -1,5 +1,6 @@
 import type { SessionCacheObservation, SessionCacheWarmth, SessionRecord } from '@cat-cafe/shared';
 import type { TokenUsage } from '../../types.js';
+import { type CacheRetentionWarmProof, validRetentionProof } from './cache-retention-proof.js';
 
 const FIVE_MINUTES = 5 * 60_000;
 const ONE_HOUR = 60 * 60_000;
@@ -20,6 +21,7 @@ export function observeSessionCache(input: {
   invocationId: string;
   runtime: string;
   model: string;
+  executionBoundaryRef?: string;
   requestStartedAt: number;
   observedAt: number;
   contextTokens: number;
@@ -68,10 +70,18 @@ export function observeSessionCache(input: {
     nativeSessionId: record.cliSessionId,
     runtime: input.runtime,
     model: input.model,
+    ...(input.executionBoundaryRef ? { executionBoundaryRef: input.executionBoundaryRef } : {}),
     requestStartedAt: input.requestStartedAt,
     timeSource: 'invocation_start_lower_bound',
     observedAt: input.observedAt,
     contextTokens: input.contextTokens,
+    ...(singleRequest &&
+    usage.cacheReadTokens !== undefined &&
+    Number.isSafeInteger(usage.cacheReadTokens) &&
+    usage.cacheReadTokens >= 0 &&
+    usage.cacheReadTokens <= input.contextTokens
+      ? { cacheReadTokens: usage.cacheReadTokens }
+      : {}),
     compressionCount: record.compressionCount,
     ...(retentionMs !== undefined
       ? {
@@ -87,6 +97,7 @@ export function projectSessionCacheWarmth(
   record: SessionRecord | null,
   now: number,
   expected?: { model: string; runtime: string },
+  maintenance?: CacheRetentionWarmProof,
 ): SessionCacheWarmth {
   const observation = record?.lastUsage?.cacheObservation;
   const unknown = (reason: string): SessionCacheWarmth => ({
@@ -118,15 +129,19 @@ export function projectSessionCacheWarmth(
     !positive(observation.retentionMs)
   )
     return unknown('no_valid_retention_window');
-  const expiresAt = observation.requestStartedAt + observation.retentionMs;
-  const latestExpiresAt = observation.observedAt + observation.retentionMs;
+  const retained = validRetentionProof(record, maintenance) ? maintenance : undefined;
+  const expiresAt = retained?.expiresAt ?? observation.requestStartedAt + observation.retentionMs;
+  const latestExpiresAt = retained?.expiresAt ?? observation.observedAt + observation.retentionMs;
   // Empirical gaps prove a lower bound; passing that bound does not prove eviction.
   if (expiresAt <= now && observation.retentionSource === 'empirical_session')
     return unknown('outside_observed_window');
   const projection: SessionCacheWarmth = {
     status: expiresAt > now ? 'warm' : 'expired',
     estimated: true,
-    source: observation.retentionSource ?? 'unavailable',
+    source: retained ? 'cache_retention' : (observation.retentionSource ?? 'unavailable'),
+    ...(retained
+      ? { maintenanceInvocationId: retained.maintenanceInvocationId, retaining: retained.retaining === true }
+      : {}),
     sessionId: record.id,
     threadId: record.threadId,
     model: observation.model,

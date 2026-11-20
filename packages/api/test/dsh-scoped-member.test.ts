@@ -70,6 +70,17 @@ test('a member policy without the live Host launch cannot enter the ordinary ACP
   assert.equal(messages.at(-1)?.type, 'done');
 });
 
+test('DSH watchers have ordinary readers and never fall through to the ordinary write-capable pool', async (t) => {
+  const f = fixture(t);
+  const watcher = { mode: 'watcher_panel' as const, allowedToolNames: ['cat_cafe_read_memory'] };
+  assert.equal(f.service.supportsToolExecutionPolicy(watcher), true);
+  assert.deepEqual(f.service.watcherMemberCapability?.(), { supported: true, context: 'ordinary', readOnly: 'tools' });
+  const messages = [];
+  for await (const message of f.service.invoke('read only', { toolExecutionPolicy: watcher })) messages.push(message);
+  assert.equal(f.ordinarySpawns(), 0);
+  assert.ok(messages.some((message) => message.errorCode === 'dsh_watcher_execution_failed'));
+});
+
 test('native recognition requires the qualified installed program and unchanged explicit profile arguments', (t) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-installation-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));

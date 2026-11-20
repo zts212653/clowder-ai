@@ -5,6 +5,7 @@ import {
 } from '../../../cats/services/agents/invocation/InvocationQueue.js';
 import type { OwnerAuthProvenance } from '../../../cats/services/agents/invocation/owner-auth-provenance.js';
 import type { IMessageStore, StoredMessage } from '../../../cats/services/stores/ports/MessageStore.js';
+import type { WatcherOutputFence } from '../watcher-output-fence.js';
 
 export const WATCHER_PANEL_SERVICE = 'watcher-panel';
 export const WATCHER_PANEL_SPEAKER = '守望猫';
@@ -40,6 +41,7 @@ export async function deliverWatcherPanelRound(
   },
   round: WatcherPanelRound,
   ownerAuthProvenance: OwnerAuthProvenance,
+  fence?: WatcherOutputFence,
 ): Promise<NonNullable<WatcherPanelRound['delivery']>> {
   const content = watcherPanelDeliveryContent(round);
   if (!content) return { skipped: 'nobody_spoke' };
@@ -55,6 +57,7 @@ export async function deliverWatcherPanelRound(
       mentions: [createCatId(round.workerCatId)],
       timestamp: Date.now(),
       idempotencyKey: key,
+      ...(fence ? { watcherOutputFence: fence } : {}),
       source: {
         connector: WATCHER_PANEL_SERVICE,
         label: WATCHER_PANEL_SPEAKER,

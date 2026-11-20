@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import * as sqliteVec from 'sqlite-vec';
 import { PassageVectorStore, passageVectorKey } from '../../dist/domains/memory/PassageVectorStore.js';
 import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceStore.js';
@@ -31,6 +32,7 @@ async function fixture(t, embed) {
   ensureVectorTable(db, 4);
   ensurePassageVectorTable(db, 4);
   const vectors = new PassageVectorStore(db, 4);
+  const messages = new Map();
   const insert = db.prepare('INSERT INTO evidence_passages(doc_anchor,passage_id,content,created_at) VALUES (?,?,?,?)');
   for (const [id, thread, body, date, vector] of [
     ['semantic', 'visible', '新伙伴的称呼在这里敲定。', '2026-01-01', [1, 0, 0, 0]],
@@ -46,6 +48,7 @@ async function fixture(t, embed) {
   ]) {
     insert.run(`thread-${thread}`, `msg-${id}`, body, date);
     vectors.upsert(passageVectorKey(`thread-${thread}`, `msg-${id}`), new Float32Array(vector));
+    messages.set(id, { id, threadId: thread, userId: 'owner', content: body, timestamp: Date.parse(date) });
   }
   new VectorStore(db, 4).initMeta({ modelId: 'queue-ipc', modelRev: '1', dim: 4 });
   let calls = 0;
@@ -65,7 +68,7 @@ async function fixture(t, embed) {
       },
     },
   });
-  return { store, calls: () => calls };
+  return { store, calls: () => calls, messages };
 }
 
 test('real message worker carries the queue selector, filters and RRF order for both display sorts', async (t) => {
@@ -150,6 +153,112 @@ test(
     }
   },
 );
+
+test(
+  'a later hybrid query can still use vectors when both read workers use their full budget',
+  { timeout: 20_000 },
+  async (t) => {
+    const occupied = Promise.withResolvers();
+    const stalled = Promise.withResolvers();
+    let encodes = 0;
+    let interruptedReads = 0;
+    const f = await fixture(t, (texts) => {
+      encodes++;
+      if (encodes === 2) occupied.resolve();
+      if (encodes <= 2) return stalled.promise;
+      assert.ok(interruptedReads > 0, 'a busy reader was released before the next query encoded');
+      return texts.map(() => new Float32Array([1, 0, 0, 0]));
+    });
+    const read = (deadlineAt, onReadSnapshot) =>
+      f.store.searchMessagePassages('Cedar 取名', {
+        visibleThreadIds: ['visible'],
+        mode: 'hybrid',
+        sort: 'relevance',
+        candidateOrder: 'relevance',
+        deadlineAt,
+        onReadSnapshot,
+      });
+    const firstDeadline = Date.now() + 15_000;
+    const onFirstRead = (snapshot) => {
+      if (snapshot.outcome === 'rejected') interruptedReads++;
+    };
+    const firstTwo = Promise.all([read(firstDeadline, onFirstRead), read(firstDeadline, onFirstRead)]);
+    try {
+      // A branch that skips vectors must fail this fixture without waiting for a missing encoder call.
+      await Promise.race([
+        occupied.promise,
+        firstTwo.then(() => {
+          throw new Error('both workers must enter their vector reads');
+        }),
+      ]);
+      const deadline = Date.now() + 15_000;
+      const third = await read(deadline);
+      assert.ok(Date.now() < deadline);
+      assert.equal(third.meta.effectiveMode, 'hybrid');
+      assert.ok(third.passages.some((p) => p.match === 'semantic' || p.match === 'hybrid'));
+      for (const result of await firstTwo) assert.equal(result.meta.degradeReason, 'passage_vector_budget_exhausted');
+    } finally {
+      stalled.resolve([new Float32Array([1, 0, 0, 0])]);
+      await firstTwo;
+    }
+  },
+);
+
+test('1.5s work preparation gets message sources while both foreground workers are waiting for vectors', async (t) => {
+  const { OwnerPreparationSources } = await import(
+    '../../dist/domains/memory/cue/preparation/OwnerPreparationSources.js'
+  );
+  const { MessageSearchService } = await import('../../dist/domains/memory/MessageSearchService.js');
+  const { preparationFixture } = await import('../helpers/work-preparation-fixture.js');
+  const preparation = preparationFixture(t);
+  const occupied = Promise.withResolvers();
+  const stalled = Promise.withResolvers();
+  let encodes = 0;
+  const f = await fixture(t, () => {
+    if (++encodes === 2) occupied.resolve();
+    return stalled.promise;
+  });
+  const { threadId, userId, originTriggerMessageId: id } = preparation.auth;
+  f.messages.set(id, { id, threadId, userId, content: 'work request', timestamp: 1 });
+  const threads = new Map([threadId, 'visible'].map((id) => [id, { id, createdBy: userId, title: id }]));
+  const messages = new MessageSearchService({
+    threadStore: { get: (id) => threads.get(id), list: () => [...threads.values()] },
+    messageStore: { getById: (id) => f.messages.get(id) },
+    evidenceStore: f.store,
+  });
+  const owners = new OwnerPreparationSources({ messages, taste: { resolveExplicit: async () => null } });
+  preparation.deps.sources.create = (input) => owners.create(input);
+  let released = false;
+  const busy = () =>
+    f.store.searchMessagePassages('Cedar 取名', {
+      visibleThreadIds: ['visible'],
+      mode: 'hybrid',
+      candidateOrder: 'relevance',
+      deadlineAt: Date.now() + 15_000,
+      onReadSnapshot: (snapshot) => {
+        if (snapshot.outcome !== 'pending') released = true;
+      },
+    });
+  const background = Promise.all([busy(), busy()]);
+  try {
+    await Promise.race([occupied.promise, background.then(() => assert.fail('both workers must enter encoding'))]);
+    await delay(2250);
+    const result = await preparation.service.prepare({
+      auth: preparation.auth,
+      activity: 'html',
+      query: 'Cedar 取名',
+      receivedAt: Date.now(),
+      signal: new AbortController().signal,
+    });
+    assert.equal(result.status, 'ok');
+    assert.equal(result.pointers.length, 2);
+    assert.equal(released, false, 'preparation returned its sources while both foreground reads were still occupied');
+    assert.equal(encodes, 2, 'the short request kept its original vector admission decision');
+  } finally {
+    stalled.resolve([new Float32Array([1, 0, 0, 0])]);
+    await background;
+  }
+});
 
 test('queue selector preserves pre-worker cancellation and the original absolute deadline', async (t) => {
   const f = await fixture(t);

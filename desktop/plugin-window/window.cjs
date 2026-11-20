@@ -1,15 +1,20 @@
-const { randomUUID } = require('node:crypto');
 const { resolve } = require('node:path');
 const { createCompanionController } = require('./companion-controller.cjs');
 const { createVoiceHost } = require('./voice-host.cjs');
 const { createPetWindow } = require('./pet-window.cjs');
 const { createWindowMotion } = require('./window-motion.cjs');
-const { inspectF221 } = require('./f221-inspection.cjs');
 const { createMediaRevocation } = require('./media-revocation.cjs');
 const { createWindowPreferences } = require('./window-preferences.cjs');
-const { createCompanionDisable } = require('./companion-disable.cjs');
+const { createCompanionGroup } = require('./companion-group.cjs');
+const { createSurfacePartition, admitSurfaceMedia } = require('./surface-partition.cjs');
+const { watchPanelVisibility } = require('./panel-visibility.cjs');
+const { createPanelRoute } = require('./panel-route.cjs');
+const { openBodyWindow } = require('./body-window.cjs');
+const { createSceneWriter } = require('./scene-writer.cjs');
+const { createLivingMode } = require('./living-mode.cjs');
+const { createPendingBadge } = require('./pending-badge.cjs');
 
-const { validateLaunch, toPublishedWindowReply } = require('./window-launch.cjs');
+const { validateLaunch, toPublishedWindowReply, conversationTarget } = require('./window-launch.cjs');
 const { companionContractHas } = require('./companion-contracts.cjs');
 
 /** Host-owned window implementation. A package supplies HTML, never main/preload code.
@@ -17,17 +22,21 @@ const { companionContractHas } = require('./companion-contracts.cjs');
  * One package body per executor process: main.cjs rejects a second open, and the
  * runtime owns one active desktop lease. IPC channel names are process-scoped;
  * the separate hidden Host voice document is not another package body.
+ * F336: the living-cat body window is not a second open either; it joins this
+ * surface's window group (companion-group.cjs) under the same Host controller.
  */
 async function createManagedWindow(
   electron,
   input,
   options = { request: async () => ({ kind: 'error', code: 'unavailable' }), validate: () => false },
 ) {
-  const { url, presentation, publicCompanionV2, companionContract } = validateLaunch(input);
+  const { url, presentation, publicCompanionV2, companionContract, bodyUrl } = validateLaunch(input);
   const { app, BrowserWindow, session, screen, ipcMain, powerMonitor, systemPreferences, shell, dialog } = electron;
   const appAssist = companionContractHas(companionContract, 'appAssist') ? options.appAssist : undefined;
   // F335 交付三：present only when the Host admitted a desk-capable archive and the API granted it.
   const desk = companionContractHas(companionContract, 'desk') ? options.desk : undefined;
+  // F336 Phase C: the transparent, unfocusable living body window (tests may inject a fake).
+  const createBodyWindow = options.createBodyWindow ?? ((body) => openBodyWindow(electron, body));
   const runAppAssist = (method) => {
     if (!appAssist) return Promise.resolve();
     try {
@@ -47,27 +56,7 @@ async function createManagedWindow(
   } catch {
     // A missing or incompatible public contract never advertises native media.
   }
-  const partition = session.fromPartition(`companion-${randomUUID()}`, { cache: false });
-  const surfaceOrigin = new URL(url).origin;
-  // This ephemeral partition is only a snapshot renderer. Signalling stays on
-  // private IPC; ordinary requests must never reach another Host or the Internet.
-  partition.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
-    let allowed = false;
-    try {
-      const target = new URL(details.url);
-      allowed =
-        ((target.protocol === 'http:' && target.origin === surfaceOrigin && !target.username && !target.password) ||
-          (target.protocol === 'blob:' &&
-            target.origin === surfaceOrigin &&
-            ['image', 'media'].includes(details.resourceType)) ||
-          (target.protocol === 'data:' && ['image', 'font'].includes(details.resourceType))) &&
-        ['GET', 'HEAD'].includes(details.method);
-    } catch {
-      // Invalid and non-snapshot requests stay closed.
-    }
-    callback({ cancel: !allowed });
-  });
-  partition.on('will-download', (event) => event.preventDefault());
+  const partition = createSurfacePartition(session, url);
   const area = screen.getPrimaryDisplay().workArea;
   const win = new BrowserWindow({
     ...presentation,
@@ -164,11 +153,6 @@ async function createManagedWindow(
     // MediaStream. Voice-only revocation destroys the separate Host document.
     stopCapture: () => captureRevocation.reload(),
   });
-  const isSurface = (event) =>
-    !win.isDestroyed() &&
-    event.sender === win.webContents &&
-    event.senderFrame === win.webContents.mainFrame &&
-    event.senderFrame?.url === url;
   motion = createWindowMotion({
     win,
     screen,
@@ -176,207 +160,124 @@ async function createManagedWindow(
     isAuthorized: () =>
       preferences?.allowed() === true && !win.isDestroyed() && win.isVisible() && app?.isHidden?.() !== true,
   });
+  // F336: in living mode the panel's badges (pending, stop sharing) keep Host-placed click rects (pending-badge.cjs).
+  const badge = createPendingBadge({ shareShown: () => controller.screenShown });
   // Trusted Host policy receives the current native lease; no package-facing
   // command can choose an absolute desktop target or rearm a revoked call.
-  const petWindow = createPetWindow({ win, screen, publish, motionLease: () => motion.current() });
-  preferences = createWindowPreferences({ motion, setBallSize: (size) => petWindow.setBallSize(size) });
-  let inspectingF221 = false;
-  let hideConfirmation;
-  const clearHideConfirmation = () => {
-    if (hideConfirmation) clearTimeout(hideConfirmation);
-    hideConfirmation = undefined;
-  };
+  const petWindow = createPetWindow({ win, screen, publish, motionLease: () => motion.current(), badge });
+  preferences = createWindowPreferences({
+    motion,
+    setBallSize: (size) => {
+      living.setBallSize(size); // the living cat's stand height follows the same trusted size
+      return petWindow.setBallSize(size);
+    },
+    observe: (values) => living.observe(values),
+  });
+  // F336 U2: the living cat's newest scene is held here, in electron main, until the API acknowledges it.
+  const scene = createSceneWriter({ request: (command) => options.request(command), log: options.onSceneLog });
   const revokeMedia = (reason) => {
-    clearHideConfirmation();
+    visibility.clear();
     if (reason === 'hidden') preferences.suspend('hidden');
     void pauseAppAssist(reason);
     controller.suspend(reason);
+    void scene.flush(reason); // hide, disable, lock and sleep: what the body has goes out now
   };
-  let pendingSettings;
-  const requestController = (command, activated) => {
-    if (command.kind === 'view.resize') motion.revoke('resize');
-    const preparing = command.kind === 'prepare' && activated === true && !controller.armed;
-    const ticket = preferences.begin(command, activated === true);
-    const reply = controller
-      .request(command, activated === true)
-      .then((result) => {
-        preferences.accept(ticket, result);
-        result = toPublishedWindowReply(result, companionContract);
-        if (appAssist && result.kind === 'state') result = { ...result, appAssist: appAssist.snapshot() };
-        if (desk && result.kind === 'state') result = { ...result, desk: desk.snapshot() };
-        return receiveOnlyAdmitted && result.kind === 'state'
-          ? { ...result, audio: { supportedModes: ['duplex', 'receive_only'], activeMode: voice.mode() } }
-          : result;
-      })
-      .catch(() => {
-        const result = { kind: 'error', code: 'unavailable' };
-        preferences.accept(ticket, result);
-        return result;
-      });
-    if (command.kind === 'settings.read') pendingSettings = reply;
-    if (preparing) voice.prepare(reply);
-    return reply;
-  };
-  const confirmDisable = createCompanionDisable({
+  // The panel and an optional living body share this Host controller, identity and lifecycle.
+  const group = createCompanionGroup({
+    ipcMain,
+    panel: { win, url },
+    routes: {
+      panel: (...request) => requestPanel(...request),
+      // F336: only a launch that carries the verified body page (a livingBody line) hears body commands.
+      body: bodyRoute({ bodyUrl, validate: options.validate, scene, petWindow }),
+    },
+    onRevoke: revokeMedia,
+    onFailure: reportFailure,
+    onClosed: closeCat,
+  });
+  // The body opens from the verified page only, and only while the owner's saved skin is the living cat.
+  const living = createLivingMode({
+    bodyUrl,
+    presentation,
+    createBodyWindow,
+    group,
+    petWindow,
+    scene,
+    screen,
+    log: (line) => options.onBodyLog?.(line),
+  });
+  const requestPanel = createPanelRoute({
+    options,
     dialog,
     win,
-    current: () => (win.isDestroyed() ? null : confirmationEpoch),
-    disable: () => controller.request({ kind: 'companion.disable' }, true),
-    begin: () => preferences.begin({ kind: 'companion.disable' }, true),
-    settle: (ticket, result) => preferences.accept(ticket, result),
+    group,
+    controller,
+    preferences,
+    motion,
+    petWindow,
+    voice,
+    desk,
+    appAssist,
+    companionContract,
+    receiveOnlyAdmitted,
+    confirmationEpoch: () => confirmationEpoch,
+    flushScene: (reason) => scene.flush(reason),
+    living,
+    observeReply: (command, result) => badge.observe(command, result),
   });
-  ipcMain.handle('companion:request', async (event, command, activated, submittedAt) => {
-    if (!isSurface(event)) return { kind: 'error', code: 'permission_required' };
-    if (command?.kind === 'f221.confirm-trial') return { kind: 'error', code: 'invalid_request' };
-    if (!options.validate(command)) return { kind: 'error', code: 'invalid_request' };
-    if (
-      command.kind === 'text' &&
-      typeof command.clientMessageId === 'string' &&
-      /^[^\s\u0000-\u001f\u007f]{1,256}$/.test(command.clientMessageId) &&
-      Number.isSafeInteger(submittedAt) &&
-      Math.abs(Date.now() - submittedAt) <= 5000
-    )
-      options.onTextSubmission?.({
-        stage: 'client_text_sent',
-        observedAt: submittedAt,
-        clientMessageId: command.clientMessageId,
-      });
-    if (command.kind === 'companion.disable') return confirmDisable(activated);
-    if (command.kind === 'audio.connect' && command.mode === 'receive_only' && !receiveOnlyAdmitted)
-      return { kind: 'error', code: 'invalid_request' };
-    if (command.kind === 'f221.inspect') {
-      if (activated !== true) return { kind: 'error', code: 'permission_required' };
-      if (inspectingF221) return { kind: 'error', code: 'busy' };
-      inspectingF221 = true;
-      const stagedEpoch = confirmationEpoch;
-      try {
-        return await inspectF221({
-          dialog,
-          win,
-          read: () => controller.request(command, false),
-          confirm: (nonce, action) => controller.request({ kind: 'f221.confirm-trial', nonce, action }, false),
-          current: () => !win.isDestroyed() && confirmationEpoch === stagedEpoch,
-        });
-      } catch {
-        return { kind: 'decision-trial', status: 'unavailable' };
-      } finally {
-        inspectingF221 = false;
-      }
-    }
-    // A deliberate hide revokes media before the window disappears, even on
-    // platforms where BrowserWindow does not emit a matching hide event.
-    if (command.kind === 'view.hide' && activated === true) revokeMedia('hidden');
-    if (command.kind === 'view.layout') {
-      // The shipped renderer reads settings before its initial layout. Settle
-      // the newest read first so its CSS size and this reply share coordinates.
-      let observed;
-      do {
-        observed = pendingSettings;
-        await observed;
-      } while (observed !== pendingSettings);
-      if (!isSurface(event)) return { kind: 'error', code: 'permission_required' };
-    }
-    const presentationReply = petWindow.request(command, activated === true);
-    if (presentationReply) {
-      preferences.presentation(command, presentationReply);
-      return presentationReply;
-    }
-    if (command.kind.startsWith('audio.')) return voice.request(command, activated === true);
-    if (desk && ['desk.settle', 'desk.thumbnail.read', 'desk.avatar.read'].includes(command.kind))
-      return desk.request(command);
-    return appAssist
-      ? appAssist.request(command, (forwarded) => requestController(forwarded, activated))
-      : requestController(command, activated);
-  });
-  partition.setPermissionCheckHandler(
-    (contents, permission, origin) =>
-      contents === win.webContents &&
-      !win.isDestroyed() &&
-      contents.getURL() === url &&
-      origin === new URL(url).origin &&
-      permission === 'display-capture' &&
-      controller.display(permission),
-  );
-  partition.setPermissionRequestHandler((contents, permission, callback, details = {}) =>
-    callback(
-      contents === win.webContents &&
-        !win.isDestroyed() &&
-        contents.getURL() === url &&
-        details.isMainFrame !== false &&
-        controller.display(permission, details.mediaTypes),
-    ),
-  );
-  partition.setDisplayMediaRequestHandler((_request, callback) => callback({}), { useSystemPicker: true });
-  const unwatchPower = preferences.watchPower(powerMonitor, revokeMedia);
-  const appAssistPowerListeners = {
-    'unlock-screen': () => void releaseAppAssist('locked'),
-    resume: () => void releaseAppAssist('suspended'),
+  admitSurfaceMedia(partition, { win, url, controller });
+  // Lock and sleep revoke through the group, which also takes the living body off screen.
+  const unwatchPower = preferences.watchPower(powerMonitor, (reason) => group.lock(reason));
+  const powerReleases = {
+    'unlock-screen': () => {
+      group.unlock('locked');
+      void releaseAppAssist('locked');
+    },
+    resume: () => {
+      group.unlock('suspended');
+      void releaseAppAssist('suspended');
+    },
   };
-  if (appAssist)
-    for (const [event, listener] of Object.entries(appAssistPowerListeners)) powerMonitor.on(event, listener);
+  for (const [event, listener] of Object.entries(powerReleases)) powerMonitor.on(event, listener);
   // The desk brings things only while the cat is actually on screen; hidden keeps them for later.
   const syncDesk = () => desk?.setVisible(!win.isDestroyed() && win.isVisible() && app?.isHidden?.() !== true);
   if (desk) for (const event of ['show', 'hide', 'blur', 'focus']) win.on(event, syncDesk);
-  win.on('hide', () => {
-    preferences.suspend('hidden');
-    petWindow.dismiss();
-    // Electron can emit hide during a macOS Space handoff while the pet is
-    // still visible on all workspaces and the app itself was not hidden.
-    // isVisible may briefly become false between native hide/show during that
-    // handoff. Actual app hiding or losing all-workspaces placement still
-    // revokes immediately; an explicit view.hide already revoked before IPC.
-    // Ambiguous native hides require a real show within the existing bound.
-    if (!win.isVisibleOnAllWorkspaces() || app?.isHidden?.() === true) {
-      revokeMedia('hidden');
-      return;
-    }
-    clearHideConfirmation();
-    hideConfirmation = setTimeout(() => {
-      hideConfirmation = undefined;
-      if (!win.isDestroyed()) revokeMedia('hidden');
-    }, 1000);
-    hideConfirmation.unref?.();
-  });
-  win.on('show', () => {
-    if (win.isVisible() && app?.isHidden?.() !== true) {
-      clearHideConfirmation();
+  const visibility = watchPanelVisibility({
+    win,
+    app,
+    revokeMedia,
+    alreadyRevoked: () => group.state === 'hidden' || group.state === 'disabled',
+    onHide: () => {
+      preferences.suspend('hidden');
+      petWindow.dismiss();
+    },
+    onShow: () => {
       preferences.resume('hidden');
       motion.arm();
       void releaseAppAssist('hidden');
-    }
+    },
+    onBlur: () => petWindow.dismiss(),
   });
-  win.on('blur', () => {
-    petWindow.dismiss();
-    // Command-H can blur this window without delivering a window hide event.
-    if (app?.isHidden?.() === true) revokeMedia('hidden');
-  });
-  win.on('closed', () => {
-    reportFailure('window-closed');
-    clearHideConfirmation();
+  // The whole cat closes once: after the group destroyed every managed window,
+  // or lost any of them (closed, renderer gone, unresponsive).
+  function closeCat() {
+    visibility.clear();
     void runAppAssist('close');
     motion.close();
     petWindow.close();
+    living.close();
+    scene.detach(); // the scene writer outlives the windows: the quit flush still writes what was reported
     controller.close();
     voice.close();
-    ipcMain.removeHandler('companion:request');
     unwatchPower();
-    if (appAssist)
-      for (const [event, listener] of Object.entries(appAssistPowerListeners)) powerMonitor.off(event, listener);
-  });
+    for (const [event, listener] of Object.entries(powerReleases)) powerMonitor.off(event, listener);
+  }
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event, target) => {
     if (target !== url) event.preventDefault();
   });
   win.webContents.on('will-redirect', (event) => event.preventDefault());
   win.webContents.on('will-attach-webview', (event) => event.preventDefault());
-  win.webContents.on('render-process-gone', () => {
-    reportFailure('renderer-gone');
-    if (!win.isDestroyed()) win.destroy();
-  });
-  win.webContents.on('unresponsive', () => {
-    reportFailure('unresponsive');
-    if (!win.isDestroyed()) win.destroy();
-  });
   let initialPageLoad = true;
   let pageReset = runAppAssist('reset');
   win.webContents.on('did-start-loading', () => {
@@ -406,41 +307,40 @@ async function createManagedWindow(
       await captureRevocation.wait();
     },
     poll() {
-      if (win.isDestroyed()) throw new Error('Window closed');
+      const value = group.poll();
       syncDesk();
-      return win.isVisible() ? 'visible' : 'hidden';
+      return value;
     },
     show() {
-      if (win.isDestroyed()) throw new Error('Window closed');
-      win.showInactive();
+      group.show();
       void releaseAppAssist('hidden');
     },
+    /** Internal body swap in (F336), from the verified body page only: never a hide, a close or a
+     * media revocation. A replaced body first hands its latest scene to the Host writer. */
+    attachBody: () => living.attach(),
+    /** Internal body swap out: back to the ball inside the panel, after the scene flush. */
+    detachBody: () => living.detach(),
+    /** Ask the body, write at once and wait for the ACK; never rejects. Quit uses this first. */
+    flushScene: (reason) => scene.flush(reason),
+    /** No body to ask and nothing pending: the process may quit without waiting. */
+    sceneIdle: () => scene.idle(),
     async navigate(params) {
-      if (!params || Object.keys(params).join(',') !== 'url') throw new Error('Invalid conversation navigation');
-      const target = new URL(params.url);
-      const coordinate = /^[A-Za-z0-9_-]{1,200}$/;
-      const validSource =
-        !target.search ||
-        (target.searchParams.getAll('message').length === 1 &&
-          coordinate.test(target.searchParams.get('message')) &&
-          target.searchParams.getAll('block').length <= 1 &&
-          (!target.searchParams.has('block') || coordinate.test(target.searchParams.get('block'))) &&
-          [...target.searchParams.keys()].every((key) => key === 'message' || key === 'block'));
-      if (
-        !['http:', 'https:'].includes(target.protocol) ||
-        !['localhost', '127.0.0.1', '[::1]'].includes(target.hostname) ||
-        !/^\/thread\/[^/?#]+$/.test(target.pathname) ||
-        target.username ||
-        target.password ||
-        !validSource ||
-        target.hash
-      )
-        throw new Error('Invalid conversation navigation');
-      await shell.openExternal(target.href, { activate: true });
+      await shell.openExternal(conversationTarget(params), { activate: true });
     },
+    /** Final close and process quit: every managed window goes in one batch. */
     close() {
-      if (!win.isDestroyed()) win.destroy();
+      group.close();
+      scene.close(); // logs a scene that is still not acknowledged
     },
+  };
+}
+/** The body role's commands: the public schema first, then the scene writer or the pet window.
+ * Without the verified body page (no livingBody line) there is no body route at all. */
+function bodyRoute({ bodyUrl, validate, scene, petWindow }) {
+  if (!bodyUrl) return undefined;
+  return (sender, command) => {
+    if (!validate(command)) return { kind: 'error', code: 'invalid_request' };
+    return command.kind.startsWith('scene.') ? scene.request(sender, command) : petWindow.requestBody(sender, command);
   };
 }
 module.exports = { createManagedWindow, validateLaunch, toPublishedWindowReply };

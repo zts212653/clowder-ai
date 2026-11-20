@@ -18,7 +18,8 @@ const install = createEventLoopTripwire();
 const initialLease = process.argv[2] === 'foreground-first' ? await acquireCpuProfiler() : undefined;
 const initialCapture = initialLease ? recordProcessCpuProfile(new AbortController().signal, 200) : undefined;
 let failedSink = false;
-const options = {logger: {info(entry) {if (failedSink) throw Error('broken sink'); process.send({type:'log', entry});}}, bootId:'owned-test-boot', windowMs:500, logDir:fileURLToPath(new URL('.',import.meta.url))};
+const options = {logger: {info(entry) {if (failedSink) throw Error('broken sink'); process.send({type:'log', entry});}}, bootId:'owned-test-boot', windowMs:process.argv[2] === 'long-window' ? 300000 : process.argv[2] === 'retained-window' ? 3500 : 500, logDir:fileURLToPath(new URL('.',import.meta.url))};
+if (process.argv[2] === 'slow-start-budget') options.profileStartBudgetMs = 0;
 let handle;
 if (process.argv[2]?.startsWith('startup')) {
   const {initializeWithEventLoopTripwire} = await import('../infrastructure/telemetry/cpu/event-loop-tripwire-startup.js');
@@ -53,7 +54,7 @@ process.on('message', async message => {
     await new Promise(resolve=>setTimeout(resolve,message.gap));
     const secondStarted=performance.now();
     const second=unicodeWork(450);
-    process.send({type:'pair-done',firstStarted,firstEnded,secondStarted,secondEnded:performance.now(),work:first+second});
+    process.send({type:'pair-done',id:message.id,firstStarted,firstEnded,secondStarted,secondEnded:performance.now(),work:first+second});
   }
   if (message.type === 'sink-failure') {failedSink = true; process.send({type:'sink-failure'});}
   if (message.type === 'close-observer') {await handle.close(); process.send({type:'closed-observer'});}
@@ -72,6 +73,7 @@ process.on('message', async message => {
   if (message.type === 'block') {
     process.send({type:'entered',id:message.id,atMs:performance.now()});
     if (message.native === 'process') uninterruptibleNativeWait(message.ms);
+    else if (message.native === 'unicode') unicodeWork(message.ms);
     else if (message.native) nativeBlockingWait(message.ms); else occupyEventLoopSpin(message.ms);
     process.send({type:'done',id:message.id,atMs:performance.now()});
   }

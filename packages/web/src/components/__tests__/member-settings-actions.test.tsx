@@ -91,6 +91,34 @@ async function render(editorOpen: boolean, error: string | null = null, members:
   );
 }
 
+it('changes the separate retention preference from the saved member detail and reads it again on reopen', async () => {
+  let enabled = false;
+  const previous = vi.mocked(apiFetch).getMockImplementation()!;
+  vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+    if (path === '/api/cats/fixture-cat/cache-retention') {
+      if (init?.method === 'PUT') {
+        if (new Headers(init.headers).get('content-type') !== 'application/json')
+          return new Response(JSON.stringify({ error: 'Only the enabled preference can be changed' }), { status: 400 });
+        enabled = JSON.parse(String(init.body)).enabled;
+      }
+      return new Response(JSON.stringify({ catId: cat.id, supported: true, enabled, sessions: [] }));
+    }
+    return previous(path, init);
+  });
+  await render(true);
+  const toggle = host.querySelector<HTMLButtonElement>('[role=switch][aria-label="延长缓存保留"]');
+  expect(toggle).not.toBeNull();
+  expect(toggle?.getAttribute('aria-checked')).toBe('false');
+  await act(async () => toggle!.click());
+  expect(enabled).toBe(true);
+  expect(toggle?.getAttribute('aria-checked')).toBe('true');
+  await render(false);
+  await render(true);
+  expect(host.querySelector('[aria-label="延长缓存保留"]')?.getAttribute('aria-checked')).toBe('true');
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="延长缓存保留"]')!.click());
+  expect(enabled).toBe(false);
+});
+
 it('shows the current estimate and refreshes it when the roster changes', async () => {
   let number = 6100;
   const previous = vi.mocked(apiFetch).getMockImplementation();

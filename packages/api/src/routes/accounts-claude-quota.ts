@@ -9,22 +9,30 @@ import { resolveAccountProjectRoot } from './accounts-project-root.js';
 
 const querySchema = z.object({ projectPath: z.string().optional() }).strict();
 
-/** Explicit sampling uses only the official CLI's inference response; never the OAuth usage API. */
-export async function queryClaudeAccountQuota(root: string, ref: string, sample = sampleClaudeQuota) {
+async function resolveClaudeQuotaAccount(root: string, ref: string) {
   const profile = resolveByAccountRef(root, ref);
   if (!profile || profile.client !== 'anthropic' || profile.authType !== 'oauth' || profile.baseUrl)
     throw new Error('claude_quota_account_required');
-  const account = claudeExecutionAccountSnapshot(profile);
+  const account = await claudeExecutionAccountSnapshot(profile);
   if (!account.credentialVersion) throw new Error('claude_quota_owner_unknown');
+  return { profile, account };
+}
+
+/** Explicit sampling uses only the official CLI's inference response; never the OAuth usage API. */
+async function queryClaudeAccountQuota(
+  root: string,
+  { profile, account }: Awaited<ReturnType<typeof resolveClaudeQuotaAccount>>,
+  sample: typeof sampleClaudeQuota,
+) {
   for (const requestedModel of ['haiku', 'fable'] as const) {
     const { model, windows } = await sample(profile, requestedModel);
     for (const reading of windows) {
-      if (!recordClaudeQuota({ root, account, model, windows: reading, observedAt: Date.now() }))
+      if (!(await recordClaudeQuota({ root, account, model, windows: reading, observedAt: Date.now() })))
         throw new Error('claude_quota_credential_changed');
     }
   }
-  const quota = readClaudeQuota(root, ref, account.credentialVersion);
-  return { accountRef: ref, claudeQuota: quota ? { samples: quota.samples } : undefined };
+  const quota = readClaudeQuota(root, account.accountRef, account.credentialVersion);
+  return { accountRef: account.accountRef, claudeQuota: quota ? { samples: quota.samples } : undefined };
 }
 
 export function registerClaudeQuotaRoutes(app: FastifyInstance, sample = sampleClaudeQuota): void {
@@ -36,18 +44,18 @@ export function registerClaudeQuotaRoutes(app: FastifyInstance, sample = sampleC
     const root = await resolveAccountProjectRoot(parsed.data.projectPath);
     if (!root) return reply.code(400).send({ error: 'Invalid project path' });
     const { profileId } = request.params as { profileId: string };
-    const key = JSON.stringify([root, profileId]);
     try {
+      const owner = await resolveClaudeQuotaAccount(root, profileId);
+      // Re-login keeps the profile id, so scope shared sampling to this account revision.
+      const key = JSON.stringify([root, profileId, owner.account.accountRevision]);
       let query = pending.get(key);
       if (!query) {
-        query = queryClaudeAccountQuota(root, profileId, sample);
+        query = queryClaudeAccountQuota(root, owner, sample).finally(() => {
+          pending.delete(key);
+        });
         pending.set(key, query);
       }
-      try {
-        return await query;
-      } finally {
-        if (pending.get(key) === query) pending.delete(key);
-      }
+      return await query;
     } catch (error) {
       const code = error instanceof Error ? error.message : '';
       return reply

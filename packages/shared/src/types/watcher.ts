@@ -1,22 +1,20 @@
 import { z } from 'zod';
+import {
+  WATCHER_DEFAULT_CONCURRENCY,
+  watcherPanelMemberSchema,
+  watcherRoutingConfigSchema,
+} from './watcher-routing.js';
+
+export { watcherPanelMemberSchema } from './watcher-routing.js';
 
 const watcherScopeSchema = z.enum(['all', 'selected']);
 
 /** F335 experiment: several watchers judge the same settled turn with ordinary context. Absent = off. */
-export const watcherPanelMemberSchema = z
-  .object({
-    catId: z.string().min(1).max(100),
-    /** Execution-local account choice so watcher load stays off the member's main account. */
-    accountRef: z.string().min(1).max(200).optional(),
-  })
-  .strict();
-
 export const watcherPanelConfigSchema = z
   .object({
     enabled: z.boolean(),
     members: z
       .array(watcherPanelMemberSchema)
-      .min(1)
       .max(5)
       .refine((members) => new Set(members.map((member) => member.catId)).size === members.length, {
         message: 'watcher panel members must be distinct',
@@ -24,14 +22,17 @@ export const watcherPanelConfigSchema = z
     /** Member runs across all threads; the rest wait in order. */
     maxConcurrentRuns: z.number().int().min(1).max(12),
   })
-  .strict();
+  .strict()
+  .refine((panel) => !panel.enabled || panel.members.length > 0, {
+    message: 'an enabled comparison requires at least one member',
+  });
 
 export type WatcherPanelConfig = z.infer<typeof watcherPanelConfigSchema>;
 
 export const WATCHER_PANEL_DEFAULTS: Readonly<WatcherPanelConfig> = Object.freeze({
   enabled: false,
-  members: [{ catId: 'codex61-terra' }, { catId: 'codex61-sol' }, { catId: 'codex-astra' }],
-  maxConcurrentRuns: 6,
+  members: [],
+  maxConcurrentRuns: WATCHER_DEFAULT_CONCURRENCY,
 });
 
 export const watcherConfigPatchSchema = z
@@ -39,6 +40,7 @@ export const watcherConfigPatchSchema = z
     enabled: z.boolean().optional(),
     scope: watcherScopeSchema.optional(),
     memberCatId: z.string().min(1).max(100).optional(),
+    routing: watcherRoutingConfigSchema.optional(),
     doNotDisturbLabelIds: z.array(z.string().min(1).max(100)).max(100).optional(),
     panel: watcherPanelConfigSchema.optional(),
   })
@@ -46,8 +48,11 @@ export const watcherConfigPatchSchema = z
 
 export const watcherConfigSchema = watcherConfigPatchSchema.extend({
   enabled: z.boolean(),
+  // Existing records that predate scope keep their original selected-thread semantics.
+  // New installations use the explicit all/off values in WATCHER_CONFIG_DEFAULTS.
   scope: watcherScopeSchema.default('selected'),
-  memberCatId: z.string().min(1).max(100),
+  // Empty only for an unconfigured, disabled installation. PUT requires a real member.
+  memberCatId: z.string().max(100),
   revision: z.number().int().nonnegative(),
   startedAfterSequence: z.number().int().nonnegative().optional(),
   /** A restart is distinct even when no work settled while watching was off. */
@@ -59,9 +64,9 @@ export type WatcherConfig = z.infer<typeof watcherConfigSchema>;
 export type WatcherConfigPatch = z.infer<typeof watcherConfigPatchSchema>;
 
 export const WATCHER_CONFIG_DEFAULTS: Readonly<WatcherConfig> = Object.freeze({
-  enabled: true,
-  scope: 'selected',
-  memberCatId: 'codex61-sol',
+  enabled: false,
+  scope: 'all',
+  memberCatId: '',
   revision: 0,
 });
 
@@ -72,7 +77,12 @@ export function parseWatcherConfig(raw: unknown): WatcherConfig {
 
 export function applyWatcherConfigPatch(current: WatcherConfig, raw: WatcherConfigPatch): WatcherConfig {
   const patch = watcherConfigPatchSchema.parse(raw);
-  return watcherConfigSchema.parse({ ...current, ...patch, revision: current.revision + 1 });
+  return watcherConfigSchema.parse({
+    ...current,
+    ...patch,
+    ...(patch.routing ? { memberCatId: patch.routing.primary.catId, scope: 'all' } : {}),
+    revision: current.revision + 1,
+  });
 }
 
 export const watcherThreadControlSchema = z

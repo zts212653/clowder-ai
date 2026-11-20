@@ -31,11 +31,11 @@ export class RuntimeRoutingCandidateCatalogSource implements RoutingCandidateCat
   }): Promise<RoutingCandidateCatalogSnapshot> {
     const configs = this.options.getConfigs();
     const entries = Object.entries(configs).sort(([left], [right]) => left.localeCompare(right));
-    let capacity: ReturnType<typeof readAccountRoutingCapacity> | undefined;
+    let capacity: Awaited<ReturnType<typeof readAccountRoutingCapacity>> | undefined;
     if (this.options.projectRoot) {
       try {
         if (resolveOwnerGate(input.ownerId)) throw new Error('routing_capacity_owner_required');
-        capacity = readAccountRoutingCapacity({
+        capacity = await readAccountRoutingCapacity({
           projectRoot: this.options.projectRoot,
           configs,
           observedAt: input.observedAt ?? Date.now(),

@@ -82,7 +82,7 @@ for (const control of ['conversation', 'settings']) {
       process.env.DEFAULT_OWNER_USER_ID = 'watcher-owner';
       const w = await watcherWorld(),
         configs = new MemoryConciergeConfigStore();
-      await configs.updateWatcherConfig('watcher-owner', 0, { scope: 'all', memberCatId: 'codex' });
+      await configs.updateWatcherConfig('watcher-owner', 0, { enabled: true, scope: 'all', memberCatId: 'codex' });
       let supervisor;
       const f = await watcherNativeFixture(w, {
         configure: async ({ app }) => {
@@ -211,7 +211,7 @@ test(
       },
     });
     const configs = new MemoryConciergeConfigStore();
-    await configs.updateWatcherConfig(source.userId, 0, { scope: 'all', memberCatId: 'codex' });
+    await configs.updateWatcherConfig(source.userId, 0, { enabled: true, scope: 'all', memberCatId: 'codex' });
     let now = Date.now();
     const errors = [];
     const options = {

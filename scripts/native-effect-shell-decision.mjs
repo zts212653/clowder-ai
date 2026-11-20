@@ -1,7 +1,7 @@
 import { expandPositionalParameters } from './lib/shell-code-inputs.mjs';
 import { executedInvocations, executionChainInvocations } from './lib/shell-invocation.mjs';
 import { scanShellText, shellSubstitutions } from './lib/shell-lexical.mjs';
-import { SUBSTITUTION } from './lib/shell-text.mjs';
+import { extractSubstitutions, SUBSTITUTION } from './lib/shell-text.mjs';
 import { codexAuthenticationEffect } from './native-auth-effect.mjs';
 import {
   copyNamespaceStability,
@@ -22,7 +22,6 @@ import {
 import { decideNativeEffect, deny } from './native-effect-policy.mjs';
 import { protectedManagedPreviewBoundary } from './native-effect-preview-boundary.mjs';
 import { managedPreviewOperationDecision } from './native-effect-preview-classifier.mjs';
-import { gitSubcommandArgs } from './native-effect-repository-classifier.mjs';
 import { isShellStructure, segmentCommandText, segmentContexts } from './native-effect-segment-locations.mjs';
 import { segmentView } from './native-effect-segment-view.mjs';
 import {
@@ -38,7 +37,7 @@ import {
 import { hasConcurrentShellExecution, pipelineChainStart } from './native-effect-shell-concurrency.mjs';
 import { expandSegmentBindings, isShellBinding } from './native-effect-shell-expansion.mjs';
 import { shellInvocation, stripHarmlessRedirections } from './native-effect-shell-tokenizer.mjs';
-import { classifyNativeTarget as classifyTarget, insideMainCheckout } from './native-effect-target-classifier.mjs';
+import { classifyNativeTarget as classifyTarget } from './native-effect-target-classifier.mjs';
 import { worktreeRemovalDecision } from './native-effect-worktree-removal.mjs';
 
 // Provenance: F306 AC-C7 -- how a shell command becomes candidates (per segment, per
@@ -146,10 +145,11 @@ export function decideShellHookPayload(
   }));
   const copyNamespaceStable = copyNamespaceStability(
     units,
-    initialCopyNamespaceStable && !hasConcurrentShellExecution(lexical, raw),
+    initialCopyNamespaceStable,
     readProgramNamespaceStable,
+    hasConcurrentShellExecution(lexical, raw),
   );
-  const executionBoundary = codeInputBoundary(raw, parts, contexts, cwd, source, readProgramNamespaceStable);
+  const executionBoundary = codeInputBoundary(raw, parts, contexts, cwd, source, readProgramNamespaceStable, depth);
   const previewDecisions = units.map(({ segment, contexts }) =>
     segmentPreviewDecision(
       segment,
@@ -205,7 +205,6 @@ export function decideShellHookPayload(
             source,
             preserved,
             targetEvidence,
-            !preserved && (execution.inner.length > 0 || unresolvedBindings.length > 0),
             dataConsumer ? candidateText : units[index].segment,
             copyNamespaceStable[index],
             readProgramNamespaceStable[index],
@@ -222,7 +221,8 @@ export function decideShellHookPayload(
   // an unbounded managed-preview operation). Do not reinterpret them as candidates.
   const decisions = candidates.map((candidate) => {
     const decision = candidate.decision ? candidate : decideNativeEffect(candidate);
-    return decision.decision === 'deny' && candidate.offendingClause
+    return (decision.decision === 'deny' || decision.reasonCode === 'copy_target_unresolved') &&
+      candidate.offendingClause
       ? { ...decision, offendingClause: candidate.offendingClause }
       : decision;
   });
@@ -235,7 +235,10 @@ export function decideShellHookPayload(
       ? deny(candidate, 'protected_target_unparsed')
       : decideNativeEffect(candidate);
   }
-  return decisions.reduce((best, candidate) => (rank(candidate) > rank(best) ? candidate : best));
+  return (
+    decisions.find((decision) => decision.reasonCode === 'copy_target_unresolved') ??
+    decisions.reduce((best, candidate) => (rank(candidate) > rank(best) ? candidate : best))
+  );
 }
 function dataDrivenPipelineDecision(raw, cwd, source) {
   const consumer = splitPipelineSegments(raw).slice(1).find(isDataDrivenPipelineConsumer);
@@ -270,7 +273,7 @@ function nestedSubstitutionDecisions(
 }
 
 /** Original-source roles precede env/path expansion; evidence stays on its execution chain. */
-function codeInputBoundary(raw, parts, contexts, cwd, source, builtinContexts) {
+function codeInputBoundary(raw, parts, contexts, cwd, source, builtinContexts, depth) {
   const rootContext = builtinContexts[0] ?? false;
   const root = executedInvocations(withoutInterpreterSource(raw), { cwd, builtinContext: rootContext });
   if (codexAuthenticationEffect(root.pipelines.flat()) === 'auth_mutation')
@@ -291,16 +294,36 @@ function codeInputBoundary(raw, parts, contexts, cwd, source, builtinContexts) {
       });
       const branch = protectedBranchBoundary(reader, directory, source, { bindings, builtinContext });
       if (branch) return branch;
-      const unproved = reader.pipelines.flat().find((call) => call.generatedCode && insideMainCheckout(call.cwd));
-      if (unproved)
-        return deny(
-          { effect: 'unknown', target: { kind: 'broad_root', value: unproved.cwd }, source },
-          'protected_target_unparsed',
-        );
+      for (const call of reader.pipelines.flat()) {
+        const literal = generatedLiteralCommand(call);
+        if (literal === undefined) continue;
+        const decision = decideShellHookPayload(hereDocumentView(literal), call.cwd, source, depth + 1);
+        if (decision.decision === 'deny') return decision;
+      }
     }
     index = end;
   }
   return null;
+}
+
+/** Reuse the reader's literal stdout proof for a single generated code operand. */
+function generatedLiteralCommand(call) {
+  if (!call.generatedCode) return undefined;
+  const template = call.script ?? call.program;
+  const markers = template?.match(/\0catcafe_substitution:\d+\0/g);
+  if (markers?.length !== 1) return undefined;
+  const producers = new Set((call.codeEvidence ?? []).flatMap((text) => extractSubstitutions(text).inner));
+  if (producers.size !== 1) return undefined;
+  const reader = executedInvocations(producers.values().next().value, { cwd: call.cwd });
+  if (!reader.complete || reader.directInvocations.length !== 1) return undefined;
+  if (reader.directInvocations[0].redirections?.length || reader.directInvocations[0].wrappers?.length)
+    return undefined;
+  const stdout = reader.output?.source;
+  if (stdout === undefined) return undefined;
+  const value = template.replace(markers[0], () => stdout.replace(/\n+$/, ''));
+  if (call.script !== undefined) return value;
+  if (!/^[\w./-]+$/.test(value) || call.operands.some((word) => word.includes('\0'))) return undefined;
+  return [value, ...call.operands].map((word) => `'${word.replaceAll("'", "'\\''")}'`).join(' ');
 }
 
 function protectedBranchBoundary(
@@ -348,7 +371,6 @@ function segmentCandidate(
   source,
   argvPreserved,
   unresolvedText = segment,
-  generatedExecution = false,
   roleSource = segment,
   copyNamespaceStable = true,
   readProgramNamespaceStable = copyNamespaceStable,
@@ -370,11 +392,11 @@ function segmentCandidate(
     argvPreserved &&
     !unprovedReadProgram &&
     (constrainedGhApiOperation(command) ?? constrainedGhPullRequestOperation(command));
-  const copy = argvPreserved ? explicitCopyRoles(command, location ?? cwd) : null;
+  const copy = explicitCopyRoles(command, location ?? cwd);
   const http = argvPreserved && copyNamespaceStable ? httpOutputTargets(command, location ?? cwd) : null;
   const explicitTarget = argvPreserved ? (explicitTemporaryWorktreeTarget(command) ?? copy?.destination) : undefined;
   const locatedSource = location ? { ...source, cwd: location } : source;
-  if (copy && (!copy.complete || !copyNamespaceStable)) {
+  if (copy?.destination && (!copy.complete || !copyNamespaceStable)) {
     return deny(
       { effect: 'unknown', target: { kind: 'ordinary', value: copy.destination }, source: locatedSource },
       'protected_target_unparsed',
@@ -402,8 +424,8 @@ function segmentCandidate(
     explicitTarget,
   );
   const candidate = { effect, target, source: locatedSource };
-  // Target evidence does not certify generated argv. Main-checkout conservatism
-  // applies to unknown executable/control positions, not every generated operand.
+  if (copy?.unresolved && target.kind === 'ordinary')
+    return { ...candidate, decision: 'allow', reasonCode: 'copy_target_unresolved' };
   if (target.kind === 'protected_branch') {
     const boundary = protectedBranchBoundary(
       executedInvocations(command, { cwd, builtinContext: readProgramNamespaceStable }),
@@ -413,12 +435,6 @@ function segmentCandidate(
     );
     if (boundary) return boundary;
   }
-  if (
-    ['unknown', 'repository_rewrite'].includes(effect) &&
-    insideMainCheckout(targetCwd) &&
-    unprovedExecutionControl(command, generatedExecution, readProgramNamespaceStable)
-  )
-    return deny({ ...candidate, target: { kind: 'broad_root', value: targetCwd } }, 'protected_target_unparsed');
   return candidate;
 }
 
@@ -433,49 +449,4 @@ function bindingViewEffect(command, managedPreview, argvPreserved, builtinContex
 function observedSegmentTarget(original, unresolved, observed, hasRoles, effect) {
   if (hasRoles || unresolved === original) return observed;
   return effect === 'write' ? `${unresolved} ${observed}` : unresolved;
-}
-
-const GIT_CONTROL_COMMANDS = new Set([
-  'reset',
-  'clean',
-  'checkout',
-  'switch',
-  'restore',
-  'rebase',
-  'merge',
-  'branch',
-  'update-ref',
-  'push',
-  'fetch',
-  'pull',
-]);
-const generatedWord = (word) => word.includes(SUBSTITUTION) || /\$\w|\$\{/.test(word);
-
-/** Read actual execution roles; generated positionals do not invent a main rewrite. */
-function unprovedExecutionControl(command, generatedExecution, builtinContext) {
-  const parsed = executedInvocations(command, { builtinContext });
-  const calls = parsed.pipelines.flat();
-  if (
-    calls.some(({ name, operands, generatedCode }) => {
-      if (generatedCode || !name || generatedWord(name)) return true;
-      if (name === 'git') {
-        const args = gitSubcommandArgs(operands);
-        if (!args?.length || generatedWord(args[0])) return true;
-      }
-      return false;
-    })
-  ) {
-    return true;
-  }
-  if (!generatedExecution) return false;
-  if (!calls.length) return !parsed.complete;
-  return calls.some(({ name, operands }) => {
-    if (!name || generatedWord(name)) return true;
-    if (name !== 'git') return false;
-    const args = gitSubcommandArgs(operands);
-    if (!args?.length || generatedWord(args[0])) return true;
-    if (args[0] === 'worktree' && generatedWord(args[1] ?? '')) return true;
-    const selectors = operands.slice(0, operands.length - args.length);
-    return selectors.some(generatedWord) || (GIT_CONTROL_COMMANDS.has(args[0]) && args.some(generatedWord));
-  });
 }

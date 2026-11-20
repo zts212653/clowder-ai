@@ -4,6 +4,28 @@ import type { AccountMember, AccountSelection, ProfileItem } from '../hub-accoun
 import { builtinClientLabel, googleCloudLabel } from '../hub-accounts.view';
 import { accountMessage } from './account-message';
 import { accountsCopy } from './accounts.shell-copy';
+import { claudeQuotaCopy } from './claude-quota.shell-copy';
+
+function isLocalDirectoryCat(cat: CatData): boolean {
+  if (cat.id === 'gpt-pro') return false;
+  if (cat.cli) return true;
+  if (cat.acp) return true;
+  return cat.carrier === 'acp';
+}
+
+export function isAgyOAuthAccount(account: ProfileItem): boolean {
+  if (account.authType !== 'oauth' || account.googleCloud) return false;
+  return Boolean(account.agy || account.clientId === 'google');
+}
+
+export function isKimiOAuthAccount(account: ProfileItem): boolean {
+  return account.authType === 'oauth' && account.clientId === 'kimi';
+}
+
+export function canSwitchAccount(account: ProfileItem): boolean {
+  if (account.authType !== 'oauth' || account.googleCloud) return false;
+  return ['openai', 'anthropic', 'google'].includes(account.clientId ? account.clientId : '');
+}
 
 export function accountProvider(account: ProfileItem, t = accountsCopy.zh): string {
   if (account.agy) return 'Google · AGY';
@@ -29,13 +51,12 @@ export function accountProvider(account: ProfileItem, t = accountsCopy.zh): stri
   }
 }
 export function accountMembers(account: ProfileItem, cats: CatData[], selection?: AccountSelection): AccountMember[] {
-  if (['openai', 'anthropic', 'google'].includes(account.clientId ?? '') && selection)
+  if (!account.googleCloud && ['openai', 'anthropic', 'google'].includes(account.clientId ?? '') && selection)
     return selection.members.filter((m) => m.accountRef === account.id);
   return cats
     .filter(
       (cat) =>
-        cat.id !== 'gpt-pro' &&
-        cat.cli &&
+        isLocalDirectoryCat(cat) &&
         (cat.accountRef ?? builtinAccountIdForClient(cat.clientId as ClientId)) === account.id,
     )
     .map((cat) => ({
@@ -49,10 +70,11 @@ export function accountMembers(account: ProfileItem, cats: CatData[], selection?
     }));
 }
 export function accountIsSelected(account: ProfileItem, cats: CatData[], selection?: AccountSelection): boolean {
+  if (account.googleCloud) return false;
   if (['openai', 'anthropic', 'google'].includes(account.clientId ?? '') && selection)
     return selection.accountRef === account.id;
   const local = cats.filter(
-    (cat) => cat.id !== 'gpt-pro' && cat.cli && cat.clientId === account.clientId && cat.roster?.available !== false,
+    (cat) => isLocalDirectoryCat(cat) && cat.clientId === account.clientId && cat.roster?.available !== false,
   );
   return (
     local.length > 0 &&
@@ -60,26 +82,35 @@ export function accountIsSelected(account: ProfileItem, cats: CatData[], selecti
   );
 }
 export function accountLoginReady(account: ProfileItem) {
-  if (account.agy) return account.agyLoginStatus === 'ready' || account.agyLoginStatus === 'refreshable';
+  if (account.agy) {
+    if (account.agyQuotaReady === false) return false;
+    return account.agyLoginStatus === 'ready' || account.agyLoginStatus === 'refreshable';
+  }
+  if (isAgyOAuthAccount(account)) return account.agyQuotaReady === true;
+  if (isKimiOAuthAccount(account)) return account.kimiLoginReady === true;
   if (account.claude) return account.claudeTokenStatus === 'saved';
+  if (account.googleCloud) return false;
   return account.codex ? account.codex.status === 'ready' : account.codexLoginStatus === 'ready';
 }
 export function accountStatus(account: ProfileItem, t = accountsCopy.zh, language: 'zh' | 'en' = 'zh') {
-  if (account.agy)
+  if (account.agy) {
+    const ready = accountLoginReady(account);
+    const unreadable = account.agyLoginStatus === 'unreadable' || (!ready && account.agyQuotaReady === false);
     return {
-      label: accountLoginReady(account)
+      label: ready
         ? language === 'zh'
           ? '登录文件已就绪'
           : 'Login file ready'
-        : account.agyLoginStatus === 'unreadable'
+        : unreadable
           ? t.unreadable
           : t.notLoggedIn,
       detail:
         language === 'zh'
           ? '由 AGY 在调用时验证身份并自动续期'
           : 'AGY verifies identity and refreshes credentials at launch',
-      ready: accountLoginReady(account),
+      ready,
     };
+  }
   if (account.claude)
     return {
       label:
@@ -93,6 +124,18 @@ export function accountStatus(account: ProfileItem, t = accountsCopy.zh, languag
     };
   if (account.authType === 'api_key')
     return { label: account.hasApiKey ? t.keyReady : t.keyMissing, detail: '', ready: false };
+  if (account.googleCloud) return { label: t.cliManaged, detail: '', ready: false };
+  if (isAgyOAuthAccount(account)) {
+    const ready = account.agyQuotaReady === true;
+    const label = ready ? t.loggedIn : account.agyQuotaReady === false ? t.unreadable : t.cliManaged;
+    const detail = account.agyQuotaReady === false ? claudeQuotaCopy[language].ownerUnknown : '';
+    return { label, detail, ready };
+  }
+  if (isKimiOAuthAccount(account)) {
+    const ready = account.kimiLoginReady === true;
+    const label = ready ? t.loggedIn : account.kimiLoginReady === false ? t.notLoggedIn : t.unreadable;
+    return { label, detail: '', ready };
+  }
   if (account.clientId === 'anthropic' && account.builtin) return { label: t.cliManaged, detail: '', ready: false };
   const attempt = account.codex?.attempt;
   const ready = accountLoginReady(account);

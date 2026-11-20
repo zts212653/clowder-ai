@@ -7,7 +7,7 @@ import { listenDocumentCacheKey, useListenModeStore } from '@/stores/listenModeS
 import { useToastStore } from '@/stores/toastStore';
 import { useVoiceSessionStore } from '@/stores/voiceSessionStore';
 import { DocumentListenController } from '../DocumentListenController';
-import type { EnqueueUrlResult, PlaybackSnapshot } from '../PlaybackManager';
+import { type EnqueueUrlResult, PlaybackManager, type PlaybackSnapshot } from '../PlaybackManager';
 
 function descriptor(): ListenDocumentDescriptor {
   return {
@@ -28,7 +28,7 @@ function descriptor(): ListenDocumentDescriptor {
   };
 }
 
-function harness(saved: ListenDocumentState | null = null) {
+function harness(saved: ListenDocumentState | null = null, realManager?: PlaybackManager) {
   const telemetry = vi.fn();
   const fetchAudio = vi
     .fn<(url: string) => Promise<Response>>()
@@ -104,7 +104,7 @@ function harness(saved: ListenDocumentState | null = null) {
   };
   const controller = new DocumentListenController({
     api,
-    getManager: () => manager as never,
+    getManager: () => realManager ?? (manager as never),
     fetchAudio,
     now: () => 123,
     telemetry,
@@ -545,6 +545,65 @@ describe('DocumentListenController', () => {
     controller.togglePlayback();
     await vi.waitFor(() => expect(manager.beginBatch).toHaveBeenCalledTimes(2));
     expect(api.stream.mock.calls.length).toBeGreaterThan(2);
+  });
+
+  it.each([
+    'synthesizing the third sentence',
+    'parked after prefetching',
+  ])('suspends document work when chat read-aloud takes over while %s', async (stage) => {
+    const pendingSentence = stage === 'synthesizing the third sentence';
+    const resumeSynthesis = Promise.withResolvers<void>();
+    const playback = new PlaybackManager({ onStateChange: vi.fn() });
+    const { api, controller, fetchAudio } = harness(null, playback);
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    vi.stubGlobal(
+      'URL',
+      class extends URL {
+        static createObjectURL = vi.fn(() => 'blob:listen-takeover');
+        static revokeObjectURL = vi.fn();
+      },
+    );
+    const generate = api.stream.getMockImplementation();
+    if (!generate) throw new Error('No document synthesis fixture');
+    if (pendingSentence) {
+      api.stream.mockImplementation((text, signal) =>
+        (async function* () {
+          if (text === '第 3 句。') await resumeSynthesis.promise;
+          yield* generate(text, signal);
+        })(),
+      );
+    }
+    try {
+      await controller.startDocument(descriptor());
+      await vi.waitFor(() => expect(fetchAudio).toHaveBeenCalledTimes(pendingSentence ? 2 : 4));
+      if (pendingSentence) await vi.waitFor(() => expect(api.stream).toHaveBeenCalledTimes(3));
+      const docFetches = fetchAudio.mock.calls.length;
+      const docStreams = api.stream.mock.calls.length;
+      const saves = api.save.mock.calls.length;
+      const position = useListenModeStore.getState().session?.currentIndex;
+
+      playback.beginBatch('read-aloud');
+      await playback.enqueueUrl('/chat.wav', async () => new Response(new Blob(['chat'])));
+      resumeSynthesis.resolve();
+      document.getElementById('voice-stream-audio')?.dispatchEvent(new Event('ended'));
+      // Finish the deliberately late synthesis and any persistence enqueued by the event.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(useListenModeStore.getState().session).toMatchObject({ phase: 'idle', currentIndex: position });
+      expect(fetchAudio).toHaveBeenCalledTimes(docFetches);
+      expect(api.stream).toHaveBeenCalledTimes(docStreams);
+      expect(api.save).toHaveBeenCalledTimes(saves);
+      expect(playback.getSnapshot().source).toBe('read-aloud');
+      if (pendingSentence) expect(api.stream.mock.calls[2][1]?.aborted).toBe(true);
+    } finally {
+      resumeSynthesis.resolve();
+      controller.stop();
+      playback.destroy();
+      vi.unstubAllGlobals();
+      play.mockRestore();
+      pause.mockRestore();
+    }
   });
 
   it('emits privacy-bounded first-play, buffer-depth, and underrun health metrics', async () => {

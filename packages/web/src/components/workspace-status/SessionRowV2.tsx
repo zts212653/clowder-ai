@@ -1,6 +1,7 @@
 'use client';
 
 import type { CatInvocationInfo, ContextHealthData } from '@/stores/chat-types';
+import { SessionCacheStatus } from '../SessionCacheStatus';
 import { BindSessionInput, SessionIdTag } from '../SessionChainInputs';
 import {
   runtimeLifecycleLabel,
@@ -101,6 +102,7 @@ export function SessionRowV2({
         </p>
       )}
       <SessionContextV2 catId={session.catId} health={health} />
+      <SessionCacheStatus warmth={session.cacheWarmth} />
       {ambiguous && unsealed && firstUnsealed?.id === session.id && (
         <p className="status-v2-session-warning">
           <span className="status-v2-dot" style={{ background: 'var(--semantic-warning)' }} />

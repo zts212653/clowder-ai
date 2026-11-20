@@ -81,10 +81,12 @@ const stopIndex = () => labels().findIndex((label) => label === 'Stop generation
 const micIndex = () => labels().findIndex((label) => label.startsWith('Start voice input'));
 
 describe('ChatInputActionButton: where the stop button sits', () => {
-  it('classic, empty draft, a cat running: stop is available without another voice input', () => {
+  it('classic, empty draft, a cat running: stop and the microphone picker are available', () => {
     renderButton({ presentation: 'classic' });
     expect(stopIndex()).toBe(0);
     expect(micIndex()).toBe(-1);
+    const picker = container.querySelector<HTMLButtonElement>('button[aria-label="选择麦克风"]');
+    expect(picker?.disabled).toBe(false);
   });
 
   it('classic, text in the draft, a cat running: the stop is still there beside queue-send (unchanged)', () => {
@@ -105,7 +107,7 @@ describe('ChatInputActionButton: where the stop button sits', () => {
   it('v2, empty draft, a cat running: voice remains available and stop is the last control', () => {
     renderButton({ presentation: 'v2' });
     expect(labels()[0]).toBe('语音输入');
-    expect(stopIndex()).toBe(1);
+    expect(labels()[1]).toBe('选择麦克风');
     expect(stopIndex()).toBe(labels().length - 1);
   });
 

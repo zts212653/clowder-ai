@@ -18,6 +18,7 @@ import {
   companionContractHas,
   companionSupportsDesk,
   isModernCompanionContract,
+  publishedCompanionSkin,
 } from '../../plugin/desktop-window-runtime/published-companion-v2.js';
 import { CompanionF221Trial } from './CompanionF221Trial.js';
 import { readCompanionDecisions } from './companion-decision-read.js';
@@ -28,6 +29,7 @@ import { readCompanionConversation } from './host/companion-conversation-read.js
 import type { DesktopDeskOwner } from './host/companion-desk-owner.js';
 import { readModernCompanionTranscript, sendCompanionText } from './host/companion-modern-live.js';
 import { readModernCompanionSettings, updateModernCompanionSettings } from './host/companion-modern-settings.js';
+import { readCompanionSceneReply, writeCompanionSceneReply } from './host/companion-scene-host.js';
 import { CompanionSubmissionDelivery } from './host/companion-submission-delivery.js';
 import {
   type CompanionWorkPort,
@@ -211,6 +213,10 @@ export class CompanionHostBridge {
           kind: 'navigation',
           delivery: (await this.unified.open(command.variantRef, command.target)) ? 'requested' : 'unconfirmed',
         };
+      case 'scene.read':
+        return readCompanionSceneReply(this.client);
+      case 'scene.write':
+        return writeCompanionSceneReply(this.client, command);
       case 'f221.inspect':
         return this.f221.inspect(command.proposalId);
       case 'f221.confirm-trial':
@@ -325,7 +331,9 @@ export class CompanionHostBridge {
   private async configSource(): Promise<{ config: ConciergeConfig; behaviorEnabled: boolean }> {
     const result = await this.client.request('/api/concierge/config?view=native');
     if (!result.config || typeof result.config !== 'object') throw new CompanionBridgeError('unavailable');
-    const config = result.config as ConciergeConfig;
+    const saved = result.config as ConciergeConfig;
+    // The state's skin follows the same projection as settings.read: no line without livingBody reads it.
+    const config = { ...saved, skin: publishedCompanionSkin(saved.skin, this.options.companionContract) };
     if (!isModernCompanionContract(this.options.companionContract))
       return { config, behaviorEnabled: result.behaviorEnabled === true };
     const settings = await readModernCompanionSettings(this.client, this.options.companionContract);

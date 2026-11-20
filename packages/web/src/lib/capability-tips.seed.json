@@ -1,5 +1,61 @@
 [
   {
+    "id": "feature-f338-cache-retention",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F338-session-cache-warmth.md",
+      "anchor": "Primary Journey: 主人打开延长缓存保留"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/settings/members/MemberCacheRetention.tsx",
+      "anchor": "MemberCacheRetention"
+    },
+    "bodySource": {
+      "path": "packages/web/src/components/settings/members/MemberCacheRetention.tsx",
+      "anchor": "更改立即生效"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "猫派活后要等伙伴交回？在「设置与管理 → 猫猫团队 → 成员与运行时」打开 Opus 5.5 或 Fable 5.2 的详情，在「模型与工具」开启「延长缓存保留」。默认关闭，更改立即保存；只在等待交回时、最初两小时内维护，会消耗 Claude 额度，关闭后停止后续维护。",
+    "action": {
+      "type": "open_source",
+      "label": "查看缓存保留开启步骤",
+      "sourceRef": {
+        "path": "docs/features/F338-session-cache-warmth.md",
+        "anchor": "Primary Journey: 主人打开延长缓存保留"
+      }
+    },
+    "owner": "codex61-sol"
+  },
+  {
+    "id": "feature-f335-global-watcher-choice",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F335-watcher-cat.md",
+      "anchor": "正式设置"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/settings/WatcherSettings.tsx",
+      "anchor": "WatcherSettings"
+    },
+    "bodySource": {
+      "path": "docs/features/F335-watcher-cat.md",
+      "anchor": "正式设置"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "想让一只猫替你看看刚结束的工作？在「设置与管理 → 猫猫团队 → 猫猫球 → 守望猫」先选主守望，再打开总开关。同家时可以换另一只、仍由主守望看，或不看；每轮自动判断，不用逐条对话配置。",
+    "action": {
+      "type": "open_source",
+      "label": "查看守望设置说明",
+      "sourceRef": {
+        "path": "docs/features/F335-watcher-cat.md",
+        "anchor": "正式设置"
+      }
+    },
+    "owner": "codex61-sol"
+  },
+  {
     "id": "feature-f051-sidebar-quota-ring",
     "kind": "feature",
     "sourceRef": {

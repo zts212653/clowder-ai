@@ -1,7 +1,8 @@
 import type { VoiceChunkEvent, VoiceStreamEndEvent, VoiceStreamStartEvent } from '@cat-cafe/shared';
+import { ReadAloudPcm } from './ReadAloudPcm';
 
 export type PlaybackManagerState = 'idle' | 'playing' | 'paused';
-export type PlaybackSource = 'voice' | 'podcast' | 'listen';
+export type PlaybackSource = 'voice' | 'podcast' | 'listen' | 'read-aloud';
 export type EnqueueUrlResult = 'enqueued' | 'failed' | 'cancelled';
 
 export interface PlaybackSnapshot {
@@ -55,6 +56,8 @@ export class PlaybackManager {
   /** Track completed items within a batch (for podcast progress tracking). */
   private batchItemIndex = 0;
   private batchMode = false;
+  private batchPlaybackError: (() => void) | undefined;
+  private readAloudPcm: ReadAloudPcm | null = null;
   /** Monotonically increasing ID to invalidate in-flight fetches after interrupt/new batch. */
   private batchId = 0;
 
@@ -190,16 +193,49 @@ export class PlaybackManager {
   }
 
   /** Begin an incrementally-filled batch owned by one audio source. */
-  beginBatch(source: Exclude<PlaybackSource, 'voice'>): void {
+  beginBatch(source: Exclude<PlaybackSource, 'voice'>, onPlaybackError?: () => void): void {
     this.interrupt();
     this.batchId++;
     this.source = source;
     this.batchMode = true;
+    this.batchPlaybackError = onPlaybackError;
     this.batchItemIndex = 0;
     this.itemElapsed = 0;
     this.activeEntry = null;
     this.streamDone = false;
     this.emitSnapshot();
+  }
+
+  prepareReadAloudPcm(beganAt: number): ReadAloudPcm | null {
+    if (this.source !== 'read-aloud' || typeof AudioContext !== 'function') return null;
+    try {
+      const context = new AudioContext({ sampleRate: 24000, latencyHint: 'interactive' });
+      const pcm = new ReadAloudPcm(
+        context,
+        {
+          playing: (active) => {
+            if (this.readAloudPcm === pcm && this.state !== 'paused') this.setState(active ? 'playing' : 'idle');
+          },
+          complete: () => {
+            if (this.readAloudPcm === pcm) this.interrupt();
+          },
+          error: () => {
+            if (this.readAloudPcm === pcm) this.batchPlaybackError?.();
+          },
+        },
+        beganAt,
+      );
+      this.readAloudPcm = pcm;
+      return pcm;
+    } catch {
+      return null;
+    }
+  }
+
+  discardReadAloudPcm(pcm: ReadAloudPcm): void {
+    if (this.readAloudPcm !== pcm) return;
+    this.readAloudPcm = null;
+    pcm.close();
   }
 
   /** Whether a batch playback is currently active. */
@@ -234,6 +270,7 @@ export class PlaybackManager {
   /** Mark the current queue as complete (no more items will be enqueued). */
   markDone(): void {
     this.streamDone = true;
+    this.readAloudPcm?.finish();
   }
 
   setPlaybackRate(rate: number): void {
@@ -249,13 +286,18 @@ export class PlaybackManager {
 
   pause(): void {
     if (this.state !== 'playing') return;
-    const audio = getDomAudio();
-    audio.pause();
+    if (this.readAloudPcm) this.readAloudPcm.pause();
+    else getDomAudio().pause();
     this.setState('paused');
   }
 
   resume(): void {
     if (this.state !== 'paused') return;
+    if (this.readAloudPcm) {
+      this.setState('playing');
+      this.readAloudPcm.resume();
+      return;
+    }
     const audio = getDomAudio();
     if (audio.src) {
       audio.play().catch(() => this.setState('idle'));
@@ -268,6 +310,10 @@ export class PlaybackManager {
   }
 
   skip(): void {
+    if (this.readAloudPcm) {
+      this.readAloudPcm.skip();
+      return;
+    }
     const audio = getDomAudio();
     audio.pause();
     audio.removeAttribute('src');
@@ -288,6 +334,7 @@ export class PlaybackManager {
 
   interrupt(): void {
     this.batchId++;
+    if (this.readAloudPcm) this.discardReadAloudPcm(this.readAloudPcm);
     const audio = getDomAudio();
     audio.pause();
     audio.removeAttribute('src');
@@ -299,6 +346,7 @@ export class PlaybackManager {
     this.streamDone = false;
     this.firstChunkPlayed = false;
     this.batchMode = false;
+    this.batchPlaybackError = undefined;
     this.batchItemIndex = 0;
     this.itemElapsed = 0;
     this.activeEntry = null;
@@ -370,6 +418,10 @@ export class PlaybackManager {
     };
     audio.onerror = () => {
       console.error('[PlaybackManager] Audio playback error');
+      if (this.batchPlaybackError) {
+        this.batchPlaybackError();
+        return;
+      }
       if (this.batchMode && entry.completesItem) {
         this.batchItemIndex++;
         this.itemElapsed = 0;
@@ -379,8 +431,10 @@ export class PlaybackManager {
     };
     this.setState('playing');
     audio.play().catch(() => {
+      if (this.activeEntry !== entry) return;
       console.error('[PlaybackManager] play() rejected');
-      this.setState('idle');
+      if (this.batchPlaybackError) this.batchPlaybackError();
+      else this.setState('idle');
     });
   }
 
@@ -392,6 +446,7 @@ export class PlaybackManager {
       this.activeEntry = null;
       if (this.batchMode) {
         this.batchMode = false;
+        this.batchPlaybackError = undefined;
         this.batchItemIndex = 0;
         this.source = null;
       }

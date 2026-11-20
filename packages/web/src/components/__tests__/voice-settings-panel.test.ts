@@ -41,7 +41,7 @@ beforeEach(() => {
   for (const k of Object.keys(mockStorage)) delete mockStorage[k];
   vi.clearAllMocks();
   useVoiceSettingsStore.setState({
-    settings: { customTerms: [], customPrompt: null, language: 'zh' },
+    settings: { customTerms: [], customPrompt: null, language: 'zh', microphoneDeviceId: null },
   });
   container = document.createElement('div');
   document.body.appendChild(container);

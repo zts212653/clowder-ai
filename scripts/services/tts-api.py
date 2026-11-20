@@ -46,7 +46,7 @@ import wave
 from abc import ABC, abstractmethod
 from array import array
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -506,6 +506,7 @@ class Qwen3CloneAdapter(TtsAdapter):
         self._loaded_model = None
         self._mlx = None
         self._reference_cache_sha256 = None
+        self._breeze_stream_reference_tokens = None
         self._inference_executor = ThreadPoolExecutor(
             max_workers=1,
             thread_name_prefix="cat-cafe-qwen-tts",
@@ -566,6 +567,7 @@ class Qwen3CloneAdapter(TtsAdapter):
         if self._loaded_model is None:
             from mlx_audio.tts.utils import load_model
 
+            self._breeze_stream_reference_tokens = None
             self._loaded_model = load_model(self._model)
         return self._loaded_model
 
@@ -629,6 +631,41 @@ class Qwen3CloneAdapter(TtsAdapter):
             if isinstance(cache, dict):
                 cache.clear()
             self._reference_cache_sha256 = sha256
+
+    @contextmanager
+    def _reuse_breeze_stream_reference(self, model, ref_audio, sha256):
+        """Reuse the vendor codec output for one exact reference on this model's thread."""
+        encode = getattr(model, '_encode_reference', None)
+        if not self.generation_profile or not sha256 or not callable(encode):
+            yield
+            return
+
+        snapshot = Path(ref_audio)
+        key = (sha256, snapshot.suffix)
+        previous_override = vars(model).get('_encode_reference')
+
+        def encode_captured_reference(ref_audio):
+            # Only the captured streaming path is covered. The vendor's static
+            # wrapper can preprocess waveform arrays before encoding.
+            if not isinstance(ref_audio, (str, Path)) or Path(ref_audio) != snapshot:
+                return encode(ref_audio)
+            cached = self._breeze_stream_reference_tokens
+            if cached is not None and cached[0] == key:
+                return cached[1]
+            self._breeze_stream_reference_tokens = None
+            tokens = encode(ref_audio)
+            self._mlx.eval(tokens)
+            self._breeze_stream_reference_tokens = (key, tokens)
+            return tokens
+
+        model._encode_reference = encode_captured_reference
+        try:
+            yield
+        finally:
+            if previous_override is None:
+                del model._encode_reference
+            else:
+                model._encode_reference = previous_override
 
     def _synthesize_path_sync(self, text, lang_code, speed, audio_format, ref_audio, ref_text, instruct, temperature, reference_sha256=None):
         from mlx_audio.tts.generate import generate_audio as tts_generate
@@ -698,9 +735,11 @@ class Qwen3CloneAdapter(TtsAdapter):
         generation = None
         result = None
         model = None
+        reference_encoder = ExitStack()
         try:
             model = self._ensure_model()
             self._prepare_reference_cache(model, reference_sha256)
+            reference_encoder.enter_context(self._reuse_breeze_stream_reference(model, ref_audio, reference_sha256))
             pcm_chunks: list[bytes] = []
             sample_rate: int | None = None
             generation = model.generate(
@@ -744,6 +783,7 @@ class Qwen3CloneAdapter(TtsAdapter):
                 except Exception:
                     log.warning("Clone inner stream close failed", exc_info=True)
                 generation = result = None
+                reference_encoder.close()
                 try:
                     tokenizer = getattr(model, "audio_tokenizer", None) or getattr(model, "speech_tokenizer", None)
                     reset = getattr(getattr(tokenizer, "decoder", None), "reset_streaming_state", None)

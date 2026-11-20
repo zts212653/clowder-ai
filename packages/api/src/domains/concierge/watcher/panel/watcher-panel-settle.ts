@@ -1,5 +1,6 @@
-import type { TurnExecutionRecord, WatcherPanelRound } from '@cat-cafe/shared';
+import { parseWatcherThreadControl, type TurnExecutionRecord, type WatcherPanelRound } from '@cat-cafe/shared';
 import { effectiveWatcherState, readWatcherPreferences } from '../watcher-controls.js';
+import { watcherUsesOrdinaryContext } from '../watcher-routing.js';
 import { deliverWatcherPanelRound } from './watcher-panel-delivery.js';
 import { settleWatcherPanelExecution } from './watcher-panel-member.js';
 import type { WatcherPanelRunnerDeps } from './watcher-panel-runner.js';
@@ -22,7 +23,8 @@ export async function settleWatcherPanelDelivery(
     deps.threads.get(round.threadId),
   ]);
   if (
-    !preferences.config.panel?.enabled ||
+    (round.configRevision !== undefined && round.configRevision !== preferences.config.revision) ||
+    !watcherUsesOrdinaryContext(preferences.config) ||
     !thread ||
     thread.deletedAt ||
     !effectiveWatcherState(preferences.config, thread, preferences.quietLabels, now).maySpeak
@@ -30,8 +32,16 @@ export async function settleWatcherPanelDelivery(
     return { skipped: 'control_changed' };
   try {
     const sourceAuth = await deps.registry.peekRecord(source.invocationId);
-    return await deliverWatcherPanelRound(deps, round, sourceAuth?.ownerAuthProvenance ?? 'unknown');
+    return await deliverWatcherPanelRound(deps, round, sourceAuth?.ownerAuthProvenance ?? 'unknown', {
+      userId: round.userId,
+      threadId: round.threadId,
+      configRevision: round.configRevision ?? preferences.config.revision,
+      controlRevision: parseWatcherThreadControl(thread.watcher).revision,
+      labels: JSON.stringify(thread.labels ?? []),
+    });
   } catch (error) {
+    if (error instanceof Error && error.message.includes('watcher_output_control_changed'))
+      return { skipped: 'control_changed' };
     deps.report(error, round.threadId);
     return { skipped: 'delivery_failed' };
   }

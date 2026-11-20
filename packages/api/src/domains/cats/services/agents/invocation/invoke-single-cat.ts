@@ -10,12 +10,17 @@ import type {
 import { ContextSourceWorkBudget } from '../../../../memory/cue/ContextSourceWorkBudget.js';
 import { sessionCacheRuntimeKey } from '../../session/cache/session-cache-runtime.js';
 import { observeSessionCache } from '../../session/cache/session-cache-warmth.js';
+import { watchThreadExecutionSettings } from '../../stores/ports/thread-execution-settings.js';
 import { captureInvocationL0Input } from '../providers/l0-input-capture.js';
 import { agentServiceGeneration } from '../registry/AgentRegistry.js';
 import { ExecutionAdmissionConflict, StaleServiceSourceConflict } from '../registry/AgentServiceUnavailableError.js';
 import { deepFreeze, type FrozenExecutionBinding, freezeExecutionAccountBinding } from './execution-account-binding.js';
 import { freezeExecutionWorkspace, requiresAgyThreadWorkspace } from './execution-workspace.js';
-import { captureHostExecutionBoundary, changedHostExecutionBoundary } from './host-execution-boundary.js';
+import {
+  captureHostExecutionBoundary,
+  changedHostExecutionBoundary,
+  hostExecutionBoundaryRef,
+} from './host-execution-boundary.js';
 import { findSleepInterruption } from './host-sleep/HostSleepEvidence.js';
 import { InvocationServiceScope } from './invocation-service-scope.js';
 import {
@@ -1218,6 +1223,8 @@ export interface InvocationDeps {
   readonly taskProgressStore?: TaskProgressStore;
   /** F24: Session chain store for context health tracking */
   readonly sessionChainStore?: ISessionChainStore;
+  /** Metadata-only cache enrollment, after normal final usage has been persisted. */
+  readonly sessionCacheObservationListener?: (record: import('@cat-cafe/shared').SessionRecord) => Promise<void>;
   /** F211 Phase A2: runtime sidecar for provider runtime session metadata. */
   readonly runtimeSessionStore?: IRuntimeSessionStore;
   /** F24 Phase B: Session sealer for auto-seal when context threshold reached */
@@ -1527,12 +1534,13 @@ export async function prepareInvocationExecutionBinding(
     };
   };
   const { workspace, threadPreferences } = await captureThread();
-  const binding = freezeExecutionAccountBinding({
+  const binding = await freezeExecutionAccountBinding({
     catId: input.catId,
     catConfig,
     model: input.model,
     workspace,
   });
+  input.signal?.throwIfAborted();
   const isScopedMember =
     input.toolExecutionPolicy?.mode === 'plugin_native' && Boolean(input.toolExecutionPolicy.memberSession);
   const captureOptions =
@@ -1616,26 +1624,42 @@ export async function prepareInvocationExecutionBinding(
   );
   const captured = mcpSources.value;
   input.signal?.throwIfAborted();
-  const currentThread = await captureThread();
-  const workspaceChanged = (
-    ['workingDirectory', 'workingProjectRoot', 'threadProjectPath', 'usesDefaultWorkspace'] as const
-  ).some((key) => workspace[key] !== currentThread.workspace[key]);
-  if (workspaceChanged || !isDeepStrictEqual(threadPreferences, currentThread.threadPreferences))
-    throw new ExecutionAdmissionConflict(
-      'Thread execution configuration changed during admission; retry this invocation.',
-      true,
-    );
+  // Claude's credential check must follow the last thread read. Observe thread settings written
+  // while those reads are pending so the credential check does not need another thread read.
+  const threadSettings =
+    catConfig?.clientId === 'anthropic' && deps.threadStore
+      ? watchThreadExecutionSettings(input.threadId, {
+          catId: input.catId,
+          projectPath: workspace.threadProjectPath,
+          hasBootcampState: Boolean(workspace.thread?.bootcampState),
+          effort: threadPreferences.reasoningEffortOverride,
+        })
+      : undefined;
+  const threadConflict = 'Thread execution configuration changed during admission; retry this invocation.';
+  let currentAccountBinding: FrozenExecutionBinding;
+  try {
+    const currentThread = await captureThread();
+    const workspaceChanged = (
+      ['workingDirectory', 'workingProjectRoot', 'threadProjectPath', 'usesDefaultWorkspace'] as const
+    ).some((key) => workspace[key] !== currentThread.workspace[key]);
+    if (workspaceChanged || !isDeepStrictEqual(threadPreferences, currentThread.threadPreferences))
+      throw new ExecutionAdmissionConflict(threadConflict, true);
+    currentAccountBinding = await freezeExecutionAccountBinding({
+      catId: input.catId,
+      catConfig,
+      model: input.model,
+      workspace,
+    });
+    input.signal?.throwIfAborted();
+    if (threadSettings?.isCurrent() === false) throw new ExecutionAdmissionConflict(threadConflict, true);
+  } finally {
+    threadSettings?.close();
+  }
   if (catRegistry.getRevision() !== memberRegistryRevision || !isPublishedCatalogSnapshotCurrent(catConfig))
     throw new ExecutionAdmissionConflict(
       'Member configuration changed during execution admission; retry this invocation.',
       true,
     );
-  const currentAccountBinding = freezeExecutionAccountBinding({
-    catId: input.catId,
-    catConfig,
-    model: input.model,
-    workspace,
-  });
   if (!isDeepStrictEqual(binding, currentAccountBinding))
     throw new ExecutionAdmissionConflict(
       'Execution configuration changed during execution admission; retry this invocation.',
@@ -4404,7 +4428,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           },
         };
       if (provider === 'anthropic')
-        observeClaudeQuotaMessage(
+        await observeClaudeQuotaMessage(
           frozenExecutionBinding.projectRoot,
           executionAccount,
           msg.metadata?.model ?? catConfig?.defaultModel ?? '',
@@ -4597,7 +4621,34 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
               if (activeRecord) {
                 const u = msg.metadata?.usage!;
                 const cacheRuntime = sessionCacheRuntimeKey(hostExecutionBoundary);
-                await deps.sessionChainStore.update(activeRecord.id, {
+                const cacheObservation =
+                  !cacheRuntime || hadStreamError || msg.errorCode || signal?.aborted
+                    ? undefined
+                    : observeSessionCache({
+                        record: activeRecord,
+                        invocationId,
+                        runtime: cacheRuntime,
+                        model: msg.metadata?.model ?? frozenExecutionBinding.executionPreferences?.model ?? '',
+                        ...(hostExecutionBoundary
+                          ? { executionBoundaryRef: hostExecutionBoundaryRef(hostExecutionBoundary) }
+                          : {}),
+                        requestStartedAt: executionStartedAt,
+                        observedAt: health.measuredAt,
+                        contextTokens: usedTokens,
+                        usage: u,
+                      });
+                if (msg.type === 'done' && cacheObservation) {
+                  try {
+                    await deps.turnExecutionStore?.cacheFacts?.recordObservation(invocationId, {
+                      sessionId: activeRecord.id,
+                      observation: cacheObservation,
+                    });
+                  } catch (err) {
+                    // Entry order still preserves this gap. Cache accounting must not block normal health updates.
+                    log.warn({ err, invocationId }, '[F338] cache return fact unavailable');
+                  }
+                }
+                const updatedRecord = await deps.sessionChainStore.update(activeRecord.id, {
                   contextHealth: health,
                   lastUsage: {
                     ...(u.inputTokens != null ? { inputTokens: u.inputTokens } : {}),
@@ -4606,22 +4657,12 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
                     ...(u.cacheCreation5mTokens != null ? { cacheCreation5mTokens: u.cacheCreation5mTokens } : {}),
                     ...(u.cacheCreation1hTokens != null ? { cacheCreation1hTokens: u.cacheCreation1hTokens } : {}),
                     ...(u.costUsd != null ? { costUsd: u.costUsd } : {}),
-                    cacheObservation:
-                      !cacheRuntime || hadStreamError || msg.errorCode || signal?.aborted
-                        ? undefined
-                        : observeSessionCache({
-                            record: activeRecord,
-                            invocationId,
-                            runtime: cacheRuntime,
-                            model: msg.metadata?.model ?? frozenExecutionBinding.executionPreferences?.model ?? '',
-                            requestStartedAt: executionStartedAt,
-                            observedAt: health.measuredAt,
-                            contextTokens: usedTokens,
-                            usage: u,
-                          }),
+                    cacheObservation,
                   },
                   updatedAt: Date.now(),
                 });
+                if (msg.type === 'done' && updatedRecord && cacheObservation)
+                  await deps.sessionCacheObservationListener?.(updatedRecord);
               }
             } catch {
               /* best-effort */

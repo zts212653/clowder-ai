@@ -6,11 +6,15 @@ export interface SessionCacheObservation {
   nativeSessionId: string;
   runtime: string;
   model: string;
+  /** Source-turn Host account/workspace/carrier fingerprint; absent on older observations. */
+  executionBoundaryRef?: string;
   requestStartedAt: number;
   /** Conservative lower bound when a carrier does not expose every internal API request start. */
   timeSource: 'invocation_start_lower_bound';
   observedAt: number;
   contextTokens: number;
+  /** Only present when one request's read count and total context can be paired exactly. */
+  cacheReadTokens?: number;
   compressionCount: number | null;
   retentionMs?: number;
   retentionSource?: 'usage_ttl' | 'empirical_session';
@@ -23,7 +27,9 @@ export const sessionCacheWarmthSchema = z
   .object({
     status: z.enum(['warm', 'expired', 'unknown']),
     estimated: z.literal(true),
-    source: z.enum(['usage_ttl', 'empirical_session', 'unavailable']),
+    source: z.enum(['usage_ttl', 'empirical_session', 'cache_retention', 'unavailable']),
+    maintenanceInvocationId: z.string().max(500).optional(),
+    retaining: z.boolean().optional(),
     bindingSource: z.enum(['catalog_default', 'frozen_execution', 'observed_session']).optional(),
     reason: z.string().max(200).optional(),
     sessionId: z.string().max(500).optional(),
@@ -42,3 +48,20 @@ export const sessionCacheWarmthSchema = z
   .strict();
 
 export type SessionCacheWarmth = z.infer<typeof sessionCacheWarmthSchema>;
+
+export interface CacheRetentionSessionStatus {
+  threadId: string;
+  sessionId: string;
+  state: 'waiting' | 'retaining' | 'stopped';
+  retainUntil?: number;
+  reason?: string;
+  lastReturnReadRatio?: number;
+}
+
+export interface CacheRetentionMemberStatus {
+  catId: string;
+  supported: boolean;
+  enabled: boolean;
+  reason?: string;
+  sessions: CacheRetentionSessionStatus[];
+}

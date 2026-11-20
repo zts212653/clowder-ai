@@ -42,6 +42,8 @@ created: 2026-10-29
 
 ## 给猫的操作约定
 
-使用现有 `cat_cafe_work`：`create` 的 source 为 `{kind: "html", html: "完整源码"}`，`submit` 带原 `contentRef`、当前 `expectedOwnerRevision` 和完整新源码；保存成功后才用 `publish-reference` 附卡。
+HTML 已经在工作区时，先用 `cat_cafe_work` 的 `inspect-source` 检查文件。传入已登记工作区的 `worktreeId` 和相对路径 `path`，把返回的 `source`（含 `expectedSourceRevision`）原样交给 `create` 或 `submit`。如果保存前文件改了，重新检查并确认这次要存的内容。手头已有一段 HTML 源码时，也可以传 `{kind: "html", html: "完整源码"}`。
+
+续版时，`submit` 还要带原作品的 `contentRef` 和当前 `expectedOwnerRevision`。保存成功后，用 `publish-reference` 附上该固定版本的卡片。
 
 `read-body` 读取指定 `{contentRef, ownerRevision}` 的原始源码。若返回分页，保持 command 和 snapshot 不变，按 nextCursor 拼齐所有 json 后解析。保存和附卡是两件事：附卡未确认时重试同一个引用，不重新提交一个版本。未经当前授权，不续改别人的作品。

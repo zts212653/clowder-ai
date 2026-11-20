@@ -1,39 +1,45 @@
 /** Parse Git's global argv once, retaining directory changes before the subcommand. */
 export function gitInvocationArguments(operands) {
   const directories = [];
+  const configuration = [];
   let coordinateKnown = true;
   let index = 0;
   while (index < operands.length && operands[index].startsWith('-')) {
     const option = globalOption(operands, index);
-    if (!option || option.missing) return { args: null, directories, coordinateKnown: false };
+    if (!option || option.missing) return { args: null, directories, configuration, coordinateKnown: false };
     if (option.directory !== undefined) directories.push(option.directory);
+    if (option.configuration) configuration.push(option.configuration);
     coordinateKnown &&= option.coordinateKnown;
     index = option.next;
   }
-  return { args: operands.slice(index), directories, coordinateKnown };
+  return { args: operands.slice(index), directories, configuration, coordinateKnown };
 }
 
 function globalOption(operands, index) {
   const token = operands[index];
-  const short = token.slice(0, 2);
-  if (['-C', '-c'].includes(short)) {
-    const separate = token.length === 2;
-    const value = separate ? operands[index + 1] : token.slice(2);
+  const name = token.split('=', 1)[0];
+  const fromEnv = name === '--config-env';
+  const option = fromEnv ? name : token.slice(0, 2);
+  if (['-C', '-c', '--config-env'].includes(option)) {
+    const separate = token === option;
+    const attached = token.slice(option.length + Number(fromEnv));
+    const value = separate ? operands[index + 1] : attached;
+    const changesDirectory = option === '-C';
     return {
       next: index + (separate ? 2 : 1),
       missing: value === undefined,
-      directory: short === '-C' ? value : undefined,
-      coordinateKnown: short === '-C' || !changesWorktreeConfig(value),
+      directory: changesDirectory ? value : undefined,
+      configuration: changesDirectory ? undefined : { value, fromEnv },
+      coordinateKnown: changesDirectory || !changesWorktreeConfig(value),
     };
   }
-  const name = token.split('=', 1)[0];
   if (SELECTORS.has(name)) return { next: index + (token.includes('=') ? 1 : 2), coordinateKnown: false };
   if (token === '--bare' || (name === '--exec-path' && token.includes('=')))
     return { next: index + 1, coordinateKnown: false };
   return CONTEXT_FREE_FLAGS.has(token) ? { next: index + 1, coordinateKnown: true } : null;
 }
 
-const SELECTORS = new Set(['--git-dir', '--work-tree', '--namespace', '--config-env', '--attr-source']);
+const SELECTORS = new Set(['--git-dir', '--work-tree', '--namespace', '--attr-source']);
 const CONTEXT_FREE_FLAGS = new Set([
   '-p',
   '-P',

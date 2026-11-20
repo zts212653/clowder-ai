@@ -1,34 +1,19 @@
 import { executedInvocations } from './lib/shell-invocation.mjs';
 import { leadingShellControl, nativeBuiltinContext } from './lib/shell-program-tokens.mjs';
-import { isExactNonRecursiveCopy } from './native-effect-media-classifier.mjs';
+import { extractSubstitutions } from './lib/shell-text.mjs';
 import { isShellStructure, segmentCommandText } from './native-effect-segment-locations.mjs';
 import { classifyShellSegment, splitShellExecutionSegmentsWithSeparators } from './native-effect-shell-classifier.mjs';
 import { isLocalProgramBinding, isShellBinding } from './native-effect-shell-expansion.mjs';
-import { shellInvocation } from './native-effect-shell-tokenizer.mjs';
-
-// These programs may create, truncate, or remove ordinary nodes, but cannot
-// create a symlink/hard link or move an existing alias onto a later target.
-const TOPOLOGY_PRESERVING_WRITES = new Set([
-  'echo',
-  'mkdir',
-  'printf',
-  'rm',
-  'rmdir',
-  'tee',
-  'touch',
-  'trash',
-  'unlink',
-]);
-const FIXED_SHELL_OPERATIONS = new Set([':', 'false', 'true']);
 
 /** Whether the physical copy-target observations remain valid before each unit. */
-export function copyNamespaceStability(units, initial = true, programContexts = []) {
+export function copyNamespaceStability(units, initial = true, programContexts = [], concurrent = false) {
   let stable = initial;
-  return units.map(({ segment }, index) => {
+  const beforeEach = units.map(({ segment }, index) => {
     const before = stable;
     stable &&= segmentPreservesCopyNamespace(segment, programContexts[index] ?? false);
     return before;
   });
+  return concurrent && !stable ? beforeEach.fill(false) : beforeEach;
 }
 
 function unitPreservesProgramNamespace(segment, stable) {
@@ -86,31 +71,19 @@ export function shellTextPreservesCopyNamespace(raw, builtinContext = false) {
 }
 
 export function segmentPreservesCopyNamespace(segment, builtinContext = false) {
-  if (!segment.trim()) return true;
-  if (builtinContext && isLocalProgramBinding(segment)) return true;
-  if (isShellBinding(segment)) {
-    const parsed = shellInvocation(segment);
-    return parsed.complete && !parsed.redirections.length && parsed.words.every((word) => word.literal);
-  }
-  const reader = executedInvocations(segment, { builtinContext });
-  if (!reader.complete || reader.unresolvedEvidence?.length) return false;
-  const calls = reader.pipelines.flat();
-  return calls.length > 0 && calls.every(invocationPreservesCopyNamespace);
+  const { inner } = extractSubstitutions(segment);
+  return [segment, ...inner].every(
+    (text) => !executedInvocations(text, { builtinContext }).pipelines.flat().some(changesCopyNamespace),
+  );
 }
 
-function invocationPreservesCopyNamespace(call) {
-  if (call.lookupOnly) return true;
-  if (
-    !call.name ||
-    call.generatedCode ||
-    call.delegated ||
-    call.unprovedCodeEvidence?.length ||
-    call.environment?.length ||
-    call.wrappers?.length
-  )
-    return false;
-  if (call.name === 'printf' && call.operands[0]?.startsWith('-v')) return false;
-  if (call.name === 'cp') return isExactNonRecursiveCopy(call.text);
-  if (TOPOLOGY_PRESERVING_WRITES.has(call.name) || FIXED_SHELL_OPERATIONS.has(call.name)) return true;
-  return classifyShellSegment(call.argvEvidence ?? call.text) === 'read';
+function changesCopyNamespace(call) {
+  if (call.lookupOnly) return false;
+  if (call.name === 'ln' || call.name === 'mv') return true;
+  if (call.name !== 'cp') return false;
+  const operands = call.programOperands ?? call.operands;
+  const separator = operands.indexOf('--');
+  return operands
+    .slice(0, separator < 0 ? undefined : separator)
+    .some((word) => word === '--link' || word === '--symbolic-link' || /^-[^-]*[ls]/.test(word));
 }

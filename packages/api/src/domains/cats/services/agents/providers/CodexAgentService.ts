@@ -18,6 +18,7 @@ import {
   resolveCodexSharedStateRoots,
 } from '../../../../../config/codex-shared-state.js';
 import { prepareCodexEnvironment } from '../../../../../utils/codex-network-environment.js';
+import { toolExecutionPolicyAllowedToolNames } from '../invocation/tool-execution-policy.js';
 import { agentServiceGeneration } from '../registry/AgentRegistry.js';
 import { inspectCodexImportSession, listCodexImportSessions } from './CodexLocalSessionSource.js';
 import {
@@ -37,6 +38,8 @@ import {
 } from './codex-config-overrides.js';
 import { CODEX_DESKTOP_ISOLATION_ARGS, CODEX_RESTRICTED_APPS_ARGS } from './codex-desktop-isolation.js';
 import { type CodexMcpInputPlan, captureCodexMcpInput } from './codex-mcp-input.js';
+import { codexWatcherPolicyArgs } from './codex-watcher-policy.js';
+import { watcherMcpInput } from './watcher-mcp-input.js';
 
 export { codexConfigObjectFromArgs } from './codex-config-overrides.js';
 
@@ -202,7 +205,7 @@ import {
 } from './codex-app-server-control-options.js';
 import { buildCodexCapacityRecoveryCardMessage } from './codex-capacity-recovery-card.js';
 import { CodexErrorEvidence } from './codex-error-evidence.js';
-import { CODEX_LIVE_DISABLED_FEATURES, CODEX_LIVE_POLICY_ARGS } from './codex-live-policy.js';
+import { CODEX_LIVE_POLICY_ARGS } from './codex-live-policy.js';
 import { codexLoopbackProxyEnvironment } from './codex-loopback-proxy-env.js';
 import { type PreparedCodexNativeLaunch, prepareCodexNativeLaunch } from './codex-plugin-native-launch.js';
 import {
@@ -856,6 +859,7 @@ async function buildCatCafeMcpArgs(
   callbackEnv?: Record<string, string>,
   workingDirectory?: string,
   frozenInput?: CodexMcpInputPlan,
+  allowedToolNames?: readonly string[],
 ): Promise<{
   args: string[];
   bearerEnv: Record<string, string>;
@@ -863,7 +867,8 @@ async function buildCatCafeMcpArgs(
   privateServers?: Record<string, Record<string, unknown>>;
 }> {
   if (!callbackEnv) return { args: [], bearerEnv: {} };
-  const plan = frozenInput ?? (await captureCodexMcpInput(callbackEnv.CAT_CAFE_CAT_ID, workingDirectory));
+  const captured = frozenInput ?? (await captureCodexMcpInput(callbackEnv.CAT_CAFE_CAT_ID, workingDirectory));
+  const plan = allowedToolNames ? watcherMcpInput(captured, allowedToolNames) : captured;
   if (!plan.available) return { args: [], bearerEnv: {} };
   const bearerEnv: Record<string, string> = {};
   const privateServers: Record<string, Record<string, unknown>> = {};
@@ -1003,6 +1008,11 @@ async function buildCatCafeMcpArgs(
       if (value) args.push('--config', `mcp_servers.${tomlName}.env.${key}=${toTomlString(value)}`);
     }
     if (isCatCafe) {
+      if (allowedToolNames)
+        args.push(
+          '--config',
+          `mcp_servers.${tomlName}.env.CAT_CAFE_ALLOWED_TOOL_NAMES=${toTomlString(JSON.stringify(allowedToolNames))}`,
+        );
       args.push('--config', `mcp_servers.${tomlName}.default_tools_approval_mode="approve"`);
       args.push('--config', `mcp_servers.${tomlName}.env.ALLOWED_WORKSPACE_DIRS=${toTomlString(allowedWorkspaceDirs)}`);
       for (const key of [...MCP_CALLBACK_ENV_KEYS, ...MCP_SESSION_ENV_KEYS]) {
@@ -1171,6 +1181,8 @@ export class CodexAgentService implements AgentService {
   }
 
   supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
+    if (policy.mode === 'watcher_panel')
+      return this.carrierMode === 'app_server' && (policy.allowedToolNames?.length ?? 0) > 0;
     if (policy.mode === 'watcher') return this.carrierMode === 'app_server';
     // exec_json has the proven --ignore-user-config + empty MCP hard fence.
     // app-server 0.144.4 exposes no equivalent ignore-user-config flag, so a
@@ -1186,6 +1198,12 @@ export class CodexAgentService implements AgentService {
     return this.carrierMode === 'app_server'
       ? { supported: true, mechanism: 'native_revert', maxWorkingContextTokens: 30000, toolPolicy: 'watcher' }
       : { supported: false, reason: '此运行方式尚不支持有界续用会话' };
+  }
+
+  watcherMemberCapability(): import('@cat-cafe/shared').WatcherMemberCapability {
+    return this.carrierMode === 'app_server'
+      ? { supported: true, context: 'ordinary', readOnly: 'tools' }
+      : { supported: false, reason: '此运行方式的守望读取尚未接通' };
   }
 
   freshnessCarrierCapability(
@@ -1689,6 +1707,9 @@ export class CodexAgentService implements AgentService {
       throw new Error('codex_continuity_preflight_requires_app_server');
     }
     const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
+    const watcherPanel = options?.toolExecutionPolicy?.mode === 'watcher_panel';
+    if (watcherPanel && !this.supportsToolExecutionPolicy(options.toolExecutionPolicy!))
+      throw new Error('watcher_panel_carrier_unsupported');
     const watcher = options?.boundedWatcher;
     if (options?.toolExecutionPolicy?.mode === 'watcher' && !watcher) throw new Error('watcher_host_port_required');
     if (watcher && (options?.toolExecutionPolicy?.mode !== 'watcher' || carrierMode !== 'app_server'))
@@ -1726,8 +1747,9 @@ export class CodexAgentService implements AgentService {
       : await extractTrustedImagePaths(options?.contentBlocks, options?.uploadDir, options?.resolveTrustedImagePath);
     const imageArgs = imagePaths.flatMap((path) => ['--image', path]);
 
-    const sandboxMode = readOnly || live || native || watcher ? 'read-only' : launchPolicy.sandboxMode;
-    const approvalPolicy = readOnly || live || native || watcher ? 'never' : launchPolicy.approvalPolicy;
+    const sandboxMode = readOnly || live || native || watcher || watcherPanel ? 'read-only' : launchPolicy.sandboxMode;
+    const approvalPolicy =
+      readOnly || live || native || watcher || watcherPanel ? 'never' : launchPolicy.approvalPolicy;
     const inheritedEffort =
       options?.executionPreferences?.effort ?? getCatEffort(this.catId as string, undefined, 'openai', effectiveModel);
     const effortLevel =
@@ -1770,6 +1792,7 @@ export class CodexAgentService implements AgentService {
       !readOnly &&
       !live &&
       !watcher &&
+      !watcherPanel &&
       !isInvocationBoundMcpLaunch(options?.callbackEnv) &&
       !options?.agentCarrierSessionFactory &&
       !!appServerHostPool;
@@ -1785,11 +1808,14 @@ export class CodexAgentService implements AgentService {
     // a pooled session whose MCP callbacks would be stale or unconfigured.
     const usePooledAppServer =
       wantsPooledAppServer && (!callbackHasInvocationCredentials || pooledCredentialEnv !== null);
-    let mcpCallbackEnv = usePooledAppServer
-      ? withoutFrozenInvocationCredentials(pooledCredentialEnv?.env ?? options?.callbackEnv)
-      : carrierMode === 'exec_json' && options?.callbackEnv?.CAT_CAFE_MCP_TRANSPORT === 'shared'
+    let mcpCallbackEnv =
+      watcherPanel && options?.callbackEnv
         ? { ...options.callbackEnv, CAT_CAFE_MCP_TRANSPORT: 'stdio' }
-        : options?.callbackEnv;
+        : usePooledAppServer
+          ? withoutFrozenInvocationCredentials(pooledCredentialEnv?.env ?? options?.callbackEnv)
+          : carrierMode === 'exec_json' && options?.callbackEnv?.CAT_CAFE_MCP_TRANSPORT === 'shared'
+            ? { ...options.callbackEnv, CAT_CAFE_MCP_TRANSPORT: 'stdio' }
+            : options?.callbackEnv;
     if (!native && !readOnly && !liveConfig && mcpCallbackEnv?.CAT_CAFE_MCP_TRANSPORT === 'shared') {
       const conflict = await findCodexProjectMcpConflict(options?.workingDirectory ?? process.cwd());
       if (conflict) {
@@ -1820,7 +1846,12 @@ export class CodexAgentService implements AgentService {
                 isCodexConfigObject(liveConfig.mcp_servers) ? liveConfig.mcp_servers : {},
               ),
             }
-          : await buildCatCafeMcpArgs(mcpCallbackEnv, options?.workingDirectory, options?.frozenCodexMcpInput);
+          : await buildCatCafeMcpArgs(
+              mcpCallbackEnv,
+              options?.workingDirectory,
+              options?.frozenCodexMcpInput,
+              watcherPanel ? toolExecutionPolicyAllowedToolNames(options?.toolExecutionPolicy) : undefined,
+            );
     // Non-Git projects also need this startup flag for read-only turns.
     // The sandbox, approval policy, and capability restrictions remain separate.
     const gitRepoArgs = live || native || watcher ? [] : buildGitRepoArgs(options?.workingDirectory);
@@ -1830,7 +1861,7 @@ export class CodexAgentService implements AgentService {
     // carries L0) before dedup — otherwise dedup() would skip the system push and the
     // L0 would be silently overridden by any cliConfigArgs entry with the same key.
     const userConfigArgs = stripReservedCodexSystemConfigs(
-      (readOnly || live || native || watcher ? [] : (options?.cliConfigArgs ?? [])).flatMap((arg) =>
+      (readOnly || live || native || watcher || watcherPanel ? [] : (options?.cliConfigArgs ?? [])).flatMap((arg) =>
         arg.trim().split(/\s+/),
       ),
       this.catId as string,
@@ -1991,9 +2022,10 @@ export class CodexAgentService implements AgentService {
       if (!native && this.nativeShellSafetyCheck) {
         verifiedNativeShellCommand = await verifyReviewedNativeShellCli(this.cliCommand);
       }
-      nativeEffectGuardArgs = native
-        ? []
-        : buildCodexNativeEffectGuardArgs({ nativeShellSafetyCheck: this.nativeShellSafetyCheck });
+      nativeEffectGuardArgs =
+        native || watcherPanel
+          ? []
+          : buildCodexNativeEffectGuardArgs({ nativeShellSafetyCheck: this.nativeShellSafetyCheck });
     } catch (error) {
       const metadata: MessageMetadata = {
         provider: 'openai',
@@ -2035,10 +2067,10 @@ export class CodexAgentService implements AgentService {
         }
       : undefined;
     const developerInstructionsArgs = ['--config', `developer_instructions=${toTomlString(developerInstructions)}`];
-    const appsWriteApprovalArgs = readOnly || live || native ? [] : [...CODEX_APPS_WRITE_APPROVAL_ARGS];
+    const appsWriteApprovalArgs = readOnly || live || native || watcherPanel ? [] : [...CODEX_APPS_WRITE_APPROVAL_ARGS];
     const desktopIsolationArgs = [
       ...CODEX_DESKTOP_ISOLATION_ARGS,
-      ...(readOnly || live || native ? CODEX_RESTRICTED_APPS_ARGS : []),
+      ...(readOnly || live || native || watcherPanel ? CODEX_RESTRICTED_APPS_ARGS : []),
     ];
 
     // resume 子命令不接受 --sandbox / --add-dir, but it does accept
@@ -2125,37 +2157,14 @@ export class CodexAgentService implements AgentService {
           ...(native?.args ?? []),
           ...promptArgs,
         ];
-    const privateMcpRpc = carrierMode === 'app_server' && mcpCallbackEnv?.CAT_CAFE_MCP_TRANSPORT === 'shared';
+    const privateMcpRpc =
+      carrierMode === 'app_server' && (watcherPanel || mcpCallbackEnv?.CAT_CAFE_MCP_TRANSPORT === 'shared');
     const appServerArgs =
       carrierMode === 'app_server'
         ? buildCodexAppServerArgs([
             ...readOnlyArgs,
             ...(live ? CODEX_LIVE_POLICY_ARGS : []),
-            ...(watcher
-              ? [
-                  ...CODEX_LIVE_DISABLED_FEATURES.flatMap((feature) => ['--disable', feature]),
-                  '--disable',
-                  'multi_agent',
-                  '--enable',
-                  'code_mode_host',
-                  '--config',
-                  'agents.enabled=false',
-                  '--config',
-                  'features.multi_agent_v2={enabled=false,disable_native_tools=true}',
-                  '--config',
-                  'web_search="disabled"',
-                  '--config',
-                  'project_doc_max_bytes=0',
-                  '--config',
-                  'skills.include_instructions=false',
-                  '--config',
-                  'orchestrator.skills.enabled=false',
-                  '--config',
-                  'orchestrator.mcp.enabled=false',
-                  '--config',
-                  'features.enable_request_compression=false',
-                ]
-              : []),
+            ...(watcher || watcherPanel ? codexWatcherPolicyArgs(Boolean(watcher)) : []),
             ...dedup(modelArgs),
             ...dedup(reasoningArgs),
             ...dedup(contextWindowArgs),
@@ -2173,11 +2182,13 @@ export class CodexAgentService implements AgentService {
       carrierMode === 'app_server'
         ? mergeCodexConfig(
             liveConfig ??
-              (privateMcpRpc
-                ? codexNativeMcpThreadConfig(catCafeMcpArgs, mcpCallbackEnv!, privateMcpServers)
-                : usePooledAppServer
-                  ? codexConfigObjectFromArgs(catCafeMcpArgs)
-                  : {}),
+              (watcherPanel
+                ? codexConfigObjectFromArgs(catCafeMcpArgs)
+                : privateMcpRpc
+                  ? codexNativeMcpThreadConfig(catCafeMcpArgs, mcpCallbackEnv!, privateMcpServers)
+                  : usePooledAppServer
+                    ? codexConfigObjectFromArgs(catCafeMcpArgs)
+                    : {}),
             codexConfigObjectFromArgs(desktopIsolationArgs),
           )
         : undefined;
@@ -2619,6 +2630,7 @@ export class CodexAgentService implements AgentService {
               ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
             },
             runInput: {
+              ...(watcherPanel ? { strictMcpConfig: true } : {}),
               ...(watcher ? { boundedWatcher: watcher, outputSchema: watcher.outputSchema } : {}),
               ...(options?.requireExactResume ? { requireExactResume: true } : {}),
               ...(options?.liveCompanion ? { live: options.liveCompanion } : {}),

@@ -112,13 +112,13 @@ for (const outcome of ['remaining-insufficient', 'deadline-elapsed', 'caller-abo
     const controller = new AbortController();
     const abort = new DOMException('caller cancelled during availability', 'AbortError');
     f.deps.isEmbeddingAvailable = async () => {
-      t.mock.timers.tick(outcome === 'deadline-elapsed' ? 6000 : 4000);
+      t.mock.timers.tick(outcome === 'deadline-elapsed' ? 8000 : 4000);
       if (outcome === 'caller-aborted') controller.abort(abort);
       return true;
     };
     const reading = searchMessagePassages(
       '守望猫',
-      { ...f.options, deadlineAt: 7500, signal: controller.signal },
+      { ...f.options, deadlineAt: 9500, signal: controller.signal },
       f.deps,
     );
     if (outcome === 'remaining-insufficient') {

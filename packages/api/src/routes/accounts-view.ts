@@ -11,7 +11,7 @@ import { readNativeCodexQuota } from '../config/native-codex-quota.js';
 import { nativeCodexAccountView } from './accounts-native-view.js';
 import { projectQuotaRenewal } from './accounts-quota-feedback.js';
 // clowder-ai#340: Derive client identity from well-known account IDs, not stored protocol.
-/** Synthesize a ProviderProfileView-compatible object from AccountConfig (purely non-blocking; AGY quota view is pre-resolved by accountToViewAsync). */
+/** Synthesize the view after accountToViewAsync resolves credential-backed quota observations. */
 export function accountToView(
   id: string,
   account: AccountConfig,
@@ -20,6 +20,7 @@ export function accountToView(
   nativeDefault = false,
   options?: {
     agyQuotaView?: { agyQuotaReady: boolean; agyQuota?: AgyAccountQuotaObservationView };
+    claudeQuota?: Awaited<ReturnType<typeof readClaudeQuotaView>>;
   },
 ) {
   const isBuiltin = account.authType === 'oauth' && !!builtinAccountFamilyForRef(id);
@@ -37,10 +38,7 @@ export function accountToView(
       : account.quota;
   const identity = account.codex?.identity ?? nativeView.nativeLogin?.identity;
   const ready = account.codex ? codexStatus === 'ready' : nativeView.codexLoginStatus === 'ready';
-  const claudeQuota =
-    projectRoot && clientId === 'anthropic' && account.authType === 'oauth'
-      ? readClaudeQuotaView(projectRoot, id)
-      : undefined;
+  const claudeQuota = options?.claudeQuota;
   const kimiView =
     projectRoot && clientId === 'kimi' && account.authType === 'oauth' ? readKimiQuotaView(projectRoot, id) : undefined;
   const agyQuotaView = options?.agyQuotaView;
@@ -138,7 +136,11 @@ export async function accountToViewAsync(
     projectRoot && clientId === 'google' && account.authType === 'oauth' && !account.googleCloud
       ? await readAgyQuotaView(projectRoot, id, { keychainIdentityInspector: options?.agyKeychainIdentityInspector })
       : undefined;
-  return accountToView(id, account, apiKeyPresent, projectRoot, nativeDefault, { agyQuotaView });
+  const claudeQuota =
+    projectRoot && clientId === 'anthropic' && account.authType === 'oauth'
+      ? await readClaudeQuotaView(projectRoot, id)
+      : undefined;
+  return accountToView(id, account, apiKeyPresent, projectRoot, nativeDefault, { agyQuotaView, claudeQuota });
 }
 
 /** Derive a slug-like ID from display name, avoiding collisions with existing accounts. */

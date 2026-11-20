@@ -56,7 +56,7 @@ const log = createModuleLogger('concierge-routes');
 const patchConciergeConfigSchema = z
   .object({
     enabled: z.boolean(),
-    skin: z.enum(['yarn-ball', 'ragdoll-v1', 'yanyan-codex', 'xianxian-codex']),
+    skin: z.enum(['yarn-ball', 'ragdoll-v1', 'yanyan-codex', 'xianxian-codex', 'xianxian-living']),
     // No newlines/CR allowed: both fields are interpolated verbatim into the concierge
     // system prompt. Embedded newlines would inject prompt directives (P1 prompt injection).
     displayName: z

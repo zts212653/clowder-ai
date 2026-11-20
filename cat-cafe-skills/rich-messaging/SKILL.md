@@ -1,6 +1,6 @@
 ---
 name: rich-messaging
-tips_exempt: "Renewed 2026-11-17: Thread Issue draft discovery is already surfaced by feature-f235-conversation-issue. The added section routes agents through that existing review and owner-confirmation flow; it adds no separate user command or grant. Original-source quotation, memory routing and HTML safety guidance remain unchanged."
+tips_exempt: "Renewed 2026-11-20: this cut updates agent instructions for creating and revising existing HTML Works, including inspect-source for a workspace file and its revision digest. It preserves the same create/submit/publish-reference user journey and permissions; no new user command or setting is introduced. Thread Issue draft discovery remains covered by feature-f235-conversation-issue."
 description: >
   Use when: 找原话并带可点击出处，或在当前 Chat 交付可看、可听或可操作产物（语音、图片、截图、HTML/demo、卡片、清单、diff、交互选择），或保存、继续修改 HTML 图解/小工具，无需用户说“富文本”。
   Not for: 不附来源或媒体的普通文字回复、仅讨论 HTML 原理或修改仓库源码；复杂 localhost 应用用 browser-preview。
@@ -85,9 +85,9 @@ triggers:
 
 使用现有 `cat_cafe_work`，完整约定见 [HTML 作品指南](../../docs/guides/html-works.md)：
 
-1. **新作品**：`command` 用 `{action:"create", operationId:"本次保存的稳定标识", title:"作品名", changeSummary:"首版说明", source:{kind:"html", html:"完整源码"}}`。保留返回的 `reference`（`contentRef` + `ownerRevision`）。
+1. **新作品**。HTML 已在工作区时，先用 `inspect-source` 拿到带修订摘要的 `source`，再交给 `create`。手头已有一段源码时，可以用 `source: {kind:"html", html:"完整源码"}`。带上稳定的 `operationId`、`title` 和 `changeSummary`，保留返回的 `reference`（`contentRef` + `ownerRevision`）。
 2. **交付**：保存成功后，`command` 用 `{action:"publish-reference", reference:保存返回的reference}` 附固定版本卡。保存和附卡是两件事；附卡失败重试同一引用，不再 create/submit 一个版本。保存结果不明时先 read/list 核实，必要时重试完全相同的 command/operationId。
-3. **已有作品续改**：先 `read` 核当前版本，再用 `read-body` 读取要修改的固定 `reference`。沿原 `contentRef`，带当前 `expectedOwnerRevision`、新的 `operationId`、`title`、`changeSummary` 和完整 `source` 做 `submit`，然后附新版卡；不按同名重建。分页时保持 command/snapshot 不变，按 `nextCursor` 拼齐全部 json 后解析。
+3. **已有作品续改**。先 `read` 核当前版本，再用 `read-body` 读取要修改的固定 `reference`。用同样的方式准备新版 `source`。沿原 `contentRef`，带当前 `expectedOwnerRevision`、新的 `operationId`、`title` 和 `changeSummary` 做 `submit`，然后附新版卡。分页时保持 command/snapshot 不变，按 `nextCursor` 拼齐全部 json 后解析。
 4. **widget 开始持续迭代**：先取回可读的原始 HTML，确认现有权限，把原内容作为作品首版保存，并在 `changeSummary` 记录原聊天消息坐标；再沿同一作品提交修改版。缺源码或来源先取原件，不能把重写稿冒充原版。单次修字仍可留在 widget；已有作品的小修继续沿原作品。
 
 “请修改”不授予别人的作品写权；使用当前工具核验的授权，不从标题、消息或文件名推导权限。作品能力只承接已有单文件 HTML，不新增作品库或绕开 HTML 沙盒。

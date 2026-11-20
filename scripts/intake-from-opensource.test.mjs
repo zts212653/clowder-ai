@@ -1514,27 +1514,26 @@ function makeHookFixture() {
   cpSync(resolve('scripts/lib/intake-brand-paths.mjs'), join(repoRoot, 'scripts/lib/intake-brand-paths.mjs'));
   chmodSync(join(repoRoot, 'scripts', 'intake-from-opensource.sh'), 0o755);
 
-  // The actual hook runs its secret scanner before the branch-specific guards.
-  // Keep that scanner real in the fixture, including its local module closure.
+  // Keep the Node guards real, including their local module dependencies.
   for (const path of [
     'secret-git-guard.mjs',
     'lib/secret-content-scan.mjs',
     'lib/secret-content-rules.mjs',
     'lib/secret-git-objects.mjs',
+    'materialize-biome-index-snapshot.mjs',
+    'biome-nested-config-scope.mjs',
+    'check-api-sync-calls.mjs',
+    'lib/api-sync-calls.mjs',
+    'lib/api-sync-bindings.mjs',
   ]) {
     cpSync(resolve('scripts', path), join(repoRoot, 'scripts', path));
   }
-
-  cpSync(
-    resolve('scripts/materialize-biome-index-snapshot.mjs'),
-    join(repoRoot, 'scripts/materialize-biome-index-snapshot.mjs'),
-  );
+  symlinkSync(resolve('node_modules/typescript'), join(repoRoot, 'node_modules/typescript'), 'dir');
 
   // Install pre-commit hook
   mkdirSync(join(repoRoot, '.githooks'), { recursive: true });
   cpSync(HOOK_SCRIPT, join(repoRoot, '.githooks', 'pre-commit'));
   chmodSync(join(repoRoot, '.githooks', 'pre-commit'), 0o755);
-  git(repoRoot, 'config', 'core.hooksPath', '.githooks');
 
   // Write all brand-good files
   for (const [relPath, content] of Object.entries(BRAND_GOOD)) {
@@ -1543,9 +1542,10 @@ function makeHookFixture() {
     writeFileSync(absPath, content, 'utf-8');
   }
 
-  // Initial commit on main (hook skips main branch)
+  // Seed historical brand examples before enabling the staged source guards.
   git(repoRoot, 'add', '-A');
   git(repoRoot, 'commit', '-m', 'initial: good brand state');
+  git(repoRoot, 'config', 'core.hooksPath', '.githooks');
 
   // Create feature branch (hook active on non-main)
   git(repoRoot, 'checkout', '-b', 'feature/intake-test');

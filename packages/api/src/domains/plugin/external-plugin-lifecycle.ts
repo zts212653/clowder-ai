@@ -100,6 +100,7 @@ export class ExternalPluginLifecycleService {
       const current = await this.readCurrent(instanceId);
       assertRevision(current, expectedRevision);
       this.assertState(current, ['enabled'], undefined, 'disable');
+      await this.beforeStop(instanceId);
       const disabling = await this.advance(instanceId, expectedRevision, { activationState: 'disabling' });
       await this.stopOrFail(instanceId, disabling.lifecycleRevision, PLUGIN_OWNER_DISABLED_REASON);
       return this.advance(instanceId, disabling.lifecycleRevision, {
@@ -134,6 +135,7 @@ export class ExternalPluginLifecycleService {
     return this.queue.run(instanceId, async () => {
       const current = await this.readCurrent(instanceId);
       assertRevision(current, expectedRevision);
+      await this.beforeStop(instanceId);
       const disabling = await this.advance(instanceId, expectedRevision, { activationState: 'disabling' });
       await this.stopOrFail(instanceId, disabling.lifecycleRevision, PLUGIN_OWNER_UNINSTALLED_REASON);
       return this.advance(instanceId, disabling.lifecycleRevision, {
@@ -469,6 +471,15 @@ export class ExternalPluginLifecycleService {
   ): void {
     if (!activation.includes(instance.activationState) || (runtime && !runtime.includes(instance.runtimeState))) {
       throw new PluginLifecycleError('INVALID_TRANSITION', `${action} is not valid from the current plugin state`);
+    }
+  }
+
+  /** Before the revision that revokes authority: the runtime may still finish its own work (F336 scene). */
+  private async beforeStop(instanceId: string): Promise<void> {
+    try {
+      await this.options.beforeStop?.(instanceId);
+    } catch {
+      /* The stop goes on: the runtime reports what it could not finish itself. */
     }
   }
 

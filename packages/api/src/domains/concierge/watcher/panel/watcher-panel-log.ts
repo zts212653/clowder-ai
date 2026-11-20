@@ -12,6 +12,9 @@ function roundRef(round: WatcherPanelRound) {
 /** Operator diagnostics project lifecycle facts, never the sentences, source text or account choices. */
 export function createWatcherPanelLog(sink: WatcherPanelLogger = createModuleLogger('watcher-panel')) {
   return {
+    skipped(round: WatcherPanelRound) {
+      sink.info({ ...roundRef(round), reason: round.quiet }, 'Watcher panel round skipped');
+    },
     started(round: WatcherPanelRound) {
       sink.info(
         { ...roundRef(round), memberCatIds: round.members.map((member) => member.catId), quiet: round.quiet },

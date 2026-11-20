@@ -73,7 +73,7 @@ test('SDK launch preserves host/session and freezes the selected token over alte
     { authType: 'oauth', clientId: 'anthropic', claude: { kind: 'long_lived_token' } },
     { accessToken: tokenA },
   );
-  const snapshot = claudeExecutionAccountSnapshot(profile);
+  const snapshot = await claudeExecutionAccountSnapshot(profile);
   assert.equal(snapshot.accountRef, 'a');
   assert.ok(!JSON.stringify(snapshot).includes(tokenA));
   assert.throws(

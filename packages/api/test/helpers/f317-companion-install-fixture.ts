@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { type TestContext } from 'node:test';
 import { CONCIERGE_CONFIG_DEFAULTS } from '@cat-cafe/shared';
+import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 import { MessageStore } from '../../src/domains/cats/services/stores/ports/MessageStore.js';
@@ -11,6 +12,7 @@ import type {
   LivePresentationObservation,
   LivePresentationReply,
 } from '../../src/domains/concierge/live/live-presentation-observations.js';
+import { MemoryCompanionSceneStore } from '../../src/domains/concierge/scene/companion-scene-store.js';
 import { companionCommandValidator } from '../../src/domains/plugin/desktop-window-runtime/admission.js';
 import type { DesktopWindowLaunch } from '../../src/domains/plugin/desktop-window-runtime/types.js';
 import { OFFICIAL_PLUGIN_CATALOG } from '../../src/domains/plugin/official-catalog.js';
@@ -21,9 +23,24 @@ import {
   companionDecisionWireResponse,
   readCompanionDecisionProjection,
 } from '../../src/routes/companion-decision-read-service.js';
+import { registerConciergeCompanionSceneRoutes } from '../../src/routes/concierge-companion-scene.js';
 import { desktopWindowManifest, windowHtml } from '../f317-window.fixture.js';
 import { approval } from '../growing/unified-attention-fixtures.js';
 import { staticEditorFixture } from '../plugin-static-editor.fixture.js';
+
+export const livingBodyHtml = '<!doctype html><html><body>Living body fixture</body></html>';
+function livingBodyManifest(version: string): PluginManifest {
+  const base = desktopWindowManifest(windowHtml, '1.3.0');
+  const [contribution] = base.contributions ?? [];
+  const body = { entrypoint: 'renderer/body.html', integrity: `sha256-${sha256(livingBodyHtml)}` };
+  return {
+    ...base,
+    pluginId: 'official.companion',
+    version,
+    contributions: [{ ...contribution, bridgeVersion: '1.8.0', body } as unknown as typeof contribution],
+  };
+}
+const sha256 = (text: string) => createHash('sha256').update(text).digest('base64');
 
 export async function modernCompanionInstallFixture(
   t: TestContext,
@@ -34,27 +51,38 @@ export async function modernCompanionInstallFixture(
     | '0.1.0-alpha.19'
     | '0.1.0-alpha.20'
     | '0.1.0-alpha.24'
-    | '0.1.0-alpha.25',
+    | '0.1.0-alpha.25'
+    | '0.1.0-alpha.38',
   alterArchive?: (bytes: Buffer) => Buffer,
   observePresentation?: (
     receipt: LivePresentationObservation,
     verifyHost: () => Promise<boolean>,
   ) => Promise<LivePresentationReply>,
+  /** F336: what the kernel does when the API asks it to flush the living body's scene before a stop. */
+  onFlushScene?: (launch: DesktopWindowLaunch) => Promise<void>,
 ) {
   const contract =
-    version === '0.1.0-alpha.25'
-      ? '0.1.0-beta.28'
-      : version === '0.1.0-alpha.24'
-        ? '0.1.0-beta.27'
-        : version === '0.1.0-alpha.15' || version === '0.1.0-alpha.19' || version === '0.1.0-alpha.20'
-          ? '0.1.0-beta.24'
-          : version === '0.1.0-alpha.14'
-            ? '0.1.0-beta.23'
-            : '0.1.0-beta.21';
-  const f = await staticEditorFixture(
-    { ...desktopWindowManifest(windowHtml, '1.3.0'), pluginId: 'official.companion', version },
-    windowHtml,
-  );
+    version === '0.1.0-alpha.38'
+      ? '0.3.3-candidate.3'
+      : version === '0.1.0-alpha.25'
+        ? '0.1.0-beta.28'
+        : version === '0.1.0-alpha.24'
+          ? '0.1.0-beta.27'
+          : version === '0.1.0-alpha.15' || version === '0.1.0-alpha.19' || version === '0.1.0-alpha.20'
+            ? '0.1.0-beta.24'
+            : version === '0.1.0-alpha.14'
+              ? '0.1.0-beta.23'
+              : '0.1.0-beta.21';
+  // F336: the livingBody line's archive declares bridge 1.8.0 and a verified body page beside the surface.
+  const f =
+    version === '0.1.0-alpha.38'
+      ? await staticEditorFixture(livingBodyManifest(version), windowHtml, undefined, {
+          'renderer/body.html': livingBodyHtml,
+        })
+      : await staticEditorFixture(
+          { ...desktopWindowManifest(windowHtml, '1.3.0'), pluginId: 'official.companion', version },
+          windowHtml,
+        );
   const actualArchive =
     version === '0.1.0-alpha.25'
       ? process.env.F317_VERIFIED_LETTER_ARCHIVE
@@ -116,6 +144,8 @@ export async function modernCompanionInstallFixture(
     );
     return reply.code(result.statusCode).send(result.body);
   });
+  // F336: the U1 scene archive behind its real owner routes, for the kernel's scene.read / scene.write.
+  registerConciergeCompanionSceneRoutes(app, { store: new MemoryCompanionSceneStore({ now: () => 1000 }) });
   const messages = new MessageStore();
   const saved = messages.append({
     userId: owner,
@@ -152,6 +182,7 @@ export async function modernCompanionInstallFixture(
       open: async (spec) => {
         launch = spec;
         return {
+          ...(spec.bodyUrl ? { flushScene: () => onFlushScene?.(spec) ?? Promise.resolve() } : {}),
           poll: async () => 'visible',
           show: async () => {},
           close: async () => {
@@ -162,9 +193,10 @@ export async function modernCompanionInstallFixture(
       },
     },
   });
+  let shutDown = false;
   t.after(async () => {
     denyClose = false;
-    await runtime.shutdown();
+    if (!shutDown) await runtime.shutdown();
     await app.close();
     await f.cleanup();
     if (priorOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
@@ -195,6 +227,11 @@ export async function modernCompanionInstallFixture(
     closes: () => closes,
     denyClose: () => {
       denyClose = true;
+    },
+    /** The Host's own shutdown, once; the fixture's cleanup then only closes the rest. */
+    shutdown: async () => {
+      shutDown = true;
+      await runtime.shutdown();
     },
     failNeedsMe: () => {
       needsMeAvailable = false;

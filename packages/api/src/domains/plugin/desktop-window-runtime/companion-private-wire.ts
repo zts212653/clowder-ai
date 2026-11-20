@@ -7,6 +7,12 @@ import {
   validateCompanionReply as validateDeskCompanionReply,
 } from '@clowder-ai/plugin-contract-033c0';
 import {
+  type CompanionCommand as LivingBodyCompanionCommand,
+  type CompanionReply as LivingBodyCompanionReply,
+  validateCompanionCommand as validateLivingBodyCompanionCommand,
+  validateCompanionReply as validateLivingBodyCompanionReply,
+} from '@clowder-ai/plugin-contract-033c3';
+import {
   type CompanionCommand,
   type CompanionReply,
   type CompanionState,
@@ -51,6 +57,10 @@ import {
   validateCompanionReply as validateAppAssistReply,
 } from '@clowder-ai/plugin-contract-beta29';
 import { z } from 'zod';
+import {
+  type CompanionSceneSnapshot,
+  isCompanionSceneSnapshot,
+} from '../../concierge/scene/companion-scene-snapshot.js';
 import { type CompanionContract, companionContractHas } from './published-companion-v2.js';
 
 // SDP exists only on the private pipe between the Host-owned preload/kernel/API.
@@ -120,6 +130,49 @@ const f221TrialReceipt = z
   })
   .strict();
 export type HostF221TrialReceipt = z.infer<typeof f221TrialReceipt>;
+/** F336 scene archive, Host kernel ↔ API only. The kernel's scene writer builds these from the
+ * body's scene.get / scene.report; a package page never sends them on this pipe. */
+const sceneCatId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/);
+const sceneSnapshot = z.custom<CompanionSceneSnapshot>((value) => isCompanionSceneSnapshot(value));
+const sceneRead = z.object({ kind: z.literal('scene.read') }).strict();
+const sceneWrite = z
+  .object({
+    kind: z.literal('scene.write'),
+    catId: sceneCatId,
+    baseRevision: z
+      .number()
+      .int()
+      .min(0)
+      .max(Number.MAX_SAFE_INTEGER - 1),
+    snapshot: sceneSnapshot,
+  })
+  .strict();
+const sceneFound = {
+  status: z.literal('found'),
+  revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  updatedAt: z.number().finite(),
+  snapshot: sceneSnapshot,
+};
+const sceneNotFound = { status: z.literal('not_found') };
+const sceneError = { status: z.literal('error'), reason: z.enum(['corrupt', 'unavailable']) };
+const storedScene = z.discriminatedUnion('status', [
+  z.object(sceneFound).strict(),
+  z.object(sceneNotFound).strict(),
+  z.object(sceneError).strict(),
+]);
+const sceneReply = z.discriminatedUnion('status', [
+  z.object({ kind: z.literal('scene'), catId: sceneCatId, ...sceneFound }).strict(),
+  z.object({ kind: z.literal('scene'), catId: sceneCatId, ...sceneNotFound }).strict(),
+  z.object({ kind: z.literal('scene'), catId: sceneCatId, ...sceneError }).strict(),
+]);
+const scenePutReply = z.discriminatedUnion('status', [
+  z.object({ kind: z.literal('scene-put'), status: z.literal('ok'), revision: sceneFound.revision }).strict(),
+  z.object({ kind: z.literal('scene-put'), status: z.literal('conflict'), current: storedScene }).strict(),
+  z.object({ kind: z.literal('scene-put'), status: z.literal('error'), reason: z.literal('unavailable') }).strict(),
+]);
+export type HostSceneWrite = z.infer<typeof sceneWrite>;
+export type HostSceneReply = z.infer<typeof sceneReply>;
+export type HostScenePutReply = z.infer<typeof scenePutReply>;
 const nativeId = z.string().regex(/^[A-Za-z0-9_-]{1,160}$/);
 /** Host media principal only; never admitted as a package CompanionCommand/Event. */
 const observationFence = { observedAt: z.number().int().nonnegative(), callId, eventId: nativeId };
@@ -205,8 +258,11 @@ export type HostCompanionCommand =
   | Exclude<LetterCompanionCommand, { kind: `audio.${string}` }>
   | Exclude<AppAssistCompanionCommand, { kind: `audio.${string}` }>
   | Exclude<DeskCompanionCommand, { kind: `audio.${string}` }>
+  | Exclude<LivingBodyCompanionCommand, { kind: `audio.${string}` | `body.${string}` | `scene.${string}` }>
   | z.infer<typeof offer>
-  | z.infer<typeof f221ConfirmTrial>;
+  | z.infer<typeof f221ConfirmTrial>
+  | z.infer<typeof sceneRead>
+  | HostSceneWrite;
 export type HostCompanionReply =
   | CompanionReply
   | ModernCompanionReply
@@ -216,10 +272,13 @@ export type HostCompanionReply =
   | LetterCompanionReply
   | AppAssistCompanionReply
   | DeskCompanionReply
+  | LivingBodyCompanionReply
   | HostCompanionState
   | z.infer<typeof answer>
   | HostF221Preview
-  | z.infer<typeof f221TrialReceipt>;
+  | z.infer<typeof f221TrialReceipt>
+  | HostSceneReply
+  | HostScenePutReply;
 /** The public command and reply schema of each admitted contract line. */
 type PublicSchema = (value: unknown) => value is { kind: string };
 const PUBLIC_COMMANDS: Record<CompanionContract, PublicSchema> = {
@@ -231,6 +290,7 @@ const PUBLIC_COMMANDS: Record<CompanionContract, PublicSchema> = {
   '0.1.0-beta.28': validateLetterCompanionCommand,
   '0.1.0-beta.29': validateAppAssistCommand,
   '0.3.3-candidate.0': validateDeskCompanionCommand,
+  '0.3.3-candidate.3': validateLivingBodyCompanionCommand,
 };
 const PUBLIC_REPLIES: Record<CompanionContract, PublicSchema> = {
   '0.1.0-beta.21': validateCompanionReply,
@@ -241,17 +301,24 @@ const PUBLIC_REPLIES: Record<CompanionContract, PublicSchema> = {
   '0.1.0-beta.28': validateLetterCompanionReply,
   '0.1.0-beta.29': validateAppAssistReply,
   '0.3.3-candidate.0': validateDeskCompanionReply,
+  '0.3.3-candidate.3': validateLivingBodyCompanionReply,
 };
+/** The living body's own commands never travel this pipe: the kernel answers body.* itself and turns
+ * scene.get / scene.report into the private scene.read / scene.write below, on a livingBody line only. */
+const KERNEL_ONLY = /^(?:body|scene)\./;
 export function validateHostCompanionCommand(
   value: unknown,
   contract: CompanionContract = '0.1.0-beta.21',
 ): value is HostCompanionCommand {
   const validatePublic = PUBLIC_COMMANDS[contract];
   if (!validatePublic) return false;
+  const scene = companionContractHas(contract, 'livingBody');
   return (
-    (validatePublic(value) && !value.kind.startsWith('audio.')) ||
+    (validatePublic(value) && !value.kind.startsWith('audio.') && !KERNEL_ONLY.test(value.kind)) ||
     offer.safeParse(value).success ||
-    f221ConfirmTrial.safeParse(value).success
+    f221ConfirmTrial.safeParse(value).success ||
+    (scene && sceneRead.safeParse(value).success) ||
+    (scene && sceneWrite.safeParse(value).success)
   );
 }
 export function validateHostCompanionReply(
@@ -274,6 +341,8 @@ export function validateHostCompanionReply(
     validatePublic(value) ||
     answer.safeParse(value).success ||
     hostF221Preview.safeParse(value).success ||
-    f221TrialReceipt.safeParse(value).success
+    f221TrialReceipt.safeParse(value).success ||
+    sceneReply.safeParse(value).success ||
+    scenePutReply.safeParse(value).success
   );
 }

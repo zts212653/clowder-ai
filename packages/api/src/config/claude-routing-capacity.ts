@@ -16,8 +16,8 @@ const hasQuantity = (window: ObservedWindow): window is ObservedWindow & { utili
   window.utilization !== undefined;
 
 /** Account observations, just like Codex's main/Spark/review windows: never model eligibility or permission. */
-export function readClaudeRoutingAccount(profile: RuntimeProviderProfile, root: string, now: number) {
-  const owner = claudeExecutionAccountSnapshot(profile);
+export async function readClaudeRoutingAccount(profile: RuntimeProviderProfile, root: string, now: number) {
+  const owner = await claudeExecutionAccountSnapshot(profile);
   const unknown = (reason: RoutingAccountCapacityV1['reason']): RoutingAccountCapacityV1 => ({
     state: 'unknown',
     reason,

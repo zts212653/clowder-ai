@@ -105,12 +105,13 @@ describe('F306 runtime media read and export guard contract', () => {
       // (`cp -- <source> <destination>; echo copied` is judged segment by segment since
       // 2026-09-27: the copy is the admitted export and `echo` is a read.)
       `cp -- ${source} "$(printf %s ${destination})"`,
-      `cp -- ${runtimeRoot}/scripts/meeting-copilot/transcripts/* ${destination}`,
       `cp -- ${source} /tmp/../cat-cafe-runtime/copy.mp3`,
     ]) {
       const cwd = command.includes('relative-source.mp3') ? runtimeRoot : projectRoot;
       const verdict = decide(command, cwd);
       assert.equal(verdict.decision, 'deny', command);
     }
+    const globSource = `cp -- ${runtimeRoot}/scripts/meeting-copilot/transcripts/* ${destination}`;
+    assert.equal(decide(globSource, projectRoot).decision, 'allow');
   });
 });

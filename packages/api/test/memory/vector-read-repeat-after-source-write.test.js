@@ -353,7 +353,7 @@ test("a message search's vector budget also bounds a repeat that is the first to
   let probes = 0;
   f.hooks.duringProbe = async () => {
     if (probes++ > 0) return;
-    await sleep(2_000); // a first attempt slow enough that the repeat's own window (4 s) outlasts the budget
+    await sleep(3_000); // the repeat's own 6 s window must outlast the 4 s vector budget
     flushMessage();
   };
 
@@ -364,7 +364,7 @@ test("a message search's vector budget also bounds a repeat that is the first to
     [true, 'passage_vector_budget_exhausted', 'lexical'],
   );
   assert.deepEqual(outcomes(), ['vector_budget_exhausted'], 'the outer budget completed its fresh lexical read');
-  assert.ok(seen.repeats[0].repeatMs >= 2_000 && seen.repeats[0].repeatMs < 3_500, `${seen.repeats[0].repeatMs} ms`);
+  assert.ok(seen.repeats[0].repeatMs >= 4_000 && seen.repeats[0].repeatMs < 5_500, `${seen.repeats[0].repeatMs} ms`);
   assert.deepEqual(seen.reads, ['message-search', 'message-search', 'message-search']);
 });
 
@@ -373,7 +373,7 @@ test('a repeat gets what the first attempt left of the vector budget, not a budg
   let embeds = 0;
   const { seen, flushMessage, search, outcomes } = await messageIndex(t, async (texts) => {
     if (!texts.some((text) => text.includes('sonata'))) return;
-    if (embeds++ === 0) return sleep(1_000); // the first attempt spends 1 s of the budget and completes
+    if (embeds++ === 0) return sleep(2_000); // the first attempt uses at least half the shared budget
     await stalled; // the repeat hangs in its vector read
   });
   let published = 0;
@@ -389,12 +389,12 @@ test('a repeat gets what the first attempt left of the vector budget, not a budg
     ['passage_vector_budget_exhausted', 'lexical'],
   );
   assert.deepEqual(outcomes(), ['vector_budget_exhausted']);
-  // 2 s from the first attempt's vector start, of which that attempt used at least 1 s. The repeat's
+  // 4 s from the first vector start, of which the first attempt used at least 2 s. The repeat's
   // own window (twice the first attempt) ends later than that, so the budget is what stops it. A budget
-  // of its own would let the repeat run 2 s. No budget at all (closed with the first attempt) would
+  // of its own would let the repeat run 4 s. No budget at all (closed with the first attempt) would
   // leave it to the repeat's own window, and the reason above would not be the budget's.
-  assert.ok(seen.repeats[0].firstAttemptMs >= 1_000);
-  assert.ok(seen.repeats[0].repeatMs < 1_500, `the repeat ran ${seen.repeats[0].repeatMs} ms`);
+  assert.ok(seen.repeats[0].firstAttemptMs >= 2_000);
+  assert.ok(seen.repeats[0].repeatMs < 2_800, `the repeat ran ${seen.repeats[0].repeatMs} ms`);
   assert.deepEqual(seen.reads, ['message-search', 'message-search', 'message-search']);
 });
 

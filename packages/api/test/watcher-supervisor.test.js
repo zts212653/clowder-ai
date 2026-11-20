@@ -12,7 +12,7 @@ import { watcherRawWindow } from '../dist/domains/concierge/watcher/watcher-prom
 
 async function setup(run, overrides = {}) {
   const configs = new MemoryConciergeConfigStore();
-  await configs.updateWatcherConfig('owner', 0, { scope: 'all', memberCatId: 'codex' });
+  await configs.updateWatcherConfig('owner', 0, { enabled: true, scope: 'all', memberCatId: 'codex' });
   const executions = new InMemoryTurnExecutionStore();
   const sessions = new SessionChainStore();
   const threads = new ThreadStore();
@@ -62,6 +62,33 @@ function settle(f, id) {
 async function flush() {
   for (let index = 0; index < 12; index++) await setImmediate();
 }
+
+test('formal routing alone dispatches new sources to ordinary members without a legacy wake', async () => {
+  const offered = [];
+  const panel = {
+    offer: (source) => offered.push(source.invocationId),
+    reconcile: async () => {},
+    stop: async () => {},
+    controlChanged: () => {},
+  };
+  const f = await setup(() => assert.fail('formal settings must never enter the bounded watcher'), {
+    panel,
+    capability: () => assert.fail('ordinary routing does not require a bounded watcher session'),
+  });
+  try {
+    await f.configs.updateWatcherConfig('owner', 1, {
+      routing: { primary: { catId: 'codex' }, whenSameFamily: { mode: 'primary' }, maxConcurrentRuns: 6 },
+    });
+    work(f, 'formal-source');
+    settle(f, 'formal-source');
+    await f.supervisor.poll();
+    await flush();
+    assert.deepEqual(offered, ['formal-source']);
+    assert.deepEqual(f.errors, []);
+  } finally {
+    await f.supervisor.stop();
+  }
+});
 
 for (const boundary of ['preferences', 'capability', 'session', 'thread']) {
   test(`a transient ${boundary} failure before run retries the same settled source without another work ending`, async () => {

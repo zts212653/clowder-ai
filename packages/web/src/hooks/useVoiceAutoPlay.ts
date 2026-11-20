@@ -38,7 +38,8 @@ let unregisterStop: (() => void) | null = null;
 let currentBlockId: string | null = null;
 
 function isListenModeActive(): boolean {
-  return useListenModeStore.getState().session !== null || peekPlaybackManager()?.getSnapshot().source === 'listen';
+  const source = peekPlaybackManager()?.getSnapshot().source;
+  return useListenModeStore.getState().session !== null || source === 'listen' || source === 'read-aloud';
 }
 
 /** Get or create a persistent, DOM-attached audio element for autoplay. */

@@ -1,68 +1,18 @@
-const { petMetrics, placePetPanel, validBallSize } = require('./pet-placement.cjs');
+const placement = require('./pet-placement.cjs');
+const { petMetrics, placePetPanel, placePanelForBody, validBallSize } = placement;
 const { createPetTravel } = require('./pet-travel.cjs');
+const { createLivingBody } = require('./body-window.cjs');
+const { validLayoutCommand, copyPanelRequest } = require('./pet-layout-command.cjs');
 const inside = (p, r) => r && p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height;
 const clamp = (value, low, high) => Math.max(low, Math.min(value, high));
-const exactKeys = (value, allowed) =>
-  value &&
-  typeof value === 'object' &&
-  !Array.isArray(value) &&
-  Object.keys(value).every((key) => allowed.includes(key));
-function validCallLayout(value) {
-  if (!exactKeys(value, ['presentation', 'bubble']) || !['lite', 'controls'].includes(value.presentation)) return false;
-  if (value.bubble === undefined) return true;
-  return (
-    exactKeys(value.bubble, ['width', 'height']) &&
-    Object.keys(value.bubble).length === 2 &&
-    Number.isInteger(value.bubble.width) &&
-    value.bubble.width >= 120 &&
-    value.bubble.width <= 420 &&
-    Number.isInteger(value.bubble.height) &&
-    value.bubble.height >= 32 &&
-    value.bubble.height <= 500
-  );
-}
-const panelKinds = new Set([
-  'none',
-  'bubble',
-  'actions',
-  'menu',
-  'chat',
-  'decisions',
-  'transcript',
-  'settings',
-  'app-assist',
-  // F335 交付三：the desk bubble / list. Only a desk-line archive's command schema lets this panel through.
-  'desk',
-]);
-const validDimension = (value, minimum, maximum) => Number.isInteger(value) && value >= minimum && value <= maximum;
-function validLayoutCommand(command) {
-  return (
-    panelKinds.has(command.panel) &&
-    validDimension(command.width, 120, 420) &&
-    validDimension(command.height, 32, 500) &&
-    (command.call === undefined || (command.panel === 'actions' && validCallLayout(command.call)))
-  );
-}
-function copyPanelRequest(command) {
-  if (command.panel === 'none') return undefined;
-  return {
-    kind: command.panel,
-    width: command.width,
-    height: command.height,
-    ...(command.call
-      ? {
-          call: {
-            presentation: command.call.presentation,
-            ...(command.call.bubble ? { bubble: { ...command.call.bubble } } : {}),
-          },
-        }
-      : {}),
-  };
-}
-
-/** Own-window presentation only. Renderer never chooses a display, absolute
- * desktop coordinate, another window, or an unbounded drag lifetime. */
-function createPetWindow({ win, screen, publish, motionLease, travelOptions = {}, now = Date.now }) {
+/** Own-window presentation only. Renderer never chooses a display, absolute desktop coordinate,
+ * another window, or an unbounded drag lifetime. F336 living mode: this window holds only the
+ * panel, next to the body's rect; travel never starts; the same tick gates the body's clicks.
+ * Living mode starts when the panel is handed over: the attached body has been drawn and the panel
+ * has just been told the living skin (living-mode.cjs). Until then this window is the ball, placed,
+ * clickable and travelling as before, so the ball hides where it is instead of being carried onto
+ * the cat (#7292 R1 P1-3; the panel learns the skin on its next state read). */
+function createPetWindow({ win, screen, publish, motionLease, badge, travelOptions = {}, now = Date.now }) {
   // Native placement and hit testing use DIP coordinates. Page/pinch zoom must
   // not silently shrink the CSS viewport; the persisted ballSize owns sizing.
   void win.webContents?.setVisualZoomLevelLimits?.(1, 1);
@@ -78,8 +28,26 @@ function createPetWindow({ win, screen, publish, motionLease, travelOptions = {}
   let panelKind = 'none',
     menuPointer;
   let ballSize = 72,
-    panelRequest;
-  const areaFor = () => screen.getDisplayMatching(win.getBounds()).workArea;
+    panelRequest,
+    living,
+    handedOver = false;
+  const onScreen = () => living !== undefined && handedOver;
+  const areaFor = () => (onScreen() ? living.area() : screen.getDisplayMatching(win.getBounds()).workArea);
+  const resumeTravel = () => {
+    if (!onScreen() && panelKind === 'none') travel?.resume();
+  };
+  const startTicking = () => {
+    timer ??= setInterval(tick, 32);
+    timer.unref?.();
+  };
+  const placeForBody = (panel, pointer) =>
+    placePanelForBody(
+      living.anchor() ?? placement.restingBodyRect(areaFor(), ballSize),
+      panel,
+      areaFor(),
+      pointer,
+      placement.petMetrics(ballSize).pet, // the page's anchor box: its badges stay whole with no panel open
+    );
   function shiftLayout(next, dx, dy) {
     if (!layout) return;
     layout = {
@@ -102,11 +70,14 @@ function createPetWindow({ win, screen, publish, motionLease, travelOptions = {}
       : null;
   function apply(panel, pointer) {
     normalizePageScale();
-    const bounds = win.getBounds();
-    const size = petMetrics(ballSize).pet;
-    anchor ??= { x: bounds.x + (bounds.width - size.width) / 2, y: bounds.y + bounds.height - size.height - 8 };
-    layout = placePetPanel({ area: areaFor(), pet: anchor, panel, pointer, ballSize });
-    anchor = { x: layout.pet.x, y: layout.pet.y };
+    if (onScreen()) layout = placeForBody(panel, pointer);
+    else {
+      const bounds = win.getBounds();
+      const size = petMetrics(ballSize).pet;
+      anchor ??= { x: bounds.x + (bounds.width - size.width) / 2, y: bounds.y + bounds.height - size.height - 8 };
+      layout = placePetPanel({ area: areaFor(), pet: anchor, panel, pointer, ballSize });
+      anchor = { x: layout.pet.x, y: layout.pet.y };
+    }
     win.setBounds(layout.bounds);
     return {
       kind: 'layout',
@@ -150,7 +121,15 @@ function createPetWindow({ win, screen, publish, motionLease, travelOptions = {}
     travel?.pause();
     shiftLayout(next, dx, dy);
     win.setBounds(next);
-    if (panelKind === 'none') travel?.resume();
+    resumeTravel();
+  }
+  // A moved body moves the anchor box with him; an open panel stays where it opened (U9: his drawn rect
+  // jitters with his tail). On candidate.3 he may still wander off meanwhile; holding him is next candidate.
+  function followBody() {
+    if (!layout || win.isDestroyed() || panelKind !== 'none' || !onScreen()) return;
+    const next = placeForBody(panelRequest, menuPointer);
+    layout = next;
+    win.setBounds(next.bounds);
   }
   function moveWindowWithLayout(cursor, dx, dy) {
     const area = screen.getDisplayNearestPoint(cursor).workArea;
@@ -198,17 +177,26 @@ function createPetWindow({ win, screen, publish, motionLease, travelOptions = {}
     normalizePageScale();
     const cursor = screen.getCursorScreenPoint();
     updateDrag(cursor);
-    const ignore =
-      !dragging && !inside(cursor, layout.pet) && (panelKind === 'bubble' || !inside(cursor, layout.panel));
+    const overPanel = panelKind !== 'bubble' && Boolean(inside(cursor, layout.panel));
+    // In living mode the panel window holds no pet: only the open panel and the badges the panel draws
+    // (pending decisions; stop sharing while a screen is shared or picked) take clicks there, over the body.
+    const overBadge = onScreen() && overPanelBadge(cursor);
+    living?.tick(cursor, overPanel || overBadge); // the body's own lease runs from attach
+    const ignore = !dragging && !overPanel && !overBadge && (onScreen() || !inside(cursor, layout.pet));
     if (ignore !== ignored) {
       ignored = ignore;
       win.setIgnoreMouseEvents(ignore, { forward: true });
     }
   }
+  function overPanelBadge(cursor) {
+    const area = areaFor();
+    const rects = [badge?.rect(layout, ballSize, area), badge?.shareRect?.(layout, ballSize, area)];
+    return rects.some((rect) => Boolean(inside(cursor, rect)));
+  }
   function endDrag() {
     const ended = dragging;
     dragging = undefined;
-    if (panelKind === 'none') travel?.resume();
+    resumeTravel();
     if (ended?.moved && panelKind === 'bubble') {
       // The ambient bubble stays open after dismiss. Let its next layout
       // place the cat at the intended edge and move the bubble inward.
@@ -219,20 +207,19 @@ function createPetWindow({ win, screen, publish, motionLease, travelOptions = {}
   }
   function requestLayout(command) {
     if (!validLayoutCommand(command)) return { kind: 'error', code: 'invalid_request' };
-    timer ??= setInterval(tick, 32);
-    timer.unref?.();
+    startTicking();
     if (command.panel !== panelKind) menuPointer = command.panel === 'menu' ? screen.getCursorScreenPoint() : undefined;
     panelKind = command.panel;
     panelRequest = copyPanelRequest(command);
     const reply = apply(panelRequest, menuPointer);
-    if (command.panel === 'none') travel?.resume();
+    if (command.panel === 'none') resumeTravel();
     else travel?.pause();
     return reply;
   }
   function requestDrag(command, activated) {
     if (command.phase === 'end') return endDrag();
     if (command.phase !== 'start') return { kind: 'error', code: 'invalid_request' };
-    if (!activated || !layout || !inside(screen.getCursorScreenPoint(), layout.pet))
+    if (onScreen() || !activated || !layout || !inside(screen.getCursorScreenPoint(), layout.pet))
       return { kind: 'error', code: 'permission_required' };
     travel?.pause();
     dragging = {
@@ -246,7 +233,7 @@ function createPetWindow({ win, screen, publish, motionLease, travelOptions = {}
   function requestReset(activated) {
     if (!activated) return { kind: 'error', code: 'permission_required' };
     dragging = undefined;
-    resetPosition();
+    if (!onScreen()) resetPosition(); // a living cat owns his own spot inside the body window
     return { kind: 'ok' };
   }
   function requestHide(activated) {
@@ -284,13 +271,74 @@ function createPetWindow({ win, screen, publish, motionLease, travelOptions = {}
       if (layout) {
         travel?.pause();
         apply(panelRequest, menuPointer);
-        if (panelKind === 'none') travel?.resume();
+        resumeTravel();
       }
       return true;
+    },
+    /** Internal swap in (F336): the Host-registered body window of this generation. */
+    attachBody(bodyWin, generation) {
+      const was = onScreen();
+      living?.release();
+      living = createLivingBody({ win: bodyWin, generation, screen, now });
+      handedOver = false;
+      startTicking();
+      if (was) {
+        apply(panelRequest, menuPointer); // a replaced body: the ball until the new one is handed over
+        resumeTravel();
+      }
+    },
+    /** The attached body has been drawn at least once. */
+    bodyDrawn: () => living?.shown() === true,
+    /** The panel was just told the living skin: from now on this window is the living cat's panel. */
+    handOver() {
+      if (handedOver || !living?.shown()) return;
+      handedOver = true;
+      dragging = undefined;
+      travel?.pause();
+      living.reveal();
+      apply(panelRequest, menuPointer);
+    },
+    /** A swap out begins: he leaves the screen now and this window is the ball again at once. */
+    concealBody() {
+      if (!living || !handedOver) return; // never revealed: already transparent and click-through
+      living.conceal();
+      handedOver = false;
+      apply(panelRequest, menuPointer);
+      resumeTravel();
+    },
+    /** Internal swap out: back to the ball inside the panel window. */
+    detachBody() {
+      if (!living) return;
+      living.release();
+      living = undefined;
+      handedOver = false;
+      apply(panelRequest, menuPointer);
+      resumeTravel();
+    },
+    /** body.* commands from the body route; only the current generation is heard. */
+    requestBody(sender, command) {
+      if (!living || sender?.role !== 'body' || sender.generation !== living.generation)
+        return { kind: 'error', code: 'permission_required' };
+      // A context click opens the ordinary menu beside his anchor, a second one closes it (as on the ball);
+      // the menu's window takes focus, so Escape and a click elsewhere (blur dismisses) close it (U9).
+      if (command.kind === 'body.menu') {
+        if (Object.keys(command).join() !== 'kind') return { kind: 'error', code: 'invalid_request' };
+        if (panelKind === 'menu') {
+          publish({ kind: 'view-dismiss' });
+          return { kind: 'ok' };
+        }
+        publish({ kind: 'view-open', panel: 'menu' });
+        win.focus();
+        return { kind: 'ok' };
+      }
+      const reply = living.request(command);
+      if (command.kind === 'body.anchor' && reply.kind === 'ok') followBody();
+      return reply;
     },
     close() {
       clearInterval(timer);
       dragging = undefined;
+      living?.release();
       travel?.close();
     },
     tick,

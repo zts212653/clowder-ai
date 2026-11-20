@@ -67,16 +67,18 @@ export function registerCodexBindingRoutes(app: FastifyInstance): void {
               ? planCodexAccountBinding(root, catalog, selection)
               : tool === 'agy'
                 ? planAgyAccountBinding(root, catalog, selection)
-                : planClaudeAccountBinding(root, catalog, selection);
+                : await planClaudeAccountBinding(root, catalog, selection);
           if (action === 'commit') {
             if (!parsed.data.previewToken) return reply.code(400).send({ error: 'Binding preview required' });
+            if (preview.previewToken !== parsed.data.previewToken)
+              throw new Error('Binding preview changed; please review it again');
             const bind =
               tool === 'codex'
                 ? bindRuntimeCodexAccounts
                 : tool === 'agy'
                   ? bindRuntimeAgyAccounts
                   : bindRuntimeClaudeAccounts;
-            bind(memberRoot, selection, parsed.data.previewToken, root);
+            await bind(memberRoot, selection, parsed.data.previewToken, root);
             reconcileCatRegistry(memberRoot, new Set(Object.keys(toAllCatConfigs(catalog))));
             await configEventBus.emitChangeAsync({
               source: 'cat-config',

@@ -38,6 +38,8 @@ export type OrdinaryTaskMutation = {
       readonly actor: TaskMutationActor;
       readonly input: Pick<UpdateTaskInput, 'status' | 'why' | 'dispatchGate'>;
       readonly execution?: ExecutionRef;
+      readonly issuerMetadataOnly?: boolean;
+      readonly finalReport?: NonNullable<TaskItem['ordinaryFinalReport']>;
     }
   | { readonly kind: 'adopt_legacy_tenant'; readonly userId: string }
   | {
@@ -47,6 +49,7 @@ export type OrdinaryTaskMutation = {
     }
   | { readonly kind: 'adopt_legacy_execution'; readonly execution: ExecutionRef }
   | { readonly kind: 'bind_execution'; readonly execution: ExecutionRef }
+  | { readonly kind: 'bind_deployment_execution'; readonly execution: ExecutionRef }
   | { readonly kind: 'release_execution'; readonly execution: ExecutionRef }
 );
 
@@ -198,6 +201,7 @@ function applyOpenMutation(
         ? updated({ ...task, executionRef: command.execution, updatedAt: now })
         : refused(task, 'execution_changed');
     case 'bind_execution':
+    case 'bind_deployment_execution':
       return bindExecution(task, command, now);
     case 'handoff':
       return applyHandoff(task, command, now);
@@ -209,7 +213,24 @@ function updateAsCallback(
   command: Extract<OrdinaryTaskMutation, { kind: 'update' }>,
   now: number,
 ): OrdinaryTaskMutationResult {
-  if (!callbackActorMatches(task, command.actor)) return refused(task, 'actor_mismatch');
+  if (
+    command.finalReport &&
+    (command.input.status !== 'done' ||
+      task.lastAppliedHandoffMessageRef !== `message:${command.finalReport.handoffMessageId}` ||
+      task.executionRef?.sourceMessageId !== command.finalReport.handoffMessageId ||
+      task.deploymentWait?.await ||
+      task.deploymentWait?.waitOutcome?.delivery === 'pending' ||
+      task.pluginWait?.await)
+  )
+    return refused(task, 'assignment_changed');
+  const issuerMetadataOnly =
+    command.issuerMetadataOnly &&
+    !command.execution &&
+    !command.finalReport &&
+    command.input.status === undefined &&
+    command.actor.catId === task.ownerCatId &&
+    command.actor.threadId === task.threadId;
+  if (!issuerMetadataOnly && !callbackActorMatches(task, command.actor)) return refused(task, 'actor_mismatch');
   const execution = command.execution;
   if (
     execution &&
@@ -226,6 +247,7 @@ function updateAsCallback(
     ...(pickedUp
       ? { ownerCatId: command.actor.catId as CatId, ownerRevision: (task.ownerRevision ?? 0) + 1, ownerChangedAt: now }
       : {}),
+    ...(command.finalReport ? { ordinaryFinalReport: command.finalReport } : {}),
     ...(execution && command.input.status === 'doing' ? { executionRef: execution } : {}),
     updatedAt: now,
   });
@@ -246,14 +268,17 @@ function updateAsHuman(
 
 function bindExecution(
   task: TaskItem,
-  command: Extract<OrdinaryTaskMutation, { kind: 'bind_execution' }>,
+  command: Extract<OrdinaryTaskMutation, { kind: 'bind_execution' | 'bind_deployment_execution' }>,
   now: number,
 ): OrdinaryTaskMutationResult {
   if (task.executionRef)
     return sameTaskExecution(task.executionRef, command.execution)
       ? { kind: 'replayed', task }
       : refused(task, 'execution_changed');
-  if (task.lastAppliedHandoffMessageRef !== `message:${command.execution.sourceMessageId}`)
+  if (command.kind === 'bind_deployment_execution') {
+    if (command.execution.threadId !== task.threadId || command.execution.catId !== task.ownerCatId)
+      return refused(task, 'actor_mismatch');
+  } else if (task.lastAppliedHandoffMessageRef !== `message:${command.execution.sourceMessageId}`)
     return refused(task, 'assignment_changed');
   return updated({ ...task, executionRef: command.execution, updatedAt: now });
 }

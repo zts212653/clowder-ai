@@ -2,15 +2,15 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { MemoryConciergeConfigStore } from '../dist/domains/concierge/ConciergeConfigStore.js';
 
-test('watcher defaults are on, owner scoped, and independent of the front desk switch', async () => {
+test('watcher defaults are off, unconfigured, owner scoped, and independent of the front desk switch', async () => {
   const store = new MemoryConciergeConfigStore();
   await store.patch('owner', { enabled: false });
   const config = await store.readWatcherConfig('owner');
-  assert.equal(config.enabled, true);
-  assert.equal(config.memberCatId, 'codex61-sol');
+  assert.equal(config.enabled, false);
+  assert.equal(config.memberCatId, '');
   assert.equal(config.revision, 0);
   await store.updateWatcherConfig('owner', 0, { enabled: false });
-  assert.equal((await store.readWatcherConfig('other')).enabled, true);
+  assert.equal((await store.readWatcherConfig('other')).enabled, false);
 });
 
 test('a watcher preference CAS preserves other settings and rejects stale tabs', async () => {

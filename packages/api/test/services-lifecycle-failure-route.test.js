@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { readWhisperSourceDigest } from '../dist/domains/services/asr-source-identity.js';
 import { resolveServiceScriptPath } from '../dist/domains/services/service-lifecycle.js';
 import { servicesRoutes } from '../dist/routes/services.js';
 
@@ -297,6 +298,7 @@ describe('service lifecycle failure handling', () => {
   it('treats an owned listener as already running instead of invoking start again', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const sourceDigest = await readWhisperSourceDigest();
     const { auditLog, events } = createAuditLog();
     let didRun = false;
     const configs = new Map([
@@ -336,6 +338,7 @@ describe('service lifecycle failure handling', () => {
           status: 'ok',
           model: 'mlx-community/Qwen3-ASR-1.7B-8bit',
           backend: 'mlx-audio',
+          asr_source_sha256: sourceDigest,
         },
       }),
     });
@@ -374,6 +377,7 @@ describe('service lifecycle failure handling', () => {
   it('persists an explicit Qwen env contract over stale Whisper lifecycle state', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const sourceDigest = await readWhisperSourceDigest();
     const env = buildIsolatedTestEnv(process.env);
     delete env.CAT_CAFE_SERVICE_ASR_ENABLED;
     delete env.ASR_ENABLED;
@@ -416,6 +420,7 @@ describe('service lifecycle failure handling', () => {
           status: 'ok',
           model: 'mlx-community/Qwen3-ASR-1.7B-8bit',
           backend: 'mlx-audio',
+          asr_source_sha256: sourceDigest,
         },
       }),
     });

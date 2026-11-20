@@ -237,7 +237,7 @@ export class DocumentListenController {
     this.pumpingGeneration = generation;
     try {
       while (this.canPump(generation) && (await this.prepareNext(generation))) {}
-      this.markDoneWhenPrepared();
+      if (this.isCurrent(generation)) this.markDoneWhenPrepared();
     } catch (error) {
       if (generation === this.generation) this.fail(error);
     } finally {
@@ -374,7 +374,11 @@ export class DocumentListenController {
       this.persistProgress(snapshot.currentTime);
       return;
     }
-    if (snapshot.source === null && this.preparedCount > 0) this.updateSession({ phase: 'idle' });
+    if (snapshot.source !== null) {
+      this.suspendAfterPlaybackCancellation(generation);
+      return;
+    }
+    if (this.preparedCount > 0) this.updateSession({ phase: 'idle' });
   }
 
   private handleItemEnd(generation: number, relativeIndex: number): void {

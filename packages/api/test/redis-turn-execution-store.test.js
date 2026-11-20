@@ -57,6 +57,39 @@ describe('RedisTurnExecutionStore', { skip: redisIsolationSkipReason(REDIS_URL) 
     store = new RedisTurnExecutionStore(redis);
   });
 
+  test('F338: cache maintenance never advances the member-work start index', async () => {
+    await store.createRunning(
+      runningInput({ invocationId: 'retention-probe', executionKind: 'cache_retention', startedAt: 200 }),
+    );
+    assert.equal(
+      await store.hasMemberTurnStartedAfter({
+        userId: 'redis-user-1',
+        threadId: 'redis-thread-1',
+        catId: 'codex-sol',
+        startedAfter: 100,
+      }),
+      false,
+    );
+    await store.createRunning(runningInput({ invocationId: 'real-work', startedAt: 300 }));
+    assert.equal(
+      await store.hasMemberTurnStartedAfter({
+        userId: 'redis-user-1',
+        threadId: 'redis-thread-1',
+        catId: 'codex-sol',
+        startedAfter: 100,
+      }),
+      true,
+    );
+  });
+
+  test('F338: interrupted cache maintenance never owes a member continuation', async () => {
+    for (const terminalReason of ['host_sleep', 'restart_shutdown']) {
+      await store.createRunning(runningInput({ invocationId: terminalReason, executionKind: 'cache_retention' }));
+      await store.transitionTerminal(terminalReason, { status: 'failed', endedAt: 200, terminalReason });
+    }
+    assert.deepEqual(await store.listOwedContinuations(), []);
+  });
+
   test('F337: recent settled turns read newest first, per thread, for the owner only', async () => {
     const settle = async (invocationId, threadId, userId, at) => {
       await store.createRunning(

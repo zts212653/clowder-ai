@@ -137,7 +137,7 @@ function applyDirectoryModes(root, modes) {
   for (const { path, mode } of [...modes].reverse()) chmodSync(path ? safeChild(root, path) : root, mode);
 }
 
-export function createReleaseArchive({ repo, entry, archivePath, txn }) {
+export function createReleaseArchive({ repo, entry, archivePath, txn, coldSocketPath }) {
   requireVisibleWorktreeIndex(entry.path);
   const root = dirname(archivePath);
   mkdirSync(root, { recursive: true, mode: 0o700 });
@@ -159,7 +159,14 @@ export function createReleaseArchive({ repo, entry, archivePath, txn }) {
   const common = safeRealpath(mustGit(entry.path, ['rev-parse', '--git-common-dir']));
   if (gitDir === common || !safeRealpath(gitDir).startsWith(`${common}/worktrees/`))
     throw new Error('archive private Git metadata boundary unknown');
-  const metadata = metadataFiles(gitDir).map((name) => copyOriginal(gitDir, join(archivePath, 'git-metadata'), name));
+  if (
+    coldSocketPath &&
+    (coldSocketPath !== join(gitDir, 'fsmonitor--daemon.ipc') || !lstatSync(coldSocketPath).isSocket())
+  )
+    throw new Error('cold Git socket archive boundary changed');
+  const metadata = metadataFiles(gitDir)
+    .filter((name) => join(gitDir, name) !== coldSocketPath)
+    .map((name) => copyOriginal(gitDir, join(archivePath, 'git-metadata'), name));
   const metadataDirectories = directoryModes(
     gitDir,
     metadata.map((item) => item.path),

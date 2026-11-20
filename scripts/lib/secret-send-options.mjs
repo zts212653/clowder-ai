@@ -126,9 +126,36 @@ export const CURL_FLAGS = new Set([
   '-V',
 ]);
 
+// Short-option arity for the CLI's existing clusters. The destination-bound
+// authentication exception still uses the smaller, strict CURL_FLAGS set.
+const CURL_SHORT_FLAGS = new Set([
+  ...CURL_FLAGS,
+  '-1',
+  '-2',
+  '-3',
+  '-a',
+  '-B',
+  '-j',
+  '-l',
+  '-M',
+  '-n',
+  '-p',
+  '-R',
+  '-Z',
+]);
+const CURL_INPUT_VALUES = new Set([...CURL_VALUES, '-C', '-K', '-P', '-t', '-z', '--config', '--netrc-file']);
+
+export function curlArguments(args, strict = false) {
+  return strict
+    ? sendArguments(args, CURL_VALUES, CURL_FLAGS)
+    : sendArguments(args, CURL_INPUT_VALUES, CURL_SHORT_FLAGS, { passthroughUnknown: true });
+}
+
 /** Keep a single option/value/operand classification for both managed senders. */
-export function sendArguments(args, values, flags) {
-  const words = flags ? expandShortOptions(args, values, flags) : args.map((word, index) => ({ word, index }));
+export function sendArguments(args, values, flags, { passthroughUnknown = false } = {}) {
+  const words = flags
+    ? expandShortOptions(args, values, flags, passthroughUnknown)
+    : args.map((word, index) => ({ word, index }));
   const output = [];
   let terminated = false;
   for (let cursor = 0; cursor < words.length; cursor++) {
@@ -149,18 +176,18 @@ export function sendArguments(args, values, flags) {
     }
     const value = option.inline ? option.value : words[++cursor]?.word;
     if (value === undefined) throw new Error('secret_send_argument_missing');
-    output.push({ kind: 'value', word, name: option.name, value });
+    output.push({ kind: 'value', word, name: option.name, value, inline: option.inline });
   }
   return output;
 }
 
 /** Expand option tokens only; a value or a post-terminator operand is literal. */
-function expandShortOptions(args, values, flags) {
+function expandShortOptions(args, values, flags, passthroughUnknown) {
   const output = [];
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === '--') return [...output, ...args.slice(index).map((word, offset) => ({ word, index: index + offset }))];
-    const expanded = expandShortOption(arg, values, flags);
+    const expanded = expandShortOption(arg, values, flags, passthroughUnknown);
     output.push(...expanded.map((word) => ({ word, index })));
     const option = splitOption(expanded.at(-1), values);
     if (values.has(option.name) && !option.inline && index + 1 < args.length)
@@ -169,14 +196,17 @@ function expandShortOptions(args, values, flags) {
   return output;
 }
 
-export function expandShortOption(arg, values, flags) {
+export function expandShortOption(arg, values, flags, passthroughUnknown = false) {
   if (!/^-[^-].+/.test(arg) || values.has(arg.slice(0, 2))) return [arg];
   const output = [];
   for (let index = 1; index < arg.length; index++) {
     const flag = `-${arg[index]}`;
     const attached = arg.slice(index + 1);
     if (values.has(flag)) return [...output, `${flag}${attached}`];
-    if (!flags.has(flag)) throw new Error('secret_send_option_unsupported');
+    if (!flags.has(flag)) {
+      if (passthroughUnknown) return [arg];
+      throw new Error('secret_send_option_unsupported');
+    }
     if (attached.startsWith('=')) {
       output.push(`${flag}${attached}`);
       return output;
@@ -184,6 +214,10 @@ export function expandShortOption(arg, values, flags) {
     output.push(flag);
   }
   return output;
+}
+
+export function withSendValue(argument, value) {
+  return argument.inline && value === argument.value ? [argument.word] : [argument.name, value];
 }
 
 export function splitOption(arg, valueOptions) {
