@@ -841,7 +841,13 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
                       : null,
                   }
                 : proposal
-                  ? proposalView(proposal, !!ui.editing?.[message.id], !!ui.asking?.[message.id], ui.f)
+                  ? proposalView(
+                      proposal,
+                      !!ui.editing?.[message.id],
+                      !!ui.asking?.[message.id],
+                      ui.f,
+                      messageRichBlocks(message).find((b) => b.id === proposal.target.blockId),
+                    )
                   : ask
                     ? runtimeAskView(
                         bound
