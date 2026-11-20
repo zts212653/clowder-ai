@@ -690,13 +690,13 @@ function ctLeaf(k, sig, draw) {
   READ_SCOPES.push(reads); READ_OWN = own; CT_UP.push(k);
   let x;
   try { PROJ_FOCUS = false; x = draw(); delete LEAF_ERR[k]; }
-  catch (err) {   /* 这一块画的时候出错（插件这类外部声明和数据）：留着上一次画好的，第一次出错的视图显示失败；同一个错只报一次；别的块照常画。
+  catch (err) {   /* 这一块画的时候出错（插件这类外部声明和数据）：留着上一次画好的，第一次就出错则空着；同一个错只报一次；别的块照常画。
                      记下的那一块不算画好：下次一定重画，错没了就回来 */
     if (LEAF_ERR[k] !== err.message) { LEAF_ERR[k] = err.message; console.error(err); }
     CT_UP.forEach(function (u) { LEAF_DIRTY.add(u); });
     READ_SCOPES.pop(); READ_OWN = own0; CT_UP.pop(); PROJ_FOCUS = focus0;
     reads.forEach(function (r) { for (let i = 0; i < READ_SCOPES.length; i++) READ_SCOPES[i].add(r); });
-    if (!was) return k.indexOf('view:') === 0 ? PV_DRAW.state('error', { text: tc('common.viewError') }) : '';
+    if (!was) return '';
     was.sig = null;
     return typeof was.piece === 'string' ? was.piece : Object.assign({}, was.piece);
   }
