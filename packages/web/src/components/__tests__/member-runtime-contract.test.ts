@@ -52,6 +52,15 @@ describe('member preferences and execution identity are independent', () => {
       'follow',
     );
   });
+  it.each(['follow', 'override'] as const)('clearing an account does not restore its stale %s binding', (mode) => {
+    const local = { ...member, accountBindingMode: mode === 'follow' ? 'override' : 'follow' } as CatData;
+    const payload = buildCatPatchPayload(
+      { ...initialState(local), accountRef: '', configurationSource: 'native_tool', accountBindingMode: mode },
+      local,
+    );
+    expect(payload).toHaveProperty('accountRef', null);
+    expect(payload).not.toHaveProperty('accountBindingMode');
+  });
   it('keeps the chosen account while inheriting model and restoring effort', () => {
     expect(buildCatPatchPayload({ ...initialState(member), cliEffort: '' }, member)).toEqual({ cli: { effort: null } });
   });

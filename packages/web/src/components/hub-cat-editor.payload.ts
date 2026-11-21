@@ -284,6 +284,7 @@ export function buildCatPatchPayload(form: HubCatEditorFormState, cat: CatData, 
   if (
     ['openai', 'anthropic'].includes(form.clientId) &&
     usesCliCarrier(form) &&
+    resolveFormAccountRef(form).length > 0 &&
     form.accountBindingMode &&
     form.accountBindingMode !== cat.accountBindingMode
   )

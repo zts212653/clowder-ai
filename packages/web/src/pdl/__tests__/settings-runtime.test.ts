@@ -728,7 +728,13 @@ describe('r8 missing settings binding families', () => {
     }
   });
 
-  it('restores the current real account in the member draft and waits for the existing member save owner', async () => {
+  it.each([
+    'save',
+    'clear',
+    'client',
+    'carrier',
+    'runtime',
+  ] as const)('restores the current real account and handles %s through the member save owner', async (transition) => {
     const { dom, w, data, action, port, post, errors } = await boot();
     Object.assign(data.cats[0], {
       accountRef: 'prior',
@@ -744,7 +750,7 @@ describe('r8 missing settings binding families', () => {
       blank: initialState(),
       codex: { sandboxMode: 'workspace-write', approvalPolicy: 'on-request' },
       strategies: [],
-      runtimes: [],
+      runtimes: [{ id: 'native-claude', form: { ...initialState(), clientId: 'anthropic', carrier: 'cli' } }],
       libraries: [],
       clients: CLIENT_OPTIONS.map((c) => ({
         id: c.value,
@@ -756,6 +762,7 @@ describe('r8 missing settings binding families', () => {
     action.mockImplementation(async (name) => {
       if (name === 'membersRead') return structuredClone(metadata);
       if (name === 'memberCanonRead') return { bound: false, versions: [] };
+      if (name === 'memberRuntimeModels') return { status: 'configured', models: [] };
       if (name === 'settingsFollowRead') {
         port.data = {
           ...port.data,
@@ -777,6 +784,25 @@ describe('r8 missing settings binding families', () => {
       expect(w.document.querySelector('[data-k="acc"]').value).toBe('current');
       expect(action.mock.calls.filter(([name]) => name === 'memberSave')).toHaveLength(0);
       expect(post).not.toHaveBeenCalled();
+      if (transition !== 'save') {
+        if (transition === 'runtime') w.eval("CHANGES.memberRuntime({target:{value:'native-claude'}})");
+        else {
+          const field = { clear: 'acc', client: 'client', carrier: 'via' }[transition];
+          const value = { clear: '', client: 'anthropic', carrier: 'acp' }[transition];
+          w.eval(
+            `CHANGES.md({type:'change',target:{dataset:{k:${JSON.stringify(field)}},value:${JSON.stringify(value)}}})`,
+          );
+        }
+        await w.__settled();
+        expect(w.eval('VM.member().form.follow')).toBe(false);
+        expect(w.eval('VM.member().form.overrideAccount')).toBe(false);
+        expect(w.document.querySelector('[data-act="followAcc"]')).toBeNull();
+        await w.eval('FORMS.member()');
+        expect(JSON.parse(action.mock.calls.find(([name]) => name === 'memberSave')![1].value)).not.toHaveProperty(
+          'accountBindingMode',
+        );
+        return;
+      }
       await w.eval('FORMS.member()');
       expect(JSON.parse(action.mock.calls.find(([name]) => name === 'memberSave')![1].value)).toMatchObject({
         accountRef: 'current',
