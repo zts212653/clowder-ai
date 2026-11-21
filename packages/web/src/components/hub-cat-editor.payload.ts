@@ -281,7 +281,13 @@ function normalizeOptionalText(value: unknown): string | null {
 
 export function buildCatPatchPayload(form: HubCatEditorFormState, cat: CatData, context: CatPayloadContext = {}) {
   const payload = buildCatPayload(form, cat, context) as Record<string, unknown>;
-  if (form.accountBindingMode && form.accountBindingMode !== cat.accountBindingMode)
+  if (
+    ['openai', 'anthropic'].includes(form.clientId) &&
+    usesCliCarrier(form) &&
+    resolveFormAccountRef(form).length > 0 &&
+    form.accountBindingMode &&
+    form.accountBindingMode !== cat.accountBindingMode
+  )
     payload.accountBindingMode = form.accountBindingMode;
 
   if (form.clientId === cat.clientId) {

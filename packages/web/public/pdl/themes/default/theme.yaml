@@ -16529,7 +16529,6 @@ pdl:
                           label: t:composer.jump
                           tip: t:composer.jumpTip
                           act: streamLatest
-                          hideWhileTyping: true
                         - type: notices
                           items:
                             slot: chat.composer.notice

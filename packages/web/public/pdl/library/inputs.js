@@ -317,9 +317,15 @@ function taGhost(ta) {
   const g = ta.parentElement && ta.parentElement.querySelector(':scope > .ta-ghost'); if (!g) return;
   const list = TA_COMPLETE[ta.id] || [], v = ta.value, end = ta.selectionStart === v.length && ta.selectionEnd === v.length;
   const hit = v.length >= 2 && end ? list.find(function (x) { return typeof x === 'string' && x.indexOf(v) === 0 && x.length > v.length; }) || '' : '';
+  if (!hit) {
+    if (g.children[0].textContent) g.children[0].textContent = '';
+    if (g.children[1].textContent) g.children[1].textContent = '';
+    delete ta.dataset.ghost;
+    return;
+  }
   taGhostStyle(ta);
-  g.children[0].textContent = v; g.children[1].textContent = hit ? hit.slice(v.length) : '';
-  if (hit) ta.dataset.ghost = hit; else delete ta.dataset.ghost;   /* 滚动对齐交给下面的 scroll 监听：打字时不读 scrollTop（读它会让整页先排一次版） */
+  g.children[0].textContent = v; g.children[1].textContent = hit.slice(v.length);
+  ta.dataset.ghost = hit;   /* 滚动对齐交给下面的 scroll 监听：打字时不读 scrollTop（读它会让整页先排一次版） */
 }
 document.addEventListener('input', function (e) { const t = e.target; if (t && t.tagName === 'TEXTAREA' && TA_COMPLETE[t.id]) taGhost(t); }, true);
 document.addEventListener('selectionchange', function () { const t = document.activeElement; if (t && t.tagName === 'TEXTAREA' && TA_COMPLETE[t.id]) taGhost(t); });

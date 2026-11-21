@@ -381,8 +381,8 @@ function patchEl(live, next) {
    消息和孤岛不就地改：内容一样留着，不一样交给 reuseApply 按版本换。最后由 placeKids 摆：留下的顺序没变就一个都不挪 */
 function kidKey(n) {
   if (n.nodeType !== 1) return null;
-  if (n.dataset.layer) return 'layer:' + n.dataset.layer + '|' + (n.dataset.lc || '');
-  if (n.dataset.view) return 'view:' + n.dataset.view;
+  if (n.hasAttribute('data-layer')) return 'layer:' + n.getAttribute('data-layer') + '|' + (n.getAttribute('data-lc') || '');
+  if (n.hasAttribute('data-view')) return 'view:' + n.getAttribute('data-view');
   const id = nodeId(n); return id ? 'id:' + id : null;
 }
 function kidPatch(o, n) {

@@ -3,8 +3,9 @@
 /* ── 输入框上沿：左边在跑的成员，右边排队 ── */
 .composer-wrap .composer { position: relative; }
 .composer > .lanes { position: absolute; left: var(--sp-m); right: var(--sp-m); bottom: calc(100% + var(--sp-xs)); pointer-events: none; z-index: var(--z-sticky); }
-.lanes > .lane { pointer-events: auto; }
-.lanes > .lane:has(> .lane-in:empty) { pointer-events: none; }   /* 空着的道只占位，不挡下面的内容 */
+.lanes > .lane.scroll-x { pointer-events: auto; }
+.lanes > .lane.scroll-x:has(> .lane-in:empty) { pointer-events: none; }   /* 空着的道只占位，不挡下面的内容 */
+.lanes > .lane > .lane-in > :not(.vstack), .lanes > .lane > .lane-in > .vstack > * { pointer-events: auto; }   /* 只有道里的胶囊和按钮接收点击，透明的道盒和留白透传给下方的输入框 */
 /* 执行中头像外那一圈的预设：streaming / spawning 贴着头像平滑地呼吸（亮 → 半亮 → 亮，中间不停），silent / stall / error 是贴着头像的警示脉动；周期都是 --loop，次数各自写在关键帧里 */
 @keyframes mo-streaming { 0%, 100% { opacity: 1; animation-timing-function: cubic-bezier(.4, 0, .6, 1); } 50% { opacity: .5; animation-timing-function: cubic-bezier(.4, 0, .6, 1); } }
 @keyframes mo-spawning { 0%, 100% { opacity: .6; animation-timing-function: cubic-bezier(.4, 0, .6, 1); } 50% { opacity: .25; animation-timing-function: cubic-bezier(.4, 0, .6, 1); } }
