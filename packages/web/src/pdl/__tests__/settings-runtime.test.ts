@@ -2679,3 +2679,51 @@ it('opens a member whose client is no longer offered (a legacy antigravity membe
   expect(w.eval('VM.member().form.d.model')).toBe('gemini-3.1-pro');
   expect(errors).not.toHaveBeenCalled();
 });
+
+it('clears a set optional secret field via pcfOp clear and saves null without exposing clear on required secrets', async () => {
+  const { dom, w, errors } = await boot();
+  try {
+    const saved: Array<Array<{ key: string; value: string | null }>> = [];
+    w.__secretClearSave = (updates: Array<{ key: string; value: string | null }>) => {
+      saved.push(updates);
+      return Promise.resolve();
+    };
+    const html = w.eval(`
+      (() => {
+        const model = pcfModel('secret-clear-test', {
+          plugin: 'official.github-operations',
+          installed: true,
+          steps: [],
+          testable: false,
+          fields: [
+            { key: 'token', label: 'Token', kind: 'secret', required: false, currentValue: '••••••' },
+            { key: 'requiredSecret', label: 'Required', kind: 'secret', required: true, currentValue: '••••••' },
+          ],
+          save: (updates) => window.__secretClearSave(updates),
+        });
+        return pluginConfigForm(model);
+      })()
+    `);
+    const host = dom.window.document.createElement('div');
+    host.innerHTML = html;
+    expect(host.querySelector('[data-act="pcfOp"][data-op="clear"][data-k="token"]')).not.toBeNull();
+    expect(host.querySelector('[data-act="pcfOp"][data-op="clear"][data-k="requiredSecret"]')).toBeNull();
+    expect(w.eval("pcfDirty('secret-clear-test')")).toBe(false);
+
+    w.eval("A.pcfOp({ op: 'clear', p: 'secret-clear-test', k: 'token' })");
+    expect(w.eval("pcfDirty('secret-clear-test')")).toBe(true);
+    const afterHtml = w.eval("pluginConfigForm(pcfModel('secret-clear-test', PCF_SRC['secret-clear-test']))");
+    host.innerHTML = afterHtml;
+    expect(host.querySelector('[data-act="pcfOp"][data-op="clear"][data-k="token"]')).toBeNull();
+    expect((host.querySelector('#pcf-secret-clear-test-token') as HTMLInputElement | null)?.placeholder).toBe(
+      w.eval("tc('pcf.unset')"),
+    );
+
+    await w.eval("pcfSave('secret-clear-test')");
+    expect(saved).toEqual([[{ key: 'token', value: null }]]);
+    expect(errors).not.toHaveBeenCalled();
+  } finally {
+    await w.__settled();
+    dom.window.close();
+  }
+});
