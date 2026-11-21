@@ -81,3 +81,39 @@ test('installer preserves identity before any payload delete', () => {
   assert.ok(prepare.indexOf('configure-desktop-instance.ps1') < prepare.indexOf('stop-installed-desktop.ps1'));
   assert.match(prepare, /Result := CustomMessage\('SetupIdentityFailed'\)/);
 });
+
+test('setup configures and preserves an external persistent data root', { skip: process.platform !== 'win32' }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'persistent-install-'));
+  const app = path.join(root, 'installed');
+  const data = path.join(root, 'data');
+  const other = path.join(root, 'other');
+  const marker = path.join(app, 'desktop-data-root.json');
+  fs.mkdirSync(data);
+  fs.mkdirSync(other);
+  try {
+    configure(app, ['-DataRoot', data]);
+    const body = fs.readFileSync(marker, 'utf8');
+    assert.equal(JSON.parse(body).dataRoot, fs.realpathSync.native(data));
+    configure(app);
+    configure(app, ['-DataRoot', data]);
+    assert.throws(() => configure(app, ['-DataRoot', other]), /conflicts/);
+    assert.throws(() => configure(app, ['-InstanceRoot', data]), /choose either/i);
+    assert.equal(fs.readFileSync(marker, 'utf8'), body);
+
+    const isolated = path.join(root, 'isolated');
+    fs.mkdirSync(isolated);
+    fs.writeFileSync(
+      path.join(isolated, 'desktop-instance.json'),
+      JSON.stringify({ ...saved, CAT_CAFE_DESKTOP_INSTANCE_ROOT: data }),
+    );
+    assert.throws(() => configure(isolated, ['-DataRoot', data]), /choose either/i);
+    assert.equal(fs.existsSync(path.join(isolated, 'desktop-data-root.json')), false);
+
+    const nested = path.join(root, 'nested-app');
+    fs.mkdirSync(nested);
+    assert.throws(() => configure(nested, ['-DataRoot', nested]), /outside the installation/i);
+    assert.throws(() => configure(nested, ['-DataRoot', path.join(root, 'missing')]), /existing directory/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

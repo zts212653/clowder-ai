@@ -125,6 +125,14 @@ test('persistent data root survives a packaged upgrade while retaining ordinary 
     fs.rmSync(payload, { recursive: true });
     fs.mkdirSync(payload);
     assert.equal(resolve().dataRoot, fs.realpathSync.native(data));
+    const legacyMarker = path.join(payload, 'desktop-instance.json');
+    fs.writeFileSync(legacyMarker, '{}');
+    assert.throws(resolve, /choose either isolated instance or persistent data root/i);
+    fs.unlinkSync(legacyMarker);
+    assert.throws(
+      () => resolveDesktopRuntime({ CAT_CAFE_DESKTOP_INSTANCE_ROOT: data }, executable),
+      /choose either isolated instance or persistent data root/i,
+    );
     fs.writeFileSync(marker, JSON.stringify({ dataRoot: install }));
     assert.throws(resolve, /outside the installation/);
     fs.writeFileSync(marker, JSON.stringify({ dataRoot: 'relative' }));

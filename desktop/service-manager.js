@@ -477,13 +477,15 @@ class ServiceManager {
 
   _buildApiEnv(userDataDir) {
     const salt = this._getOrCreateTelemetrySalt(userDataDir);
+    const { instanceRoot, dataRoot } = resolveDesktopRuntime();
     return {
       // Binary lookup and runtime-path redirection are one API contract.
       // Keep writable project data outside the installation and respect an
       // ordinary deployment's existing explicit workspace selection.
       CAT_CAFE_RUNTIME_ROOT: this.root,
-      CAT_CAFE_WORKSPACE_ROOT: process.env.CAT_CAFE_WORKSPACE_ROOT?.trim() || path.join(userDataDir, 'project'),
-      ...(resolveDesktopRuntime().instanceRoot
+      CAT_CAFE_WORKSPACE_ROOT:
+        (!dataRoot && process.env.CAT_CAFE_WORKSPACE_ROOT?.trim()) || path.join(userDataDir, 'project'),
+      ...(instanceRoot
         ? {
             CAT_CAFE_CONFIG_ROOT: path.join(userDataDir, 'project'),
             CAT_CAFE_WORKSPACE_ROOT: path.join(userDataDir, 'project'),
@@ -756,6 +758,19 @@ class ServiceManager {
       PROMPT_DEBUG: '1',
     };
 
+    if (dataRoot) {
+      // The install marker selects its workspace and local state independently of the shell.
+      for (const key of [
+        'CAT_CAFE_CONFIG_ROOT',
+        'CAT_CAFE_GLOBAL_CONFIG_ROOT',
+        'ALLOWED_WORKSPACE_DIRS',
+        'MEMORY_STORE',
+        'CAT_CAFE_INVOCATION_REGISTRY',
+        'NODE_PATH',
+      ]) {
+        delete env[key];
+      }
+    }
     if (IS_WIN) windowsUserPath.mergeWindowsPath(env, this.windowsPath);
 
     // macOS Electron apps launched from Finder/Dock inherit a minimal PATH
@@ -804,9 +819,8 @@ class ServiceManager {
       Object.assign(env, opts.envOverrides);
     }
     if (name === 'api') {
-      // Ordinary launches respect explicit client bindings. Only an isolated
-      // instance replaces them with its own authorized client-homes mapping.
-      if (instanceRoot) {
+      // Install-owned profiles use their configured native client bindings.
+      if (instanceRoot || dataRoot) {
         for (const key of [
           'CLAUDE_CONFIG_DIR',
           'CODEX_HOME',
@@ -817,13 +831,10 @@ class ServiceManager {
         ]) {
           delete env[key];
         }
+        if (dataRoot) delete env.GEMINI_CLI_HOME;
       }
-      Object.assign(
-        env,
-        instanceRoot ? readClientHomes(instanceRoot) : resolveDefaultClientHomes(dataRoot ? inherited : env),
-        readClientHomes(dataRoot),
-      );
-      if (dataRoot) env.GEMINI_CLI_HOME ??= inherited.USERPROFILE || os.homedir();
+      const profileRoot = instanceRoot ?? dataRoot;
+      Object.assign(env, profileRoot ? readClientHomes(profileRoot) : resolveDefaultClientHomes(env));
     }
 
     log(`[${name}] spawn: ${cmd} ${args.join(' ')}`);

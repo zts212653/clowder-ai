@@ -329,9 +329,21 @@ test('persistent profile gives a real API child G-compatible state paths and hos
   const canonicalProfile = fs.realpathSync.native(profile);
   fs.writeFileSync(path.join(install, 'desktop-data-root.json'), JSON.stringify({ dataRoot: profile }));
   const clientHome = fs.realpathSync.native(codex);
-  fs.writeFileSync(path.join(profile, 'client-homes.json'), JSON.stringify({ codex }));
+  fs.writeFileSync(path.join(profile, 'client-homes.json'), JSON.stringify({ codex, gemini: codex }));
   const execPath = process.execPath;
-  const previous = process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
+  const stale = {
+    CAT_CAFE_WORKSPACE_ROOT: host,
+    CAT_CAFE_CONFIG_ROOT: host,
+    CAT_CAFE_GLOBAL_CONFIG_ROOT: host,
+    USERPROFILE: host,
+    HOME: host,
+    CODEX_HOME: host,
+    DSH_HOME: host,
+    GEMINI_CLI_HOME: host,
+  };
+  const envKeys = [...Object.keys(stale), 'CAT_CAFE_DESKTOP_INSTANCE_ROOT'];
+  const previous = new Map(envKeys.map((key) => [key, process.env[key]]));
+  Object.assign(process.env, stale);
   delete process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
   process.execPath = path.join(payload, 'Clowder AI.exe');
   try {
@@ -340,7 +352,19 @@ test('persistent profile gives a real API child G-compatible state paths and hos
     assert.equal(business, path.join(canonicalProfile, 'Clowder AI'));
     fs.mkdirSync(business);
     const result = path.join(base, 'env.json');
-    const sample = ['HOME', 'LOCALAPPDATA', 'CAT_CAFE_DATA_DIR', 'EVIDENCE_DB', 'CODEX_HOME', 'REDIS_URL'];
+    const sample = [
+      'HOME',
+      'LOCALAPPDATA',
+      'CAT_CAFE_DATA_DIR',
+      'EVIDENCE_DB',
+      'CODEX_HOME',
+      'REDIS_URL',
+      'CAT_CAFE_WORKSPACE_ROOT',
+      'CAT_CAFE_CONFIG_ROOT',
+      'CAT_CAFE_GLOBAL_CONFIG_ROOT',
+      'DSH_HOME',
+      'GEMINI_CLI_HOME',
+    ];
     manager._startProcess(
       'api',
       execPath,
@@ -359,13 +383,17 @@ test('persistent profile gives a real API child G-compatible state paths and hos
       EVIDENCE_DB: path.join(business, 'evidence.sqlite'),
       CODEX_HOME: clientHome,
       REDIS_URL: 'redis://localhost:6399',
+      CAT_CAFE_WORKSPACE_ROOT: path.join(business, 'project'),
+      GEMINI_CLI_HOME: clientHome,
     });
     manager._isPortOpen = async () => true;
     await assert.rejects(manager._startRedis(business), /Persistent Redis port 6399 is already occupied/);
   } finally {
     process.execPath = execPath;
-    if (previous === undefined) delete process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
-    else process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT = previous;
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
