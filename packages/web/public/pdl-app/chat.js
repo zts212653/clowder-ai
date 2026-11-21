@@ -1450,8 +1450,9 @@ window.clowderChat = {
       return true;
     };
     INPUTS.cafeField = function (e) {
+      const before = CS.f[e.target.id] || '';
       CS.f[e.target.id] = e.target.value;
-      if (e.target.id.indexOf('pick-') === 0) render(true);
+      if (e.target.id.indexOf('pick-') === 0 && !before.trim() !== !e.target.value.trim()) render(true);
     };
     A.cafeAskSubmit = function (d) {
       return chatAction('runtimeRespond', d);

@@ -6182,6 +6182,15 @@ describe('unmodified runtime and project chat bindings', () => {
       input.dispatchEvent(new w.InputEvent('input', { bubbles: true, data: 'y', isComposing: true }));
       expect(w.document.getElementById(id) === input).toBe(true);
       expect(w.document.activeElement === input).toBe(true);
+      await w.__settled();
+      w.eval(
+        'window.cardInputRenders=0; var cardRender=render; render=function(){window.cardInputRenders++;return cardRender.apply(this,arguments);}; window.cardStreamReads=0; var cardStream=VM.chatStream; VM.chatStream=function(){window.cardStreamReads++;return cardStream.apply(this,arguments);};',
+      );
+      const changes: unknown[] = [];
+      const observer = new w.MutationObserver((items: unknown[]) => changes.push(...items));
+      observer.observe(w.document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+      input.value = 'yu';
+      input.dispatchEvent(new w.InputEvent('input', { bubbles: true, data: 'u', isComposing: true }));
       input.value = '语';
       input.dispatchEvent(new w.InputEvent('input', { bubbles: true, data: '语', isComposing: true }));
       input.dispatchEvent(new w.CompositionEvent('compositionend', { bubbles: true, data: '语' }));
@@ -6192,6 +6201,11 @@ describe('unmodified runtime and project chat bindings', () => {
       committed.dispatchEvent(new w.InputEvent('input', { bubbles: true, data: '音', isComposing: false }));
       expect(ui.f[id]).toBe('语音');
       expect(w.document.getElementById(id) === committed).toBe(true);
+      await w.__settled();
+      observer.disconnect();
+      expect(w.cardInputRenders).toBe(0);
+      expect(w.cardStreamReads).toBe(0);
+      expect(changes).toHaveLength(0);
       const next = w.document.getElementById(id);
       next.focus();
       next.dispatchEvent(new w.CompositionEvent('compositionstart', { bubbles: true }));

@@ -1,5 +1,5 @@
 'use client';
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { useWorkspace } from '@/hooks/useWorkspace';
 import type { ChatData } from './chat-models';
 import type { ChatUiState } from './types';
@@ -56,12 +56,8 @@ export function ProjectDataBinding({
   ui: ChatUiState;
   changed: (binding: ProjectBindings) => void;
 }) {
-  const projectSources = useMemo(
-    () => [...needed].filter((key) => key.startsWith('project.') || key === 'sidebar' || key.startsWith('sidebar.')),
-    [needed],
-  );
   const need = (source: string) =>
-    projectSources.some((key) => key === source || key.startsWith(source + '.')) ? readGeneration : false;
+    [...needed].some((key) => key === source || key.startsWith(source + '.')) ? readGeneration : false;
   const workbench = useWorkbenchBindings(data, workspace, {
     git: need('project.workbench.git'),
     native: need('project.workbench.native'),
@@ -81,7 +77,7 @@ export function ProjectDataBinding({
   const settings = useSettingsBindings();
   const board = useBoardBindings(data, workbench.state, need('project.board'), [
     ...new Set(
-      projectSources
+      [...needed]
         .filter((key) => key.startsWith('project.board.docs.'))
         .map((key) => key.slice('project.board.docs.'.length).split('.')[0]),
     ),
