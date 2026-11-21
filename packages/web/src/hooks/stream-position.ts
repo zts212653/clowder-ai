@@ -24,6 +24,12 @@ import type { NamedMessageStore } from './named-message-writer';
  */
 type Placement = 'start' | 'next' | 'held' | 'gap' | 'legacy';
 
+/**
+ * A reply whose stream this page lost part of: the socket joins its thread room again, and the join's replay
+ * (the server's full event list of every open reply) rebuilds it. Until then what arrives is still written.
+ */
+export const STREAM_GAP_EVENT = 'cat-cafe:stream-gap';
+
 /** Event types the server records into a response's stream (callback text is the post's own). */
 function isRecordable(event: Pick<AgentEventFields, 'type' | 'origin'>): boolean {
   if (event.type === 'text') return event.origin !== 'callback';
@@ -99,6 +105,8 @@ export function admitStreamEvent(event: AdmittedEvent, threadId: string, store: 
   if (step === 'gap') {
     if (before) current.patchThreadMessage(threadId, event.messageId, { streamPrefix: 'incomplete' });
     else current.upsertLifecycleMessage(threadId, newReply(event, 'incomplete'));
+    if (typeof window !== 'undefined')
+      window.dispatchEvent(new CustomEvent(STREAM_GAP_EVENT, { detail: { threadId, messageId: event.messageId } }));
     return true;
   }
   if (!before) current.upsertLifecycleMessage(threadId, newReply(event));

@@ -3,7 +3,6 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { constants, createReadStream, createWriteStream, type Stats } from 'node:fs';
 import { lstat, mkdir, mkdtemp, open, readdir, readFile, rename, rm } from 'node:fs/promises';
 import { isAbsolute, posix, relative, resolve, sep } from 'node:path';
-import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
 import { type PluginManifest } from '@clowder-ai/plugin-contract';
@@ -62,26 +61,15 @@ async function sha512File(path: string): Promise<Buffer> {
 }
 
 export async function sealArchive(source: string, destination: string, signal?: AbortSignal): Promise<void> {
-  let bytes = 0;
-  const bound = new Transform({
-    transform(chunk: Buffer, _encoding, callback) {
-      bytes += chunk.length;
-      callback(
-        bytes > PLUGIN_ARCHIVE_BUDGET.compressedBytes ? runtimeError('archive compressed byte limit exceeded') : null,
-        chunk,
-      );
-    },
-  });
   const deadline = AbortSignal.timeout(PLUGIN_ARCHIVE_BUDGET.deadlineMs);
   const handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const opened = await handle.stat();
-    if (!opened.isFile() || opened.size > PLUGIN_ARCHIVE_BUDGET.compressedBytes) {
-      throw runtimeError('archive must be a regular file within the compressed byte limit');
+    if (!opened.isFile()) {
+      throw runtimeError('archive must be a regular file');
     }
     await pipeline(
       handle.createReadStream({ autoClose: false }),
-      bound,
       createWriteStream(destination, { flags: 'wx', mode: 0o600 }),
       { signal: signal ? AbortSignal.any([signal, deadline]) : deadline },
     );
@@ -216,8 +204,6 @@ export async function stageVerifiedPackageContent(
   if (!archiveStat.isFile() || archiveStat.isSymbolicLink()) {
     throw runtimeError('staged package archive must be a regular file');
   }
-  if (archiveStat.size > PLUGIN_ARCHIVE_BUDGET.compressedBytes)
-    throw runtimeError('archive compressed byte limit exceeded');
   input.signal?.throwIfAborted();
   await mkdir(input.packagesRoot, { recursive: true });
   const stageParent = await mkdtemp(resolve(input.packagesRoot, '.runtime-stage-'));

@@ -184,7 +184,8 @@ describe('GET/PUT /api/config/conversation-view (F322)', () => {
       url: '/api/config/conversation-view?threadId=thread-foreign',
       headers: ownerHeaders,
     });
-    assert.equal(foreign.statusCode, 404, foreign.payload);
+    // the owner gate is the boundary: a thread the owner did not create (a system thread) has a view preference too
+    assert.equal(foreign.statusCode, 200, foreign.payload);
 
     const nonParticipant = await app.inject({
       method: 'PUT',

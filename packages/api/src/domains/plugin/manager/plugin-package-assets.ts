@@ -1,3 +1,4 @@
+import type { PluginPdlFragment } from '@cat-cafe/shared';
 import { fetchOfficialPackageArchive } from '../bundled-package-source.js';
 import { FilesystemVerifiedPluginPackageLocator } from '../external-runtime/filesystem-package-locator.js';
 import type { PluginManifestValidator } from '../external-runtime/package-staging.js';
@@ -16,6 +17,7 @@ import {
   inventoryIdentity,
   objectIcon,
   pluginIconAsset,
+  readVerifiedConsole,
   readVerifiedIcon,
   readVerifiedReadme,
   verifiedPackageIcon,
@@ -43,12 +45,15 @@ export interface PluginManagerPackageAssetServiceOptions {
   };
 }
 
+type PluginConsoleFiles = { pdl?: PluginPdlFragment } & Pick<PluginPdlFragment, 'components' | 'i18n'>;
+
 export class PluginManagerPackageAssetService
   implements PluginManagerPackageAssetPort, PluginManagerPackageDocumentationPort
 {
   private readonly fetchArchive: (entry: OfficialPluginCatalogEntry) => Promise<Uint8Array>;
   private readonly catalogPackages: FilesystemVerifiedPluginPackageLocator;
   private readonly readmeCache = new Map<string, Promise<string | undefined>>();
+  private readonly consoleCache = new Map<string, Promise<PluginConsoleFiles>>();
 
   constructor(private readonly options: PluginManagerPackageAssetServiceOptions) {
     this.fetchArchive = options.fetchArchive ?? fetchOfficialPackageArchive;
@@ -145,6 +150,26 @@ export class PluginManagerPackageAssetService
     }
   }
 
+  /** The installed package's console files (app.js, i18n), read beside its manifest's pdl section. */
+  async readConsole(pluginId: string): Promise<PluginConsoleFiles> {
+    const snapshot = await this.options.inventory.snapshot({ pluginId });
+    const instance = snapshot.instances.find(
+      (candidate) => candidate.pluginId === pluginId && candidate.lifecycleState === 'installed',
+    );
+    const installed = instance
+      ? snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest)
+      : undefined;
+    if (!installed) return {};
+    return this.cached(this.consoleCache, installed.packageDigest, async () => {
+      const located = await this.options.packages.resolveInstalledPackage(installed.packageDigest);
+      try {
+        return await readVerifiedConsole(located, inventoryIdentity(installed));
+      } finally {
+        await located.release();
+      }
+    });
+  }
+
   async readReadme(pluginId: string): Promise<string | undefined> {
     const snapshot = await this.options.inventory.snapshot({ pluginId });
     const instance = snapshot.instances.find(
@@ -154,7 +179,7 @@ export class PluginManagerPackageAssetService
       ? snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest)
       : undefined;
     if (installed) {
-      return this.cachedReadme(installed.packageDigest, async () => {
+      return this.cached(this.readmeCache, installed.packageDigest, async () => {
         const located = await this.options.packages.resolveInstalledPackage(installed.packageDigest).catch((error) => {
           throw new PluginManagerPackageAssetError('INVALID_ASSET', 'installed plugin package could not be verified', {
             cause: error,
@@ -180,7 +205,7 @@ export class PluginManagerPackageAssetService
       if (this.options.repositoryAssets) return this.options.repositoryAssets.readReadme(pluginId);
       throw new PluginManagerPackageAssetError('PLUGIN_NOT_FOUND', `unknown plugin ${pluginId}`);
     }
-    return this.cachedReadme(entry.packageDigest, async () => {
+    return this.cached(this.readmeCache, entry.packageDigest, async () => {
       let located: VerifiedPluginPackage;
       try {
         located = await this.catalogPackages.resolvePackageArchiveBytes(
@@ -206,14 +231,15 @@ export class PluginManagerPackageAssetService
     });
   }
 
-  private cachedReadme(packageDigest: string, load: () => Promise<string | undefined>): Promise<string | undefined> {
-    const existing = this.readmeCache.get(packageDigest);
+  /** An installed package's files are fixed by its digest: read and verify them once. */
+  private cached<T>(cache: Map<string, Promise<T>>, packageDigest: string, load: () => Promise<T>): Promise<T> {
+    const existing = cache.get(packageDigest);
     if (existing) return existing;
     const pending = load().catch((error) => {
-      this.readmeCache.delete(packageDigest);
+      cache.delete(packageDigest);
       throw error;
     });
-    this.readmeCache.set(packageDigest, pending);
+    cache.set(packageDigest, pending);
     return pending;
   }
 }

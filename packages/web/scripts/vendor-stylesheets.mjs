@@ -32,20 +32,15 @@ function writeManifest(webRoot, urls) {
 
 /** Rebase source CSS fingerprints after export transforms, without installing packages. */
 export function refreshAppStylesheetManifest(webRoot) {
-  const manifest = JSON.parse(readFileSync(resolve(webRoot, 'src/generated/vendor-stylesheets.json'), 'utf8'));
-  const external = manifest.filter((url) => !url.startsWith('/vendor/app/'));
-  if (external.length !== 1 || !/^\/vendor\/xterm\/xterm\.[a-f0-9]{16}\.css$/.test(external[0])) {
-    throw new Error('Expected the existing dependency stylesheet fingerprint');
-  }
-  return writeManifest(webRoot, [...appStylesheets(webRoot).map((item) => item.versionedUrl), ...external]);
+  return writeManifest(
+    webRoot,
+    appStylesheets(webRoot).map((item) => item.versionedUrl),
+  );
 }
 
 /** Publish immutable bytes before exposing the URLs to Next's document renderer. */
-export function syncStylesheets(webRoot, xtermCssPath) {
-  const sources = [
-    ...appStylesheets(webRoot),
-    stylesheet(readFileSync(xtermCssPath, 'utf8'), '/vendor/xterm/xterm.css'),
-  ];
+export function syncStylesheets(webRoot) {
+  const sources = appStylesheets(webRoot);
   const urls = sources.map(({ contents, url, versionedUrl }) => {
     writeTextAsset(resolve(webRoot, `public${versionedUrl}`), contents);
     // Existing consumers retain their aliases. New documents only consume the

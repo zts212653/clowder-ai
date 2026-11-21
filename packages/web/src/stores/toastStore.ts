@@ -8,6 +8,8 @@ export interface ToastItem {
   title: string;
   message: string;
   threadId?: string;
+  /** A member's finished reply in a conversation that is not open: the console shows it above the composer. */
+  reply?: { catId: string; messageId: string };
   /** Optional exact navigation affordance rendered below the toast body. */
   action?: { label: string; threadId: string; messageId?: string };
   /** Auto-dismiss after ms (0 = no auto-dismiss) */

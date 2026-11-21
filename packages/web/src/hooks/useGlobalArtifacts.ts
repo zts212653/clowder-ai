@@ -13,6 +13,7 @@ import { usePagedGlobalWorks } from './usePagedGlobalWorks';
 import { useWorksSourceRefresh, type WorksSourceChange, worksSourceInvalidation } from './useThreadArtifacts';
 
 type WorkLineage = GlobalArtifactsResponse['workLineage'];
+const EMPTY_ARTIFACTS: GlobalArtifactDTO[] = [];
 
 class GlobalArtifactsReadError extends Error {
   constructor(readonly status: number) {
@@ -69,27 +70,27 @@ interface UseGlobalArtifactsResult {
 export type GlobalArtifactsQuery = { view: 'recent-works'; limit: number } | { view: 'works' };
 
 export function useGlobalArtifacts(
-  enabled: boolean,
+  enabled: boolean | number,
   query?: GlobalArtifactsQuery,
   ownerKey?: string | null,
   { paused = false }: { paused?: boolean } = {},
 ): UseGlobalArtifactsResult {
   const worksView = query?.view === 'works';
-  const active = enabled && !paused;
+  const active = Boolean(enabled) && !paused;
   const identity = useSyncExternalStore(
     apiSessionIdentity.subscribe,
     apiSessionIdentity.getSnapshot,
     apiSessionIdentity.getSnapshot,
   );
   const ownerScope = JSON.stringify([ownerKey, identity.ownerUserId, identity.generation]);
-  const paged = usePagedGlobalWorks(enabled && worksView, ownerScope, paused);
+  const paged = usePagedGlobalWorks(worksView ? enabled : false, ownerScope, paused);
   const { scheduleRefresh, invalidate: invalidateAccess } = paged;
   const [resolvedScope, setResolvedScope] = useState<string | null>(null);
   const resolvedScopeRef = useRef<string | null>(null);
   const [artifacts, setArtifacts] = useState<GlobalArtifactDTO[]>([]);
   const [workLineage, setWorkLineage] = useState<WorkLineage>('unavailable');
   const [complete, setComplete] = useState(true);
-  const [loading, setLoading] = useState(enabled);
+  const [loading, setLoading] = useState(Boolean(enabled));
   const [error, setError] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const reading = useRef(false);
@@ -198,7 +199,7 @@ export function useGlobalArtifacts(
   return worksView
     ? paged
     : {
-        artifacts: enabled && resolvedScope === scope ? artifacts : [],
+        artifacts: enabled && resolvedScope === scope ? artifacts : EMPTY_ARTIFACTS,
         workLineage: resolvedScope === scope ? workLineage : 'unavailable',
         complete: resolvedScope === scope && complete,
         loading: active && (loading || !reading.current),

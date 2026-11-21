@@ -27,7 +27,16 @@ export default defineConfig({
     // for every file; a .ts test that needs the DOM says so with `// @vitest-environment jsdom` at its top.
     projects: [
       { extends: true, test: { name: 'tsx', include: ['src/**/__tests__/**/*.test.tsx'] } },
-      { extends: true, test: { name: 'ts', environment: 'node', include: ['src/**/__tests__/**/*.test.ts'] } },
+      {
+        extends: true,
+        test: {
+          name: 'ts',
+          environment: 'node',
+          include: ['src/**/__tests__/**/*.test.ts'],
+          exclude: ['src/pdl/__tests__/**/*.test.ts'],
+        },
+      },
+      { extends: true, test: { name: 'pdl', environment: 'jsdom', include: ['src/pdl/__tests__/**/*.test.ts'] } },
     ],
     // Every test file runs in a fresh worker, so it re-imports everything it uses. @cat-cafe/shared is a workspace
     // package, which Vite would transform and evaluate module by module (about 300 of them) in each of those

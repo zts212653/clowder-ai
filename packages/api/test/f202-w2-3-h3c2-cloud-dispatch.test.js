@@ -162,14 +162,19 @@ async function bindingsApp(bindings) {
   return { app, read };
 }
 
-test("the thread's bindings come with the Host's answer to which cat is the cloud cat", async () => {
+test("the thread's bindings come with the Host's answer to which cat is the cloud cat and each cloud cat's provider", async () => {
   const bindings = { 'cloud-alt': 'https://chatgpt.com/c/alt', 'gpt-pro': 'https://chatgpt.com/c/stale' };
   const { app, read } = await bindingsApp(bindings);
 
-  assert.deepEqual(await read(), { bindings, cloudCat: { status: 'resolved', catId: 'cloud-alt' } });
+  assert.deepEqual(await read(), {
+    bindings,
+    cloudCat: { status: 'resolved', catId: 'cloud-alt' },
+    providers: { 'cloud-alt': 'chatgpt' },
+  });
   configureCats([]);
-  assert.deepEqual((await read()).cloudCat, { status: 'unavailable' });
+  assert.deepEqual(await read(), { bindings, cloudCat: { status: 'unavailable' }, providers: {} });
   configureCats(['cloud-alt', 'cloud-beta']);
   assert.deepEqual((await read()).cloudCat, { status: 'ambiguous', catIds: ['cloud-alt', 'cloud-beta'] });
+  assert.deepEqual((await read()).providers, { 'cloud-alt': 'chatgpt', 'cloud-beta': 'chatgpt' });
   await app.close();
 });

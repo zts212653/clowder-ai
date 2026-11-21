@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import ts from 'typescript';
 
@@ -42,10 +42,10 @@ function walk(node, visit) {
 
 /** Only definitions backed by an actual renderer suppress a legacy source.icon fallback. */
 export function registeredConnectorSvgs(root) {
-  const renderer = parse(
-    'ConnectorIcon.tsx',
-    readFileSync(join(root, 'packages/web/src/components/icons/ConnectorIcon.tsx'), 'utf8'),
-  );
+  const rendererPath = join(root, 'packages/web/src/components/icons/ConnectorIcon.tsx');
+  // The console draws senders itself and has no React connector renderer: nothing suppresses a source.icon.
+  if (!existsSync(rendererPath)) return new Map();
+  const renderer = parse('ConnectorIcon.tsx', readFileSync(rendererPath, 'utf8'));
   const rendered = new Set();
   walk(renderer, (node) => {
     if (

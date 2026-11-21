@@ -89,7 +89,7 @@ for (const contractVersion of [
   });
 }
 
-for (const contractVersion of ['0.1.0-beta.12', '0.3.3', '0.3.4-candidate.1', '0.3.4']) {
+for (const contractVersion of ['0.1.0-beta.12', '0.4.0-candidate.1', '0.4.0', '0.4.1']) {
   test(`quarantines ${contractVersion} outside the Host supported contract range`, async () => {
     const packageManifest = manifest({ contractVersion });
     const archive = await packageArchive({ packageManifest });

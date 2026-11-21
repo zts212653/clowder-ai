@@ -135,6 +135,7 @@ async function read(key: string, projection: EvolutionProgramProjection, selecte
 export function useEvolutionAssetReview(
   projection: EvolutionProgramProjection | null,
   selectedVersionRef?: ExactAssetVersionRefV1,
+  needed: boolean | number = true,
 ) {
   const surfaceVisible = useWorkspaceSurfaceVisibility();
   const snapshot = useSyncExternalStore(
@@ -149,7 +150,7 @@ export function useEvolutionAssetReview(
   const requestTarget = useRef({ projection, selectedVersionRef });
   requestTarget.current = { projection, selectedVersionRef };
   useEffect(() => {
-    if (!surfaceVisible) return;
+    if (!surfaceVisible || !needed) return;
     const { projection, selectedVersionRef } = requestTarget.current;
     if (!projection) return;
     const reconcile = () => {
@@ -169,10 +170,14 @@ export function useEvolutionAssetReview(
       document.removeEventListener('visibilitychange', reconcile);
     };
     // Only exact identities restart this independent owner read, not Program sequence allocations.
-  }, [key, surfaceVisible]);
+  }, [key, surfaceVisible, needed]);
   const result = snapshot.reads[key];
   const catalog = programId ? snapshot.catalogs[programId] : undefined;
   return {
+    retry: () => {
+      const target = requestTarget.current;
+      return target.projection ? read(key, target.projection, target.selectedVersionRef) : Promise.resolve();
+    },
     review: result?.review,
     catalog: catalog?.status === 'resolved' ? catalog : undefined,
     error: result?.error,

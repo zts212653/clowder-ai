@@ -174,8 +174,7 @@ export function resolveChatReadingAnchor(
   anchor: MessageScrollAnchor,
   messages: readonly ChatMessage[],
 ): MessageScrollAnchor | undefined {
-  if (messages.some((message) => !message.sendAttempt && message.id === anchor.messageId))
-    return describeChatReadingAnchor(anchor, messages);
+  if (messages.some((message) => message.id === anchor.messageId)) return describeChatReadingAnchor(anchor, messages);
   return undefined;
 }
 
@@ -188,7 +187,7 @@ export function findChatReadingSuccessor(
   if (orderAt === undefined) return undefined;
   let next: ChatMessage | undefined;
   for (const message of messages) {
-    if (message.sendAttempt || message.id.startsWith('draft-')) continue;
+    if (message.id.startsWith('draft-')) continue;
     const time = getMessageTimelineOrderTime(message);
     if (time < orderAt || (time === orderAt && message.id <= anchor.messageId)) continue;
     const nextTime = next ? getMessageTimelineOrderTime(next) : undefined;

@@ -46,7 +46,7 @@ test(
         path.join(evidence, 'composer-draft.json'),
         JSON.stringify(
           await page.evaluate(() => ({
-            drafts: JSON.parse(sessionStorage.getItem('cat-cafe:thread-context-attachment-drafts') || '[]'),
+            drafts: JSON.parse(localStorage.getItem('cat-cafe:thread-context-attachment-drafts') || '[]'),
             notices: [...document.querySelectorAll('[role="alert"], [data-testid="workspace-content-review-surface"]')]
               .filter((node) => node.getClientRects().length)
               .map((node) => node.textContent),
@@ -151,8 +151,6 @@ test(
       const paragraph = indexed.context.story[2];
       const cleanOptions = {
         page,
-        context,
-        api,
         threadId: thread.id,
         reference: saved.reference,
         allowedAnchors: [
@@ -171,13 +169,8 @@ test(
         ],
       };
       await context.addInitScript(() => localStorage.setItem('cat-cafe:shell-presentation', 'v2'));
-      const hydrated = page.waitForResponse(
-        (response) =>
-          response.url().endsWith(`/api/threads/${thread.id}/composer-draft`) && response.request().method() === 'GET',
-      );
       await page.goto(`${web}/thread/${thread.id}`, { waitUntil: 'domcontentloaded' });
       await ensureWorkspaceOpen(page, { readinessTimeoutMs: 90000 });
-      await hydrated;
       cleanOwnDraft = () => cleanAuthorDraft(cleanOptions);
       await writeFile(
         path.join(evidence, 'initial-author-cleanup.json'),

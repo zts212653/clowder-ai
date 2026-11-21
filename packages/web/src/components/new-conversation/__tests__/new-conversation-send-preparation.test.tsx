@@ -1,7 +1,6 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { registerComposerDraftFlusher } from '../../composer-draft-flush-registry';
 import { freshIntent } from '../new-conversation-hydration';
 import { useNewConversationAdmissionSend } from '../use-new-conversation-admission-send';
 
@@ -9,8 +8,6 @@ let container: HTMLDivElement;
 let root: Root;
 let latest: ReturnType<typeof useNewConversationAdmissionSend>;
 let options: Parameters<typeof useNewConversationAdmissionSend>[0];
-let unregister: () => void;
-const flushResult = { persisted: true, revision: 1, snapshot: { text: 'draft', contextAttachments: [] } };
 
 function Host() {
   latest = useNewConversationAdmissionSend(options);
@@ -29,16 +26,12 @@ beforeEach(() => {
     intentRef: { current: freshIntent('/isolated') },
     draftRef: { current: { text: 'draft', files: [], contextAttachments: [] } },
     saveSnapshot: vi.fn(async () => undefined),
-    persistIntent: vi.fn(async () => undefined),
     submit: vi.fn(async () => true),
     setPhasePreparing: vi.fn(),
     setPrepareFailed: vi.fn(),
     setPreparationCancelled: vi.fn(),
-    setDraftRecovered: vi.fn(),
-    setDraftRecoveryBlocked: vi.fn(),
     setLocalSaveFailed: vi.fn(),
   };
-  unregister = registerComposerDraftFlusher('default', async () => flushResult);
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -47,29 +40,16 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
-  unregister();
 });
 
-it.each([
-  'save',
-  'flush',
-  'persist',
-] as const)('cancels while waiting for %s and never submits on late completion', async (step) => {
+it('cancels while waiting for the save and never submits on late completion', async () => {
   const gate = Promise.withResolvers<void>();
   let waiting = false;
   const wait = async () => {
     waiting = true;
     await gate.promise;
   };
-  if (step === 'save') options.saveSnapshot = wait;
-  if (step === 'flush') {
-    unregister();
-    unregister = registerComposerDraftFlusher('default', async () => {
-      await wait();
-      return flushResult;
-    });
-  }
-  if (step === 'persist') options.persistIntent = wait;
+  options.saveSnapshot = wait;
   act(() => root.render(<Host />));
   let sending = Promise.resolve(true);
   let result: boolean | undefined;

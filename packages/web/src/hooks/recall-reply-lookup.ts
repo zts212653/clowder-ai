@@ -23,6 +23,20 @@ export function recallReplyMessage(reply: RecallReplyCoordinate): ChatMessage {
     extra: { stream: { turnInvocationId: reply.invocationId, invocationId: reply.parentInvocationId } },
   };
 }
+/** One owner-scoped reply page, shared by explicit paging and exact reply lookup. */
+export async function readRecallReplyPage(input: { threadId: string; cursor: RecallReplyCursor; signal: AbortSignal }) {
+  const response = await apiFetch(
+    `/api/recall/events?threadId=${encodeURIComponent(input.threadId)}&replyBeforeTs=${input.cursor.timestamp}&replyBeforeId=${encodeURIComponent(input.cursor.messageId)}`,
+    { signal: input.signal },
+  );
+  if (!response.ok) throw new Error('Reply lookup unavailable');
+  const page = (await response.json()) as {
+    replies?: RecallReplyCoordinate[];
+    replyCursor?: RecallReplyCursor | null;
+  };
+  if (!Array.isArray(page.replies)) throw new Error('Reply projection unavailable');
+  return { messages: page.replies.map(recallReplyMessage), cursor: page.replyCursor ?? null };
+}
 export async function lookupRecallReply(input: {
   threadId: string;
   event: RecallEvent;
@@ -41,20 +55,11 @@ export async function lookupRecallReply(input: {
     const key = JSON.stringify(cursor);
     if (seen.has(key)) throw new Error('Reply cursor did not advance');
     seen.add(key);
-    const response = await apiFetch(
-      `/api/recall/events?threadId=${encodeURIComponent(input.threadId)}&replyBeforeTs=${cursor.timestamp}&replyBeforeId=${encodeURIComponent(cursor.messageId)}`,
-      { signal: input.signal },
-    );
-    if (!response.ok) throw new Error('Reply lookup unavailable');
-    const page = (await response.json()) as {
-      replies?: RecallReplyCoordinate[];
-      replyCursor?: RecallReplyCursor | null;
-    };
-    if (!Array.isArray(page.replies)) throw new Error('Reply projection unavailable');
+    const page = await readRecallReplyPage({ threadId: input.threadId, cursor, signal: input.signal });
     if (!input.isCurrent() || input.signal.aborted) return undefined;
     const ids = new Set(messages.map((message) => message.id));
-    messages = [...messages, ...page.replies.map(recallReplyMessage).filter((message) => !ids.has(message.id))];
-    cursor = page.replyCursor ?? null;
+    messages = [...messages, ...page.messages.filter((message) => !ids.has(message.id))];
+    cursor = page.cursor;
     input.onPage(messages, cursor);
     const reply = findRecallReply(input.event, messages);
     if (reply) return reply.id;

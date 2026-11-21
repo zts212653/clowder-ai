@@ -2,7 +2,6 @@ import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
-import { CONCIERGE_CONFIG_DEFAULTS } from '@cat-cafe/shared';
 import { validateCompanionReply as validateDeskReply } from '@clowder-ai/plugin-contract-033c0';
 import { validateCompanionCommand as validateAppAssistCommand } from '@clowder-ai/plugin-contract-beta29';
 import cookie from '@fastify/cookie';
@@ -29,6 +28,7 @@ import {
 import { createSuggestionIntegration } from '../dist/domains/suggestions/composition.js';
 import { sessionAuthPlugin, sessionRoute } from '../dist/infrastructure/session-auth.js';
 import { conciergeRoutes } from '../dist/routes/concierge.js';
+import { companionConfigurationFixture } from './helpers/companion-configuration-fixture.js';
 
 const require = createRequire(import.meta.url);
 const kernelContracts = require('../../../desktop/plugin-window/companion-contracts.cjs');
@@ -107,7 +107,7 @@ test('F335 desk admission: alpha.37 is admitted only by its exact SRI, and only 
   assert.equal(companionContractHas('0.1.0-beta.30', 'modern'), false, 'an unknown line has no capability');
 });
 
-test('F335 desk admission: bridge 1.7.0 is admitted only for the shipped alpha.37 manifest', () => {
+test('F335 desk admission: bridge 1.7.0 is admitted for the shipped alpha.37 manifest and local builds', () => {
   // The generic Host manifest ABI stops at bridge 1.6.0; 1.7.0 enters only through the archive row.
   const admitted = validateHostPluginManifest(ALPHA37_MANIFEST);
   assert.equal(admitted.valid, true);
@@ -117,7 +117,8 @@ test('F335 desk admission: bridge 1.7.0 is admitted only for the shipped alpha.3
     contributions: ALPHA37_MANIFEST.contributions.map((c) => ({ ...c, bridgeVersion })),
   });
   assert.equal(validateHostPluginManifest(withBridge('1.8.0')).valid, false);
-  assert.equal(validateHostPluginManifest({ ...ALPHA37_MANIFEST, version: '0.1.0-alpha.36' }).valid, false);
+  // A version without a pinned release is a local build: the current contract reads it
+  assert.equal(validateHostPluginManifest({ ...ALPHA37_MANIFEST, version: '0.1.0-alpha.36' }).valid, true);
   assert.equal(validateHostPluginManifest({ ...ALPHA37_MANIFEST, pluginId: 'dev.other' }).valid, false);
 });
 
@@ -159,13 +160,18 @@ test('F335 desk public pair: the complete 0.3.3 reply passes the published valid
     if (previous === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
     else process.env.DEFAULT_OWNER_USER_ID = previous;
   });
-  await store.put(OWNER, { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: 'opus' });
+  const companion = companionConfigurationFixture({ dutyCatProfileId: 'opus' });
   await app.register(cookie);
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute, { ownerUserId: OWNER });
+  companion.register(app);
   await app.register(conciergeRoutes, {
     conciergeConfigStore: store,
-    conciergeThreadService: new ConciergeThreadService({ conciergeConfigStore: store, threadStore: new ThreadStore() }),
+    companionSettings: companion.read,
+    conciergeThreadService: new ConciergeThreadService({
+      companionSettings: companion.read,
+      threadStore: new ThreadStore(),
+    }),
   });
 
   // 「给人的东西」 holds the one copy; the desk owner reads it under the Host lease.
@@ -189,6 +195,7 @@ test('F335 desk public pair: the complete 0.3.3 reply passes the published valid
   });
   const appAssistOwner = new CompanionAppAssistOwner({
     store,
+    companionSettings: companion.read,
     ownerUserId: OWNER,
     timeZone: () => 'Pacific/Honolulu',
     now: () => Date.parse('2030-01-02T12:00:00Z'),

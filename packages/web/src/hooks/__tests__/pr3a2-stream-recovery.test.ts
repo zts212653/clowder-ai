@@ -219,16 +219,17 @@ describe('returning to a thread while a reply still streams (§3.11.1)', () => {
     ['the server has no record of', { ...replay([]), responses: [] }],
   ];
   for (const [label, entries] of unknownStarts) {
-    it(`does not splice live deltas into a reply ${label}`, () => {
+    it(`keeps writing live deltas into a reply ${label}`, () => {
       writeStoredSnapshot(T, response('A|'));
       applyResponseStreamReplay(entries);
       expect(shown()?.streamPrefix).toBe('incomplete');
       writeStreamText(target, { content: 'C|' });
-      expect(shown()?.content).toBe('A|');
+      expect(shown()?.content).toBe('A|C|');
       issueRead()([response('A|B|')]);
       expect(shown()?.content).toBe('A|B|');
       writeStreamText(target, { content: 'D|' });
-      expect(shown()?.content).toBe('A|B|');
+      expect(shown()?.content).toBe('A|B|D|');
+      // the terminal snapshot is the final body
       writeStoredSnapshot(T, response('A|B|C|D|', 'completed'));
       expect(shown()?.content).toBe('A|B|C|D|');
     });

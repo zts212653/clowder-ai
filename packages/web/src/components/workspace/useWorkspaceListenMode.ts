@@ -13,6 +13,7 @@ interface WorkspaceListenModeInput {
   openFilePath: string | null;
   worktreeId: string | null;
   enabled: boolean;
+  readGeneration?: number;
   sourceKey?: string;
   returnTarget?: ListenDocumentDescriptor['returnTarget'];
 }
@@ -22,6 +23,7 @@ export function useWorkspaceListenMode({
   openFilePath,
   worktreeId,
   enabled,
+  readGeneration = 1,
   sourceKey,
   returnTarget,
 }: WorkspaceListenModeInput) {
@@ -63,7 +65,7 @@ export function useWorkspaceListenMode({
     if (!descriptor) return;
     void documentCacheController.refresh(descriptor);
     return () => documentCacheController.release(descriptor);
-  }, [descriptor]);
+  }, [descriptor, readGeneration]);
   const start = useCallback(
     (index?: number) => {
       if (descriptor) void documentListenController.startDocument(descriptor, index);

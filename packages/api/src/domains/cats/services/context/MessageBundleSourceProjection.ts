@@ -178,6 +178,7 @@ function readContentBlockFallback(block: MessageContent): string | null {
       if (attachment.kind === 'quote') return `[引用]\n${attachment.text}`;
       if (attachment.kind === 'thread') return `[对话: ${attachment.title}]`;
       if (attachment.kind === 'media') return `[作品: ${attachment.title}]`;
+      if (attachment.kind === 'work') return `[作品: ${attachment.title} · ${attachment.workId}@${attachment.version}]`;
       if (attachment.kind === 'project-screening')
         return `[审片: ${attachment.title} · 输入 v${attachment.input.ownerRevision}]`;
       return `[文件: ${attachment.path}]`;

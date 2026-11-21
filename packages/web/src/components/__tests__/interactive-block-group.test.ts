@@ -2,8 +2,7 @@
  * F096 Phase C: InteractiveBlockGroup — buildGroupMessage + groupBlocks tests
  */
 import { describe, expect, it } from 'vitest';
-import { buildSelectionMessage } from '@/components/rich/InteractiveBlock';
-import { buildGroupMessage } from '@/components/rich/InteractiveBlockGroup';
+import { buildGroupMessage, buildSelectionMessage } from '@/components/rich/interactive-message';
 import type { RichInteractiveBlock } from '@/stores/chat-types';
 
 const selectBlock: RichInteractiveBlock = {

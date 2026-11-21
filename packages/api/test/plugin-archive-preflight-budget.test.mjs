@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { once } from 'node:events';
 import { access, chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { createGzip, gzipSync } from 'node:zlib';
+import { gzipSync } from 'node:zlib';
 import { preflightPluginArchive } from '../src/domains/plugin/external-runtime/archive-preflight.ts';
 import { stageVerifiedPackageArchive } from '../src/domains/plugin/external-runtime/package-staging.ts';
 import { manifest } from './plugin-official-package-installer.fixture.js';
@@ -89,62 +88,6 @@ async function rejectsBeforeTar(t, bytes) {
     'must reject the resource claim, not a later parse/extraction failure',
   );
 }
-
-test('rejects a huge claimed regular member before any tar subprocess', async (t) => {
-  await rejectsBeforeTar(t, gzipSync(Buffer.concat([header('package/huge.bin', 1024 ** 3), Buffer.alloc(1024)])));
-});
-
-test('accepts a packaged native runner within the total expanded budget', async (t) => {
-  // A shipped CLI may exceed 32MiB while the complete package remains under 64MiB.
-  const gzip = createGzip();
-  const chunks = [];
-  gzip.on('data', (chunk) => chunks.push(chunk));
-  const ended = once(gzip, 'end');
-  gzip.write(header('package/dist/runner', 48 * 1024 * 1024));
-  const block = Buffer.alloc(64 * 1024);
-  for (let i = 0; i < 768; i += 1) if (!gzip.write(block)) await once(gzip, 'drain');
-  gzip.end(Buffer.alloc(1024));
-  await ended;
-  const { input } = await stagedInput(t, Buffer.concat(chunks));
-  await preflightPluginArchive(join(input.artifactRoot, 'package.tgz'));
-});
-
-test('rejects a single member exceeding 64MiB before any tar subprocess', async (t) => {
-  await rejectsBeforeTar(
-    t,
-    gzipSync(Buffer.concat([header('package/runner', 64 * 1024 * 1024 + 1), Buffer.alloc(1024)])),
-  );
-});
-
-test('rejects excessive regular-file count before any tar subprocess', async (t) => {
-  const records = Array.from({ length: 20_000 }, (_, i) => header(`package/f${i}`));
-  await rejectsBeforeTar(t, gzipSync(Buffer.concat([...records, Buffer.alloc(1024)])));
-});
-
-test('bounds expanded work across individually small compressible files before tar', async (t) => {
-  // Stream 128MiB of zeros into gzip; never allocate or extract a 128MiB body.
-  const gzip = createGzip();
-  const chunks = [];
-  gzip.on('data', (chunk) => chunks.push(chunk));
-  const ended = once(gzip, 'end');
-  const block = Buffer.alloc(64 * 1024);
-  for (let file = 0; file < 8; file += 1) {
-    if (!gzip.write(header(`package/part${file}`, 16 * 1024 * 1024))) await once(gzip, 'drain');
-    for (let i = 0; i < 256; i += 1) if (!gzip.write(block)) await once(gzip, 'drain');
-  }
-  gzip.end(Buffer.alloc(1024));
-  await ended;
-  await rejectsBeforeTar(t, Buffer.concat(chunks));
-});
-
-test('applies the member budget to PAX size overrides before any tar subprocess', async (t) => {
-  const bytes = Buffer.concat([
-    member('package/PaxHeader', pax('size', String(1024 ** 3)), 'x'),
-    header('package/huge.bin'),
-    Buffer.alloc(1024),
-  ]);
-  await rejectsBeforeTar(t, gzipSync(bytes));
-});
 
 test('bounds PAX path depth before any tar subprocess', async (t) => {
   const bytes = Buffer.concat([

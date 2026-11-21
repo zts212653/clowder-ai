@@ -61,7 +61,7 @@ export const threadExportRoutes: FastifyPluginAsync<ThreadExportRoutesOptions> =
       // Construct frontend URL
       const env = process.env;
       const frontendUrl = resolveFrontendBaseUrl(env, fastify.log);
-      const url = `${frontendUrl}/thread/${threadId}`;
+      const url = `${frontendUrl}/#export-${encodeURIComponent(threadId)}`;
 
       fastify.log.info(`Exporting thread ${threadId} to image from ${url}`);
 
@@ -105,7 +105,7 @@ export const threadExportRoutes: FastifyPluginAsync<ThreadExportRoutesOptions> =
 
       try {
         const frontendUrl = resolveFrontendBaseUrl(process.env, fastify.log);
-        const url = `${frontendUrl}/thread/${threadId}`;
+        const url = `${frontendUrl}/#export-${encodeURIComponent(threadId)}`;
         const exporter = sharedExporter ?? (sharedExporter = new ImageExporter());
         const imageBuffer = await exporter.capture(url, userId, {
           selectionMessageIds: [...new Set(resolution.carrier.items.map((item) => item.messageId))],

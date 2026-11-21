@@ -19,6 +19,7 @@ import {
   companionSupportsDesk,
   isModernCompanionContract,
 } from '../../plugin/desktop-window-runtime/published-companion-v2.js';
+import type { CompanionSettings } from '../companion-settings.js';
 import { CompanionF221Trial } from './CompanionF221Trial.js';
 import { readCompanionDecisions } from './companion-decision-read.js';
 import { CompanionBridgeError, CompanionOwnerClient } from './companion-owner-client.js';
@@ -322,10 +323,10 @@ export class CompanionHostBridge {
     if (typeof result.threadId !== 'string') throw new CompanionBridgeError('unavailable');
     return result.threadId;
   }
-  private async configSource(): Promise<{ config: ConciergeConfig; behaviorEnabled: boolean }> {
+  private async configSource(): Promise<{ config: ConciergeConfig & CompanionSettings; behaviorEnabled: boolean }> {
     const result = await this.client.request('/api/concierge/config?view=native');
     if (!result.config || typeof result.config !== 'object') throw new CompanionBridgeError('unavailable');
-    const config = result.config as ConciergeConfig;
+    const config = result.config as ConciergeConfig & CompanionSettings;
     if (!isModernCompanionContract(this.options.companionContract))
       return { config, behaviorEnabled: result.behaviorEnabled === true };
     const settings = await readModernCompanionSettings(this.client, this.options.companionContract);

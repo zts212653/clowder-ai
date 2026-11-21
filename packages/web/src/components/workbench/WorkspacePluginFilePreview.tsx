@@ -3,9 +3,7 @@
 import { contentFileExtension } from '@cat-cafe/shared';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { FileActions } from '@/components/content-review/FileActions';
-import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
-import { ContentLandingHeader } from './content-review/ContentLandingHeader';
 
 type Preview = {
   rendererOrigin: string;
@@ -51,14 +49,12 @@ function parsePreview(input: unknown): Preview {
 
 export function WorkspacePluginFilePreview({
   target,
-  navigationOrigin,
   onBack,
   showPluginSettings,
   fallback,
 }: {
   target: { worktreeId: string; path: string };
-  navigationOrigin?: WorkspaceFileNavigationOrigin;
-  onBack: () => void;
+  onBack?: () => void;
   showPluginSettings: boolean;
   fallback: ReactNode;
 }) {
@@ -159,11 +155,7 @@ export function WorkspacePluginFilePreview({
       <div className="flex min-h-0 flex-1 flex-col">
         <output className="shrink-0 px-3 py-2 text-xs text-cafe-muted">
           {message}
-          {showPluginSettings && !unsupported && state !== 'too-large' && (
-            <a className="ml-2 text-cafe-accent hover:underline" href="/settings?s=plugins">
-              插件设置
-            </a>
-          )}
+          {showPluginSettings && state === 'unavailable' && !unsupported && ' 可在插件设置中检查预览插件。'}
         </output>
         {fallback}
       </div>
@@ -172,14 +164,11 @@ export function WorkspacePluginFilePreview({
   const title = path.split('/').at(-1) || path;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ContentLandingHeader
-        title={title}
-        navigationOrigin={navigationOrigin}
-        onBack={onBack}
-        leadingAction={
-          <FileActions source={{ kind: 'workspace', worktreeId, path }} filename={title} appearance="toolbar" />
-        }
-      />
+      <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2">
+        <h2 className="truncate text-sm font-semibold">{title}</h2>
+        <FileActions source={{ kind: 'workspace', worktreeId, path }} filename={title} appearance="toolbar" />
+        {onBack && <button type="button" onClick={onBack}>返回</button>}
+      </div>
       {state === 'loading' ? (
         <output className="p-4 text-xs text-cafe-muted">正在打开预览…</output>
       ) : (

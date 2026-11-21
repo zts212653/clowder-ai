@@ -17,7 +17,6 @@ export function isMessageSelectableForBundle(message: ChatMessage): boolean {
   if (!authoredMessage && !managedHoldConnector) return false;
   if (
     message.isStreaming ||
-    message.sendAttempt ||
     message.queuedEntryId ||
     message.extra?.recall ||
     (!managedHoldConnector && message.extra?.scheduler)

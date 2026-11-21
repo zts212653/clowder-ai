@@ -1,10 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
-import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
-import { ContentLandingHeader } from '../content-review/ContentLandingHeader';
 import { ContentEditorOwnerSurface } from './ContentEditorOwnerSurface';
 
 const EXPLANATIONS: Readonly<Record<string, string>> = {
@@ -26,13 +23,9 @@ interface EditorTarget {
 export function WorkspaceOfficeSurface({
   worktreeId,
   path,
-  navigationOrigin,
-  onBack,
 }: {
   readonly worktreeId: string;
   readonly path: string;
-  readonly navigationOrigin?: WorkspaceFileNavigationOrigin;
-  readonly onBack?: () => void;
 }) {
   const [target, setTarget] = useState<EditorTarget | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -78,21 +71,12 @@ export function WorkspaceOfficeSurface({
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col" data-testid="workspace-office-surface">
-      <ContentLandingHeader
-        title={path.split('/').at(-1) || path}
-        navigationOrigin={navigationOrigin}
-        onBack={onBack}
-        versionControl={
-          <button
-            type="button"
-            className="shrink-0 text-xs text-cafe-accent hover:underline"
-            onClick={requestOpen}
-            disabled={loading}
-          >
-            重新打开
-          </button>
-        }
-      />
+      <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2">
+        <h2 className="truncate text-sm font-semibold">{path.split('/').at(-1) || path}</h2>
+        <button type="button" className="shrink-0 text-xs text-cafe-accent" onClick={requestOpen} disabled={loading}>
+          重新打开
+        </button>
+      </div>
       <p className="px-3 py-2 text-xs text-cafe-muted">
         编辑保存在协作文档中，原文件不会自动改变。
         {target?.ownerRevision ? ` 打开时为第 ${target.ownerRevision} 版。` : ''}
@@ -113,29 +97,20 @@ export function WorkspaceOfficeSurface({
                 <button type="button" onClick={open} className="rounded-lg bg-cafe-accent px-4 py-2 text-sm text-white">
                   {error ? '重试' : '打开协作版本'}
                 </button>
-                {error && (
-                  <a href="/settings?s=plugins" className="self-center text-sm text-cafe-accent hover:underline">
-                    打开插件设置
-                  </a>
-                )}
               </div>
             )}
           </div>
         </div>
       )}
-      <ConfirmDialog
-        open={confirmReopen}
-        title="打开已保存的版本？"
-        message="当前编辑器中未保存的修改会被丢弃。你可以先保留当前编辑，或明确丢弃修改后重新打开已保存的版本。"
-        confirmLabel="丢弃修改并重新打开"
-        cancelLabel="保留当前编辑"
-        variant="danger"
-        onCancel={() => setConfirmReopen(false)}
-        onConfirm={() => {
-          setConfirmReopen(false);
-          open();
-        }}
-      />
+      {confirmReopen && (
+        <div role="alertdialog" aria-label="打开已保存的版本？" className="space-y-2 border-t border-cafe-subtle p-3 text-sm">
+          <p>当前编辑器中未保存的修改会被丢弃。</p>
+          <div className="flex flex-wrap gap-3">
+            <button type="button" onClick={() => setConfirmReopen(false)}>保留当前编辑</button>
+            <button type="button" className="text-cafe-accent" onClick={open}>丢弃修改并重新打开</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
