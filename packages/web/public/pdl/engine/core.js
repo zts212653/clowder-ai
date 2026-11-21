@@ -367,7 +367,7 @@ function reuseApply(old) {
    · 贴底的区（stick-end）停在底部：锚点是底，变化往上长（浏览器的反向排列本来就这样，不用补）；普通的区停在顶上：锚点是顶，变化往下长；
    · 否则：锚点是窗口里第一张完整可见的单位（带身份的最外层节点：消息、行……）的上沿，它不动，变化都往它下面长；
      它被删掉了，就由紧挨着它的下一张接到它原来的位置；
-   · 窗口里没有完整可见的单位（一张卡比一屏还高）：没有卡片锚点，只有窗口——贴底的区照旧往上走，普通的区停在原处。
+   · 窗口里没有完整可见的单位（一张卡比一屏还高）：以第一张与窗口相交的单位为锚，仍保持它的屏幕偏移。
    用户（或 streamScrollTo / scrollToMessage）滚动后重新取锚点；尺寸变化和增删由一个观察器统一还原。滚动位置只有这一个写入者（浏览器的原生锚定关掉）。 */
 const KEYED_SEL = '[id], [data-island], [data-mid], [data-id], [data-k]';
 const ANCHOR = new WeakMap();
@@ -376,15 +376,21 @@ function keySel(n) { const d = n.dataset; return d.island ? '[data-island="' + C
 function keyedIn(sc, ref) { return Array.prototype.filter.call(sc.querySelectorAll(ref.sel), function (x) { return nodeId(x) === ref.id && treeKey(x) === ref.key; }); }
 /* 单位 = 带身份的最外层节点。按文档顺序从第一张完整可见的单位起取 max 张：从滚动区往下走，找到之前只进和窗口相交的分支，单位里面不再进 */
 function anchorUnits(sc, r, max) {
-  const out = [];
+  const out = []; let partial = null;
   (function walk(p) {
     for (let n = p.firstElementChild; n && out.length < max; n = n.nextElementSibling) {
       const q = n.getBoundingClientRect();
-      if (n.matches(KEYED_SEL)) { if (nodeId(n) && q.height && (out.length || (q.top >= r.top - 0.5 && q.bottom <= r.bottom + 0.5))) out.push(n); continue; }
+      if (n.matches(KEYED_SEL)) {
+        if (nodeId(n) && q.height) {
+          if (out.length || (q.top >= r.top - 0.5 && q.bottom <= r.bottom + 0.5)) out.push(n);
+          else if (!partial && q.bottom > r.top && q.top < r.bottom) partial = n;
+        }
+        continue;
+      }
       if (out.length || !q.height || (q.bottom > r.top && q.top < r.bottom)) walk(n);
     }
   })(sc);
-  return out;
+  return out.length || !partial ? out : [partial];
 }
 function anchorRef(sc, n) { const ref = { el: n, id: nodeId(n), key: treeKey(n), sel: keySel(n) }; ref.i = keyedIn(sc, ref).indexOf(n); return ref; }
 function anchorTake(sc) {
