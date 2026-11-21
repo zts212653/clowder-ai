@@ -74,6 +74,21 @@ describe('MCP Callback Tools', () => {
     assert.deepEqual(body, { roadmap });
   });
 
+  test('handleSetThreadMetadata forwards the title intent exposed by the tool schema', async () => {
+    const { callbackTools, handleSetThreadMetadata } = await import('../dist/tools/callback-tools.js');
+    const tool = callbackTools.find((entry) => entry.name === 'cat_cafe_set_thread_metadata');
+    assert.ok(tool);
+    assert.equal(tool.inputSchema.titleIntent?.safeParse('user_requested').success, true);
+    let body;
+    globalThis.fetch = async (_url, options) => {
+      body = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ titleApplied: true, titleSource: 'user' }) };
+    };
+    const result = await handleSetThreadMetadata({ title: '用户指定标题', titleIntent: 'user_requested' });
+    assert.notEqual(result.isError, true);
+    assert.deepEqual(body, { title: '用户指定标题', titleIntent: 'user_requested' });
+  });
+
   test('propose_thread forwards explicit empty fields when clearing an owner revision', async () => {
     const { handleProposeThread } = await import('../dist/tools/callback-tools.js');
     let body;

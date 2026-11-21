@@ -40,6 +40,7 @@ import type {
   ThreadPluginOwnershipV1,
   ThreadRoutingPolicyV1,
   ThreadSystemKind,
+  UserRequestedTitleResult,
   VotingStateV1,
 } from '../ports/ThreadStore.js';
 import {
@@ -748,7 +749,16 @@ export class RedisThreadStore implements IThreadStore {
 
   async updateTitle(threadId: string, title: string): Promise<void> {
     const key = ThreadKeys.detail(threadId);
-    await this.setDetailFields(key, 'title', title, 'titleSource', 'user', 'titleCatId', '');
+    const changed = await this.redis.eval(
+      `if redis.call('HEXISTS', KEYS[1], 'id') == 0 then return 0 end
+       redis.call('HSET', KEYS[1], 'title', ARGV[1], 'titleSource', 'user', 'titleCatId', '')
+       redis.call('HINCRBY', KEYS[1], 'userTitleRevision', 1)
+       return 1`,
+      1,
+      key,
+      title,
+    );
+    if (changed === 1) await this.applyKeyRetention([key]);
   }
 
   async setSessionImport(threadId: string, value: NonNullable<Thread['sessionImport']>): Promise<void> {
@@ -766,6 +776,7 @@ export class RedisThreadStore implements IThreadStore {
     title: string,
     source: 'temporary' | 'cat',
     catId?: string,
+    intent: 'name' | 'update' = 'name',
   ): Promise<boolean> {
     const key = ThreadKeys.detail(threadId);
     const changed = await this.redis.eval(
@@ -776,9 +787,10 @@ export class RedisThreadStore implements IThreadStore {
       local current = redis.call('HGET', KEYS[1], 'title') or ''
       local source = redis.call('HGET', KEYS[1], 'titleSource')
       if not source then source = current == '' and 'temporary' or 'user' end
-      if source ~= 'temporary' then return 0 end
+      if ARGV[4] == 'name' and source ~= 'temporary' then return 0 end
+      if ARGV[4] == 'update' and source == 'user' then return 0 end
       if ARGV[2] == 'temporary' and current ~= '' then return 0 end
-      redis.call('HSET', KEYS[1], 'title', ARGV[1], 'titleSource', ARGV[2], 'titleCatId', ARGV[3])
+      redis.call('HSET', KEYS[1], 'title', ARGV[1], 'titleSource', ARGV[2], 'titleCatId', ARGV[2] == 'cat' and ARGV[3] or '')
       return 1
     `,
       1,
@@ -786,9 +798,34 @@ export class RedisThreadStore implements IThreadStore {
       title,
       source,
       catId ?? '',
+      source === 'cat' ? intent : 'name',
     );
     if (changed === 1) await this.applyKeyRetention([key]);
     return changed === 1;
+  }
+
+  async setUserRequestedTitle(
+    threadId: string,
+    title: string,
+    expectedUserTitleRevision: number,
+  ): Promise<UserRequestedTitleResult> {
+    const key = ThreadKeys.detail(threadId);
+    const result = await this.redis.eval(
+      `if redis.call('HEXISTS', KEYS[1], 'id') == 0 then return 'not_found' end
+       local deleted = redis.call('HGET', KEYS[1], 'deletedAt')
+       if deleted and deleted ~= '' and deleted ~= '0' then return 'deleted' end
+       local revision = tonumber(redis.call('HGET', KEYS[1], 'userTitleRevision') or '0')
+       if revision ~= tonumber(ARGV[2]) then return 'revision_conflict' end
+       redis.call('HSET', KEYS[1], 'title', ARGV[1], 'titleSource', 'user', 'titleCatId', '')
+       redis.call('HINCRBY', KEYS[1], 'userTitleRevision', 1)
+       return 'applied'`,
+      1,
+      key,
+      title,
+      String(expectedUserTitleRevision),
+    );
+    if (result === 'applied') await this.applyKeyRetention([key]);
+    return result as UserRequestedTitleResult;
   }
 
   async compareAndSetTitle(threadId: string, expectedTitle: string, nextTitle: string): Promise<boolean> {
@@ -1478,6 +1515,7 @@ export class RedisThreadStore implements IThreadStore {
       title: thread.title ?? '',
       titleSource: thread.titleSource ?? (thread.title ? 'user' : 'temporary'),
       titleCatId: thread.titleCatId ?? '',
+      userTitleRevision: String(thread.userTitleRevision ?? 0),
       ...(thread.sessionImport
         ? {
             sessionImportSessionId: thread.sessionImport.sessionId,
@@ -1599,6 +1637,7 @@ export class RedisThreadStore implements IThreadStore {
             ? 'user'
             : 'temporary',
       ...(data.titleCatId ? { titleCatId: data.titleCatId } : {}),
+      userTitleRevision: Number(data.userTitleRevision ?? 0),
       ...(data.sessionImportSessionId && data.sessionImportCatId
         ? {
             sessionImport: { sessionId: data.sessionImportSessionId, catId: data.sessionImportCatId },
