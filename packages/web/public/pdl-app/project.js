@@ -401,12 +401,23 @@ function bindProject() {
     };
   };
   const filePage = VM.filePage;
+  let editingOfficeFile = null;
   VM.filePage = function () {
     const model = filePage(),
       docs = documentModels();
     return model
-      ? Object.assign({}, model, { documentReview: docs.documentReview, annotations: docs.documentAnnotations })
+      ? Object.assign({}, model, {
+          documentReview: docs.documentReview,
+          annotations: docs.documentAnnotations,
+          documentFrame: model.documentEditor && model.documentFrame !== editingOfficeFile ? null : model.documentFrame,
+        })
       : null;
+  };
+  A.fileOffice = function () {
+    const file = filePage();
+    if (!file?.documentEditor) return;
+    editingOfficeFile = editingOfficeFile === file.documentFrame ? null : file.documentFrame;
+    render(true);
   };
   PAGES.trash = function () {
     return pdlView('cafe.trash');
@@ -2091,6 +2102,7 @@ function bindProject() {
   };
 
   A.wsFile = function (d) {
+    editingOfficeFile = null;
     const data = { p: String(d.p).replace(/:\d+(-\d+)?$/, ''), w: d.w || S.ws.wt };
     if (data.p && data.p.startsWith('/')) {
       const owner = workbenchModels()

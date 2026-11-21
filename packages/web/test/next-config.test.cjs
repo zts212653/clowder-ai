@@ -112,6 +112,31 @@ describe('service worker runtime routes', () => {
   });
 });
 
+describe('next.config frame policy', () => {
+  for (const mode of ['development', 'production']) {
+    it(`only allows the workspace document in a same-origin frame in ${mode}`, async () => {
+      await withEnv({ NODE_ENV: mode }, async (config) => {
+        const rules = await config.headers();
+        assert.deepEqual(
+          rules.map((rule) => rule.source),
+          ['/:path*', '/workspace-document'],
+        );
+        const [consoleHeaders, documentHeaders] = rules.map(({ headers }) =>
+          Object.fromEntries(headers.map(({ key, value }) => [key, value])),
+        );
+        assert.equal(consoleHeaders['X-Frame-Options'], 'DENY');
+        assert.match(consoleHeaders['Content-Security-Policy'], /^frame-ancestors 'none';/u);
+        assert.equal(documentHeaders['X-Frame-Options'], 'SAMEORIGIN');
+        assert.equal(
+          documentHeaders['Content-Security-Policy'],
+          consoleHeaders['Content-Security-Policy'].replace("frame-ancestors 'none'", "frame-ancestors 'self'"),
+        );
+        assert.equal(documentHeaders['Content-Security-Policy'].includes("'unsafe-eval'"), mode === 'development');
+      });
+    });
+  }
+});
+
 describe('next.config rewrites', () => {
   it('compiles desktop images without writing an optimizer cache into the installed application', () => {
     const { getImgProps } = require('next/dist/shared/lib/get-img-props');

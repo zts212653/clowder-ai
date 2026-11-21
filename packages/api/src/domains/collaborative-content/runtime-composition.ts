@@ -14,6 +14,7 @@ import {
   resolveWorkspaceContentRoot,
 } from '../workspace/workspace-content-source-factory.js';
 import { readWorkspaceOfficeImport } from '../workspace/workspace-office-import.js';
+import { readWorkspacePreviewSnapshot } from '../workspace/workspace-preview-snapshot.js';
 import { EditorBridgeService } from './editor-bridge/service.js';
 import { EditorSessionService } from './editor-session-service.js';
 import { type ContentInspectionPort, NamedCatContentService } from './named-cat-content-service.js';
@@ -23,6 +24,7 @@ import { createPluginEditorWorker } from './plugin-editor-worker.js';
 import { OfficeProviderBindingStore } from './provider-binding-store.js';
 import { SemanticOperationStore } from './semantic-operation-store.js';
 import { WorkspaceEditorService } from './workspace-editor-service.js';
+import { WorkspacePreviewService } from './workspace-preview-service.js';
 
 export function createCollaborativeContentComposition(options: {
   readonly dataDir: string;
@@ -81,6 +83,11 @@ export function createCollaborativeContentComposition(options: {
     runtime,
     readSource: options.readSource ?? readWorkspaceOfficeImport,
   });
+  const workspacePreview = new WorkspacePreviewService({
+    inventory: options.plugins.inventoryStore,
+    runtime,
+    readSource: readWorkspacePreviewSnapshot,
+  });
   const namedCats = new NamedCatContentService({
     ownerUserId: options.ownerUserId,
     sessions,
@@ -102,5 +109,6 @@ export function createCollaborativeContentComposition(options: {
     surfaces,
     workspace,
     namedCats,
+    workspacePreview,
   };
 }

@@ -4352,7 +4352,7 @@ describe('unmodified runtime and project chat bindings', () => {
       dom.window.close();
     }
   });
-  it('renders r126 file media and generic Office metadata through the original file view', async () => {
+  it('keeps file media and Office metadata and opens the declared document surfaces', async () => {
     const media = {
       id: 'file:/project/owner.png',
       kind: 'image',
@@ -4405,11 +4405,35 @@ describe('unmodified runtime and project chat bindings', () => {
         },
       });
       await w.__settled();
-      expect(page().textContent).toContain(w.eval("tc('workbench.file.noPreview')"));
+      expect(page().querySelector('iframe')?.getAttribute('src')).toBe(
+        '/workspace-document?worktreeId=wt&path=owner.pptx',
+      );
       expect(page().textContent).toContain(w.eval("tc('workbench.fileInfoField.size')"));
       expect(page().textContent).toContain(w.eval("tc('workbench.fileInfoField.slides')"));
       expect(page().textContent).toContain('2 KB');
       expect(page().querySelector('pre,video,audio,img')).toBeNull();
+      await w.eval("A.wsFile({ p:'owner.docx',w:'wt'})");
+      w.clowderChat.pushProject({
+        workbench: {
+          ...bench,
+          opened: {
+            worktreeId: 'wt',
+            file: {
+              ...file,
+              path: 'owner.docx',
+              absolutePath: '/project/owner.docx',
+              mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            },
+          },
+        },
+      });
+      await w.__settled();
+      expect(page().querySelector('iframe')).toBeNull();
+      page().querySelector('[data-act="fileOffice"]').click();
+      await w.__settled();
+      expect(page().querySelector('iframe')?.getAttribute('src')).toBe(
+        '/workspace-document?worktreeId=wt&path=owner.docx',
+      );
       expect(errors).not.toHaveBeenCalled();
     } finally {
       dom.window.close();

@@ -6015,6 +6015,7 @@ async function initializeApi(
   );
   const { registerCollaborativeContentRoutes } = await import('./routes/collaborative-content-routes.js');
   const { registerWorkspaceContentEditorRoutes } = await import('./routes/workspace-content-editor-routes.js');
+  const { registerWorkspaceContentPreviewRoutes } = await import('./routes/workspace-content-preview-routes.js');
   let projectCatGrants:
     | import('./domains/collaborative-content/workspace-review/project-message/cat-grants.js').ProjectMessageCatGrants
     | undefined;
@@ -6058,6 +6059,10 @@ async function initializeApi(
   namedCatContentHolder.current = collaborativeContent.namedCats;
   registerCollaborativeContentRoutes(app, { ...collaborativeContent, ownerUserId: privateUserId });
   registerWorkspaceContentEditorRoutes(app, { workspace: collaborativeContent.workspace, ownerUserId: privateUserId });
+  registerWorkspaceContentPreviewRoutes(app, {
+    workspace: collaborativeContent.workspacePreview,
+    ownerUserId: privateUserId,
+  });
   const { createWorkspaceContentReviewComposition } = await import(
     './domains/collaborative-content/workspace-review/composition.js'
   );

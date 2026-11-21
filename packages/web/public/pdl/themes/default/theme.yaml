@@ -27317,6 +27317,24 @@ pdl:
               when:
                 - $.binary
                 - "!$.media"
+                - "!$.documentFrame"
+            - type: toolbar
+              when: $.documentEditor
+              items:
+                - type: button
+                  label: 协作编辑
+                  act: fileOffice
+                  when: "!$.documentFrame"
+                - type: button
+                  label: t:common.back
+                  act: fileOffice
+                  when: $.documentFrame
+            - type: frame
+              title: $.name
+              key: $.documentFrame
+              src: $.documentFrame
+              tall: true
+              when: $.documentFrame
             - $frag: FILE_INFO
             - type: notice
               tone: warn
