@@ -41,6 +41,8 @@ import type {
 import { resolveCurrentContextUsage } from '../../types.js';
 import type { RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
+import { appendLocalImagePathHints } from './image-cli-bridge.js';
+import { extractTrustedImagePaths } from './image-paths.js';
 import {
   cacheOpenCodeAutoApproveProbe,
   getCliFlagName,
@@ -305,6 +307,15 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     )
       throw new Error('Exact OpenCode resume requires the original session ID and refuses session overrides');
     const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
+    // Attached images cannot ride the argv-only prompt. Add local path hints so
+    // the agent's read tool can load them; OpenCode still decides whether the
+    // configured model advertises image input.
+    const imagePaths = await extractTrustedImagePaths(
+      options?.contentBlocks,
+      options?.uploadDir,
+      options?.resolveTrustedImagePath,
+    );
+    const effectivePrompt = appendLocalImagePathHints(prompt, imagePaths);
     // P1-2: runtime model override takes precedence over constructor model
     const effectiveModel = options?.callbackEnv?.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE ?? this.model;
     const cwd = options?.workingDirectory;
@@ -368,7 +379,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         readOnly,
       );
       const args = this.buildArgs(
-        prompt,
+        effectivePrompt,
         options?.sessionId,
         effectiveModel,
         readOnly ? undefined : options?.cliConfigArgs,
