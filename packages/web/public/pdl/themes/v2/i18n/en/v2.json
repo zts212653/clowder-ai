@@ -5337,5 +5337,13 @@
     "barTitle": "Show usage in the sidebar",
     "selectedCount": "{0} accounts selected",
     "item": "{0} {1}% left"
+  },
+  "recovery": {
+    "paused": "Automatic recovery paused",
+    "pending": "Recovery pending",
+    "needsAttention": "Needs attention",
+    "parked": "Parked",
+    "interrupted": "Interrupted",
+    "recheck": "Recheck"
   }
 }

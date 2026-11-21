@@ -11679,6 +11679,55 @@ pdl:
       closeArgs:
         path: cs.modal
   views:
+    recovery.notice:
+      blocks:
+        - type: component
+          use: v2Box
+          props:
+            role: group
+            blocks:
+              - type: component
+                use: v2Status
+                props:
+                  tone: warn
+                  text: t:recovery.paused
+                when: $.incidents
+              - type: component
+                use: v2Status
+                props:
+                  tone: info
+                  text: t:recovery.pending
+                when: $.pending
+              - type: component
+                use: v2List
+                props:
+                  from: $.incidents
+                  optional: true
+                  row:
+                    layout: two
+                    title:
+                      - text:
+                          of: "@disposition"
+                          map:
+                            needs_attention: t:recovery.needsAttention
+                            parked: t:recovery.parked
+                            interrupted: t:recovery.interrupted
+                            _: "@disposition"
+                      - lit: " "
+                      - use: v2Text
+                        props:
+                          text: "@reasonCode"
+                          mono: true
+                    sub: "@executionRef"
+              - type: component
+                use: v2Action
+                props:
+                  label: t:recovery.recheck
+                  act: recoveryRecheck
+                  args:
+                    taskId: $.taskId
+                  busy: $.busy
+                when: $.canRecheck
     v2.quotaPin.rail:
       vm: quotaPin
       bare: true
@@ -16876,6 +16925,10 @@ pdl:
                   when:
                     - "@meta.open"
                     - "@exec"
+                - type: view
+                  id: recovery.notice
+                  data: "@recovery"
+                  when: "@recovery"
               acts:
                 slot: chat.message.actions
                 ctx: "@actsCtx"
@@ -25089,6 +25142,13 @@ pdl:
                     role: cycle
               title: "@title"
               inline:
+                - control:
+                    type: component
+                    use: v2Status
+                    props:
+                      tone: warn
+                      text: t:recovery.paused
+                  when: "@recovery.incidents"
                 - icon:
                     of: "@kind"
                     map:
@@ -25168,6 +25228,10 @@ pdl:
                 slot: ws.tasks.task
                 ctx: "@actsCtx"
               expand:
+                - type: view
+                  id: recovery.notice
+                  data: "@recovery"
+                  when: "@recovery"
                 - type: component
                   use: v2Text
                   props:
@@ -27965,6 +28029,10 @@ pdl:
                     path: ws.execDetail
                 when: "!$.inExec"
             blocks:
+              - type: view
+                id: recovery.notice
+                data: $.recovery
+                when: $.recovery
               - type: component
                 use: v2Pre
                 props:
@@ -34256,6 +34324,10 @@ pdl:
                               args:
                                 mid: "@mid"
           when: "@supp"
+        - type: view
+          id: recovery.notice
+          data: "@recovery"
+          when: "@recovery"
         - type: toolbar
           when: "@hold"
           items:
@@ -34814,6 +34886,10 @@ pdl:
                               args:
                                 mid: "@mid"
           when: "@supp"
+        - type: view
+          id: recovery.notice
+          data: "@recovery"
+          when: "@recovery"
     chat.node/user:
       frame: msg
       who: "@who"
@@ -35088,6 +35164,10 @@ pdl:
                               args:
                                 mid: "@mid"
           when: "@supp"
+        - type: view
+          id: recovery.notice
+          data: "@recovery"
+          when: "@recovery"
       acts:
         slot: chat.message.actions
         ctx: "@actsCtx"
@@ -37437,6 +37517,10 @@ pdl:
                               args:
                                 mid: "@mid"
           when: "@supp"
+        - type: view
+          id: recovery.notice
+          data: "@recovery"
+          when: "@recovery"
       acts:
         slot: chat.message.actions
         ctx: "@actsCtx"
@@ -37976,6 +38060,10 @@ pdl:
                               args:
                                 mid: "@mid"
           when: "@supp"
+        - type: view
+          id: recovery.notice
+          data: "@recovery"
+          when: "@recovery"
       acts:
         slot: chat.message.actions
         ctx: "@actsCtx"

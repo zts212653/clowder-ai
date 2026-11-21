@@ -5337,5 +5337,13 @@
     "barTitle": "在左侧栏显示额度",
     "selectedCount": "已选 {0} 个账号",
     "item": "{0} 剩 {1}%"
+  },
+  "recovery": {
+    "paused": "自动恢复已暂停",
+    "pending": "正在恢复",
+    "needsAttention": "需要检查",
+    "parked": "已停放",
+    "interrupted": "已中断",
+    "recheck": "重新检查"
   }
 }
