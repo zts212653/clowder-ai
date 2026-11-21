@@ -1065,7 +1065,7 @@ SET_AFTER['s.dialog.panes.cur'] = function (v) { const p = S.dialog && S.dialog.
 (function () {
   let tm = null;
   document.addEventListener('input', function (e) {
-    const scope = e.target && e.target.closest && e.target.closest('.typing-scope'); if (!scope) return;
+    const scope = e.target && e.target.closest && e.target.closest('.typing-scope'); if (!scope || !scope.querySelector('[data-htype]')) return;
     scope.dataset.typing = '1'; clearTimeout(tm);
     tm = setTimeout(function () { delete scope.dataset.typing; }, ms('--typing-hold'));
   });

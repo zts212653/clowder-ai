@@ -107,7 +107,7 @@
 @property --rot-t { syntax: '<integer>'; inherits: true; initial-value: 0; }
 @keyframes rot { to { --rot-t: var(--n); } }
 [data-rot] { display: inline-grid; min-width: 0; animation: rot calc(var(--n) * 4 * var(--loop)) steps(var(--n)) infinite; }
-[data-rot]:hover, .typing-scope[data-typing] [data-rot] { animation-play-state: paused; }
+[data-rot]:hover { animation-play-state: paused; }
 [data-rot] > * { grid-area: 1 / 1; transition: opacity var(--dur-med); min-width: 0; --rot-d: min(1, max(var(--rot-t) - var(--i, 0), var(--i, 0) - var(--rot-t))); opacity: calc(1 - var(--rot-d)); z-index: calc(1 - var(--rot-d)); pointer-events: auto; }
 :root[data-motion="reduce"] [data-rot] > * { transition: none; }
    /* 不滚动的道：内容不超过道宽（胶囊按自己的规则省略） */

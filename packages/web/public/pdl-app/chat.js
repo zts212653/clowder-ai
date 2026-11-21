@@ -1467,7 +1467,7 @@ window.clowderChat = {
       draft.values[key] = e.target.value;
     };
     INPUTS.runtimeCustom = function (e) {
-      return chatAction('runtimeCustom', { id: e.target.dataset.id, v: e.target.value });
+      return chatPort.action('runtimeCustom', { id: e.target.dataset.id, v: e.target.value });
     };
     CHANGES.runtimeSet = function (e) {
       const id = e.target.dataset.id,
