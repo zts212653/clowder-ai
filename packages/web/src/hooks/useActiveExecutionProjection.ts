@@ -91,9 +91,13 @@ export async function cancelProjectedExecution(
         ? await postLiveExecutionCancel(target)
         : await deleteHold(target.taskId, execution, withFeedback);
     await requireCancelConvergence(response);
-    useActiveExecutionStore.getState().settleCancellation(execution);
+    if (response.status !== 202) useActiveExecutionStore.getState().settleCancellation(execution);
     const { anchorThreadId, projectPath } = useActiveExecutionStore.getState();
-    if (anchorThreadId) await refreshActiveExecutionProjection(anchorThreadId, projectPath);
+    try {
+      if (anchorThreadId) await refreshActiveExecutionProjection(anchorThreadId, projectPath);
+    } finally {
+      if (response.status === 202) useActiveExecutionStore.getState().releaseCancellation(execution);
+    }
   } catch (error) {
     useActiveExecutionStore.getState().releaseCancellation(execution);
     throw error;

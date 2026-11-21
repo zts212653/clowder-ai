@@ -312,6 +312,67 @@ describe('F295 canonical execution hydration', () => {
       ]),
     );
   });
+
+  it('releases cancelPendingByKey after a 202 pending cancel so a still-active command can be stopped again', async () => {
+    const execution: ActiveExecutionProjection = {
+      executionId: 'hold-ball-parked',
+      threadId: 'thread-a',
+      threadTitle: 'Thread A',
+      catId: 'codex-sol',
+      kind: 'managed_command',
+      startedAt: 400,
+      cancelability: {
+        state: 'cancelable',
+        target: { kind: 'managed_command', taskId: 'hold-ball-parked' },
+      },
+    };
+    const key = activeExecutionKey(execution);
+    const store = useActiveExecutionStore.getState();
+    store.applySnapshot('thread-a', store.beginHydration('thread-a', '/project/cafe'), {
+      projectPath: '/project/cafe',
+      executions: [execution],
+    });
+
+    let deleteCount = 0;
+    const refreshGate = { release: () => {} };
+    mocks.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'DELETE' && url === '/api/callbacks/hold-ball/hold-ball-parked') {
+        deleteCount += 1;
+        if (deleteCount === 1) {
+          return new Response(JSON.stringify({ status: 'pending', cancelled: false, cancellationRequested: true }), {
+            status: 202,
+          });
+        }
+        return new Response(JSON.stringify({ status: 'ok', cancelled: true }), { status: 200 });
+      }
+      if (deleteCount === 1) {
+        await new Promise<void>((resolve) => {
+          refreshGate.release = resolve;
+        });
+        return new Response(JSON.stringify({ projectPath: '/project/cafe', executions: [execution] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ projectPath: '/project/cafe', executions: [] }), { status: 200 });
+    });
+
+    const firstCancel = cancelProjectedExecution(execution);
+    await Promise.resolve();
+    await Promise.resolve();
+    // Concurrent click while 202 + refresh is in flight stays fenced.
+    await cancelProjectedExecution(execution);
+    expect(deleteCount).toBe(1);
+    expect(useActiveExecutionStore.getState().cancelPendingByKey[key]).toBe(true);
+
+    refreshGate.release();
+    await firstCancel;
+
+    expect(useActiveExecutionStore.getState().executionsByKey[key]).toEqual(execution);
+    expect(useActiveExecutionStore.getState().cancelPendingByKey).toEqual({});
+
+    await cancelProjectedExecution(execution);
+    expect(deleteCount).toBe(2);
+    expect(useActiveExecutionStore.getState().executionsByKey).toEqual({});
+    expect(useActiveExecutionStore.getState().cancelPendingByKey).toEqual({});
+  });
 });
 beforeAll(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
