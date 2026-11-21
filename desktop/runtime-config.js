@@ -55,7 +55,23 @@ function resolveDesktopRuntime(env = process.env, executable = process.execPath)
     env = { ...env, ...saved };
   }
   const instanceRoot = env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
-  if (instanceRoot === undefined) return { frontendPort: 3003, apiPort: 3004, redisPort: 6399, instanceRoot: null };
+  if (instanceRoot === undefined) {
+    const config = { frontendPort: 3003, apiPort: 3004, redisPort: 6399, instanceRoot: null };
+    if (path.basename(directory).toLowerCase() !== 'desktop-dist') return config;
+    const installRoot = fs.realpathSync.native(path.dirname(directory));
+    const dataMarker = path.join(installRoot, 'desktop-data-root.json');
+    if (!fs.existsSync(dataMarker)) return config;
+    const { dataRoot } = JSON.parse(fs.readFileSync(dataMarker, 'utf8'));
+    if (typeof dataRoot !== 'string' || !path.isAbsolute(dataRoot))
+      throw new Error('Desktop data root must be absolute');
+    if (!fs.existsSync(dataRoot) || !fs.statSync(dataRoot).isDirectory())
+      throw new Error('Desktop data root must be an existing directory');
+    const canonicalRoot = fs.realpathSync.native(dataRoot);
+    const relative = path.relative(installRoot, canonicalRoot);
+    if (!relative || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`)))
+      throw new Error('Desktop data root must be outside the installation');
+    return { ...config, dataRoot: canonicalRoot };
+  }
   if (!instanceRoot || !path.isAbsolute(instanceRoot)) throw new Error('Desktop instance root must be absolute');
   assertDesktopDataBoundary(
     instanceRoot,
@@ -101,8 +117,9 @@ function readPackagedApiPort(root) {
   return Number(url.port);
 }
 function prepareDesktopInstance(app, config) {
-  if (!config.instanceRoot) return;
-  const userData = path.join(config.instanceRoot, 'electron');
+  const root = config.instanceRoot ?? config.dataRoot;
+  if (!root) return;
+  const userData = path.join(root, 'electron');
   fs.mkdirSync(userData, { recursive: true });
   app.setPath('userData', userData);
 }

@@ -99,3 +99,39 @@ test('requires an explicit absolute instance root and three safe distinct ports'
   assert.throws(() => resolveDesktopRuntime({ ...env, API_SERVER_PORT: env.FRONTEND_PORT }), /distinct/);
   assert.throws(() => resolveDesktopRuntime({ ...env, CAT_CAFE_DESKTOP_INSTANCE_ROOT: '../production' }), /absolute/);
 });
+
+test('persistent data root survives a packaged upgrade while retaining ordinary ports', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-persistent-'));
+  const install = path.join(root, 'app');
+  const payload = path.join(install, 'desktop-dist');
+  const data = path.join(root, 'state');
+  fs.mkdirSync(payload, { recursive: true });
+  fs.mkdirSync(data);
+  try {
+    const executable = path.join(payload, 'Clowder AI.exe');
+    const marker = path.join(install, 'desktop-data-root.json');
+    fs.writeFileSync(marker, JSON.stringify({ dataRoot: data }));
+    const resolve = () => resolveDesktopRuntime({ API_SERVER_PORT: '15888' }, executable);
+    assert.deepEqual(resolve(), {
+      frontendPort: 3003,
+      apiPort: 3004,
+      redisPort: 6399,
+      instanceRoot: null,
+      dataRoot: fs.realpathSync.native(data),
+    });
+    const setters = [];
+    require('./runtime-config').prepareDesktopInstance({ setPath: (...args) => setters.push(args) }, resolve());
+    assert.deepEqual(setters, [['userData', path.join(fs.realpathSync.native(data), 'electron')]]);
+    fs.rmSync(payload, { recursive: true });
+    fs.mkdirSync(payload);
+    assert.equal(resolve().dataRoot, fs.realpathSync.native(data));
+    fs.writeFileSync(marker, JSON.stringify({ dataRoot: install }));
+    assert.throws(resolve, /outside the installation/);
+    fs.writeFileSync(marker, JSON.stringify({ dataRoot: 'relative' }));
+    assert.throws(resolve, /absolute/);
+    fs.writeFileSync(marker, JSON.stringify({ dataRoot: path.join(root, 'missing') }));
+    assert.throws(resolve, /existing directory/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

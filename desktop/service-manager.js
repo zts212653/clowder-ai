@@ -68,7 +68,7 @@ const ARCH_SEG = process.arch === 'arm64' ? 'arm64' : 'x64';
 // Reads brand name from electron-builder config — single source of truth
 // shared with main.js (which imports USER_DATA_DIR from this module).
 function resolveUserDataDir() {
-  const { instanceRoot } = resolveDesktopRuntime();
+  const { instanceRoot, dataRoot } = resolveDesktopRuntime();
   if (instanceRoot) return instanceRoot;
   let brandName;
   try {
@@ -76,9 +76,11 @@ function resolveUserDataDir() {
   } catch {
     brandName = 'Clowder AI';
   }
-  const base = IS_MAC
-    ? path.join(process.env.HOME || os.homedir(), 'Library', 'Application Support')
-    : process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
+  const base =
+    dataRoot ??
+    (IS_MAC
+      ? path.join(process.env.HOME || os.homedir(), 'Library', 'Application Support')
+      : process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local'));
   return path.join(base, brandName);
 }
 
@@ -197,8 +199,9 @@ class ServiceManager {
       }),
     );
     if (occupied.some(Boolean)) throw occupiedDesktopPorts(occupied.filter(Boolean).join('、'));
-    if (resolveDesktopRuntime().instanceRoot && (await this._isPortOpen(this.redisPort))) {
-      throw new Error(`Isolated desktop port ${this.redisPort} is already occupied`);
+    const { instanceRoot, dataRoot } = resolveDesktopRuntime();
+    if ((instanceRoot || dataRoot) && (await this._isPortOpen(this.redisPort))) {
+      throw new Error(`${instanceRoot ? 'Isolated' : 'Persistent'} desktop port ${this.redisPort} is already occupied`);
     }
 
     // ---- Pre-flight checks ----
@@ -534,12 +537,14 @@ class ServiceManager {
     const portableRedis = path.join(redisDir, `redis-server${EXE_SUFFIX}`);
     // An isolated instance can never degrade, so its failures must not advertise
     // the one-launch memory choice the dialog would otherwise offer.
-    const isolated = Boolean(resolveDesktopRuntime().instanceRoot);
+    const { instanceRoot, dataRoot } = resolveDesktopRuntime();
+    const isolated = Boolean(instanceRoot);
     const fail = (reason) => new RedisUnavailableError(reason, this.redisPort, { allowMemoryOnce: !isolated });
 
     // Already running — verify it is actually Redis
     if (await this._isPortOpen(this.redisPort)) {
-      if (isolated) throw new Error(`Isolated Redis port ${this.redisPort} is already occupied`);
+      if (isolated || dataRoot)
+        throw new Error(`${isolated ? 'Isolated' : 'Persistent'} Redis port ${this.redisPort} is already occupied`);
       const isRedis = await this._verifyRedisPing(this.redisPort);
       if (isRedis) {
         this.onStatus(`Redis already running on ${this.redisPort}`);
@@ -696,7 +701,7 @@ class ServiceManager {
 
   _startProcess(name, cmd, args, opts = {}) {
     this.startupAbort?.signal.throwIfAborted();
-    const { instanceRoot } = resolveDesktopRuntime();
+    const { instanceRoot, dataRoot } = resolveDesktopRuntime();
     const inherited = instanceRoot
       ? Object.fromEntries(
           Object.entries(process.env).filter(([key]) =>
@@ -734,6 +739,14 @@ class ServiceManager {
             REDIS_PORT: String(this.redisPort),
             API_SERVER_HOST: '127.0.0.1',
             NODE_ENV: 'production',
+          }
+        : {}),
+      ...(dataRoot
+        ? {
+            HOME: dataRoot,
+            USERPROFILE: dataRoot,
+            LOCALAPPDATA: dataRoot,
+            CAT_CAFE_DATA_DIR: path.join(dataRoot, '.cat-cafe'),
           }
         : {}),
       API_SERVER_PORT: String(this.apiPort),
@@ -805,7 +818,12 @@ class ServiceManager {
           delete env[key];
         }
       }
-      Object.assign(env, instanceRoot ? readClientHomes(instanceRoot) : resolveDefaultClientHomes(env));
+      Object.assign(
+        env,
+        instanceRoot ? readClientHomes(instanceRoot) : resolveDefaultClientHomes(dataRoot ? inherited : env),
+        readClientHomes(dataRoot),
+      );
+      if (dataRoot) env.GEMINI_CLI_HOME ??= inherited.USERPROFILE || os.homedir();
     }
 
     log(`[${name}] spawn: ${cmd} ${args.join(' ')}`);
