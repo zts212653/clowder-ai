@@ -8,6 +8,7 @@ const clientKeys = {
   dsh: 'DSH_HOME',
   kimi: 'KIMI_CODE_HOME',
   pi: 'PI_CODING_AGENT_DIR',
+  gemini: 'GEMINI_CLI_HOME',
   npmCache: 'npm_config_cache',
 };
 

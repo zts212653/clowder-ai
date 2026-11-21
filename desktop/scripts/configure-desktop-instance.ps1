@@ -1,6 +1,7 @@
 param(
   [Parameter(Mandatory)] [string]$AppDir,
   [string]$InstanceRoot,
+  [string]$DataRoot,
   [string]$FrontendPort,
   [string]$ApiPort,
   [string]$RedisPort
@@ -70,6 +71,17 @@ function Assert-DataBoundary([string]$root) {
     }
   }
 }
+function Resolve-DataRoot([string]$root) {
+  if ($root -notmatch '^(?:[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)') { throw 'Desktop data root must be absolute' }
+  if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw 'Desktop data root must be an existing directory' }
+  $canonical = Resolve-BoundaryPath $root
+  $app = Resolve-BoundaryPath $AppDir
+  if ($canonical.Equals($app, [StringComparison]::OrdinalIgnoreCase) -or
+      $canonical.StartsWith($app + '\', [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Desktop data root must be outside the installation'
+  }
+  return $canonical
+}
 function Assert-Identity($identity) {
   if ($identity -isnot [pscustomobject] -or -not $identity.CAT_CAFE_DESKTOP_INSTANCE_ROOT -or
       -not [IO.Path]::IsPathRooted($identity.CAT_CAFE_DESKTOP_INSTANCE_ROOT)) { throw 'Invalid instance root' }
@@ -87,6 +99,22 @@ $legacy = Join-Path $AppDir 'desktop-dist\desktop-instance.json'
 $saved = $null
 $body = $null
 $existing = if (Test-Path -LiteralPath $marker) { $marker } elseif (Test-Path -LiteralPath $legacy) { $legacy } else { $null }
+$dataMarker = Join-Path $AppDir 'desktop-data-root.json'
+$hasDataMarker = Test-Path -LiteralPath $dataMarker
+if (($hasDataMarker -or $DataRoot) -and ($existing -or $InstanceRoot)) {
+  throw 'Choose either isolated instance or persistent data root'
+}
+if ($hasDataMarker) {
+  $savedData = [IO.File]::ReadAllText($dataMarker, [Text.Encoding]::UTF8) | ConvertFrom-Json
+  if ($savedData.dataRoot -isnot [string]) { throw 'Invalid desktop data root marker' }
+  $savedDataRoot = Resolve-DataRoot $savedData.dataRoot
+}
+if ($DataRoot) {
+  $requestedDataRoot = Resolve-DataRoot $DataRoot
+  if ($savedDataRoot -and $requestedDataRoot -ne $savedDataRoot) {
+    throw 'Explicit desktop data root conflicts with existing installation'
+  }
+}
 if ($existing) {
   $body = [IO.File]::ReadAllText($existing, [Text.Encoding]::UTF8)
   $saved = $body | ConvertFrom-Json
@@ -137,6 +165,10 @@ function Write-DefaultClientHomes([string]$root) {
 }
 
 Write-DefaultClientHomes $InstanceRoot
+if ($DataRoot -and -not $hasDataMarker) {
+  $marker = $dataMarker
+  $body = @{ dataRoot = $requestedDataRoot } | ConvertTo-Json -Compress
+}
 if (-not $body -or (Test-Path -LiteralPath $marker)) { exit 0 }
 # Keep this install-owned record outside the payload replacement boundary.
 # A failed extraction can be retried without losing the original instance.
