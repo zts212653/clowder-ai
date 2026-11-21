@@ -358,7 +358,7 @@ function syncAttrs(live, next) {
   }
   let i, a;
   for (i = 0; i < next.attributes.length; i++) { a = next.attributes[i]; if (live.getAttribute(a.name) !== a.value) live.setAttribute(a.name, a.value); }
-  for (i = live.attributes.length - 1; i >= 0; i--) { a = live.attributes[i]; if (a.name !== 'data-aname' && !next.hasAttribute(a.name)) live.removeAttribute(a.name); }
+  for (i = live.attributes.length - 1; i >= 0; i--) { a = live.attributes[i]; if (a.name !== 'data-aname' && a.name !== 'data-typing' && !next.hasAttribute(a.name)) live.removeAttribute(a.name); }
   if (cursor) live.style.cursor = cursor;
 }
 /* 同一个元素就地改属性、再往下比孩子；返回 false 表示结构不同，交给调用处整块换 */

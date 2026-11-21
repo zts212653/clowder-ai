@@ -270,7 +270,7 @@ function nodeId(n) {
 }
 function treeKey(el) { const ks = []; for (let n = el; n && n !== document.body; n = n.parentElement) { const k = nodeId(n); if (k) ks.unshift(k); } return ks.join('/'); }
 /* 节点的“版本”就是它的 HTML：相位（节拍、轮换起点）从不写进 HTML，由动画诞生时按时间原点对齐 */
-function streamVer(el) { return el.outerHTML.replace(/ data-aname="[^"]*"/g, ''); }   /* 锚点名（anchor.js）是插进页面后按身份写上的，不算内容 */
+function streamVer(el) { return el.outerHTML.replace(/ data-aname="[^"]*"/g, '').replace(/(<[^>]* data-tick="[^"]*"[^>]*>)[^<]*/g, '$1'); }   /* 锚点名（anchor.js）与会走的计时字（data-tick）不算内容，避免重画拆装孤岛打断动画 */
 /* 本地更新之后（只改了某个节点里的属性 / 一小块）：把所在消息节点、各层孤岛记下的版本更新成现在的样子，
    下次整页重画时它们照样被复用（前提：本地更新出来的 HTML 和重画出来的一样） */
 /* 组件在页面上写的测量结果（CSS 变量、data-foldable、按测量改的提示文字）不算内容：记版本前由各组件把副本还原成“刚画出来”的样子 */
