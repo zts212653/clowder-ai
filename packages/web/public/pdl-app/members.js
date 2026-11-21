@@ -359,7 +359,7 @@ function bindMembers() {
   // Refresh: read the current catalog again past the server's cache; the list on screen stays until it arrives.
   A.memberCatalogRefresh = function () {
     const state = runtimeCatalogState();
-    if (!state) return;
+    if (!state) return read();
     state.load = 'loading';
     render(true);
     settleHold(
@@ -400,7 +400,25 @@ function bindMembers() {
       });
   });
   function memberPreferences(f, catalogState, poolDefault) {
-    const catalog = catalogState && catalogState.value;
+    let catalog = catalogState && catalogState.value;
+    const account =
+      meta &&
+      meta.accounts.find(function (a) {
+        return a.id === f.accountRef;
+      });
+    if (
+      (!catalog || !catalog.models.length) &&
+      f.configurationSource === 'managed_account' &&
+      account &&
+      account.models &&
+      account.models.length
+    )
+      catalog = Object.assign({}, catalog, {
+        status: catalog ? catalog.status : 'configured',
+        models: account.models.map(function (value) {
+          return { value: value, label: value };
+        }),
+      });
     if (!catalog)
       return {
         catalog: null,
@@ -423,7 +441,7 @@ function bindMembers() {
       });
     return {
       catalog: catalog,
-      catalogLoading: catalogState.load === 'loading',
+      catalogLoading: !!catalogState && catalogState.load === 'loading',
       catalogRead: true,
       acpMaxDefault: poolDefault,
       selectedModel: selected,
@@ -715,8 +733,9 @@ function bindMembers() {
         ? null
         : memberPreferences(f, catalogState, runtime ? runtime.acpMaxDefault : client && client.acpMaxDefault),
       identityProtection: cat && cat.identityProtection,
-      follow: f.accountBindingMode === 'follow',
-      overrideAccount: f.accountBindingMode === 'override',
+      follow: ['openai', 'anthropic'].includes(f.clientId) && f.carrier !== 'acp' && f.accountBindingMode === 'follow',
+      overrideAccount:
+        ['openai', 'anthropic'].includes(f.clientId) && f.carrier !== 'acp' && f.accountBindingMode === 'override',
       required: { provider: f.clientId === 'opencode' },
       noAccount: !meta.accounts.length,
       active: active,
@@ -817,7 +836,9 @@ function bindMembers() {
     if (key === 'name') state.form.displayName = e.target.value;
     if (key === 'accountRef' && e.target.value) {
       state.form.configurationSource = 'managed_account';
-      state.form.accountBindingMode = 'override';
+      if (['openai', 'anthropic'].includes(state.form.clientId) && state.form.carrier !== 'acp')
+        state.form.accountBindingMode = 'override';
+      else delete state.form.accountBindingMode;
     } else if (key === 'accountRef') state.form.configurationSource = 'native_tool'; // the client's own login and configuration
     if (key === 'clientId') {
       const client = meta.clients.find(function (row) {

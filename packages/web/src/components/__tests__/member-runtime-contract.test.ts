@@ -25,6 +25,33 @@ const member = {
 } as CatData;
 
 describe('member preferences and execution identity are independent', () => {
+  it.each(['opencode', 'google', 'kimi', 'acp'] as const)('does not send account following for %s ACP', (clientId) => {
+    const acp = {
+      ...member,
+      clientId,
+      carrier: 'acp',
+      cli: undefined,
+      acp: { command: clientId, startupArgs: ['acp'] },
+    } as CatData;
+    const form = {
+      ...initialState(acp),
+      accountRef: 'qiniu',
+      accountBindingMode: 'override' as const,
+      defaultModel: 'glm-5.3',
+      provider: 'anthropic',
+    };
+    const payload = buildCatPatchPayload(form, acp);
+    expect(payload).not.toHaveProperty('accountBindingMode');
+    expect(payload).toMatchObject({ accountRef: 'qiniu', defaultModel: 'glm-5.3' });
+    if (clientId === 'opencode') expect(payload).toHaveProperty('provider', 'anthropic');
+  });
+  it.each(['openai', 'anthropic'] as const)('keeps explicit account following for local %s', (clientId) => {
+    const local = { ...member, clientId, carrier: 'cli' } as CatData;
+    expect(buildCatPatchPayload({ ...initialState(local), accountBindingMode: 'follow' }, local)).toHaveProperty(
+      'accountBindingMode',
+      'follow',
+    );
+  });
   it('keeps the chosen account while inheriting model and restoring effort', () => {
     expect(buildCatPatchPayload({ ...initialState(member), cliEffort: '' }, member)).toEqual({ cli: { effort: null } });
   });
