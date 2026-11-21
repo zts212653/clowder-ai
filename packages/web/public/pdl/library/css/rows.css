@@ -35,7 +35,7 @@
 [data-cols] > .lr:not([data-layout="tree"]) > .lr-exp:has(> .group, > .lr-inline > .lr) { grid-column: 1 / -1; padding-inline-start: 0; }   /* 展开里是列表（卡片或一列行）：已经在卡片里了，和卡片内边左对齐，不再让出头像那一列 */
 /* 行尾顺序：数据列（状态、元信息）在前，操作永远在最后。有数据列的行，操作在流里占最后一列（看不见时也占着位置，状态不会跳）；
    列表里的行（data-cols）操作落在 acts 列轨上下对齐。没有数据列的单行照旧浮在行尾 */
-.lr-end > .lr-cols ~ .lr-acts, .lr-end > .lr-acts:has(~ .lr-ctls), [data-cols] > .lr:not([data-layout="tree"]) > .lr-head > .lr-end > .lr-acts { position: static; transform: none; padding-inline-start: var(--sp-s); }
+.lr-end > .lr-cols ~ .lr-acts, .lr-end > .lr-acts:has(~ .lr-ctls), [data-cols] > .lr:not([data-layout="tree"]) > .lr-head > .lr-end > .lr-acts { position: static; transform: none; flex: none; padding-inline-start: var(--sp-s); }
 [data-cols] > .lr:not([data-layout="tree"]) > .lr-head > .lr-end > .lr-acts { grid-column: acts; justify-self: end; }
 .lr-col { flex: 0 1 auto; min-width: 0; padding-inline-start: var(--sp-s); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: clip; text-overflow: ellipsis; }
 .lr-colbtn { font: inherit; font-size: var(--fs-s); background: none; border: 0; padding-block: 0; padding-inline-end: 0; cursor: pointer; }
@@ -81,9 +81,10 @@
 .lr-lead > .ic { color: var(--fg-faint); }
 .lr.done .lr-lead > .ic { color: var(--ok); }
 /* 行内标记可以收缩；标题至少留 4 个字 */
-.lr-title { overflow: clip; white-space: nowrap; text-overflow: ellipsis; flex: 0 1 auto; min-width: 4em; }
+.lr-title { overflow: clip; white-space: nowrap; text-overflow: ellipsis; flex: 0 1 auto; min-width: min(4em, 100%); }
 .lr[data-open="true"]:is(:not(:has(> .lr-exp)), [data-title-wrap="open"]) > .lr-head > .lr-main > .lr-line > .lr-title { white-space: normal; text-overflow: clip; overflow-wrap: anywhere; }   /* 打开时标题换行看全：默认只在只为看全标题时（展开区有内容时标题保持一行，详情在展开区）；行声明 titleWrap: open 时打开就换行（展开区接着标题往下写的，比如思考） */
-.lr-line > :not(.lr-title):not(.dot) { flex: 0 1 auto; min-width: 0; overflow: clip; white-space: nowrap; text-overflow: ellipsis; }
+.lr-line > :not(.lr-title):not(.dot):not(.status) { flex: 0 1 auto; min-width: 0; overflow: clip; white-space: nowrap; text-overflow: ellipsis; }
+.lr-line > .status { flex: none; max-width: min(var(--col-state), max(var(--dot), 100% - 4em - var(--sp-s))); }   /* 行内状态先于标题保住完整展示，过长时按状态列上限省略，不裁圆点 */
 /* 当前对话之类的“这里”：比普通行高一层底色 */
 .lr.here { background: var(--accent-wash); }
 /* 没有前导的父行：子行前导不悬挂，避免伸出列表边缘 */

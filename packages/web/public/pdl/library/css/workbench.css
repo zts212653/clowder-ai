@@ -34,7 +34,7 @@
 .panel-head { height: var(--row-h); display: flex; align-items: center; gap: var(--sp-xs); padding: 0 var(--sp-s) 0 var(--sp-s); flex-shrink: 0; }
 .panel-head .grow { flex: 1; }
 .panel-body { flex: 1; min-height: 0; padding: var(--sp-xs) var(--gutter-panel) calc(24 * var(--unit)); display: flex; flex-direction: column; gap: var(--sp-l); }
-.split.wide .panel-body > * { inline-size: 100%; max-inline-size: var(--g-w); margin-inline: auto; }   /* 铺开的工作台：内容占满工作台的网格（和主窗口一样的模数），居中 */
+.split.wide .panel-body > :not(.vw-page-split, .vw-split, .frame.tall, .vw-widget[src].tall, .page:has(> .vw-split), .page:has(> .frame.tall), .page:has(> .vw-widget[src].tall)) { inline-size: 100%; max-inline-size: var(--g-w); margin-inline: auto; }   /* 铺开的工作台：阅读内容占满工作台的网格（和主窗口一样的模数）居中；分栏与整页框按自身规则铺满 */
 .menu button[aria-current="true"] { font-weight: var(--fw-medium); color: var(--fg-strong); }   /* 当前的那一项：字重标出，不默认铺底（底色只给悬停） */
 /* 插件嵌入位：插件提供界面，控制台只给一个框 */
 .frame { border-radius: var(--r-l); background: var(--bg-field); min-height: calc(7 * var(--row-h-1)); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-s); color: var(--fg-muted); text-align: center; padding: var(--sp-xl); box-shadow: inset 0 0 0 1px var(--line-strong); }
