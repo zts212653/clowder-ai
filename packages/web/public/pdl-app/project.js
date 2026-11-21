@@ -2499,10 +2499,10 @@ function bindProject() {
     }
   };
   INPUTS.workReviewText = function (e) {
-    return chatPort.action('workReviewText', { v: e.target.value });
+    return chatAction('workReviewText', { v: e.target.value });
   };
   INPUTS.workReviewTime = function (e) {
-    return chatPort.action('workReviewTime', { id: e.target.id, v: e.target.value });
+    return chatAction('workReviewTime', { id: e.target.id, v: e.target.value });
   };
   INPUTS.contentModifyPrompt = function (e) {
     CS.contentModification.prompt = e.target.value;
