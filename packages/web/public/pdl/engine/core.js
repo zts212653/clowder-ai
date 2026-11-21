@@ -461,6 +461,7 @@ function locateNode(attr, value, o) {
 }
 let JUMP_WAIT = null;   /* 正在滚向的那次跳转：重画后看一眼流 / 目标还在不在 */
 function scrollToMessage(mid, done, tries) {
+  if (JUMP_WAIT) { JUMP_WAIT.drop(); JUMP_WAIT = null; }   /* 新的跳转先接替旧的，包括已经在位、无需滚动的落点 */
   const s = document.getElementById('stream'); done = done || function () {};
   /* 只认消息节点（流的直接子项）：按钮、引用这类也带 data-mid，不能当成落点；正在输出的那条用 data-run 标它的消息号 */
   const el = s && s.querySelector('[data-stream] > [data-mid="' + mid + '"], [data-stream] > [data-run="' + mid + '"]');
@@ -475,7 +476,6 @@ function scrollToMessage(mid, done, tries) {
   /* 居中算的是连同滚动外边距（scroll-margin）的那一块：浏览器就是这样居中的，不算的话带外边距的消息永远差几像素“不在位” */
   const away = function () { const sr = s.getBoundingClientRect(), r = el.getBoundingClientRect(), m = getComputedStyle(el), d = (r.top - parseFloat(m.scrollMarginTop) + r.bottom + parseFloat(m.scrollMarginBottom)) / 2 - (sr.top + sr.height / 2), room = d > 0 ? -s.scrollTop : s.scrollHeight - s.clientHeight + s.scrollTop;   /* stick-end：往下（朝底）还能滚 -scrollTop，往上还能滚到 -(sh - ch) */ return Math.abs(d) >= 2 && room >= 2; };
   if (!away() || motionOff()) { el.scrollIntoView({ block: 'center', behavior: 'instant' }); fin(); return; }
-  if (JUMP_WAIT) JUMP_WAIT.drop();   /* 新的跳转接替旧的 */
   JUMP_WAIT = { check: function () { if (!s.isConnected || !el.isConnected) again(); }, drop: function () { live = false; } };
   /* 在文档上（捕获）等 scrollend：流被换掉时也收得到 */
   const wait = function () { document.addEventListener('scrollend', function (e) {
