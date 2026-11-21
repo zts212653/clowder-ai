@@ -148,8 +148,8 @@ export function WorkspacePluginFilePreview({
   }, [state]);
 
   if (state === 'unavailable' || state === 'too-large' || state === 'failed') {
-    if (!showPluginSettings && state === 'unavailable') return fallback;
     const unsupported = state === 'unavailable' && SYSTEM_APP_OFFICE_FORMATS.has(contentFileExtension(path));
+    if (state === 'unavailable' && !showPluginSettings && !unsupported) return fallback;
     const message = unsupported ? '此格式暂不支持预览。可用默认应用打开。' : PREVIEW_FALLBACK_MESSAGE[state];
     return (
       <div className="flex min-h-0 flex-1 flex-col">
@@ -157,7 +157,6 @@ export function WorkspacePluginFilePreview({
           {message}
           {showPluginSettings && state === 'unavailable' && !unsupported && ' 可在插件设置中检查预览插件。'}
         </output>
-        {fallback}
       </div>
     );
   }

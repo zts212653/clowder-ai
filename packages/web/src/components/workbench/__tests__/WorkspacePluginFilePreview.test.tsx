@@ -48,13 +48,13 @@ describe('WorkspacePluginFilePreview', () => {
     vi.resetAllMocks();
   });
 
-  async function renderPreview(path = 'docs/sample.pdf') {
+  async function renderPreview(path = 'docs/sample.pdf', showPluginSettings = true) {
     await act(async () => {
       root.render(
         <WorkspacePluginFilePreview
           target={{ worktreeId: 'project', path }}
           onBack={() => undefined}
-          showPluginSettings
+          showPluginSettings={showPluginSettings}
           fallback={<p>System application fallback</p>}
         />,
       );
@@ -105,23 +105,25 @@ describe('WorkspacePluginFilePreview', () => {
     expect(postMessage).not.toHaveBeenCalled();
     expect(port1.postMessage).not.toHaveBeenCalled();
     expect(container.querySelector('iframe')).toBeNull();
-    expect(container.textContent).toContain('System application fallback');
+    expect(container.textContent).toContain('无法加载文件预览');
+    expect(container.textContent).not.toContain('System application fallback');
   });
 
-  it('shows the preview limit with a system application fallback', async () => {
+  it('shows the preview limit and points to the default application', async () => {
     vi.mocked(apiFetch).mockResolvedValueOnce(new Response(null, { status: 413 }));
     await renderPreview();
     expect(container.textContent).toContain('32 MiB');
-    expect(container.textContent).toContain('System application fallback');
+    expect(container.textContent).toContain('可用默认应用打开');
+    expect(container.textContent).not.toContain('System application fallback');
     expect(container.querySelector('iframe')).toBeNull();
   });
 
   it('explains unsupported spreadsheets without suggesting a plugin install', async () => {
     vi.mocked(apiFetch).mockResolvedValueOnce(new Response(null, { status: 204 }));
-    await renderPreview('docs/report.XLSX');
+    await renderPreview('docs/report.XLSX', false);
     expect(container.textContent).toContain('此格式暂不支持预览');
-    expect(container.textContent).toContain('System application fallback');
-    expect(container.querySelector('a[href="/settings?s=plugins"]')).toBeNull();
+    expect(container.textContent).not.toContain('System application fallback');
+    expect(container.textContent).not.toContain('可在插件设置中检查预览插件');
   });
 
   it('discards ready after the workspace preview has closed', async () => {
