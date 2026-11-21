@@ -49,6 +49,31 @@ exit 1
   return file;
 }
 
+function createHelpCli(helpText) {
+  const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-help-cli-'));
+  const script = join(dir, 'fixture.cjs');
+  writeFileSync(
+    script,
+    `const args = process.argv.slice(2);
+if (args[0] === 'run' && args.includes('--help')) {
+  console.log(${JSON.stringify(helpText)});
+  process.exit(0);
+}
+console.error('unexpected invocation');
+process.exit(1);
+`,
+  );
+  const command = join(dir, process.platform === 'win32' ? 'opencode.cmd' : 'opencode');
+  writeFileSync(
+    command,
+    process.platform === 'win32'
+      ? `@echo off\r\n"${process.execPath}" "${script}" %*\r\n`
+      : `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`,
+  );
+  chmodSync(command, 0o755);
+  return command;
+}
+
 function createAdvertisedAutoApprovalOpenCodeCli(...flags) {
   const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-advertised-opencode-cli-'));
   const file = join(dir, 'opencode');
@@ -298,6 +323,48 @@ describe('OpenCode headless permission mode', () => {
 
     assert.ok(args.includes('--auto'), 'must inject --auto when the probe selects it');
     assert.equal(args.filter((arg) => arg === '--auto').length, 1, 'must inject --auto exactly once');
+  });
+
+  test('opencode help probe reports thinking support', async () => {
+    const withThinking = createHelpCli('opencode run [message..]\n      --auto\n      --thinking');
+    const withoutThinking = createHelpCli('opencode run [message..]\n      --auto');
+
+    assert.equal((await probeOpenCodeAutoApproveSupport(withThinking)).thinking, true);
+    assert.equal((await probeOpenCodeAutoApproveSupport(withoutThinking)).thinking, false);
+  });
+
+  test('opencode injects --thinking when the CLI advertises it', async () => {
+    const args = await invokeOpenCodeAndCaptureArgs(
+      {},
+      {
+        autoApproveProbeFn: async () => ({ approvalFlag: '--auto', thinking: true }),
+      },
+    );
+
+    assert.ok(args.includes('--thinking'), 'must forward reasoning parts with --thinking');
+    assert.equal(args.filter((arg) => arg === '--thinking').length, 1, 'must inject --thinking exactly once');
+  });
+
+  test('opencode omits --thinking when the CLI does not advertise it', async () => {
+    const args = await invokeOpenCodeAndCaptureArgs(
+      {},
+      {
+        autoApproveProbeFn: async () => ({ approvalFlag: '--auto' }),
+      },
+    );
+
+    assert.equal(args.includes('--thinking'), false);
+  });
+
+  test('opencode keeps a user-supplied --thinking instead of duplicating it', async () => {
+    const args = await invokeOpenCodeAndCaptureArgs(
+      { cliConfigArgs: ['--thinking'] },
+      {
+        autoApproveProbeFn: async () => ({ approvalFlag: '--auto', thinking: true }),
+      },
+    );
+
+    assert.equal(args.filter((arg) => arg === '--thinking').length, 1);
   });
 
   test('opencode auto-approval probe prefers an advertised --auto flag', async () => {
