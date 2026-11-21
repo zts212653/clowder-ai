@@ -16865,6 +16865,51 @@ pdl:
                   when:
                     - "@meta.open"
                     - "@exec"
+              acts:
+                slot: chat.message.actions
+                ctx: "@actsCtx"
+                when: "@actsCtx"
+                items:
+                  - label: t:chatMessage.menu.label
+                    act: copy
+                    args:
+                      v: "@mid"
+                  - label: t:placement.relatedDisposition
+                    act: msgDisposition
+                    args:
+                      mid: "@mid"
+                  - label: t:chatMessage.menu.viewExecution
+                    act: traceOpen
+                    args:
+                      i: "@i"
+                    when: "@isCat"
+                  - label: t:chatMessage.menu.revealWhisper
+                    act: setStatus
+                    args:
+                      entity: msg
+                      id: "@i"
+                      field: revealed
+                      v: "true"
+                      cast: bool
+                    when: "@canReveal"
+                  - label: t:chatMessage.menu.branchHere
+                    act: modal
+                    args:
+                      v: branch
+                      i: "@i"
+                  - label: t:composerPop.forwardMore
+                    act: modal
+                    args:
+                      v: forward
+                      id: msg
+                  - label: t:chatMessage.menu.deleteMenu
+                    act: setStatus
+                    args:
+                      entity: msgDel
+                      id: "@i"
+                      v: "true"
+                      cast: bool
+                    tone: danger
     chat.ticks:
       vm: chatTicks
       bare: true
@@ -16891,6 +16936,28 @@ pdl:
           use: v2Composer
           props:
             home: $.home
+            runners:
+              - type: component
+                use: v2Runners
+                props:
+                  from: $.runners
+                  label: t:composer.running
+                  item:
+                    who: "@who"
+                    name: "@name"
+                    what: "@what"
+                    stop:
+                      label:
+                        t: composer.actions.stopNamed
+                        args:
+                          - "@name"
+                      act: cafeRunStop
+                      args:
+                        id: "@who"
+                        kind: "@kind"
+                when:
+                  - "!$.home"
+                  - $.runners
             header:
               - type: component
                 use: v2ComposerTitle
