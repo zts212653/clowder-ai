@@ -432,6 +432,7 @@ document.addEventListener('scroll', function (e) { const sc = e.target; if (!sc.
    消息流是 stick-end：scrollTop ≤ 0，0 就是底 */
 function streamTop() { const s = document.getElementById('stream'); return s ? s.scrollTop : 0; }   /* 消息流现在的位置（给“返回原处”记下；还原走 streamScrollTo） */
 function streamScrollTo(top) {
+  if (JUMP_WAIT) { JUMP_WAIT.drop(); JUMP_WAIT = null; }
   /* top：数字 = scrollTop；null = 到底；{ mid, off } = 让这条消息离视口顶 off（之后内容高度变了由浏览器的滚动锚定保持） */
   const s = document.getElementById('stream'); if (!s) return;
   const el = top && typeof top === 'object' ? s.querySelector('[data-stream] > [data-mid="' + top.mid + '"]') : null;
@@ -466,7 +467,16 @@ function scrollToMessage(mid, done, tries) {
   /* 只认消息节点（流的直接子项）：按钮、引用这类也带 data-mid，不能当成落点；正在输出的那条用 data-run 标它的消息号 */
   const el = s && s.querySelector('[data-stream] > [data-mid="' + mid + '"], [data-stream] > [data-run="' + mid + '"]');
   if (!el && ENGINE_PARTS.unitsAll && ENGINE_PARTS.unitsAll()) { scrollToMessage(mid, done, tries); return; }   /* 目标在数据里但还没画（长列表分批画）：先全画上 */
-  if (!el) { if ((tries || 0) < 3 && STREAM_OLDER.load && STREAM_OLDER.load(function () { scrollToMessage(mid, done, (tries || 0) + 1); }) !== false) return; done(false); return; }
+  if (!el) {
+    if ((tries || 0) < 3 && STREAM_OLDER.load) {
+      let pending = true;
+      const owner = { check: function () {}, drop: function () { pending = false; } };
+      JUMP_WAIT = owner;
+      if (STREAM_OLDER.load(function () { if (pending) scrollToMessage(mid, done, (tries || 0) + 1); }) !== false) return;
+      if (JUMP_WAIT === owner) { owner.drop(); JUMP_WAIT = null; }
+    }
+    done(false); return;
+  }
   let live = true;
   const fin = function () { if (!live) return; live = false; JUMP_WAIT = null; land(el, mid, 'emph'); done(true, el); };
   /* 滚动途中整页重画换掉了消息流（或目标节点）：旧节点上的 scrollend 不会再来，按 mid 重新找一次再滚 */
