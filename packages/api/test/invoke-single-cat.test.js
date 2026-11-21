@@ -318,6 +318,35 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     };
   }
 
+  it('gives conditional naming guidance for a temporary conversation title', async () => {
+    const prompts = [];
+    await collect(
+      invokeSingleCat(
+        { ...makeDeps(), threadStore: { get: async () => ({ title: '你好', titleSource: 'temporary' }) } },
+        {
+          catId: 'opus',
+          userId: 'user-1',
+          threadId: 'thread-hello',
+          prompt: '你好',
+          service: {
+            async *invoke(prompt) {
+              prompts.push(prompt);
+              yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+            },
+          },
+        },
+      ),
+    );
+    assert.equal(prompts.length, 1);
+    assert.match(
+      prompts[0],
+      /如果只是寒暄，或还看不出用户要做什么，保留临时标题，直接回复，无需为了起名查找或调用工具/,
+    );
+    assert.match(prompts[0], /等到任务明确的那一轮，再调用 cat_cafe_set_thread_metadata/);
+    assert.match(prompts[0], /还有必要的工具调用时，把起名和它们放在同一批发出/);
+    assert.match(prompts[0], /若要先查找命名工具，把查找和本来就要发出的调用一起做/);
+  });
+
   it('F321 keeps unrelated private Profile content behind the authenticated pull entry', async () => {
     const { FileProfileRepository } = await import('../dist/domains/cats/services/profile/ProfileRepository.js');
     const dataDir = await mkdtemp(join(tmpdir(), 'f321-pull-only-'));
