@@ -40,7 +40,7 @@ test('the latest message jump wins, including an immediately completed destinati
           document.querySelector('[data-mid="msg-50"]').scrollIntoView({ block: 'center', behavior: 'instant' });
         });
         await page.waitForTimeout(100);
-        await page.evaluate(() => scrollToMessage('msg-5'));
+        await page.evaluate(() => scrollToMessage('msg-48'));
         if (target === 'msg-80') await page.waitForTimeout(80);
         await page.evaluate((mid) => scrollToMessage(mid), target);
         // Allow the obsolete smooth-scroll's scrollend to fire as well. Merely observing the new
@@ -88,7 +88,7 @@ test('a newer scroll owner cancels both scrolling and pending history jumps', as
           );
           await page.waitForTimeout(100);
           await page.evaluate((kind) => {
-            if (kind === 'scroll-latest') scrollToMessage('msg-5');
+            if (kind === 'scroll-latest') scrollToMessage('msg-48');
             else {
               STREAM_OLDER.load =
                 kind === 'load-empty'
@@ -143,6 +143,140 @@ test('a newer scroll owner cancels both scrolling and pending history jumps', as
             assert.ok(Math.abs(result.scrollTop) < 120, `${scenario}: ${JSON.stringify(result)}`);
           }
           assert.equal(result.pending, false, `${scenario}: stale owner: ${JSON.stringify(result)}`);
+        } finally {
+          await page.close();
+        }
+      });
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test('native user scrolling owns the viewport throughout history loading and smooth arrival', async (t) => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    for (const mode of [
+      'wheel-load',
+      'touch-load',
+      'key-load',
+      'bar-load',
+      'wheel-smooth',
+      'deep-load',
+      'failed-load',
+      'far',
+    ]) {
+      await t.test(mode, async () => {
+        const page = await browser.newPage({ viewport: { width: 1000, height: 700 }, hasTouch: true });
+        try {
+          await page.setContent(
+            '<style>#stream{width:700px;height:500px;overflow:scroll;scrollbar-gutter:stable;display:flex;flex-direction:column-reverse;overflow-anchor:none}[data-stream]{flex:none}[data-mid]{height:120px;scroll-margin:0}</style><div id="stream" tabindex="0"><div data-stream="chat">' +
+              Array.from({ length: 100 }, (_, i) => `<div data-mid="msg-${i}">${i}</div>`).join('') +
+              '</div></div>',
+          );
+          await page.addScriptTag({
+            content:
+              'const ENGINE_PARTS={}, STREAM_OLDER={load:null}; function motionOff(){return false;} const marks=[],results=[]; let resume,pages=0; function land(el,mid){marks.push(mid);} function addOld(){const e=document.createElement("div");e.dataset.mid="old";document.querySelector("[data-stream]").prepend(e);}\n' +
+              productionJump,
+          });
+          await page.evaluate((kind) => {
+            const s = document.getElementById('stream');
+            s.scrollTop = -5650;
+            window.inputSeen = false;
+            window.inputScrolling = false;
+            s.addEventListener('scroll', () => {
+              window.inputScrolling = true;
+            });
+            s.addEventListener('scrollend', () => {
+              window.inputScrolling = false;
+            });
+            ['wheel', 'touchstart', 'keydown', 'pointerdown'].forEach((type) => {
+              s.addEventListener(type, () => {
+                window.inputSeen = true;
+              });
+            });
+            STREAM_OLDER.load =
+              kind === 'deep-load'
+                ? (cb) => {
+                    pages++;
+                    if (pages === 5) addOld();
+                    cb(true);
+                    return true;
+                  }
+                : (cb) => {
+                    pages++;
+                    resume = cb;
+                    return true;
+                  };
+            window.start = performance.now();
+            scrollToMessage(kind === 'wheel-smooth' ? 'msg-48' : kind === 'far' ? 'msg-5' : 'old', (ok) => {
+              results.push(ok);
+              window.arrived = performance.now() - start;
+            });
+          }, mode);
+          if (mode === 'failed-load') await page.evaluate(() => resume(false));
+          else if (!['deep-load', 'far'].includes(mode)) {
+            if (mode === 'wheel-smooth') await page.waitForTimeout(60);
+            const r = await page.locator('#stream').boundingBox();
+            await page.mouse.move(r.x + 200, r.y + 200);
+            if (mode.startsWith('wheel')) await page.mouse.wheel(0, 180);
+            else if (mode === 'key-load') {
+              await page.locator('#stream').focus();
+              await page.keyboard.press('PageUp');
+            } else if (mode === 'bar-load') {
+              await page.mouse.move(r.x + r.width - 4, r.y + 200);
+              await page.mouse.down();
+              await page.mouse.move(r.x + r.width - 4, r.y + 260);
+              await page.mouse.up();
+            } else {
+              const cdp = await page.context().newCDPSession(page);
+              await cdp.send('Input.dispatchTouchEvent', {
+                type: 'touchStart',
+                touchPoints: [{ x: r.x + 200, y: r.y + 200 }],
+              });
+              await cdp.send('Input.dispatchTouchEvent', {
+                type: 'touchMove',
+                touchPoints: [{ x: r.x + 200, y: r.y + 280 }],
+              });
+              await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+              await cdp.detach();
+            }
+            await page.waitForFunction(() => inputSeen);
+            assert.equal(
+              await page.evaluate(() => JUMP_WAIT === null),
+              true,
+              `${mode}: retire at the actual input event`,
+            );
+            if (mode !== 'wheel-smooth')
+              await page.evaluate(() => {
+                addOld();
+                resume(true);
+              });
+          }
+          await page.waitForTimeout(600);
+          await page.waitForFunction(() => !inputScrolling);
+          const before = await page.evaluate(() => document.getElementById('stream').scrollTop);
+          await page.waitForTimeout(700);
+          const r = await page.evaluate(() => ({
+            marks,
+            results,
+            pages,
+            pending: !!JUMP_WAIT,
+            top: document.getElementById('stream').scrollTop,
+            arrived: window.arrived,
+          }));
+          assert.equal(r.pending, false, JSON.stringify(r));
+          if (['deep-load', 'far'].includes(mode)) {
+            assert.deepEqual(r.results, [true]);
+            assert.ok(r.arrived < 200, JSON.stringify(r));
+          } else if (mode === 'failed-load') {
+            assert.deepEqual(r.results, [false]);
+            assert.equal(r.pages, 1);
+          } else {
+            assert.deepEqual(r.results, []);
+            assert.deepEqual(r.marks, []);
+            assert.ok(Math.abs(r.top - before) < 1, JSON.stringify({ before, ...r }));
+          }
         } finally {
           await page.close();
         }

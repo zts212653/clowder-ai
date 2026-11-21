@@ -438,7 +438,7 @@ document.addEventListener('scroll', function (e) { const sc = e.target; if (!sc.
    消息流是 stick-end：scrollTop ≤ 0，0 就是底 */
 function streamTop() { const s = document.getElementById('stream'); return s ? s.scrollTop : 0; }   /* 消息流现在的位置（给“返回原处”记下；还原走 streamScrollTo） */
 function streamScrollTo(top) {
-  if (JUMP_WAIT) { JUMP_WAIT.drop(); JUMP_WAIT = null; }
+  jumpDrop();
   /* top：数字 = scrollTop；null = 到底；{ mid, off } = 让这条消息离视口顶 off（之后内容高度变了由浏览器的滚动锚定保持） */
   const s = document.getElementById('stream'); if (!s) return;
   const el = top && typeof top === 'object' ? s.querySelector('[data-stream] > [data-mid="' + top.mid + '"]') : null;
@@ -446,7 +446,7 @@ function streamScrollTo(top) {
   else s.scrollTop = top == null ? 0 : typeof top === 'object' ? top.top : top;
 }
 /* 跳到某条消息（跳到原文、点引用、补充消息的跳到原文、跨对话落点、查找命中……都走这一个）：
-   浏览器原生的平滑滚动（scrollIntoView，减少动态效果时直接到位），停下来之后（scrollend）才回调——强调从这时开始；
+   浏览器原生的滚动（scrollIntoView，超过一屏或减少动态效果时直接到位），停下来之后（scrollend）才回调——强调从这时开始；
    目标还没加载（更早的消息）时先加载再滚。仍然是消息流唯一的滚动所有者：只有这里和 streamScrollTo 改 #stream 的位置 */
 const STREAM_OLDER = { load: null };   /* 对话区登记“加载更早的消息”（返回 false 表示已经没有更早的了） */
 /* 落点强调：跳转 / 定位停下来之后，目标闪一下（--dur-emph）。节点上直接加类；期间重画时组件按 landed(key) 照样画上，到时清掉 */
@@ -467,18 +467,40 @@ function locateNode(attr, value, o) {
   return true;
 }
 let JUMP_WAIT = null;   /* 正在滚向的那次跳转：重画后看一眼流 / 目标还在不在 */
-function scrollToMessage(mid, done, tries) {
-  if (JUMP_WAIT) { JUMP_WAIT.drop(); JUMP_WAIT = null; }   /* 新的跳转先接替旧的，包括已经在位、无需滚动的落点 */
+function jumpDrop() {
+  if (!JUMP_WAIT) return;
+  JUMP_WAIT.drop(); JUMP_WAIT = null;
+  const s = document.getElementById('stream');
+  if (s) s.scrollTo({ top: s.scrollTop, left: s.scrollLeft, behavior: 'instant' });
+}
+/* 原生滚动输入立即接管：取消等待读取的回调，也停止浏览器尚未结束的平滑滚动。 */
+['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach(function (type) {
+  document.addEventListener(type, function (e) {
+    if (!JUMP_WAIT) return;
+    const s = document.getElementById('stream'); if (!s) return;
+    if (type === 'keydown') {
+      if (!['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(e.key) || e.target.closest('input, textarea, select, button, [contenteditable]')) return;
+      const sc = e.target.closest('.scroll'); if (sc && sc !== s) return;
+    } else if (!s.contains(e.target)) return;
+    jumpDrop();
+  }, { capture: true, passive: true });
+});
+function scrollToMessage(mid, done) {
+  jumpDrop();   /* 新的跳转先接替旧的，包括已经在位、无需滚动的落点 */
   const s = document.getElementById('stream'); done = done || function () {};
   /* 只认消息节点（流的直接子项）：按钮、引用这类也带 data-mid，不能当成落点；正在输出的那条用 data-run 标它的消息号 */
   const el = s && s.querySelector('[data-stream] > [data-mid="' + mid + '"], [data-stream] > [data-run="' + mid + '"]');
-  if (!el && ENGINE_PARTS.unitsAll && ENGINE_PARTS.unitsAll()) { scrollToMessage(mid, done, tries); return; }   /* 目标在数据里但还没画（长列表分批画）：先全画上 */
+  if (!el && ENGINE_PARTS.unitsAll && ENGINE_PARTS.unitsAll()) { scrollToMessage(mid, done); return; }   /* 目标在数据里但还没画（长列表分批画）：先全画上 */
   if (!el) {
-    if ((tries || 0) < 3 && STREAM_OLDER.load) {
+    if (STREAM_OLDER.load) {
       let pending = true;
       const owner = { check: function () {}, drop: function () { pending = false; } };
       JUMP_WAIT = owner;
-      if (STREAM_OLDER.load(function () { if (pending) scrollToMessage(mid, done, (tries || 0) + 1); }) !== false) return;
+      if (STREAM_OLDER.load(function (loaded) {
+        if (!pending) return;
+        if (loaded === false) { owner.drop(); JUMP_WAIT = null; done(false); }
+        else scrollToMessage(mid, done);
+      }) !== false) return;
       if (JUMP_WAIT === owner) { owner.drop(); JUMP_WAIT = null; }
     }
     done(false); return;
@@ -486,13 +508,18 @@ function scrollToMessage(mid, done, tries) {
   let live = true;
   const fin = function () { if (!live) return; live = false; JUMP_WAIT = null; land(el, mid, 'emph'); done(true, el); };
   /* 滚动途中整页重画换掉了消息流（或目标节点）：旧节点上的 scrollend 不会再来，按 mid 重新找一次再滚 */
-  const again = function () { if (!live) return; live = false; JUMP_WAIT = null; scrollToMessage(mid, done, tries); };
+  const again = function () { if (!live) return; live = false; JUMP_WAIT = null; scrollToMessage(mid, done); };
   /* 已经在位（或滚不动）时不会有 scrollend：读一下目标和当前的差（只读，不用来定位）。
      之前的滚动留下的 scrollend 可能晚一拍才到：到了还没在位、也还滚得动，就接着等下一个 */
   /* 居中算的是连同滚动外边距（scroll-margin）的那一块：浏览器就是这样居中的，不算的话带外边距的消息永远差几像素“不在位” */
-  const away = function () { const sr = s.getBoundingClientRect(), r = el.getBoundingClientRect(), m = getComputedStyle(el), d = (r.top - parseFloat(m.scrollMarginTop) + r.bottom + parseFloat(m.scrollMarginBottom)) / 2 - (sr.top + sr.height / 2), room = d > 0 ? -s.scrollTop : s.scrollHeight - s.clientHeight + s.scrollTop;   /* stick-end：往下（朝底）还能滚 -scrollTop，往上还能滚到 -(sh - ch) */ return Math.abs(d) >= 2 && room >= 2; };
-  if (!away() || motionOff()) { el.scrollIntoView({ block: 'center', behavior: 'instant' }); fin(); return; }
+  const away = function () { const sr = s.getBoundingClientRect(), r = el.getBoundingClientRect(), m = getComputedStyle(el), d = (r.top - parseFloat(m.scrollMarginTop) + r.bottom + parseFloat(m.scrollMarginBottom)) / 2 - (sr.top + sr.height / 2), room = d > 0 ? -s.scrollTop : s.scrollHeight - s.clientHeight + s.scrollTop;   /* stick-end：往下（朝底）还能滚 -scrollTop，往上还能滚到 -(sh - ch) */ return Math.abs(d) >= 2 && room >= 2 ? d : 0; };
+  const distance = away();
   JUMP_WAIT = { check: function () { if (!s.isConnected || !el.isConnected) again(); }, drop: function () { live = false; } };
+  if (!distance || motionOff() || Math.abs(distance) > s.clientHeight) {
+    /* 先让被取消的原生动画交回这一帧，再落位；旧动画的末帧不能覆盖新的位置。 */
+    requestAnimationFrame(function () { if (live) { el.scrollIntoView({ block: 'center', behavior: 'instant' }); fin(); } });
+    return;
+  }
   /* 在文档上（捕获）等 scrollend：流被换掉时也收得到 */
   const wait = function () { document.addEventListener('scrollend', function (e) {
     if (!live) return;

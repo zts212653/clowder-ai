@@ -975,17 +975,12 @@ function ChatBinding({
     // thread's, and until its first page is read there is nothing to judge.
     const own = useChatStore.getState().getThreadState(threadId);
     if (own.isLoadingHistory || !own.messages.length) return;
-    if (own.messages.some((m) => m.id === target.mid)) {
-      pendingJump.current = null;
-      ui.current.pendingMid = target.mid;
-      ui.current.pendingBlock = target.block;
-      if (engineMounted) window.clowderChat.update();
-    } else if (own.hasMore) {
-      void loadEarlier();
-    } else {
-      pendingJump.current = null;
-    }
-  }, [threadId, history.messages, history.isLoadingHistory, history.hasMore, pendingJump, loadEarlier, engineMounted]);
+    // The engine owns both history paging and arrival, so a user's scroll cancels the whole jump.
+    pendingJump.current = null;
+    ui.current.pendingMid = target.mid;
+    ui.current.pendingBlock = target.block;
+    if (engineMounted) window.clowderChat.update();
+  }, [threadId, history.messages, history.isLoadingHistory, pendingJump, engineMounted]);
 
   const [documentVisible, setDocumentVisible] = useState(
     () => typeof document === 'undefined' || document.visibilityState !== 'hidden',
@@ -1442,8 +1437,7 @@ function ChatBinding({
         return;
       }
       case 'older':
-        await loadEarlier();
-        return;
+        return (await loadEarlier()) === true;
       case 'messageDelete':
         await request(`/api/messages/${encodeURIComponent(args.mid)}${args.v === 'false' ? '/restore' : ''}`, {
           method: args.v === 'false' ? 'PATCH' : 'DELETE',
@@ -1924,12 +1918,6 @@ function ChatBinding({
           pendingJump.current = { threadId: args.thread, mid: args.mid, ...(args.block ? { block: args.block } : {}) };
           pushThreadRouteWithHistory(args.thread, window);
           return;
-        }
-        while (
-          !state.getThreadState(threadId).messages.some((m) => m.id === args.mid) &&
-          state.getThreadState(threadId).hasMore
-        ) {
-          if ((await loadEarlier()) !== true) break;
         }
         ui.current.pendingMid = args.mid;
         ui.current.pendingBlock = args.block;
