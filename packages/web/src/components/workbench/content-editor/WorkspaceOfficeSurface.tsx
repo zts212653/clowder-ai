@@ -20,13 +20,7 @@ interface EditorTarget {
 }
 
 /** The F063 source is imported once; subsequent opens resume the durable content owner. */
-export function WorkspaceOfficeSurface({
-  worktreeId,
-  path,
-}: {
-  readonly worktreeId: string;
-  readonly path: string;
-}) {
+export function WorkspaceOfficeSurface({ worktreeId, path }: { readonly worktreeId: string; readonly path: string }) {
   const [target, setTarget] = useState<EditorTarget | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -103,11 +97,19 @@ export function WorkspaceOfficeSurface({
         </div>
       )}
       {confirmReopen && (
-        <div role="alertdialog" aria-label="打开已保存的版本？" className="space-y-2 border-t border-cafe-subtle p-3 text-sm">
+        <div
+          role="alertdialog"
+          aria-label="打开已保存的版本？"
+          className="space-y-2 border-t border-cafe-subtle p-3 text-sm"
+        >
           <p>当前编辑器中未保存的修改会被丢弃。</p>
           <div className="flex flex-wrap gap-3">
-            <button type="button" onClick={() => setConfirmReopen(false)}>保留当前编辑</button>
-            <button type="button" className="text-cafe-accent" onClick={open}>丢弃修改并重新打开</button>
+            <button type="button" onClick={() => setConfirmReopen(false)}>
+              保留当前编辑
+            </button>
+            <button type="button" className="text-cafe-accent" onClick={open}>
+              丢弃修改并重新打开
+            </button>
           </div>
         </div>
       )}

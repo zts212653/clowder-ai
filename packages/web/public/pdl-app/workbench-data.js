@@ -304,9 +304,7 @@ function workbenchModels() {
             mode: rendered ? 'render' : 'src',
             binary: file.binary,
             documentEditor,
-            documentFrame: (documentEditor || pluginPreview) && fileParams
-              ? '/workspace-document?' + fileParams
-              : null,
+            documentFrame: (documentEditor || pluginPreview) && fileParams ? '/workspace-document?' + fileParams : null,
             hasBody: !file.binary,
             quote: !file.binary,
             media: mediaKind

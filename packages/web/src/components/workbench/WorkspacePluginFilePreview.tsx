@@ -167,7 +167,11 @@ export function WorkspacePluginFilePreview({
       <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2">
         <h2 className="truncate text-sm font-semibold">{title}</h2>
         <FileActions source={{ kind: 'workspace', worktreeId, path }} filename={title} appearance="toolbar" />
-        {onBack && <button type="button" onClick={onBack}>返回</button>}
+        {onBack && (
+          <button type="button" onClick={onBack}>
+            返回
+          </button>
+        )}
       </div>
       {state === 'loading' ? (
         <output className="p-4 text-xs text-cafe-muted">正在打开预览…</output>

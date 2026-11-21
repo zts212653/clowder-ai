@@ -190,7 +190,9 @@ it('projects an explicit DOCX editor target and local plugin preview URLs', () =
 
   open('doc & notes.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
   expect(read('workbenchModels().filePage.documentEditor')).toBe(true);
-  expect(read('workbenchModels().filePage.documentFrame')).toBe('/workspace-document?worktreeId=wt&path=doc+%26+notes.docx');
+  expect(read('workbenchModels().filePage.documentFrame')).toBe(
+    '/workspace-document?worktreeId=wt&path=doc+%26+notes.docx',
+  );
 
   open('example.pdf', 'application/pdf');
   expect(read('workbenchModels().filePage.documentFrame')).toBe('/workspace-document?worktreeId=wt&path=example.pdf');
