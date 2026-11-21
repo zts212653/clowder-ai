@@ -107,7 +107,12 @@ function unitsOwn(nodeKey, hook) {
       if (o && (n.dataset.kept || NODE_HTML.get(o) === streamVer(n))) { if (hook) hook.kept(o); return o; }   /* 这一项没变（只交了壳，或画出来一样）：原节点留着 */
       if (n.dataset && n.dataset.kept) return n;   /* 只交了壳、这里没有原节点：由 keptFill 换回完整的 */
       if (!k) { const c = loose[li++]; if (c && c.isEqualNode(n)) return c; }
-      if (n.nodeType === 1) { NODE_HTML.set(n, streamVer(n)); if (hook) hook.added(n, o, ctx); }
+      if (n.nodeType === 1) {
+        const version = streamVer(n);
+        /* 正在交互的同键单元逐层对齐，保留焦点和输入法；其余沿用单元版本更新。 */
+        if (o && o.contains(document.activeElement) && patchEl(o, n)) { NODE_HTML.set(o, version); if (hook) hook.kept(o); return o; }
+        NODE_HTML.set(n, version); if (hook) hook.added(n, o, ctx);
+      }
       return n;
     });
     placeKids(live, plan);
