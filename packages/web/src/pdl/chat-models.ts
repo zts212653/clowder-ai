@@ -16,8 +16,9 @@ import { projectMessagePartsForImage } from '@/components/message-export-parts';
 import { selectMessagesForExport } from '@/components/message-export-selection';
 import type { ReplyOutputProjection } from '@/components/reply-layers/reply-output';
 import { projectReplySubexecutions, type ReplySubexecution } from '@/components/reply-layers/reply-subexecution';
-import { scheduleEffect, scheduleTask } from '@/components/rich/read-schedule-approval';
+import { formatScheduleFields, scheduleEffect, scheduleTask } from '@/components/rich/read-schedule-approval';
 import { adaptServiceState } from '@/components/settings/service-ui-adapter';
+import { readShellLanguage, type ShellLanguage } from '@/components/shell/shell-language';
 import { projectDisplayName } from '@/components/ThreadSidebar/thread-utils';
 import { projectTargetReply } from '@/components/target-response-projection';
 import { deduplicateRecallEvents, groupRecallEvents, recallReplyInvocationId } from '@/hooks/recall-feed-model';
@@ -805,47 +806,20 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
               : scheduleRecord
                 ? (() => {
                     const task = scheduleTask(scheduleRecord);
-                    const formatInterval = (ms: number) => {
-                      if (ms % 86_400_000 === 0) return `每 ${ms / 86_400_000} 天`;
-                      if (ms % 3_600_000 === 0) return `每 ${ms / 3_600_000} 小时`;
-                      if (ms % 60_000 === 0) return `每 ${ms / 60_000} 分钟`;
-                      return `每 ${Math.max(1, Math.round(ms / 1000))} 秒`;
-                    };
-                    const triggerText =
-                      task.trigger.type === 'interval'
-                        ? formatInterval(task.trigger.ms)
-                        : task.trigger.type === 'cron'
-                          ? `${task.trigger.expression}${task.trigger.timezone ? ` (${task.trigger.timezone})` : ''}`
-                          : scheduleRecord.mutation.kind === 'create' && scheduleRecord.mutation.relativeOnceDelayMs
-                            ? `批准后 ${formatInterval(scheduleRecord.mutation.relativeOnceDelayMs).replace(/^每 /, '')}执行一次`
-                            : new Date(task.trigger.fireAt).toLocaleString();
+                    const pdlLang = (globalThis as { S?: { lang?: string } }).S?.lang;
+                    const language: ShellLanguage =
+                      ui.lang === 'en' || ui.lang === 'zh'
+                        ? ui.lang
+                        : pdlLang === 'en' || pdlLang === 'zh'
+                          ? pdlLang
+                          : readShellLanguage();
                     const threadTitle = task.deliveryThreadId
-                      ? (data.threads.find((entry) => entry.id === task.deliveryThreadId)?.title ??
-                        task.deliveryThreadId)
-                      : '不向对话送消息';
-                    const paramEntries = Object.entries(task.params).filter(([, value]) => value !== undefined);
-                    const paramText =
-                      typeof task.params.text === 'string' && task.params.text.trim()
-                        ? task.params.text.trim()
-                        : typeof task.params.message === 'string' && task.params.message.trim()
-                          ? task.params.message.trim()
-                          : paramEntries.length
-                            ? paramEntries
-                                .map(
-                                  ([key, value]) =>
-                                    `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`,
-                                )
-                                .join('\n')
-                            : '';
-                    const fields =
-                      scheduleRecord.mutation.kind === 'update'
-                        ? undefined
-                        : [
-                            { k: '触发周期', v: triggerText },
-                            { k: '送达对话', v: threadTitle },
-                            { k: '模板', v: task.templateId },
-                            ...(paramText ? [{ k: '任务内容', v: paramText }] : []),
-                          ];
+                      ? (data.threads.find((entry) => entry.id === task.deliveryThreadId)?.title ?? undefined)
+                      : undefined;
+                    const fields = formatScheduleFields(scheduleRecord, {
+                      language,
+                      threadTitle,
+                    });
                     return {
                       title: task.display.label,
                       schedule: scheduleRecord,

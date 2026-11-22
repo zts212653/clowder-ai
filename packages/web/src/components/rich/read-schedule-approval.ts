@@ -5,6 +5,8 @@ import type {
   ScheduleMutationTaskDefinition,
 } from '@cat-cafe/shared';
 import { matchHostedApproval } from '@/components/shell/mailbox/approval-match';
+import { resolveShellCopy } from '@/components/shell/shell-copy';
+import type { ShellLanguage } from '@/components/shell/shell-language';
 import { readFreshApprovalResultOwner } from '@/lib/approval-result-owner';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { apiFetch } from '@/utils/api-client';
@@ -15,6 +17,7 @@ import {
   scheduleText as text,
   scheduleTime as time,
 } from './parse-schedule-proposal';
+import { scheduleApprovalCopy } from './schedule-approval.shell-copy';
 
 export { parseScheduleProposal, scheduleObject } from './parse-schedule-proposal';
 export type ScheduleCoordinate = { threadId: string; messageId: string };
@@ -194,4 +197,64 @@ export function scheduleEffect(
   return checkpoint.expectedFingerprint === p.mutation.expectedFingerprint && time(checkpoint.deletedAt)
     ? 'schedule-deleted'
     : null;
+}
+
+type ScheduleCopy = typeof scheduleApprovalCopy.zh;
+
+export function formatScheduleDuration(ms: number, t: ScheduleCopy): string {
+  for (const [unit, size] of [
+    [t.days, 86_400_000],
+    [t.hours, 3_600_000],
+    [t.minutes, 60_000],
+    [t.seconds, 1_000],
+  ] as const) {
+    if (ms >= size && ms % size === 0) return `${ms / size} ${unit}`;
+  }
+  return `${Math.max(1, Math.round(ms / 1_000))} ${t.seconds}`;
+}
+
+export function formatScheduleTime(p: ScheduleMutationProposal, language: ShellLanguage): string {
+  const t = resolveShellCopy(scheduleApprovalCopy, language),
+    trigger = scheduleTask(p).trigger;
+  if (trigger.type === 'once' && p.mutation.kind === 'create' && p.mutation.relativeOnceDelayMs !== undefined)
+    return `${t.afterApproval} ${formatScheduleDuration(p.mutation.relativeOnceDelayMs, t)} ${t.later}`;
+  if (trigger.type === 'interval') return `${t.every} ${formatScheduleDuration(trigger.ms, t)}`;
+  if (trigger.type === 'once')
+    return `${t.at} ${new Date(trigger.fireAt).toLocaleString(language === 'en' ? 'en-US' : 'zh-CN')}`;
+  const match = /^(\d{1,2}) (\d{1,2}) \* \* (\*|[0-6])$/.exec(trigger.expression);
+  if (!match || Number(match[1]) > 59 || Number(match[2]) > 23)
+    return `${trigger.expression} · ${trigger.timezone ?? t.localTimezone}`;
+  const day = match[3] === '*' ? t.daily : `${t.weekday} ${t.weekdays[match[3] as keyof typeof t.weekdays]}`;
+  return `${day} ${match[2].padStart(2, '0')}:${match[1].padStart(2, '0')} · ${trigger.timezone ?? t.localTimezone}`;
+}
+
+export function formatScheduleFields(
+  p: ScheduleMutationProposal,
+  options: {
+    language: ShellLanguage;
+    threadTitle?: string;
+    templateLabel?: string;
+  },
+): Array<{ k: string; v: string }> | undefined {
+  if (p.mutation.kind === 'update') return undefined;
+  const t = resolveShellCopy(scheduleApprovalCopy, options.language),
+    task = scheduleTask(p);
+  const destination = task.deliveryThreadId ? (options.threadTitle ?? task.deliveryThreadId) : t.noDestination;
+  const paramEntries = Object.entries(task.params).filter(([, value]) => value !== undefined);
+  const paramText =
+    typeof task.params.text === 'string' && task.params.text.trim()
+      ? task.params.text.trim()
+      : typeof task.params.message === 'string' && task.params.message.trim()
+        ? task.params.message.trim()
+        : paramEntries.length
+          ? paramEntries
+              .map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
+              .join('\n')
+          : '';
+  return [
+    { k: t.time, v: formatScheduleTime(p, options.language) },
+    { k: t.destination, v: destination },
+    { k: t.template, v: options.templateLabel ?? task.templateId },
+    ...(paramText ? [{ k: t.params, v: paramText }] : []),
+  ];
 }

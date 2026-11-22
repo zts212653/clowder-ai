@@ -483,6 +483,7 @@ function chatRead(name) {
     }
     return chatSpeechAvailable;
   }
+  CS.lang = S.lang === 'en' ? 'en' : 'zh';
   return projectChat(projectChatData(), CS, chatDataSnapshot, name)[name];
 }
 /* A reply still in progress: streaming, or the response an active run is writing (before its first output) */

@@ -1,4 +1,5 @@
 export interface ChatUiState {
+  lang?: 'zh' | 'en';
   draft?: Record<string, string>;
   workspace?: Record<string, unknown>;
   sendScope?: string;

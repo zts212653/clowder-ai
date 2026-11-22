@@ -58,28 +58,44 @@ describe('PDL lanes, queue drag/recall, and schedule approval regressions', () =
     approvalResultRead.clear();
   });
 
-  it('constrains share-based lanes with minmax(0, Nfr) so long notices truncate instead of pushing queue off-edge', async () => {
+  it('constrains share-based lanes with minmax(0, Nfr) in both default and v2 themes', async () => {
     const { dom, evaluate } = await bootPdlEngine();
     try {
-      const html = evaluate(`PDL_BLOCKS.lanes({
+      const lanesExpr = `PDL_BLOCKS.lanes({
         lanes: [
           { share: 2, name: 'run', attach: 'straddle', items: [] },
           { share: 3, name: 'notice', align: 'center', items: [{ type: 'text', text: 'A very long notice title' }] },
           { share: 2, name: 'queue', align: 'end', attach: 'straddle', items: [{ type: 'text', text: 'Queued' }] },
         ],
+      }, {}, {})`;
+      const defaultHtml = evaluate(lanesExpr) as string;
+      expect(defaultHtml).toContain('--lanes:minmax(0, 2fr) minmax(0, 3fr) minmax(0, 2fr)');
+      expect(defaultHtml).not.toContain('max-content');
+
+      // Load v2 component override and assert the same constraint on v2's PDL_BLOCKS.lanes
+      for (const file of ['v2.js', 'v2b.js', 'v2c.js']) {
+        evaluate(readFileSync(path.join('public/pdl/themes/v2/components/v2', file), 'utf8'));
+      }
+      const v2Html = evaluate(`PDL_BLOCKS.lanes({
+        lanes: [
+          { share: 2, name: 'run', attach: 'straddle', items: [] },
+          { share: 3, name: 'notice', align: 'center', items: [{ use: 'v2Notice', props: { text: { lit: 'A very long v2 notice title' } } }] },
+          { share: 2, name: 'queue', align: 'end', attach: 'straddle', items: [{ use: 'v2Action', props: { label: { lit: 'Queued' } } }] },
+        ],
       }, {}, {})`) as string;
-      expect(html).toContain('--lanes:minmax(0, 2fr) minmax(0, 3fr) minmax(0, 2fr)');
-      expect(html).not.toContain('max-content');
+      expect(v2Html).toContain('--lanes:minmax(0, 2fr) minmax(0, 3fr) minmax(0, 2fr)');
+      expect(v2Html).not.toContain('max-content');
     } finally {
       dom.window.close();
     }
   });
 
-  it('does not eat clicks on action buttons inside orderable queue rows or tiny <4px pointer jitter', async () => {
+  it('protects native buttons and [data-act] controls inside orderable rows (including v2 member rows) while preserving drag surfaces and iframe cleanup', async () => {
     const { dom, w, evaluate } = await bootPdlEngine();
     try {
       const app = w.document.getElementById('app')!;
       app.innerHTML =
+        '<iframe id="plugin-frame"></iframe>' +
         '<div class="group lr-list" data-ocontainer="list:queue:t1" data-order-act="cafeQueueOrder">' +
         '<div class="lr qitem" data-okey="q1" data-edit="order">' +
         '<div class="lr-head">' +
@@ -87,15 +103,31 @@ describe('PDL lanes, queue drag/recall, and schedule approval regressions', () =
         '<span class="lr-end"><span class="lr-acts">' +
         '<button type="button" class="btn btn-sm btn-icon" data-act="cafeQueue" data-v="edit" data-i="0">edit</button>' +
         '</span></span>' +
-        '</div></div></div>';
+        '</div></div></div>' +
+        '<table><tbody data-ocontainer="list:um-members" data-order-act="umOrder">' +
+        '<tr data-cat-id="c1" data-okey="c1" data-edit="order">' +
+        '<td><span class="member-sort">⠿</span></td>' +
+        '<td><button type="button" class="member-name" data-act="open" data-page="member" data-p="c1"><span><strong>Cat</strong></span></button></td>' +
+        '<td><button type="button" class="member-aliases">@cat</button></td>' +
+        '<td><button type="button" class="member-switch" role="switch" aria-checked="true" data-act="setStatus" data-entity="member" data-id="c1"><span></span></button></td>' +
+        '<td><span class="custom-act" data-act="customPing">ping</span></td>' +
+        '</tr></tbody></table>' +
+        '<div class="ws-strip" data-ocontainer="tabs.panel" data-order-act="tab" data-op="order" data-r="panel">' +
+        '<span class="ws-chip" data-okey="t1" data-edit="order">' +
+        '<button type="button" class="ws-chip-t" data-drag-surface data-act="tab" data-op="show" data-r="panel" data-k="t1">Tab 1</button>' +
+        '<button type="button" class="btn btn-xs btn-icon" data-act="tab" data-op="close" data-r="panel" data-k="t1">x</button>' +
+        '</span></div>' +
+        '<div id="orphan-ct" data-edit="ct">orphan</div>';
 
-      const clicks: Array<Record<string, unknown>> = [];
-      evaluate('window.__clicks = []; A.cafeQueue = function (d) { window.__clicks.push(d); };');
+      evaluate(
+        'window.__clicks = []; A.cafeQueue = function (d) { window.__clicks.push(["queue", d]); }; A.open = function (d) { window.__clicks.push(["open", d]); }; A.setStatus = function (d) { window.__clicks.push(["status", d]); }; A.customPing = function (d) { window.__clicks.push(["ping", d]); };',
+      );
 
+      const frame = app.querySelector('#plugin-frame') as HTMLIFrameElement;
       const btn = app.querySelector('button[data-act="cafeQueue"]') as HTMLButtonElement;
       const row = app.querySelector('.lr.qitem') as HTMLElement;
 
-      // 1. Hovering and clicking action button inside orderable row with 20px mouse movement must NOT enter drag or eat click
+      // 1. Action button (.btn) inside orderable queue row with 20px movement never drags or eats click
       btn.dispatchEvent(new w.MouseEvent('mousemove', { bubbles: true, clientX: 100, clientY: 20 }));
       expect(row.style.cursor).toBe('');
       btn.dispatchEvent(new w.MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 100, clientY: 20 }));
@@ -104,7 +136,38 @@ describe('PDL lanes, queue drag/recall, and schedule approval regressions', () =
       btn.dispatchEvent(new w.MouseEvent('click', { bubbles: true, clientX: 120, clientY: 20 }));
       expect(evaluate('window.__clicks.length')).toBe(1);
 
-      // 2. Micro jitter (<4px) on the draggable row body itself must NOT start drag or eat clicks
+      // 2. v2 member table non-.btn native <button>s and non-button [data-act] never drag or eat click
+      const memberRow = app.querySelector('tr[data-cat-id="c1"]') as HTMLElement;
+      let aliasesClicked = 0;
+      const aliasesBtn = memberRow.querySelector('.member-aliases') as HTMLButtonElement;
+      aliasesBtn.addEventListener('click', () => {
+        aliasesClicked++;
+      });
+      for (const target of [
+        memberRow.querySelector('.member-name strong') as HTMLElement,
+        aliasesBtn,
+        memberRow.querySelector('.member-switch') as HTMLElement,
+        memberRow.querySelector('.custom-act') as HTMLElement,
+      ]) {
+        target.dispatchEvent(new w.MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 50, clientY: 50 }));
+        target.dispatchEvent(new w.MouseEvent('mousemove', { bubbles: true, clientX: 70, clientY: 50 }));
+        expect(memberRow.classList.contains('edit-drag')).toBe(false);
+        target.dispatchEvent(new w.MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 70, clientY: 50 }));
+        target.dispatchEvent(new w.MouseEvent('click', { bubbles: true, clientX: 70, clientY: 50 }));
+      }
+      expect(evaluate('window.__clicks.map(x => x[0])')).toEqual(['queue', 'open', 'status', 'ping']);
+      expect(aliasesClicked).toBe(1);
+
+      // Dragging the grip handle on the v2 member row still starts drag after 4px slop
+      const grip = memberRow.querySelector('.member-sort') as HTMLElement;
+      grip.dispatchEvent(new w.MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 10, clientY: 50 }));
+      grip.dispatchEvent(new w.MouseEvent('mousemove', { bubbles: true, clientX: 25, clientY: 50 }));
+      expect(memberRow.classList.contains('edit-drag')).toBe(true);
+      grip.dispatchEvent(new w.MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 25, clientY: 50 }));
+      grip.dispatchEvent(new w.MouseEvent('click', { bubbles: true, clientX: 25, clientY: 50 }));
+      expect(frame.style.pointerEvents).toBe('');
+
+      // 3. Micro jitter (<4px) on the draggable row body itself must NOT start drag or eat clicks
       let bodyClicked = 0;
       row.addEventListener('click', () => {
         bodyClicked++;
@@ -116,7 +179,25 @@ describe('PDL lanes, queue drag/recall, and schedule approval regressions', () =
       title.dispatchEvent(new w.MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 42, clientY: 21 }));
       title.dispatchEvent(new w.MouseEvent('click', { bubbles: true, clientX: 42, clientY: 21 }));
       expect(bodyClicked).toBe(1);
-      expect(clicks).toHaveLength(0);
+
+      // 4. Primary drag surface (.ws-chip-t with data-drag-surface) remains draggable beyond 4px slop
+      const tabChip = app.querySelector('.ws-chip') as HTMLElement;
+      const tabBtn = app.querySelector('.ws-chip-t') as HTMLButtonElement;
+      tabBtn.dispatchEvent(new w.MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 30, clientY: 10 }));
+      tabBtn.dispatchEvent(new w.MouseEvent('mousemove', { bubbles: true, clientX: 45, clientY: 10 }));
+      expect(tabChip.classList.contains('edit-drag')).toBe(true);
+      tabBtn.dispatchEvent(new w.MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 45, clientY: 10 }));
+      expect(frame.style.pointerEvents).toBe('');
+
+      // 5. Rejected delayed start() (e.g. data-edit="ct" outside data-ocontainer in editLayout) must restore iframe pointerEvents
+      evaluate('S.editLayout = true;');
+      const orphan = app.querySelector('#orphan-ct') as HTMLElement;
+      orphan.dispatchEvent(new w.MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 10, clientY: 10 }));
+      expect(frame.style.pointerEvents).toBe('none');
+      orphan.dispatchEvent(new w.MouseEvent('mousemove', { bubbles: true, clientX: 30, clientY: 10 }));
+      expect(frame.style.pointerEvents).toBe('');
+      orphan.dispatchEvent(new w.MouseEvent('mouseup', { bubbles: true, button: 0, clientX: 30, clientY: 10 }));
+      expect(frame.style.pointerEvents).toBe('');
     } finally {
       dom.window.close();
     }
@@ -149,17 +230,18 @@ describe('PDL lanes, queue drag/recall, and schedule approval regressions', () =
     expect(items[1]).toMatchObject({ key: 'q-user', queued: true, recallable: true });
   });
 
-  it('projects readable fields for create/delete schedule proposals without saying 原定时任务', () => {
+  it('projects localized zh/en fields for create/delete schedule proposals without saying 原定时任务', () => {
     expect(scheduleApprovalCopy.zh.unavailable).not.toContain('原定时任务');
     expect(scheduleApprovalCopy.zh.checking).not.toContain('原定时任务');
     expect(scheduleApprovalCopy.zh.changed).not.toContain('原定时任务');
+    expect(scheduleApprovalCopy.en.unavailable).toContain('proposal');
 
     const data = fixtureData();
     const proposal = scheduleProposal('pending');
     if (proposal.mutation.kind !== 'create') throw new Error('expected create fixture');
     proposal.mutation.task.trigger = { type: 'interval', ms: 1_200_000 };
     proposal.mutation.task.deliveryThreadId = data.threadId;
-    proposal.mutation.task.params = { text: '巡检 RSI 评估项' };
+    proposal.mutation.task.params = { text: 'Inspect RSI items' };
     data.schedules = {
       schedule: {
         mid: 'reply-1',
@@ -172,15 +254,49 @@ describe('PDL lanes, queue drag/recall, and schedule approval regressions', () =
         decide: vi.fn(),
       },
     };
-    const card = chatModels(data, fixtureUi()).chatStream.items.find((item) => item.mid === 'reply-1')!.card as {
-      fields?: Array<{ k: string; v: string }>;
-    };
-    expect(card.fields).toEqual([
-      { k: '触发周期', v: '每 20 分钟' },
-      { k: '送达对话', v: data.threads[0].title },
-      { k: '模板', v: proposal.mutation.task.templateId },
-      { k: '任务内容', v: '巡检 RSI 评估项' },
+    const zhCard = chatModels(data, { ...fixtureUi(), lang: 'zh' }).chatStream.items.find(
+      (item) => item.mid === 'reply-1',
+    )!.card as { fields?: Array<{ k: string; v: string }> };
+    expect(zhCard.fields).toEqual([
+      { k: scheduleApprovalCopy.zh.time, v: '每 20 分钟' },
+      { k: scheduleApprovalCopy.zh.destination, v: data.threads[0].title },
+      { k: scheduleApprovalCopy.zh.template, v: proposal.mutation.task.templateId },
+      { k: scheduleApprovalCopy.zh.params, v: 'Inspect RSI items' },
     ]);
+
+    const enCard = chatModels(data, { ...fixtureUi(), lang: 'en' }).chatStream.items.find(
+      (item) => item.mid === 'reply-1',
+    )!.card as { fields?: Array<{ k: string; v: string }> };
+    expect(enCard.fields).toEqual([
+      { k: scheduleApprovalCopy.en.time, v: 'Every 20 minutes' },
+      { k: scheduleApprovalCopy.en.destination, v: data.threads[0].title },
+      { k: scheduleApprovalCopy.en.template, v: proposal.mutation.task.templateId },
+      { k: scheduleApprovalCopy.en.params, v: 'Inspect RSI items' },
+    ]);
+    for (const field of enCard.fields!) {
+      expect(field.k).not.toMatch(/[\u4e00-\u9fff]/);
+    }
+
+    // Relative-once + no deliveryThreadId + explicit once locale in English mode
+    const noDestProposal = scheduleProposal('pending');
+    if (noDestProposal.mutation.kind !== 'create') throw new Error('expected create fixture');
+    const fireAt = Date.parse('2026-11-22T18:30:00.000Z');
+    noDestProposal.mutation.relativeOnceDelayMs = 600_000;
+    noDestProposal.mutation.task.trigger = { type: 'once', fireAt };
+    noDestProposal.mutation.task.deliveryThreadId = null;
+    data.schedules.schedule.proposal = noDestProposal;
+    const relEn = chatModels(data, { ...fixtureUi(), lang: 'en' }).chatStream.items.find(
+      (item) => item.mid === 'reply-1',
+    )!.card as { fields?: Array<{ k: string; v: string }> };
+    expect(relEn.fields![0]).toEqual({ k: 'When', v: 'After approval: 10 minutes later, once' });
+    expect(relEn.fields![1]).toEqual({ k: 'Destination conversation', v: 'No conversation delivery' });
+
+    delete noDestProposal.mutation.relativeOnceDelayMs;
+    const onceEn = chatModels(data, { ...fixtureUi(), lang: 'en' }).chatStream.items.find(
+      (item) => item.mid === 'reply-1',
+    )!.card as { fields?: Array<{ k: string; v: string }> };
+    expect(onceEn.fields![0].v).toBe(`Once at ${new Date(fireAt).toLocaleString('en-US')}`);
+    expect(onceEn.fields![0].v).not.toMatch(/[\u4e00-\u9fff]/);
   });
 
   it('ignores stale/superseded reread failures and never leaves unavailable error once proposal loads', async () => {
