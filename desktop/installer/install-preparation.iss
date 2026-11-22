@@ -68,7 +68,7 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ExitCode: Integer;
-  Cmd, AppDir, InstanceRoot, FrontendPort, ApiPort, RedisPort: String;
+  Cmd, AppDir, InstanceRoot, DataRoot, FrontendPort, ApiPort, RedisPort: String;
   Started: Boolean;
   StartedAt: Cardinal;
 begin
@@ -76,6 +76,7 @@ begin
   NeedsRestart := False;
   AppDir := ExpandConstant('{app}');
   InstanceRoot := ExpandConstant('{param:DesktopInstanceRoot|}');
+  DataRoot := ExpandConstant('{param:DesktopDataRoot|}');
   FrontendPort := ExpandConstant('{param:FrontendPort|}');
   ApiPort := ExpandConstant('{param:ApiPort|}');
   RedisPort := ExpandConstant('{param:RedisPort|}');
@@ -93,6 +94,7 @@ begin
   end;
   Cmd := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}') +
          '\configure-desktop-instance.ps1" -AppDir "' + AppDir + '"';
+  if DataRoot <> '' then Cmd := Cmd + ' -DataRoot "' + DataRoot + '"';
   // PowerShell may bind the next switch as the value of an empty argument.
   if InstanceRoot <> '' then begin
     Cmd := Cmd + ' -InstanceRoot "' + InstanceRoot + '"';

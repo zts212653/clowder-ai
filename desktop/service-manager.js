@@ -68,7 +68,7 @@ const ARCH_SEG = process.arch === 'arm64' ? 'arm64' : 'x64';
 // Reads brand name from electron-builder config — single source of truth
 // shared with main.js (which imports USER_DATA_DIR from this module).
 function resolveUserDataDir() {
-  const { instanceRoot } = resolveDesktopRuntime();
+  const { instanceRoot, dataRoot } = resolveDesktopRuntime();
   if (instanceRoot) return instanceRoot;
   let brandName;
   try {
@@ -76,9 +76,11 @@ function resolveUserDataDir() {
   } catch {
     brandName = 'Clowder AI';
   }
-  const base = IS_MAC
-    ? path.join(process.env.HOME || os.homedir(), 'Library', 'Application Support')
-    : process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
+  const base =
+    dataRoot ??
+    (IS_MAC
+      ? path.join(process.env.HOME || os.homedir(), 'Library', 'Application Support')
+      : process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local'));
   return path.join(base, brandName);
 }
 
@@ -197,8 +199,9 @@ class ServiceManager {
       }),
     );
     if (occupied.some(Boolean)) throw occupiedDesktopPorts(occupied.filter(Boolean).join('、'));
-    if (resolveDesktopRuntime().instanceRoot && (await this._isPortOpen(this.redisPort))) {
-      throw new Error(`Isolated desktop port ${this.redisPort} is already occupied`);
+    const { instanceRoot, dataRoot } = resolveDesktopRuntime();
+    if ((instanceRoot || dataRoot) && (await this._isPortOpen(this.redisPort))) {
+      throw new Error(`${instanceRoot ? 'Isolated' : 'Persistent'} desktop port ${this.redisPort} is already occupied`);
     }
 
     // ---- Pre-flight checks ----
@@ -474,13 +477,15 @@ class ServiceManager {
 
   _buildApiEnv(userDataDir) {
     const salt = this._getOrCreateTelemetrySalt(userDataDir);
+    const { instanceRoot, dataRoot } = resolveDesktopRuntime();
     return {
       // Binary lookup and runtime-path redirection are one API contract.
       // Keep writable project data outside the installation and respect an
       // ordinary deployment's existing explicit workspace selection.
       CAT_CAFE_RUNTIME_ROOT: this.root,
-      CAT_CAFE_WORKSPACE_ROOT: process.env.CAT_CAFE_WORKSPACE_ROOT?.trim() || path.join(userDataDir, 'project'),
-      ...(resolveDesktopRuntime().instanceRoot
+      CAT_CAFE_WORKSPACE_ROOT:
+        (!dataRoot && process.env.CAT_CAFE_WORKSPACE_ROOT?.trim()) || path.join(userDataDir, 'project'),
+      ...(instanceRoot
         ? {
             CAT_CAFE_CONFIG_ROOT: path.join(userDataDir, 'project'),
             CAT_CAFE_WORKSPACE_ROOT: path.join(userDataDir, 'project'),
@@ -534,12 +539,14 @@ class ServiceManager {
     const portableRedis = path.join(redisDir, `redis-server${EXE_SUFFIX}`);
     // An isolated instance can never degrade, so its failures must not advertise
     // the one-launch memory choice the dialog would otherwise offer.
-    const isolated = Boolean(resolveDesktopRuntime().instanceRoot);
+    const { instanceRoot, dataRoot } = resolveDesktopRuntime();
+    const isolated = Boolean(instanceRoot);
     const fail = (reason) => new RedisUnavailableError(reason, this.redisPort, { allowMemoryOnce: !isolated });
 
     // Already running — verify it is actually Redis
     if (await this._isPortOpen(this.redisPort)) {
-      if (isolated) throw new Error(`Isolated Redis port ${this.redisPort} is already occupied`);
+      if (isolated || dataRoot)
+        throw new Error(`${isolated ? 'Isolated' : 'Persistent'} Redis port ${this.redisPort} is already occupied`);
       const isRedis = await this._verifyRedisPing(this.redisPort);
       if (isRedis) {
         this.onStatus(`Redis already running on ${this.redisPort}`);
@@ -696,7 +703,7 @@ class ServiceManager {
 
   _startProcess(name, cmd, args, opts = {}) {
     this.startupAbort?.signal.throwIfAborted();
-    const { instanceRoot } = resolveDesktopRuntime();
+    const { instanceRoot, dataRoot } = resolveDesktopRuntime();
     const inherited = instanceRoot
       ? Object.fromEntries(
           Object.entries(process.env).filter(([key]) =>
@@ -736,6 +743,14 @@ class ServiceManager {
             NODE_ENV: 'production',
           }
         : {}),
+      ...(dataRoot
+        ? {
+            HOME: dataRoot,
+            USERPROFILE: dataRoot,
+            LOCALAPPDATA: dataRoot,
+            CAT_CAFE_DATA_DIR: path.join(dataRoot, '.cat-cafe'),
+          }
+        : {}),
       API_SERVER_PORT: String(this.apiPort),
       FRONTEND_PORT: String(this.frontendPort),
       NEXT_PUBLIC_API_URL: `http://localhost:${this.apiPort}`,
@@ -743,6 +758,19 @@ class ServiceManager {
       PROMPT_DEBUG: '1',
     };
 
+    if (dataRoot) {
+      // The install marker selects its workspace and local state independently of the shell.
+      for (const key of [
+        'CAT_CAFE_CONFIG_ROOT',
+        'CAT_CAFE_GLOBAL_CONFIG_ROOT',
+        'ALLOWED_WORKSPACE_DIRS',
+        'MEMORY_STORE',
+        'CAT_CAFE_INVOCATION_REGISTRY',
+        'NODE_PATH',
+      ]) {
+        delete env[key];
+      }
+    }
     if (IS_WIN) windowsUserPath.mergeWindowsPath(env, this.windowsPath);
 
     // macOS Electron apps launched from Finder/Dock inherit a minimal PATH
@@ -791,9 +819,8 @@ class ServiceManager {
       Object.assign(env, opts.envOverrides);
     }
     if (name === 'api') {
-      // Ordinary launches respect explicit client bindings. Only an isolated
-      // instance replaces them with its own authorized client-homes mapping.
-      if (instanceRoot) {
+      // Install-owned profiles use their configured native client bindings.
+      if (instanceRoot || dataRoot) {
         for (const key of [
           'CLAUDE_CONFIG_DIR',
           'CODEX_HOME',
@@ -804,8 +831,10 @@ class ServiceManager {
         ]) {
           delete env[key];
         }
+        if (dataRoot) delete env.GEMINI_CLI_HOME;
       }
-      Object.assign(env, instanceRoot ? readClientHomes(instanceRoot) : resolveDefaultClientHomes(env));
+      const profileRoot = instanceRoot ?? dataRoot;
+      Object.assign(env, profileRoot ? readClientHomes(profileRoot) : resolveDefaultClientHomes(env));
     }
 
     log(`[${name}] spawn: ${cmd} ${args.join(' ')}`);
