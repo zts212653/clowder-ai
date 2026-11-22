@@ -16573,7 +16573,7 @@ pdl:
                             args:
                               v: edit
                               i: "@index"
-                            when: "@queued"
+                            when: "@recallable"
                           - label: t:common.delete
                             icon: delete
                             act: cafeQueue

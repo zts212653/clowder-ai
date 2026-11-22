@@ -803,43 +803,89 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
             : memory
               ? memoryMessageView(memory, ui.f)
               : scheduleRecord
-                ? {
-                    title: scheduleTask(scheduleRecord).display.label,
-                    schedule: scheduleRecord,
-                    task: scheduleTask(scheduleRecord),
-                    load: schedule!.current || scheduleSettled ? '' : 'loading',
-                    canApproveSchedule: !scheduleSettled && !schedule!.blocked && !schedule!.drifted,
-                    changes: (() => {
-                      const mutation = scheduleRecord.mutation;
-                      if (mutation.kind !== 'update') return [];
-                      const template = schedule!.templates?.find(
-                        (entry) => entry.templateId === mutation.taskSnapshot.templateId,
-                      );
-                      return Object.keys({ ...mutation.taskSnapshot.params, ...mutation.params })
-                        .filter(
-                          (key) =>
-                            JSON.stringify(mutation.taskSnapshot.params[key]) !== JSON.stringify(mutation.params[key]),
-                        )
-                        .map((key) => ({
-                          key,
-                          description: template?.paramSchema[key]?.description,
-                          before: mutation.taskSnapshot.params[key],
-                          after: mutation.params[key],
-                        }));
-                    })(),
-                    effect: scheduleEffect(scheduleRecord) !== null,
-                    scheduleError: schedule!.error || schedule!.templateError,
-                    canEditInPlace: false,
-                    canRequestChange: false,
-                    decided: scheduleSettled,
-                    result: scheduleSettled
-                      ? {
-                          key: scheduleRecord.proposalId,
-                          status: scheduleRecord.status,
-                          reason: scheduleRecord.status,
-                        }
-                      : null,
-                  }
+                ? (() => {
+                    const task = scheduleTask(scheduleRecord);
+                    const formatInterval = (ms: number) => {
+                      if (ms % 86_400_000 === 0) return `每 ${ms / 86_400_000} 天`;
+                      if (ms % 3_600_000 === 0) return `每 ${ms / 3_600_000} 小时`;
+                      if (ms % 60_000 === 0) return `每 ${ms / 60_000} 分钟`;
+                      return `每 ${Math.max(1, Math.round(ms / 1000))} 秒`;
+                    };
+                    const triggerText =
+                      task.trigger.type === 'interval'
+                        ? formatInterval(task.trigger.ms)
+                        : task.trigger.type === 'cron'
+                          ? `${task.trigger.expression}${task.trigger.timezone ? ` (${task.trigger.timezone})` : ''}`
+                          : scheduleRecord.mutation.kind === 'create' && scheduleRecord.mutation.relativeOnceDelayMs
+                            ? `批准后 ${formatInterval(scheduleRecord.mutation.relativeOnceDelayMs).replace(/^每 /, '')}执行一次`
+                            : new Date(task.trigger.fireAt).toLocaleString();
+                    const threadTitle = task.deliveryThreadId
+                      ? (data.threads.find((entry) => entry.id === task.deliveryThreadId)?.title ??
+                        task.deliveryThreadId)
+                      : '不向对话送消息';
+                    const paramEntries = Object.entries(task.params).filter(([, value]) => value !== undefined);
+                    const paramText =
+                      typeof task.params.text === 'string' && task.params.text.trim()
+                        ? task.params.text.trim()
+                        : typeof task.params.message === 'string' && task.params.message.trim()
+                          ? task.params.message.trim()
+                          : paramEntries.length
+                            ? paramEntries
+                                .map(
+                                  ([key, value]) =>
+                                    `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`,
+                                )
+                                .join('\n')
+                            : '';
+                    const fields =
+                      scheduleRecord.mutation.kind === 'update'
+                        ? undefined
+                        : [
+                            { k: '触发周期', v: triggerText },
+                            { k: '送达对话', v: threadTitle },
+                            { k: '模板', v: task.templateId },
+                            ...(paramText ? [{ k: '任务内容', v: paramText }] : []),
+                          ];
+                    return {
+                      title: task.display.label,
+                      schedule: scheduleRecord,
+                      task,
+                      ...(fields ? { fields } : {}),
+                      load: schedule!.current || scheduleSettled ? '' : 'loading',
+                      canApproveSchedule: !scheduleSettled && !schedule!.blocked && !schedule!.drifted,
+                      changes: (() => {
+                        const mutation = scheduleRecord.mutation;
+                        if (mutation.kind !== 'update') return [];
+                        const template = schedule!.templates?.find(
+                          (entry) => entry.templateId === mutation.taskSnapshot.templateId,
+                        );
+                        return Object.keys({ ...mutation.taskSnapshot.params, ...mutation.params })
+                          .filter(
+                            (key) =>
+                              JSON.stringify(mutation.taskSnapshot.params[key]) !==
+                              JSON.stringify(mutation.params[key]),
+                          )
+                          .map((key) => ({
+                            key,
+                            description: template?.paramSchema[key]?.description,
+                            before: mutation.taskSnapshot.params[key],
+                            after: mutation.params[key],
+                          }));
+                      })(),
+                      effect: scheduleEffect(scheduleRecord) !== null,
+                      scheduleError: schedule!.error || schedule!.templateError,
+                      canEditInPlace: false,
+                      canRequestChange: false,
+                      decided: scheduleSettled,
+                      result: scheduleSettled
+                        ? {
+                            key: scheduleRecord.proposalId,
+                            status: scheduleRecord.status,
+                            reason: scheduleRecord.status,
+                          }
+                        : null,
+                    };
+                  })()
                 : proposal
                   ? proposalView(
                       proposal,
@@ -1382,6 +1428,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
                   });
                 })(),
                 queued: q.status === 'queued',
+                recallable: q.status === 'queued' && (!q.from || q.from.kind === 'user'),
                 orderable: q.status === 'queued',
               })),
             }

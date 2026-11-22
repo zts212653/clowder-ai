@@ -616,7 +616,7 @@ let CLICK_EAT = false;
 function clickEat() { CLICK_EAT = true; setTimeout(function () { CLICK_EAT = false; }, 0); }
 document.addEventListener('click', function (e) { if (CLICK_EAT) { e.stopImmediatePropagation(); e.preventDefault(); CLICK_EAT = false; } }, true);
 (function () {
-  const EDGE = 6; let sess = null, cur = null;
+  const EDGE = 6, DRAG_SLOP = 4; let sess = null, cur = null;
   const onEdge = function (el, e) { const r = el.getBoundingClientRect(); return e.clientX - r.left < EDGE || r.right - e.clientX < EDGE || e.clientY - r.top < EDGE || r.bottom - e.clientY < EDGE; };
   /* 嵌套拖动按命中层级取最近的可抓元素；外层窗口不能先截走里面的入口。 */
   const hit = function (t, e) {
@@ -629,7 +629,15 @@ document.addEventListener('click', function (e) { if (CLICK_EAT) { e.stopImmedia
     return found;
   };
   document.addEventListener('mousemove', function (e) {
-    if (sess) { sess.moved = true; sess.s.move(e); return; }
+    if (sess) {
+      if (!sess.moved) {
+        if (Math.hypot(e.clientX - sess.x0, e.clientY - sess.y0) < DRAG_SLOP) return;
+        const s = sess.pr.start(sess.el, sess.e0);
+        if (!s) { sess = null; return; }
+        sess.s = s; sess.moved = true;
+      }
+      sess.s.move(e); return;
+    }
     const x = hit(e.target, e), el = x && x.el;
     if (cur && cur !== el) cur.style.cursor = '';
     if (el) el.style.cursor = 'move';
@@ -638,11 +646,10 @@ document.addEventListener('click', function (e) { if (CLICK_EAT) { e.stopImmedia
   document.addEventListener('mousedown', function (e) {
     if (e.button !== 0) return;
     const x = hit(e.target, e); if (!x) return;
-    const s = x.pr.start(x.el, e); if (!s) return;
-    sess = { s: s, moved: false }; e.preventDefault();
+    sess = { pr: x.pr, el: x.el, e0: e, x0: e.clientX, y0: e.clientY, s: null, moved: false }; e.preventDefault();
     document.querySelectorAll('iframe').forEach(function (f) { f.style.pointerEvents = 'none'; });   /* 拖过框（插件页面）时指针不被框吃掉 */
   }, true);
-  document.addEventListener('mouseup', function (e) { if (!sess) return; const s = sess; sess = null; document.querySelectorAll('iframe').forEach(function (f) { f.style.pointerEvents = ''; }); if (s.moved) clickEat(); s.s.end(e, s.moved); });
+  document.addEventListener('mouseup', function (e) { if (!sess) return; const s = sess; sess = null; document.querySelectorAll('iframe').forEach(function (f) { f.style.pointerEvents = ''; }); if (s.moved) { clickEat(); s.s.end(e, true); } });
 })();
 /* 弹窗拖动：弹窗框架（[data-pop] 的第一个子元素）能不能拖只看 PDL_POPUPS 的 drag 声明，不逐个开启。拖动是相对初始位置（at）的偏移，只在这次打开期间有效：关掉再打开回到初始位置 */
 S.dragPos = {};

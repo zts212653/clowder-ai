@@ -751,6 +751,7 @@ EDGE_DRAG.push({
   find: function (t) {
     if (!t || !t.closest) return null;
     const el = t.closest('[data-edit]'); if (!el || el.dataset.locked) return null;
+    if (!S.editLayout && t.closest('.btn, a, input, textarea, select')) return null;   /* 非布局编辑态：行内按钮与表单控件照常点击，不拦截进拖拽 */
     if (el.dataset.edit === 'move') return el.closest('[data-move-act]') ? { el: el, whole: true } : null;   /* 移到别的容器（对话拖进 / 拖出分组）：所在的容器声明了 data-move */
     if (!S.editLayout) { const box = el.dataset.edit === 'order' && el.parentElement && el.parentElement.closest('[data-ocontainer]'); if (!box || !box.dataset.orderAct) return null; }   /* 平时只有会话状态的容器能拖（它声明了顺序存哪：data-order-act）；主题的布局只在编辑布局时动 */
     return { el: el, whole: true };   /* 编辑布局时整块都是抓手（平时的窗口只有边缘） */

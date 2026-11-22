@@ -92,6 +92,7 @@ import { useTts } from '@/hooks/useTts';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { fetchApprovalProducerBody } from '@/lib/approval-producer-read';
+import { readApprovalResultOwner } from '@/lib/approval-result-owner';
 import { isDshMember } from '@/lib/member-model-display';
 import { useApprovalResult } from '@/lib/use-approval-result';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
@@ -2637,6 +2638,10 @@ function ScheduleRecordBinding({
   const reread = useRef(source.reread);
   reread.current = source.reread;
   useEffect(() => {
+    if (!source.ownerUserId) {
+      void readApprovalResultOwner();
+      return;
+    }
     reread.current();
   }, [generation, source.ownerUserId]);
   useLayoutEffect(() => {

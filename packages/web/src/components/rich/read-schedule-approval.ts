@@ -144,7 +144,11 @@ export async function readScheduleSource(
   // vector catches up. Recovery must join the current original-owner read.
   if (fresh || proposal.status === 'applying') await useApprovalHubStore.getState().fetchPending();
   else await useApprovalHubStore.getState().ensurePending(owner.userId);
-  const store = useApprovalHubStore.getState();
+  let store = useApprovalHubStore.getState();
+  if (!store.pendingReadAvailable && !store.isLoading && !store.error) {
+    await useApprovalHubStore.getState().fetchPending();
+    store = useApprovalHubStore.getState();
+  }
   if (!store.pendingReadAvailable || store.isLoading) return null;
   const body = { items: store.items };
   const copies = body.items.filter(
