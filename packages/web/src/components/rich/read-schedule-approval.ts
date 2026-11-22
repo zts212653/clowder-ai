@@ -217,15 +217,15 @@ export function formatScheduleTime(p: ScheduleMutationProposal, language: ShellL
   const t = resolveShellCopy(scheduleApprovalCopy, language),
     trigger = scheduleTask(p).trigger;
   if (trigger.type === 'once' && p.mutation.kind === 'create' && p.mutation.relativeOnceDelayMs !== undefined)
-    return `${t.afterApproval} ${formatScheduleDuration(p.mutation.relativeOnceDelayMs, t)} ${t.later}`;
-  if (trigger.type === 'interval') return `${t.every} ${formatScheduleDuration(trigger.ms, t)}`;
-  if (trigger.type === 'once')
-    return `${t.at} ${new Date(trigger.fireAt).toLocaleString(language === 'en' ? 'en-US' : 'zh-CN')}`;
+    return t.relativeOnceSummary(formatScheduleDuration(p.mutation.relativeOnceDelayMs, t));
+  if (trigger.type === 'interval') return t.intervalSummary(formatScheduleDuration(trigger.ms, t));
+  if (trigger.type === 'once') return t.onceAtSummary(new Date(trigger.fireAt).toLocaleString(t.dateLocale));
+  const tz = trigger.timezone ?? t.localTimezone;
   const match = /^(\d{1,2}) (\d{1,2}) \* \* (\*|[0-6])$/.exec(trigger.expression);
-  if (!match || Number(match[1]) > 59 || Number(match[2]) > 23)
-    return `${trigger.expression} · ${trigger.timezone ?? t.localTimezone}`;
-  const day = match[3] === '*' ? t.daily : `${t.weekday} ${t.weekdays[match[3] as keyof typeof t.weekdays]}`;
-  return `${day} ${match[2].padStart(2, '0')}:${match[1].padStart(2, '0')} · ${trigger.timezone ?? t.localTimezone}`;
+  if (!match || Number(match[1]) > 59 || Number(match[2]) > 23) return t.customCronSummary(trigger.expression, tz);
+  const hhmm = `${match[2].padStart(2, '0')}:${match[1].padStart(2, '0')}`;
+  if (match[3] === '*') return t.dailySummary(hhmm, tz);
+  return t.weeklySummary(t.weekdays[match[3] as keyof typeof t.weekdays], hhmm, tz);
 }
 
 export function formatScheduleFields(

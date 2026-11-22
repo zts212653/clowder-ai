@@ -18,7 +18,6 @@ import type { ReplyOutputProjection } from '@/components/reply-layers/reply-outp
 import { projectReplySubexecutions, type ReplySubexecution } from '@/components/reply-layers/reply-subexecution';
 import { formatScheduleFields, scheduleEffect, scheduleTask } from '@/components/rich/read-schedule-approval';
 import { adaptServiceState } from '@/components/settings/service-ui-adapter';
-import { readShellLanguage, type ShellLanguage } from '@/components/shell/shell-language';
 import { projectDisplayName } from '@/components/ThreadSidebar/thread-utils';
 import { projectTargetReply } from '@/components/target-response-projection';
 import { deduplicateRecallEvents, groupRecallEvents, recallReplyInvocationId } from '@/hooks/recall-feed-model';
@@ -806,13 +805,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
               : scheduleRecord
                 ? (() => {
                     const task = scheduleTask(scheduleRecord);
-                    const pdlLang = (globalThis as { S?: { lang?: string } }).S?.lang;
-                    const language: ShellLanguage =
-                      ui.lang === 'en' || ui.lang === 'zh'
-                        ? ui.lang
-                        : pdlLang === 'en' || pdlLang === 'zh'
-                          ? pdlLang
-                          : readShellLanguage();
+                    const language = ui.lang === 'en' ? 'en' : 'zh';
                     const threadTitle = task.deliveryThreadId
                       ? (data.threads.find((entry) => entry.id === task.deliveryThreadId)?.title ?? undefined)
                       : undefined;

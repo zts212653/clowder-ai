@@ -277,7 +277,7 @@ describe('PDL lanes, queue drag/recall, and schedule approval regressions', () =
       expect(field.k).not.toMatch(/[\u4e00-\u9fff]/);
     }
 
-    // Relative-once + no deliveryThreadId + explicit once locale in English mode
+    // Relative-once + no deliveryThreadId + explicit once locale + weekday cron in both zh and en
     const noDestProposal = scheduleProposal('pending');
     if (noDestProposal.mutation.kind !== 'create') throw new Error('expected create fixture');
     const fireAt = Date.parse('2026-11-22T18:30:00.000Z');
@@ -285,6 +285,13 @@ describe('PDL lanes, queue drag/recall, and schedule approval regressions', () =
     noDestProposal.mutation.task.trigger = { type: 'once', fireAt };
     noDestProposal.mutation.task.deliveryThreadId = null;
     data.schedules.schedule.proposal = noDestProposal;
+
+    const relZh = chatModels(data, { ...fixtureUi(), lang: 'zh' }).chatStream.items.find(
+      (item) => item.mid === 'reply-1',
+    )!.card as { fields?: Array<{ k: string; v: string }> };
+    expect(relZh.fields![0]).toEqual({ k: '什么时候', v: '批准后 10 分钟执行一次' });
+    expect(relZh.fields![1]).toEqual({ k: '送到哪条对话', v: '不向对话送消息' });
+
     const relEn = chatModels(data, { ...fixtureUi(), lang: 'en' }).chatStream.items.find(
       (item) => item.mid === 'reply-1',
     )!.card as { fields?: Array<{ k: string; v: string }> };
@@ -292,11 +299,32 @@ describe('PDL lanes, queue drag/recall, and schedule approval regressions', () =
     expect(relEn.fields![1]).toEqual({ k: 'Destination conversation', v: 'No conversation delivery' });
 
     delete noDestProposal.mutation.relativeOnceDelayMs;
+    const onceZh = chatModels(data, { ...fixtureUi(), lang: 'zh' }).chatStream.items.find(
+      (item) => item.mid === 'reply-1',
+    )!.card as { fields?: Array<{ k: string; v: string }> };
+    expect(onceZh.fields![0].v).toBe(`执行一次：${new Date(fireAt).toLocaleString('zh-CN')}`);
+
     const onceEn = chatModels(data, { ...fixtureUi(), lang: 'en' }).chatStream.items.find(
       (item) => item.mid === 'reply-1',
     )!.card as { fields?: Array<{ k: string; v: string }> };
     expect(onceEn.fields![0].v).toBe(`Once at ${new Date(fireAt).toLocaleString('en-US')}`);
     expect(onceEn.fields![0].v).not.toMatch(/[\u4e00-\u9fff]/);
+
+    // Weekday cron in zh has no stray space ("周一"), and VM ignores v2 shell-language localStorage
+    noDestProposal.mutation.task.trigger = { type: 'cron', expression: '30 9 * * 1' };
+    window.localStorage.setItem('cat-cafe:shell-language', 'en');
+    try {
+      const cronDefault = chatModels(data, fixtureUi()).chatStream.items.find((item) => item.mid === 'reply-1')!
+        .card as { fields?: Array<{ k: string; v: string }> };
+      expect(cronDefault.fields![0]).toEqual({ k: '什么时候', v: '周一 09:30 · 调度器的本地时区' });
+
+      const cronEn = chatModels(data, { ...fixtureUi(), lang: 'en' }).chatStream.items.find(
+        (item) => item.mid === 'reply-1',
+      )!.card as { fields?: Array<{ k: string; v: string }> };
+      expect(cronEn.fields![0]).toEqual({ k: 'When', v: 'On Monday 09:30 · Scheduler local timezone' });
+    } finally {
+      window.localStorage.removeItem('cat-cafe:shell-language');
+    }
   });
 
   it('ignores stale/superseded reread failures and never leaves unavailable error once proposal loads', async () => {
