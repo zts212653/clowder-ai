@@ -1,6 +1,6 @@
 import { agyReplyEvidence } from './agy-reply-evidence.js';
 import { AgyStepEvidence, isAgyAnonymousCompletion } from './agy-step-evidence.js';
-import { parseAgyResultFields, parseAgyToolFields } from './agy-stream-json-fields.js';
+import { parseAgyResultFields, parseAgySubagentFields, parseAgyToolFields } from './agy-stream-json-fields.js';
 
 /**
  * F210: AGY stream-json carrier — 事件解析与回合归纳。
@@ -206,17 +206,30 @@ function parseStepEvent(step: Record<string, unknown>): AgyStreamJsonEvent {
   // Decode that recorded spelling once for both live and terminal consumers;
   // the unchanged index, owner and error fields still pass normal validation.
   const finishCompleted = step.step_type === 'finish' && step.state === 'DONE' && step.tool_name === undefined;
+  // Recorded official CLI spelling for invoking children. Keep the operation in
+  // the ordinary tool evidence path, including live identity and error checks.
+  const subagentInvocation = step.step_type === 'subagent' && step.tool_name === 'invoke_subagent';
+  let toolFields = parseAgyToolFields(step.tool_info);
+  if (subagentInvocation) {
+    const launch = parseAgySubagentFields(step.subagent_info, step.state);
+    toolFields = {
+      toolParameters: toolFields.toolParameters ?? launch.toolParameters,
+      toolOutput: toolFields.toolOutput ?? launch.toolOutput,
+      toolErrorMessage: toolFields.toolErrorMessage ?? launch.toolErrorMessage,
+      anomalies: [...toolFields.anomalies, ...launch.anomalies],
+    };
+  }
   return {
     kind: 'step',
     conversationId: asString(step.conversation_id) ?? '',
     stepIndex: asNumber(step.step_index) ?? -1,
     state: parseState(step.state),
     rawState: asString(step.state) ?? '',
-    stepType: finishCompleted ? 'tool' : (asString(step.step_type) ?? 'unknown'),
+    stepType: finishCompleted || subagentInvocation ? 'tool' : (asString(step.step_type) ?? 'unknown'),
     ...(isAgyAnonymousCompletion(step) ? { anonymousCompletion: true as const } : {}),
-    textDelta: asString(step.text_delta),
+    textDelta: subagentInvocation ? null : asString(step.text_delta),
     toolName: finishCompleted ? 'finish' : asString(step.tool_name),
-    ...parseAgyToolFields(step.tool_info),
+    ...toolFields,
     durationSeconds: asNumber(step.duration_seconds),
     usage: parseUsage(step.usage),
   };
