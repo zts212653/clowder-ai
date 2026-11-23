@@ -1,8 +1,8 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 import Fastify from 'fastify';
@@ -78,7 +78,7 @@ test('reading either AGY model catalog never launches a process without its prof
   const root = mkdtempSync(join(tmpdir(), 'agy-catalog-no-launch-'));
   const marker = join(root, 'spawned');
   const originalPath = process.env.PATH;
-  process.env.PATH = `${root}:${originalPath}`;
+  process.env.PATH = `${root}${delimiter}${originalPath}`;
   t.after(() => {
     process.env.PATH = originalPath;
     for (const name of ['agy', 'agy_acp_server.par']) invalidateCliCommand(name);
@@ -112,6 +112,101 @@ test('reading either AGY model catalog never launches a process without its prof
       ['low', 'medium', 'high', 'xhigh'],
     );
     assert.equal(body.selectedEffort, 'xhigh');
+    assert.equal(
+      body.selectedEffortSource,
+      undefined,
+      'effort inferred from model string must not be mislabeled as tool_config',
+    );
+    assert.equal(body.defaultModelSource, undefined);
+    assert.equal(body.defaultEffortSource, undefined);
     assert.equal(existsSync(marker), false, 'read-side discovery must not start an unisolated AGY process');
   }
+});
+
+test('AGY account catalog distinguishes static reference fallback from explicit account models and omits false tool_config labels', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'agy-catalog-account-'));
+  const prevGlobal = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+  const prevProject = process.env.CAT_CAFE_WORKSPACE_ROOT;
+  process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
+  process.env.CAT_CAFE_WORKSPACE_ROOT = root;
+  t.after(() => {
+    if (prevGlobal === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = prevGlobal;
+    if (prevProject === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+    else process.env.CAT_CAFE_WORKSPACE_ROOT = prevProject;
+    rmSync(root, { recursive: true, force: true });
+  });
+  mkdirSync(join(root, '.cat-cafe'), { recursive: true });
+  writeFileSync(
+    join(root, '.cat-cafe', 'accounts.json'),
+    JSON.stringify({
+      gemini: {
+        clientId: 'google',
+        displayName: 'Default Google',
+        authType: 'oauth',
+        models: [],
+      },
+      'agy-declared': {
+        clientId: 'google',
+        displayName: 'Declared Google',
+        authType: 'oauth',
+        models: ['gemini-4-neon-high'],
+      },
+    }),
+  );
+  const app = Fastify();
+  registerRuntimeCatalogRoute(app);
+  t.after(() => app.close());
+
+  // 1. Account with empty models falls back to read-only reference list, NEVER mislabeled account_catalog.
+  const fallbackRes = await app.inject({
+    method: 'POST',
+    url: '/api/cats/runtime-models',
+    headers: { 'x-cat-cafe-user': 'fixture' },
+    payload: { runtimeId: 'agy-native', accountRef: 'gemini', model: 'gemini-4-neon-xhigh' },
+  });
+  assert.equal(fallbackRes.statusCode, 200, fallbackRes.body);
+  const fallbackBody = fallbackRes.json();
+  assert.equal(fallbackBody.status, 'configured');
+  assert.equal(fallbackBody.message, 'reference_catalog');
+  assert.ok(fallbackBody.models.some((entry) => entry.value === 'gemini-4-neon-xhigh'));
+  assert.equal(fallbackBody.selectedModel, 'gemini-4-neon-xhigh');
+  assert.equal(fallbackBody.selectedEffort, 'xhigh');
+  assert.equal(fallbackBody.selectedEffortSource, undefined);
+  assert.deepEqual(
+    fallbackBody.effortOptions?.map((entry) => entry.value),
+    ['low', 'medium', 'high', 'xhigh'],
+  );
+
+  // 2. Arbitrary manually-typed custom model stays accepted without inventing effort options.
+  const customRes = await app.inject({
+    method: 'POST',
+    url: '/api/cats/runtime-models',
+    headers: { 'x-cat-cafe-user': 'fixture' },
+    payload: { runtimeId: 'agy-native', accountRef: 'gemini', model: 'gemini-future-preview' },
+  });
+  assert.equal(customRes.statusCode, 200, customRes.body);
+  const customBody = customRes.json();
+  assert.equal(customBody.message, 'reference_catalog');
+  assert.equal(customBody.selectedModel, 'gemini-future-preview');
+  assert.equal(customBody.selectedEffort, undefined);
+  assert.equal(customBody.selectedEffortSource, undefined);
+
+  // 3. Account with explicit models reports account_catalog and returns only declared models.
+  const declaredRes = await app.inject({
+    method: 'POST',
+    url: '/api/cats/runtime-models',
+    headers: { 'x-cat-cafe-user': 'fixture' },
+    payload: { runtimeId: 'agy-native', accountRef: 'agy-declared', model: 'gemini-4-neon-high' },
+  });
+  assert.equal(declaredRes.statusCode, 200, declaredRes.body);
+  const declaredBody = declaredRes.json();
+  assert.equal(declaredBody.status, 'configured');
+  assert.equal(declaredBody.message, 'account_catalog');
+  assert.deepEqual(
+    declaredBody.models.map((entry) => entry.value),
+    ['gemini-4-neon-high'],
+  );
+  assert.equal(declaredBody.selectedEffort, 'high');
+  assert.equal(declaredBody.selectedEffortSource, undefined);
 });

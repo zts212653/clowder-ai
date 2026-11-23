@@ -6,6 +6,7 @@ import { type RawArchiveSink, sanitizeRawEvent } from '../../codex-audit-hooks.j
 import type { createAgyNativeContinuityInput } from '../agy-native-continuity.js';
 import type { AgyNativeLaunchPlan } from '../agy-native-launch.js';
 import { AgyNativeProgress } from '../agy-native-progress.js';
+import { asRecord } from '../agy-native-stream-validation.js';
 import { type AgyNativeObservedTurn, observeAgyNativeTurn, projectAgyNativeTurn } from '../agy-native-turn.js';
 import { AgyNativeCapacityObserver } from './agy-native-capacity-observer.js';
 import { AgyNativeImagePublisher } from './agy-native-image-publisher.js';
@@ -71,9 +72,19 @@ export async function* runAgyNativeInvocation(input: {
   const inputLifetime = new AbortController();
   const processLifetime = new AbortController();
   let windowsPostEofTimer: ReturnType<typeof setTimeout> | undefined;
+  let windowsPostEofTriggered = false;
+  let resultBoundaryObserved = false;
   const armWindowsPostEofShutdown = (): void => {
-    if (process.platform !== 'win32' || windowsPostEofTimer) return;
+    if (process.platform !== 'win32' || windowsPostEofTimer || !resultBoundaryObserved || options?.signal?.aborted) {
+      return;
+    }
     windowsPostEofTimer = setTimeout(() => {
+      if (options?.signal?.aborted) return;
+      windowsPostEofTriggered = true;
+      log.info(
+        { catId, invocationId: options?.invocationId, graceMs: WINDOWS_POST_EOF_EXIT_GRACE_MS },
+        'Terminating lingering Windows AGY native process after terminal result EOF',
+      );
       processLifetime.abort();
     }, WINDOWS_POST_EOF_EXIT_GRACE_MS);
     windowsPostEofTimer.unref();
@@ -147,6 +158,7 @@ export async function* runAgyNativeInvocation(input: {
       archiveNativeStream(stream, options?.invocationId, rawArchive, (eventType) => {
         lastNativeEventType = eventType;
         if (eventType === 'result') {
+          resultBoundaryObserved = true;
           if (runInput) runInput.resultBoundary();
           else inputLifetime.abort();
         }
@@ -226,6 +238,7 @@ export async function* runAgyNativeInvocation(input: {
           yield* messages;
         }
       } else if (observation.kind === 'turn_complete') {
+        resultBoundaryObserved = false;
         const projected = projectAgyNativeTurn(
           catId,
           { ...metadata },
@@ -273,6 +286,18 @@ export async function* runAgyNativeInvocation(input: {
       }
     }
     if (!observed) throw new Error('AGY native stream ended without a terminal observation');
+    if (windowsPostEofTriggered) {
+      metadata.diagnostics = {
+        ...metadata.diagnostics,
+        agyNative: {
+          ...asRecord(metadata.diagnostics?.agyNative),
+          windowsPostEofShutdown: {
+            triggered: true,
+            graceMs: WINDOWS_POST_EOF_EXIT_GRACE_MS,
+          },
+        },
+      };
+    }
     const publication = await imagePublisher.settle(observed);
     observed = publication.observed;
     yield* publication.messages;
@@ -295,8 +320,23 @@ export async function* runAgyNativeInvocation(input: {
       await runInput.completeTurn(successful(messages));
       await runInput.dispose();
       settleCapacity(observed, successful(messages));
-      for (const message of messages)
-        if (message.metadata) message.metadata.contextWindowObservation = metadata.contextWindowObservation;
+      for (const message of messages) {
+        if (message.metadata) {
+          message.metadata.contextWindowObservation = metadata.contextWindowObservation;
+          if (windowsPostEofTriggered) {
+            message.metadata.diagnostics = {
+              ...message.metadata.diagnostics,
+              agyNative: {
+                ...asRecord(message.metadata.diagnostics?.agyNative),
+                windowsPostEofShutdown: {
+                  triggered: true,
+                  graceMs: WINDOWS_POST_EOF_EXIT_GRACE_MS,
+                },
+              },
+            };
+          }
+        }
+      }
       yield* messages;
       return;
     }

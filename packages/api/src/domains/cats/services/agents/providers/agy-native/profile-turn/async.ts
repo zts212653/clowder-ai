@@ -6,6 +6,7 @@ import {
   sameUnixProcess,
   type UnixProcessIdentity,
 } from '../../../../../../../utils/cli-process-ownership.js';
+import { currentWindowsApiJob } from '../../../../../../../utils/windows-job-owner.js';
 import {
   AgyNativeProfileBusyError,
   type AgyNativeTurnScope,
@@ -75,12 +76,21 @@ export async function acquireAgyNativeProfileTurnAsync(
       if (current?.token !== previous?.token || current?.owner !== previous?.owner)
         throw new AgyNativeProfileBusyError('Native profile ownership changed during process observation');
       if (owner && !owner.preparation) retireOrphanCredentials(owner.runHome ?? home, home);
+      const activeWinJob = process.platform === 'win32' ? currentWindowsApiJob() : null;
       const next: ProfileTurnOwner = {
         identity,
         dataRoot: resolveCatCafeDataRoot(),
         ...(invocationId ? { invocationId } : {}),
         ...(scope.runHome ? { runHome: scope.runHome } : {}),
         ...(scope.preparation ? { preparation: true } : {}),
+        ...(activeWinJob
+          ? {
+              windowsJob: {
+                jobName: activeWinJob.record.jobName,
+                sessionId: activeWinJob.record.sessionId,
+              },
+            }
+          : {}),
       };
       db.prepare(`INSERT INTO ${table} (${key}, token, owner) VALUES (?, ?, ?)
         ON CONFLICT(${key}) DO UPDATE SET token = excluded.token, owner = excluded.owner`).run(

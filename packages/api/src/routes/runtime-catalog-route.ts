@@ -105,9 +105,11 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
           ...fallback,
           models: accountModels.length ? accountModels : fallback.models,
           ...(selectedModel ? { selectedModel } : {}),
-          ...(selectedEffort ? { selectedEffort, selectedEffortSource: 'tool_config' as const } : {}),
+          ...(selectedEffort ? { selectedEffort } : {}),
           ...(agyEfforts ? { effortOptions: agyEfforts.map((value) => ({ value, label: value })) } : {}),
-          message: 'account_catalog',
+          // Only report `account_catalog` when the account declares its own models;
+          // falling back to AGY's static reference list stays unverified and manually overridable.
+          message: accountModels.length ? 'account_catalog' : 'reference_catalog',
         };
       }
       return {
@@ -121,31 +123,34 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
     if ('dshDesktop' in runtime && runtime.dshDesktop) return { ...fallback, message: 'configured_only' };
     if (data.customStartup || member?.cliConfigArgs?.length) return { ...fallback, message: 'custom_startup' };
     // Native streams cannot use ACP discovery. AGY ACP also needs its isolated
-    // profile launch contract, so this read path only returns configured models.
+    // profile launch contract, so this read path only returns configured/reference models.
     if ('agyCarrier' in runtime || runtime.id === 'kimi' || runtime.id === 'opencode') {
-      const selectedModel = data.model || ('configuredModel' in runtime ? runtime.configuredModel : undefined);
+      const isAgy = 'agyCarrier' in runtime;
+      const configuredModel = 'configuredModel' in runtime ? runtime.configuredModel : undefined;
+      const configuredEffort = 'configuredEffort' in runtime ? runtime.configuredEffort : undefined;
+      const selectedModel = data.model || configuredModel;
       const selected =
         'modelCatalog' in runtime ? runtime.modelCatalog.find((model) => model.value === selectedModel) : undefined;
       const agyFallbackEfforts =
-        'agyCarrier' in runtime && selectedModel && !selected?.efforts
+        isAgy && selectedModel && !selected?.efforts
           ? getCliEffortOptionsForProvider('google', selectedModel)?.map((value) => ({ value, label: value }))
           : undefined;
       const agyFallbackEffort =
-        'agyCarrier' in runtime && selectedModel && !selected?.defaultEffort
+        isAgy && selectedModel && !selected?.defaultEffort
           ? (inferGoogleModelEffort(selectedModel) ?? undefined)
           : undefined;
       return {
         ...fallback,
-        defaultModel: 'configuredModel' in runtime ? runtime.configuredModel : undefined,
-        defaultEffort: 'configuredEffort' in runtime ? runtime.configuredEffort : undefined,
-        defaultModelSource: 'tool_config',
-        defaultEffortSource: 'tool_config',
+        defaultModel: configuredModel,
+        defaultEffort: configuredEffort,
+        ...(!isAgy || configuredModel ? { defaultModelSource: 'tool_config' as const } : {}),
+        ...(!isAgy || configuredEffort ? { defaultEffortSource: 'tool_config' as const } : {}),
         ...('configuredThinkingEnabled' in runtime ? { thinkingEnabled: runtime.configuredThinkingEnabled } : {}),
-        ...('modelCatalog' in runtime || 'agyCarrier' in runtime
+        ...('modelCatalog' in runtime || isAgy
           ? {
               selectedModel,
               selectedEffort: selected?.defaultEffort ?? agyFallbackEffort,
-              selectedEffortSource: 'tool_config' as const,
+              ...(!isAgy ? { selectedEffortSource: 'tool_config' as const } : {}),
               effortOptions: selected?.efforts ?? agyFallbackEfforts,
             }
           : {}),

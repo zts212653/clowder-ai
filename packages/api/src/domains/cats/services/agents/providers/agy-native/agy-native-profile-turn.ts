@@ -5,6 +5,7 @@ import {
   resolveCatCafeDataRoot,
   sameUnixProcess,
 } from '../../../../../../utils/cli-process-ownership.js';
+import { currentWindowsApiJob } from '../../../../../../utils/windows-job-owner.js';
 import { acquireAgyNativeProfileTurnAsync } from './profile-turn/async.js';
 import {
   AgyNativeProfileBusyError,
@@ -75,12 +76,21 @@ export function acquireAgyNativeProfileTurn(
         // that fences the successor. Never retire a live turn's MCP credential.
         if (!owner.preparation) retireOrphanCredentials(owner.runHome ?? home, home);
       }
+      const activeWinJob = process.platform === 'win32' ? currentWindowsApiJob() : null;
       const owner: ProfileTurnOwner = {
         identity,
         dataRoot: resolveCatCafeDataRoot(),
         ...(invocationId ? { invocationId } : {}),
         ...(scope.runHome ? { runHome: scope.runHome } : {}),
         ...(scope.preparation ? { preparation: true } : {}),
+        ...(activeWinJob
+          ? {
+              windowsJob: {
+                jobName: activeWinJob.record.jobName,
+                sessionId: activeWinJob.record.sessionId,
+              },
+            }
+          : {}),
       };
       db.prepare(
         `INSERT INTO ${table} (${key}, token, owner) VALUES (?, ?, ?) ON CONFLICT(${key}) DO UPDATE SET token = excluded.token, owner = excluded.owner`,

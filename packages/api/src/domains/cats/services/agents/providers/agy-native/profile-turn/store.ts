@@ -8,8 +8,14 @@ import {
   type UnixProcessIdentity,
   type UnixProcessSnapshotEntry,
 } from '../../../../../../../utils/cli-process-ownership.js';
+import { isClowderJobName } from '../../../../../../../utils/windows-job-native.js';
 import { AGY_NATIVE_CREDENTIAL_DIR } from '../agy-native-credential-file.js';
 import { AGY_NATIVE_RUNS } from '../agy-native-run-profile.js';
+
+export interface ProfileTurnWindowsJob {
+  readonly jobName: string;
+  readonly sessionId: number;
+}
 
 export interface ProfileTurnOwner {
   readonly identity: UnixProcessIdentity;
@@ -17,6 +23,7 @@ export interface ProfileTurnOwner {
   readonly invocationId?: string;
   readonly runHome?: string;
   readonly preparation?: boolean;
+  readonly windowsJob?: ProfileTurnWindowsJob;
 }
 
 export interface AgyNativeTurnScope {
@@ -110,6 +117,17 @@ export function parseNativeTurnOwner(raw: string, home: string): ProfileTurnOwne
     (dirname(owner.runHome) !== join(home, AGY_NATIVE_RUNS) || !/^run-[A-Za-z0-9]+$/.test(basename(owner.runHome)))
   )
     throw new Error('Native conversation lease has an invalid run directory');
+  if (
+    owner.windowsJob !== undefined &&
+    (typeof owner.windowsJob !== 'object' ||
+      owner.windowsJob === null ||
+      typeof owner.windowsJob.jobName !== 'string' ||
+      !isClowderJobName(owner.windowsJob.jobName) ||
+      typeof owner.windowsJob.sessionId !== 'number' ||
+      !Number.isSafeInteger(owner.windowsJob.sessionId) ||
+      owner.windowsJob.sessionId < 0)
+  )
+    throw new Error('Native profile lease has invalid Windows job ownership evidence');
   return owner;
 }
 
