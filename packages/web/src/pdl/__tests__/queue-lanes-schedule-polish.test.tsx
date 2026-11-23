@@ -85,6 +85,23 @@ describe('PDL lanes, queue drag/recall, and schedule approval regressions', () =
       }, {}, {})`) as string;
       expect(v2Html).toContain('--lanes:minmax(0, 2fr) minmax(0, 3fr) minmax(0, 2fr)');
       expect(v2Html).not.toContain('max-content');
+
+      // v2ThreadRow renders the pin glyph on BOTH pinned (visible) and unpinned (hover-revealed) rows
+      const v2RowExpr = (pinned: boolean) => `PDL_COMPONENTS.v2ThreadRow({
+        data: { lit: { id: 't1', title: 'Test thread', pinned: ${pinned}, time: 'now', cur: false } },
+        open: { act: 'thread', args: { id: 't1' } },
+        pin: { act: 'setStatus', args: { entity: 'pin', id: 't1' }, label: '${pinned ? 'Unpin' : 'Pin'}' },
+        more: [],
+        signals: [],
+      }, {}, {})`;
+      const unpinnedHtml = evaluate(v2RowExpr(false)) as string;
+      expect(unpinnedHtml).toContain('opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100');
+      expect(unpinnedHtml).toContain('data-act="setStatus"');
+      expect(unpinnedHtml).toContain('<svg');
+      const pinnedHtml = evaluate(v2RowExpr(true)) as string;
+      expect(pinnedHtml).not.toContain('opacity-0');
+      expect(pinnedHtml).toContain('var(--shell-primary)');
+      expect(pinnedHtml).toContain('<svg');
     } finally {
       dom.window.close();
     }
