@@ -104,8 +104,8 @@ Source: "..\scripts\stop-installed-desktop.ps1"; Flags: dontcopy
 ; ── Bulk archives ─────────────────────────────────────────────────────
 ; Shipped as uncompressed .tar archives compressed once by Inno Setup's solid
 ; LZMA2 stream, then extracted post-install by Windows' built-in tar.exe / npm tar.
-; This replaces per-file Inno Setup extraction of 30K+ node_modules files while
-; avoiding double gzip+LZMA compression and shrinking the final .exe significantly.
+; This replaces per-archive gzip + Inno store-only (nocompression) with a single
+; solid LZMA2 pass while keeping fast bulk extraction of 30K+ node_modules files.
 Source: "..\scripts\extract-runtime-archive.cjs"; DestDir: "{app}\scripts"
 Source: "..\scripts\native-runtime-extractor.cjs"; DestDir: "{app}\scripts"
 Source: "..\..\bundled\archives\deploy-dependencies.tar.json"; DestDir: "{app}\bundled\archives"
@@ -180,9 +180,7 @@ Source: "..\assets\*";                           DestDir: "{app}\desktop\assets"
 ; Portable Redis for Windows — fail-closed: any publishable installer MUST
 ; include Redis. The build script retries download 3× and verifies
 ; redis-server.exe; Inno Setup will abort here if bundled/redis/ is empty.
-; Exclude duplicate copies of redis-server.exe (sentinel/check-aof/check-rdb) and unused benchmark.
 Source: "..\..\bundled\redis\*";                 DestDir: "{app}\.cat-cafe\redis\windows"; \
-  Excludes: "redis-sentinel.exe,redis-check-aof.exe,redis-check-rdb.exe,redis-benchmark.exe"; \
   Flags: recursesubdirs createallsubdirs
 
 [Tasks]

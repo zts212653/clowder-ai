@@ -10,29 +10,69 @@ import { resolveNpmCli } from './scripts/rebuild-frozen-dependencies.mjs';
 const { extractRuntimeArchive } = createRequire(import.meta.url)('./scripts/extract-runtime-archive.cjs');
 const tar = createRequire(resolveNpmCli())('tar');
 
-test('real archive producer supplies integrity and extraction validates it, including failures', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-progress-'));
+test('real archive producer supplies integrity and extraction validates it for .tar and .tar.gz, including failures', async () => {
+  for (const ext of ['.tar', '.tar.gz']) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-progress-'));
+    try {
+      const input = path.join(root, 'input');
+      fs.mkdirSync(input);
+      fs.writeFileSync(path.join(input, 'Clowder AI.exe'), `entry-${ext}`);
+      const file = path.join(root, `bundled/archives/electron${ext}`);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const manifest = await createRuntimeArchive(input, file);
+      const header = fs.readFileSync(file).subarray(0, 2);
+      assert.equal(header[0] === 0x1f && header[1] === 0x8b, ext === '.tar.gz', `${ext} compression header`);
+      const events = [];
+      await extractRuntimeArchive(root, path.basename(file), tar, { onProgress: (e) => events.push(e) });
+      assert.equal(events[0].status, 'start');
+      assert.equal(events.at(-1).entries, manifest.entries);
+      assert.equal(events.at(-1).percent, 100);
+      assert.equal(fs.readFileSync(path.join(root, 'desktop-dist/Clowder AI.exe'), 'utf8'), `entry-${ext}`);
+      fs.writeFileSync(file + '.json', JSON.stringify({ ...manifest, sha256: '0'.repeat(64) }));
+      await assert.rejects(
+        extractRuntimeArchive(root, path.basename(file), tar, { onProgress: (e) => events.push(e) }),
+        /integrity mismatch/,
+      );
+      assert.equal(events.at(-1).status, 'failed');
+      fs.renameSync(file + '.json', file + '.saved-manifest');
+      await assert.rejects(extractRuntimeArchive(root, path.basename(file), tar), /manifest/i);
+      await assert.rejects(createRuntimeArchive(input, file), /must be new/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('all five sidecar-backed .tar archives validate SHA-256, entry count, and expected entry file', async () => {
+  const cases = [
+    ['deploy-dependencies', 'node_modules', '.runtime-lock.json'],
+    ['deploy-api', 'packages/api', 'dist/index.js'],
+    ['deploy-web', 'packages/web', '.next/BUILD_ID'],
+    ['deploy-mcp-server', 'packages/mcp-server', 'dist/index.js'],
+    ['electron', 'desktop-dist', 'Clowder AI.exe'],
+  ];
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-all-five-'));
   try {
-    const input = path.join(root, 'input');
-    fs.mkdirSync(input);
-    fs.writeFileSync(path.join(input, 'Clowder AI.exe'), 'entry');
-    const file = path.join(root, 'bundled/archives/electron.tar');
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    const manifest = await createRuntimeArchive(input, file);
-    const events = [];
-    await extractRuntimeArchive(root, path.basename(file), tar, { onProgress: (e) => events.push(e) });
-    assert.equal(events[0].status, 'start');
-    assert.equal(events.at(-1).entries, manifest.entries);
-    assert.equal(events.at(-1).percent, 100);
-    fs.writeFileSync(file + '.json', JSON.stringify({ ...manifest, sha256: '0'.repeat(64) }));
-    await assert.rejects(
-      extractRuntimeArchive(root, path.basename(file), tar, { onProgress: (e) => events.push(e) }),
-      /integrity mismatch/,
-    );
-    assert.equal(events.at(-1).status, 'failed');
-    fs.renameSync(file + '.json', file + '.saved-manifest');
-    await assert.rejects(extractRuntimeArchive(root, path.basename(file), tar), /manifest/i);
-    await assert.rejects(createRuntimeArchive(input, file), /must be new/);
+    fs.mkdirSync(path.join(root, 'bundled/archives'), { recursive: true });
+    for (const [name, destDir, expectedRel] of cases) {
+      const input = path.join(root, 'src', name);
+      const entryPath = path.join(input, expectedRel);
+      fs.mkdirSync(path.dirname(entryPath), { recursive: true });
+      fs.writeFileSync(entryPath, `payload-${name}`);
+      const archiveFile = path.join(root, 'bundled/archives', `${name}.tar`);
+      const manifest = await createRuntimeArchive(input, archiveFile);
+      await extractRuntimeArchive(root, `${name}.tar`, tar);
+      assert.equal(fs.readFileSync(path.join(root, destDir, expectedRel), 'utf8'), `payload-${name}`);
+
+      // Corrupt a payload byte (preserving tar header & total size): SHA-256 check must reject it.
+      const tampered = fs.readFileSync(archiveFile);
+      const payloadOffset = tampered.indexOf(Buffer.from(`payload-${name}`));
+      assert.ok(payloadOffset >= 0, `expected payload bytes inside ${name}.tar`);
+      tampered[payloadOffset] ^= 0x01;
+      fs.writeFileSync(archiveFile, tampered);
+      await assert.rejects(extractRuntimeArchive(root, `${name}.tar`, tar), /integrity mismatch/);
+      assert.equal(manifest.archive, `${name}.tar`);
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

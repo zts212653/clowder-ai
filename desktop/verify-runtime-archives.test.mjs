@@ -43,10 +43,20 @@ test('runtime archive gate rejects zero-byte archives and missing sidecars', () 
   fs.rmSync(missingSidecar, { recursive: true, force: true });
 });
 
-test('runtime archive gate accepts all non-empty archives with matching sidecars', () => {
+test('runtime archive gate accepts node.tar without a sidecar and requires matching sidecars for the other five archives', () => {
   const root = makeRoot();
   const result = spawnSync(process.execPath, [script, root], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /"ok": true/);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.ok, true);
+  assert.equal(report.archives.find((item) => item.name === 'node.tar')?.manifest, undefined);
+  assert.equal(report.archives.filter((item) => item.manifest).length, 5);
+
+  // Tamper sidecar byte size on one manifest-backed archive: gate must fail.
+  const webSidecar = path.join(root, 'bundled', 'archives', 'deploy-web.tar.json');
+  fs.writeFileSync(webSidecar, JSON.stringify({ archive: 'deploy-web.tar', bytes: 999 }));
+  const mismatch = spawnSync(process.execPath, [script, root], { encoding: 'utf8' });
+  assert.notEqual(mismatch.status, 0);
+  assert.match(mismatch.stdout, /deploy-web\.tar: sidecar does not match archive/);
   fs.rmSync(root, { recursive: true, force: true });
 });

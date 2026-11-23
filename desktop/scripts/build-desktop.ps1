@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Builds the Clowder AI Windows installer package.
 
@@ -744,10 +744,6 @@ if (-not $SkipPortableZip) {
     $bundledRedisDir = Join-Path $ProjectRoot "bundled\redis"
     if (Test-Path $bundledRedisDir) {
         Copy-ToStaging $bundledRedisDir ".cat-cafe\redis\windows"
-        foreach ($unusedRedisBin in @('redis-sentinel.exe', 'redis-check-aof.exe', 'redis-check-rdb.exe', 'redis-benchmark.exe')) {
-            $unusedPath = Join-Path (Join-Path $staging ".cat-cafe\redis\windows") $unusedRedisBin
-            if (Test-Path -LiteralPath $unusedPath) { Remove-Item -LiteralPath $unusedPath -Force }
-        }
     }
 
     # start.bat — portable entry point
@@ -786,7 +782,7 @@ if (-not $SkipPortableZip) {
 # Step 9: Build identity manifest (P2-6). Release evidence must succeed before
 # any output can be delivered. Only files produced by this invocation belong
 # to its source revision. The manifest records: source
-# SHA, generation time, Setup/portable ZIP path+sha256, every tar.gz archive
+# SHA, generation time, Setup/portable ZIP path+sha256, every runtime archive
 # with its serialized manifest, API/Web .build-commit identities, and the
 # working-tree state of every input that the installer packages (including
 # desktop/ source and untracked files that are bundled along, e.g. docs/).
