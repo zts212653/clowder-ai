@@ -645,6 +645,80 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     await cleanupPrefixedRedisKeys(redis, ['msg:*']);
   });
 
+  it('F335 restores legacy watcher identity through Redis-backed History without rewriting the row', async () => {
+    const { default: Fastify } = await import('fastify');
+    const { InvocationRegistry } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+    const watcher = {
+      kind: 'nudge',
+      sourceInvocationId: 'ordinary-work',
+      sourceMessageId: 'original-message',
+      watcherInvocationId: 'watcher-work',
+    };
+    const now = Date.now(); // This suite's ephemeral store retains a 60-second timeline.
+    const nudge = await appendFixture(store, {
+      userId: 'default-user',
+      threadId: 'watcher-history',
+      catId: 'codex',
+      content: '@gemini\n\nA helpful precedent.',
+      mentions: ['gemini'],
+      timestamp: now,
+      extra: {
+        watcher,
+        turnExecution: { invocationId: 'watcher-work', parentInvocationId: 'parent', executionKind: 'watcher' },
+      },
+    });
+    const ordinary = await appendFixture(store, {
+      userId: 'default-user',
+      threadId: 'watcher-history',
+      catId: 'codex',
+      content: '守望猫 · 小太阳',
+      mentions: ['gemini'],
+      timestamp: now + 1,
+    });
+    const beforeHash = await redis.hgetall(MessageKeys.detail(nudge.id));
+    assert.deepEqual(JSON.parse(beforeHash.extra).watcher, watcher, 'the original row already owns the provenance');
+    assert.deepEqual((await store.getById(nudge.id))?.extra?.watcher, watcher, 'single-message hydration');
+    const history = await store.getByThread('watcher-history', 10, 'default-user');
+    assert.ok(
+      history.some((row) => row.id === nudge.id),
+      'the persisted nudge must actually be in the timeline',
+    );
+    assert.deepEqual(history.find((row) => row.id === nudge.id)?.extra?.watcher, watcher, 'batch History hydration');
+    const app = Fastify();
+    try {
+      await app.register(messagesRoutes, {
+        registry: new InvocationRegistry(),
+        messageStore: store,
+        socketManager: { broadcastAgentMessage: () => {} },
+      });
+      const response = await app.inject({ method: 'GET', url: '/api/messages?threadId=watcher-history&limit=10' });
+      assert.equal(response.statusCode, 200);
+      const rows = response.json().messages;
+      assert.ok(
+        rows.some((row) => row.id === nudge.id),
+        'the API must actually publish the fixture',
+      );
+      assert.deepEqual(rows.find((row) => row.id === nudge.id)?.extra?.watcher, watcher);
+      assert.deepEqual(rows.find((row) => row.id === nudge.id)?.extra?.targetCats, ['gemini']);
+      const ordinaryRow = rows.find((row) => row.id === ordinary.id);
+      assert.ok(ordinaryRow, 'the API must actually publish the ordinary negative fixture');
+      assert.equal(ordinaryRow.id, ordinary.id);
+      assert.equal(ordinaryRow.content, ordinary.content);
+      assert.equal(ordinaryRow.extra?.watcher, undefined);
+      assert.deepEqual((await store.getById(nudge.id))?.extra?.watcher, watcher);
+      assert.deepEqual(
+        await redis.hgetall(MessageKeys.detail(nudge.id)),
+        beforeHash,
+        'History must not backfill stored data',
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   it('append() stores message and returns with id', async () => {
     const msg = await appendFixture(store, {
       userId: 'user1',

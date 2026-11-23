@@ -1,7 +1,8 @@
 按场景选用，不串成 SOP；不熟先用 `tool_search` 搜 skill 名。
 
-先核个人/项目前提；检索并回读当前原文，核主体/项目/条件/版本。历史不替现行；本批授权/进度回原Task与执行回执核对。缺资料不编造，检索摘要不授予操作权限。新知识留原合法入口；无关任务直接做。
+先核个人/项目前提；检索并回读当前原文，核主体/项目/条件/版本。历史不替现行；本批授权/进度回原Task与执行回执核对。新知识留原合法入口；无关任务直接做。
 
+- 分析发现待跟踪问题 → `rich-messaging` 会话草稿（一次建议；授权后 canonical gh，不自动外发）。
 - Chat内交付→rich-messaging（无需富文本）
 - 改前端 UI 想说"开浏览器看看" → `browser-preview` 渲染到 Hub panel
 - 想说"文件在 X 路径" → `workspace-navigator` 程式打开
@@ -12,13 +13,13 @@
 - 外部 runtime 会话像丢了 → `cat_cafe_list_external_runtime_sessions` / `cat_cafe_read_external_runtime_session`（F211）
 - CLI 只显"退出了" → 读 `cliDiagnostics` / debugRef，不猜 stderr（F212）
 - 阶段进度给下棒可见 → `cat_cafe_update_workflow` 推告示牌（不只发聊天）
-- SOP / harness "修了 vs sunset"判断 → 走 Eval Hub / Verdict Handoff 闭环（F192）
+- 效用比较 / 校准 / 干预 → `eval-design`，回原任务，不要求评估平台
 - 压缩后失忆 / 找旧决策 → `search_evidence` + drilldown（见 §7），不单刀
-- 获准开发新 Feature / 回原现场继续 Phase → `custody-recognition` 先核原 scope 与责任，再沿开发流程真正续做；唤醒不授予开发权限
+- 获准开发新 Feature / 回原现场继续 Phase → `custody-recognition` 先核原 scope 与责任，再沿开发流程真正续做
 - 收到 `context_management_hint`(warn) → `context-self-management` 自检（F225）
-- 关于{{CO_CREATOR_ROLE}}本人/个人近况/称谓/咱们关系/沟通边界的稳定事实 → `cat_cafe_propose_profile_update`（先 read_profile；Hub 审批；先 `tool_search`）；全猫共享→加`targetLayer:'corpus'`
-- 关于什么输出/设计/表达/架构/系统才算好的可复用品味判断 → `cat_cafe_propose_taste`（Hub 审批；先 `tool_search`）
+- 关于{{CO_CREATOR_ROLE}}本人/个人近况/称谓/咱们关系/沟通边界的稳定事实 → `cat_cafe_remember` 选 `profile`（先 read_profile）；全猫共享→加`targetLayer:'corpus'`
+- 关于什么输出/设计/表达/架构/系统才算好的可复用品味判断 → `cat_cafe_remember` 选 `taste`；可 1–4 条混记，payload 同原工具
 - 单次 continuity-valued 人物线索或频率 nudge → `proactive-memory-judgment`（不确定降档、不因未重复沉默）；skill 再路由三态。
-- 纠正/表扬/Magic Word 不决定存哪，按内容走上两路；重复工具/流程摩擦 → `code-as-harness`（搜证据→代码守护）
+- 纠正/表扬/Magic Word 不决定存哪，按内容走上两路；家里本来有答案、他不得不重说的事 → `code-as-harness`（先搜证据）
 
-> 完整入口见 `cat-cafe-skills/refs/capability-wakeup-index.md`；按 `eval:capability-wakeup` 每周结论迭代（F192）。
+> 完整入口见 `cat-cafe-skills/refs/capability-wakeup-index.md`；按真实使用证据维护，不默认运行周期评估。

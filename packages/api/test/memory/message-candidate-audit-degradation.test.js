@@ -44,6 +44,7 @@ function failingVectors(db, beforeFailure = () => {}) {
     isEmbeddingAvailable: async () => true,
     semanticSearch: (_limit, audit) => fail(audit),
     hybridSearch: (_lexical, _limit, _accept, _compare, audit) => fail(audit),
+    reportVectorDegrade: () => {},
   };
 }
 

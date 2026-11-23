@@ -41,7 +41,8 @@ function isBroadRootTarget(raw, cwd, effect) {
   if (!['delete', 'repository_rewrite', 'process_control', 'service_mutation'].includes(effect)) {
     return false;
   }
-  if (shellTargetTokens(raw).some(isBroadRootSelector)) return true;
+  const tokens = shellTargetTokens(raw);
+  if (tokens.some(isBroadRootSelector)) return true;
 
   const broadCwd = typeof cwd === 'string' && isBroadRootSelector(cwd);
   if (broadCwd && /\b(?:find|rm|trash|unlink|rmdir|mv)\b[^;&|]*(?:^|\s)(?:\.|\.\/|\*)(?=$|[\s;&|])/i.test(raw)) {
@@ -49,7 +50,12 @@ function isBroadRootTarget(raw, cwd, effect) {
   }
   // `git reset --hard` (without -C) rewrites the checkout it runs in; in the shared main
   // checkout that discards other cats' uncommitted work.
-  return effect === 'repository_rewrite' && insideMainCheckout(cwd) && /^\s*git\s+reset\s+--hard\b/i.test(raw);
+  return (
+    effect === 'repository_rewrite' &&
+    insideMainCheckout(cwd) &&
+    (/^\s*git\s+reset\s+--hard\b/i.test(raw) ||
+      (tokens[0] === 'git' && tokens[1] === 'reset' && tokens.includes('--hard')))
+  );
 }
 
 export function insideMainCheckout(cwd) {

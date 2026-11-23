@@ -15,6 +15,7 @@ import type { CallbackAuthSystemMessageNotifier } from './callback-auth-system-m
 import { recordCallbackAuthFailure, recordLegacyFallbackHit } from './callback-auth-telemetry.js';
 import { makeCallbackAuthError } from './callback-errors.js';
 import { derivePrincipal } from './callback-scope-helpers.js';
+import { claimWatcherRememberForward } from './watcher-remember-forward.js';
 
 /**
  * F174 Phase D1: derive a concise tool name from the request URL for
@@ -37,7 +38,7 @@ async function allowToolExecution(
 ): Promise<boolean> {
   const denial = toolExecutionPolicyDenial(
     record.toolExecutionPolicy,
-    record.toolExecutionPolicy?.mode === 'watcher'
+    record.toolExecutionPolicy?.mode === 'watcher' || record.toolExecutionPolicy?.mode === 'watcher_panel'
       ? `${request.method} ${request.routeOptions.url ?? ''}`
       : record.toolExecutionPolicy?.mode === 'callback_allowlist' ||
           record.toolExecutionPolicy?.mode === 'plugin_native'
@@ -50,6 +51,7 @@ async function allowToolExecution(
       record.toolExecutionPolicy?.mode === 'watcher' &&
       request.routeOptions.url !== '/api/callbacks/watcher-tool-admission'
     ) {
+      if (claimWatcherRememberForward(request, record)) return true;
       const callId = firstHeaderValue(request.headers['x-watcher-tool-call-id']);
       if (
         request.watcherToolTicket?.invocationId === record.invocationId &&
@@ -181,6 +183,7 @@ export function registerCallbackAuthHook(
       if (
         options.enforceToolExecutionPolicy !== false ||
         request.callbackAuth.toolExecutionPolicy?.mode === 'watcher' ||
+        request.callbackAuth.toolExecutionPolicy?.mode === 'watcher_panel' ||
         request.callbackAuth.toolExecutionPolicy?.mode === 'callback_allowlist' ||
         request.callbackAuth.toolExecutionPolicy?.mode === 'plugin_native'
       )
@@ -261,7 +264,11 @@ export function registerCallbackAuthHook(
         );
       // Surface in-context using the snapshot captured before verify ran.
       // Notifier handles the surface decision (skips stale_invocation, etc).
-      if (options.notifier && recordSnapshot) {
+      const privatePanel = recordSnapshot?.toolExecutionPolicy?.mode === 'watcher_panel';
+      const canceledWatcher = result.reason === 'canceled' && recordSnapshot?.toolExecutionPolicy?.mode === 'watcher';
+      // Observer diagnostics stay in owner logs/ledgers. Keep rejection and telemetry,
+      // but no panel failure may publish its private member identity into shared history.
+      if (options.notifier && recordSnapshot && !privatePanel && !canceledWatcher) {
         try {
           await options.notifier.notify({
             invocationId,
@@ -293,6 +300,7 @@ export function registerCallbackAuthHook(
     if (
       (options.enforceToolExecutionPolicy !== false ||
         result.record.toolExecutionPolicy?.mode === 'watcher' ||
+        result.record.toolExecutionPolicy?.mode === 'watcher_panel' ||
         result.record.toolExecutionPolicy?.mode === 'callback_allowlist' ||
         result.record.toolExecutionPolicy?.mode === 'plugin_native') &&
       !(await allowToolExecution(request, reply, result.record, options, registry))

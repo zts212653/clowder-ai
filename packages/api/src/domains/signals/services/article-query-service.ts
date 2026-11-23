@@ -229,6 +229,7 @@ export class SignalArticleQueryService {
     return {
       ...enriched,
       content: detail.content,
+      enriched: detail.frontmatter.enriched === true,
     };
   }
 

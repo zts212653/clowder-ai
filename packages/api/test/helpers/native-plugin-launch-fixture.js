@@ -95,6 +95,7 @@ export async function fixture(t, options = {}) {
     stopAll: async () => {},
     invoke: async () => ({}),
     ...(options.factory ? { resolveMcpFactory: async () => options.factory } : {}),
+    ...options.carrier,
   });
   t.after(() => router.stopAll('test_cleanup'));
   return {

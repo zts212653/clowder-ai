@@ -15,13 +15,47 @@ const attachment = {
 };
 
 describe('messages ContextAttachment request contract', () => {
+  it('retains a fixed work version and an execution leaf through the normal send and model projection', async () => {
+    const { serializeContextAttachmentsForPrompt } = await import(
+      '../dist/domains/cats/services/agents/routing/context-attachment-prompt.js'
+    );
+    const references = [
+      { v: 1, id: 'work-1', kind: 'work', workId: 'work:owner', version: 2, title: 'Owner work' },
+      {
+        v: 1,
+        id: 'cli-1',
+        kind: 'quote',
+        text: 'owner output',
+        selectionStart: 4,
+        selectionEnd: 16,
+        source: {
+          kind: 'cli_output',
+          threadId: 'thread-1',
+          messageId: 'reply-1',
+          toolUseId: 'call-1',
+          executionRef: 'run-1',
+          part: 'result',
+        },
+      },
+    ];
+    const input = sendMessageSchema.parse({ content: '', contextAttachments: JSON.stringify(references) });
+    const blocks = buildMessageContentBlocks(input.content, input.contextAttachments);
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(blocks)).map((block) => block.attachment),
+      references,
+    );
+    assert.equal(
+      serializeContextAttachmentsForPrompt(blocks),
+      `<context_attachments>${JSON.stringify(references)}</context_attachments>`,
+    );
+  });
   it('accepts attachment-only sends and rejects a completely empty send', () => {
     const attachmentOnly = sendMessageSchema.safeParse({ content: '', contextAttachments: [attachment] });
     assert.equal(attachmentOnly.success, true);
     assert.equal(sendMessageSchema.safeParse({ content: '' }).success, false);
   });
 
-  it('parses multipart JSON and enforces the attachment count bound', () => {
+  it('parses multipart JSON and accepts fifteen attachments within the content budget', () => {
     const parsed = sendMessageSchema.safeParse({
       content: 'look here',
       contextAttachments: JSON.stringify([attachment]),
@@ -30,10 +64,10 @@ describe('messages ContextAttachment request contract', () => {
     assert.deepEqual(parsed.data.contextAttachments, [attachment]);
     assert.equal(
       sendMessageSchema.safeParse({
-        content: 'too many',
-        contextAttachments: Array.from({ length: 13 }, () => attachment),
+        content: 'fifteen comments',
+        contextAttachments: Array.from({ length: 15 }, (_, index) => ({ ...attachment, id: `quote-${index}` })),
       }).success,
-      false,
+      true,
     );
   });
 

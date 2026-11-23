@@ -9,6 +9,7 @@ import { getOrderedMessageTimeline } from '@/stores/message-timeline';
 import { useVoiceSessionStore } from '@/stores/voiceSessionStore';
 import { apiFetch } from '@/utils/api-client';
 import { base64ToBlob, streamTts } from '@/utils/tts-stream';
+import { showTtsVoiceWarning } from '@/utils/tts-voice-warning';
 
 /**
  * F092: Auto-play incoming audio blocks when Voice Companion is active.
@@ -97,6 +98,7 @@ async function streamAndPlay(block: RichAudioBlock, originSessionId: string): Pr
   const queue: string[] = [];
   let firstChunkPlayed = false;
   let streamDone = false;
+  let voiceReported: string | undefined;
 
   const playNext = () => {
     if (queue.length === 0) {
@@ -131,6 +133,10 @@ async function streamAndPlay(block: RichAudioBlock, originSessionId: string): Pr
       streamingAbort.signal,
     )) {
       if (streamingAbort.signal.aborted || isSessionStale()) break;
+      if (event.voiceSelection && voiceReported !== JSON.stringify(event.voiceSelection.warnings)) {
+        showTtsVoiceWarning(event.voiceSelection, useVoiceSessionStore.getState().session?.boundThreadId);
+        voiceReported = JSON.stringify(event.voiceSelection.warnings);
+      }
 
       if (event.type === 'chunk' && event.audioBase64) {
         const mimeType = event.format === 'mp3' ? 'audio/mpeg' : 'audio/wav';
@@ -156,8 +162,13 @@ async function streamAndPlay(block: RichAudioBlock, originSessionId: string): Pr
       cleanupAutoplay();
       setPlaybackState('idle');
     }
-  } catch {
+  } catch (error) {
     if (!streamingAbort?.signal.aborted) {
+      if (!isSessionStale())
+        showTtsVoiceWarning(
+          { warnings: [error instanceof Error ? error.message : '语音合成失败，已停止播放。'] },
+          useVoiceSessionStore.getState().session?.boundThreadId,
+        );
       cleanupAutoplay();
       setPlaybackState('idle');
     }
@@ -199,6 +210,7 @@ async function fetchAndPlay(block: RichAudioBlock, originSessionId: string): Pro
     }
 
     const audio = getAutoplayAudio();
+    showTtsVoiceWarning(block.voiceSelection, useVoiceSessionStore.getState().session?.boundThreadId);
     audio.src = blobUrl;
     setPlaybackState('playing');
 

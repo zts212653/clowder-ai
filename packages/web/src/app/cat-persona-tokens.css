@@ -47,6 +47,34 @@
   --color-cocreator-light: var(--color-cocreator-surface);
   --color-cocreator-dark: var(--color-cocreator-text);
   --color-cocreator-bg: var(--color-cocreator-surface);
+
+  /* ── Four quota-bar cat family anchors (F051: Ragdoll / Maine Coon / Siamese / Turkish Van) ──
+   * Uses the same OKLCH ring derivation as CatHueInjector so Light/Dark + Theme Tuner stay aligned.
+   * Turkish Van (墨墨 / Kimi) uses auburn (#C27A3A → H=59.6 C=0.120) instead of grey (#4B5563) so a healthy bar
+   * never resembles an unconnected empty slot. */
+  --family-ragdoll-hue: 304.9;
+  --family-ragdoll-chroma: 0.105;
+  --family-mainecoon-hue: 143.9;
+  --family-mainecoon-chroma: 0.095;
+  --family-siamese-hue: 247.5;
+  --family-siamese-chroma: 0.11;
+  --family-turkish-van-hue: 59.6;
+  --family-turkish-van-chroma: 0.12;
+
+  --family-ragdoll-ring: oklch(
+    var(--cat-ring-l, 0.55) calc(var(--family-ragdoll-chroma) * var(--cat-ring-cmul, 1.1)) var(--family-ragdoll-hue)
+  );
+  --family-mainecoon-ring: oklch(
+    var(--cat-ring-l, 0.55) calc(var(--family-mainecoon-chroma) * var(--cat-ring-cmul, 1.1)) var(--family-mainecoon-hue)
+  );
+  --family-siamese-ring: oklch(
+    var(--cat-ring-l, 0.55) calc(var(--family-siamese-chroma) * var(--cat-ring-cmul, 1.1)) var(--family-siamese-hue)
+  );
+  --family-turkish-van-ring: oklch(
+    var(--cat-ring-l, 0.58) calc(var(--family-turkish-van-chroma) * var(--cat-ring-cmul, 1.05))
+      var(--family-turkish-van-hue)
+  );
+  --quota-bar-danger: oklch(0.57 0.182 24.5);
 }
 
 [data-theme="dark"] {
@@ -60,4 +88,18 @@
   --color-cocreator-ring: oklch(
     var(--cat-ring-l, 0.7) calc(var(--cocreator-chroma) * var(--cat-ring-cmul, 1)) var(--cocreator-hue)
   );
+  --family-ragdoll-ring: oklch(
+    var(--cat-ring-l, 0.7) calc(var(--family-ragdoll-chroma) * var(--cat-ring-cmul, 1)) var(--family-ragdoll-hue)
+  );
+  --family-mainecoon-ring: oklch(
+    var(--cat-ring-l, 0.7) calc(var(--family-mainecoon-chroma) * var(--cat-ring-cmul, 1)) var(--family-mainecoon-hue)
+  );
+  --family-siamese-ring: oklch(
+    var(--cat-ring-l, 0.7) calc(var(--family-siamese-chroma) * var(--cat-ring-cmul, 1)) var(--family-siamese-hue)
+  );
+  --family-turkish-van-ring: oklch(
+    var(--cat-ring-l, 0.72) calc(var(--family-turkish-van-chroma) * var(--cat-ring-cmul, 1))
+      var(--family-turkish-van-hue)
+  );
+  --quota-bar-danger: oklch(0.7 0.175 24.5);
 }

@@ -9,6 +9,7 @@
  */
 
 import type { CatId } from './ids.js';
+import type { SessionCacheObservation } from './session-cache.js';
 import type { CatHandoffNote } from './session-handoff-proposal.js';
 
 export type SessionStatus = 'active' | 'sealing' | 'sealed';
@@ -23,7 +24,7 @@ export type SessionStatus = 'active' | 'sealing' | 'sealed';
 export interface SessionCapacityPin {
   windowTokens: number;
   inputCeilingTokens: number;
-  source: 'reported' | 'manual' | 'catalog' | 'unresolved';
+  source: 'reported' | 'observed' | 'manual' | 'catalog' | 'unresolved';
   provenance: string;
   actionable: boolean;
 }
@@ -169,7 +170,10 @@ export interface SessionUsageSnapshot {
   inputTokens?: number;
   outputTokens?: number;
   cacheReadTokens?: number;
+  cacheCreation5mTokens?: number;
+  cacheCreation1hTokens?: number;
   costUsd?: number;
+  cacheObservation?: SessionCacheObservation;
 }
 
 export interface ContextHealth {

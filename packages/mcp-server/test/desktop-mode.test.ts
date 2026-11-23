@@ -41,9 +41,7 @@ const ALL_FAKE_NAMES = [
   'cat_cafe_multi_mention',
   'cat_cafe_hold_ball',
   'cat_cafe_propose_thread',
-  'cat_cafe_propose_profile_update',
-  'cat_cafe_propose_taste',
-  'cat_cafe_read_profile',
+  'cat_cafe_read_memory',
   'cat_cafe_list_schedule_templates',
   'cat_cafe_preview_scheduled_task',
   'cat_cafe_register_scheduled_task',
@@ -51,8 +49,6 @@ const ALL_FAKE_NAMES = [
   'cat_cafe_shell_exec',
   // memory
   'cat_cafe_search_evidence',
-  'cat_cafe_graph_resolve',
-  'cat_cafe_list_recent',
   'cat_cafe_list_session_chain',
   'cat_cafe_read_session_digest',
   'cat_cafe_read_session_events',
@@ -106,7 +102,8 @@ describe('applyReadonlyFilter — env modes', () => {
   });
 
   it('readonly=true + hasAgentKey=true + agentKeyUnion=true exposes AGY-safe coordination and scheduler tools', () => {
-    const out = buildCollabTools({ readonly: true, hasAgentKey: true, agentKeyUnion: true });
+    const env = { readonly: true, hasAgentKey: true, agentKeyUnion: true };
+    const out = [...buildCollabTools(env), ...buildMemoryTools(env)];
     const outNames = new Set(out.map((t) => t.name));
 
     const expectedPresent = [
@@ -121,7 +118,7 @@ describe('applyReadonlyFilter — env modes', () => {
       'cat_cafe_preview_scheduled_task',
       'cat_cafe_register_scheduled_task',
       'cat_cafe_remove_scheduled_task',
-      'cat_cafe_read_profile',
+      'cat_cafe_read_memory',
     ];
     for (const name of expectedPresent) {
       assert.equal(outNames.has(name), true, `${name} must be exposed to readonly+agent-key AGY cats`);
@@ -134,7 +131,6 @@ describe('applyReadonlyFilter — env modes', () => {
       'cat_cafe_set_read_mode',
       'cat_cafe_submit_game_action', // mcp-cutover-negative-reference: absence
       'cat_cafe_propose_thread',
-      'cat_cafe_propose_profile_update',
     ];
     for (const name of expectedAbsent) {
       assert.equal(outNames.has(name), false, `${name} must remain blocked in readonly+agent-key mode`);
@@ -170,7 +166,7 @@ describe('applyReadonlyFilter — env modes', () => {
     // Core desktop allowlist entries are present.
     assert.equal(outNames.has('cat_cafe_post_message'), true);
     assert.equal(outNames.has('cat_cafe_search_evidence'), true);
-    assert.equal(outNames.has('cat_cafe_read_profile'), true);
+    assert.equal(outNames.has('cat_cafe_read_memory'), true);
     // V2→V3 adjustment §1: raw transcript/invocation detail 不在白名单
     assert.equal(outNames.has('cat_cafe_read_session_events'), false, 'read_session_events excluded (V3 §1)');
     assert.equal(outNames.has('cat_cafe_read_invocation_detail'), false, 'read_invocation_detail excluded (V3 §1)');
@@ -188,11 +184,12 @@ describe('applyReadonlyFilter — env modes', () => {
 });
 
 describe('DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS — V3 + F231 profile continuity', () => {
-  it('contains exactly 12 tools', () => {
-    assert.equal(DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS.size, 12, 'F236 adds the workflow-SOP progressive drill');
+  it('contains exactly 10 tools', () => {
+    // F332 F2: graph and recent browsing are groups of search_evidence, not separate tools.
+    assert.equal(DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS.size, 10, 'F236 adds the workflow-SOP progressive drill');
   });
 
-  it('contains 6 collab read/message tools + 5 memory cold-start tools + 1 profile tool', () => {
+  it('contains 6 collab read/message tools + 3 memory cold-start tools + 1 profile tool', () => {
     const expected = [
       // collab
       'cat_cafe_post_message',
@@ -203,12 +200,10 @@ describe('DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS — V3 + F231 profile continuity', 
       'cat_cafe_get_message',
       // memory
       'cat_cafe_search_evidence',
-      'cat_cafe_graph_resolve',
-      'cat_cafe_list_recent',
       'cat_cafe_list_session_chain',
       'cat_cafe_read_session_digest',
       // profile
-      'cat_cafe_read_profile',
+      'cat_cafe_read_memory',
     ];
     for (const name of expected) {
       assert.equal(DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS.has(name), true, `expected ${name} in whitelist`);
@@ -365,17 +360,11 @@ describe('buildCollabTools / buildMemoryTools — real toolset assertions (codex
     assert.equal(outNames.has('cat_cafe_search_evidence'), false);
   });
 
-  it('Desktop mode memory: only 5 memory tools registered', () => {
+  it('Desktop mode memory: only 3 memory tools registered', () => {
     const env: ToolsetEnv = { desktopMode: 'fable-phase0' };
     const out = buildMemoryTools(env);
     const outNames = new Set(out.map((t) => t.name));
-    const expectedMemory = [
-      'cat_cafe_search_evidence',
-      'cat_cafe_graph_resolve',
-      'cat_cafe_list_recent',
-      'cat_cafe_list_session_chain',
-      'cat_cafe_read_session_digest',
-    ];
+    const expectedMemory = ['cat_cafe_search_evidence', 'cat_cafe_list_session_chain', 'cat_cafe_read_session_digest'];
     for (const name of expectedMemory) {
       assert.equal(outNames.has(name), true, `${name} expected in Desktop memory`);
     }
@@ -428,10 +417,10 @@ describe('buildCollabTools / buildMemoryTools — real toolset assertions (codex
 // =====================================================================
 
 describe('F238 cloud-pro-phase0 mode — Phase B1a security boundary', () => {
-  it('DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS contains exactly 13 tools', () => {
+  it('DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS contains exactly 11 tools', () => {
     assert.equal(
       DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS.size,
-      13,
+      11,
       'cloud-pro-phase0 includes scoped thread-cat discovery',
     );
   });
@@ -476,7 +465,7 @@ describe('F238 cloud-pro-phase0 mode — Phase B1a security boundary', () => {
     // 11 项白名单仍在
     assert.equal(outNames.has('cat_cafe_post_message'), true);
     assert.equal(outNames.has('cat_cafe_search_evidence'), true);
-    assert.equal(outNames.has('cat_cafe_read_profile'), true);
+    assert.equal(outNames.has('cat_cafe_read_memory'), true);
   });
 
   it('cloud-pro-phase0 limb tools fully denied (defense-in-depth)', () => {
@@ -520,17 +509,11 @@ describe('F238 cloud-pro-phase0 mode — Phase B1a security boundary', () => {
     assert.equal(outNames.has('cat_cafe_search_evidence'), false);
   });
 
-  it('cloud-pro-phase0 memory build: only 5 memory tools registered', () => {
+  it('cloud-pro-phase0 memory build: only 3 memory tools registered', () => {
     const env: ToolsetEnv = { desktopMode: 'cloud-pro-phase0' };
     const out = buildMemoryTools(env);
     const outNames = new Set(out.map((t) => t.name));
-    const expectedMemory = [
-      'cat_cafe_search_evidence',
-      'cat_cafe_graph_resolve',
-      'cat_cafe_list_recent',
-      'cat_cafe_list_session_chain',
-      'cat_cafe_read_session_digest',
-    ];
+    const expectedMemory = ['cat_cafe_search_evidence', 'cat_cafe_list_session_chain', 'cat_cafe_read_session_digest'];
     for (const name of expectedMemory) {
       assert.equal(outNames.has(name), true, `${name} expected in cloud-pro-phase0 memory`);
     }

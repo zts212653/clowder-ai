@@ -5,7 +5,7 @@ export const CLI_EFFORT_VALUES = ['low', 'medium', 'high', 'max', 'xhigh', 'ultr
 export type CliEffortPreset = (typeof CLI_EFFORT_VALUES)[number];
 /** Canonical non-empty provider-native value persisted on a member. */
 export type CliEffortValue = string;
-export type CliEffortProvider = 'anthropic' | 'openai' | 'kimi';
+export type CliEffortProvider = 'anthropic' | 'openai' | 'kimi' | 'google' | 'antigravity';
 export type CliEffortPatchValue = CliEffortPreset | null;
 export type CliEffortOverrideSource = 'thread_override' | 'inherited';
 export type CliEffortOverrideCompatibility = 'compatible' | 'incompatible';
@@ -23,7 +23,12 @@ const CLI_EFFORT_OPTIONS_BY_PROVIDER: Record<CliEffortProvider, readonly CliEffo
   // k3 family declares support_efforts (low/high/max, no medium). Boolean-thinking
   // Kimi models (kimi-for-coding, k2.x) get null from getCliEffortOptionsForProvider.
   kimi: ['low', 'high', 'max'],
+  google: ['low', 'medium', 'high'],
+  antigravity: ['low', 'medium', 'high'],
 };
+
+const GOOGLE_XHIGH_EFFORT_OPTIONS: readonly CliEffortPreset[] = ['low', 'medium', 'high', 'xhigh'];
+const GOOGLE_PRO_EFFORT_OPTIONS: readonly CliEffortPreset[] = ['low', 'high'];
 
 const OPENAI_MAX_EFFORT_OPTIONS: readonly CliEffortPreset[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 const OPENAI_MAX_ULTRA_EFFORT_OPTIONS: readonly CliEffortPreset[] = [...OPENAI_MAX_EFFORT_OPTIONS, 'ultra'];
@@ -34,14 +39,45 @@ const CLI_EFFORT_DEFAULT_BY_PROVIDER: Record<CliEffortProvider, CliEffortPreset>
   anthropic: 'max',
   openai: 'xhigh',
   kimi: 'high',
+  google: 'high',
+  antigravity: 'high',
 };
 
 function isCliEffortProvider(provider: string): provider is CliEffortProvider {
-  return provider === 'anthropic' || provider === 'openai' || provider === 'kimi';
+  return (
+    provider === 'anthropic' ||
+    provider === 'openai' ||
+    provider === 'kimi' ||
+    provider === 'google' ||
+    provider === 'antigravity'
+  );
 }
 
 export function normalizeModelSlug(model: string | null | undefined): string | null {
-  return model?.trim().toLowerCase().split('/').filter(Boolean).at(-1) ?? null;
+  const raw = model?.trim().toLowerCase().split('/').filter(Boolean).at(-1) ?? null;
+  if (!raw) return null;
+  const displayMatch = raw.match(/^(gemini\s+[0-9.]+(?:\s+[a-z0-9]+)+?)(?:\s*\((low|medium|high|xhigh|max)\))?$/);
+  if (displayMatch) {
+    const slug = displayMatch[1].trim().replace(/\s+/g, '-');
+    return displayMatch[2] ? `${slug}-${displayMatch[2]}` : slug;
+  }
+  return raw;
+}
+
+function getGoogleEffortOptions(model: string | null | undefined): readonly CliEffortPreset[] | null {
+  const modelId = normalizeModelSlug(model);
+  if (!modelId) return CLI_EFFORT_OPTIONS_BY_PROVIDER.google;
+  const base = modelId.replace(/-(?:low|medium|high|xhigh|max)$/, '');
+  if (base.startsWith('gemini-4-hydrogen')) return GOOGLE_XHIGH_EFFORT_OPTIONS;
+  if (base.startsWith('gemini-3.1-pro')) return GOOGLE_PRO_EFFORT_OPTIONS;
+  if (
+    base.startsWith('gemini-4-carbon') ||
+    base.startsWith('gemini-4-argon') ||
+    /^gemini-3\.(?:5|6|7|8)-flash(?:-|$)/.test(base)
+  ) {
+    return CLI_EFFORT_OPTIONS_BY_PROVIDER.google;
+  }
+  return null;
 }
 
 function getOpenAiEffortOptions(model: string | null | undefined): readonly CliEffortPreset[] {
@@ -68,6 +104,7 @@ export function getCliEffortOptionsForProvider(
   if (!isCliEffortProvider(provider)) return null;
   if (provider === 'openai') return getOpenAiEffortOptions(model);
   if (provider === 'kimi') return isKimiEffortCapableModel(model) ? CLI_EFFORT_OPTIONS_BY_PROVIDER.kimi : null;
+  if (provider === 'google' || provider === 'antigravity') return getGoogleEffortOptions(model);
   return CLI_EFFORT_OPTIONS_BY_PROVIDER[provider];
 }
 
@@ -88,11 +125,16 @@ export function isValidCliEffortForProvider(
 export function normalizeCliEffortForProvider(
   provider: CatProvider | string,
   effort: string | null | undefined,
-  _model?: string | null,
+  model?: string | null,
 ): CliEffortValue | null {
   if (!isCliEffortProvider(provider)) return null;
   const nativeValue = effort?.trim();
-  if (nativeValue) return nativeValue;
+  if (nativeValue) {
+    if (provider === 'google' || provider === 'antigravity') {
+      return isValidCliEffortForProvider(provider, nativeValue, model) ? nativeValue : null;
+    }
+    return nativeValue;
+  }
   return CLI_EFFORT_DEFAULT_BY_PROVIDER[provider];
 }
 

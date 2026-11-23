@@ -4,7 +4,7 @@ import type { FastifyReply } from 'fastify';
 import type { ApprovalIngress } from '../domains/approval-hub/ApprovalIngress.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IProfileUpdateProposalStore } from '../domains/cats/services/stores/ports/ProfileUpdateProposalStore.js';
-import { buildProfileUpdateCardBlock } from './profile-update-card-block.js';
+import { buildProfileUpdateCardBlock, summarizeProfileProposalDiff } from './profile-update-card-block.js';
 import {
   isEligibleProfileOrigin,
   type ProfileUpdateInput,
@@ -63,6 +63,7 @@ export async function visibleDedupResponse(
       proposalId: proposal.proposalId,
       status: proposal.status,
       messageId: cardMessageId,
+      diff: summarizeProfileProposalDiff(proposal),
       deduped: true,
     };
   }
@@ -72,6 +73,7 @@ export async function visibleDedupResponse(
       proposalId: proposal.proposalId,
       status: proposal.status,
       messageId: envelope.approvalCardRef.messageId,
+      diff: summarizeProfileProposalDiff(proposal),
       deduped: true,
     };
   }

@@ -1,113 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { AgyNativeAgentService } from '../dist/domains/cats/services/agents/providers/agy-native/AgyNativeAgentService.js';
+import { answer, input, result, runNative, session } from './helpers/agy-followup-fixture.js';
 import { appendRecoveryFixture } from './helpers/append-recovery-fixture.js';
 
-const model = 'gemini-3.8-flash-high';
-const session = 'followup-session';
-const input = (index, state = 'DONE') => ({
-  event: 'step_update',
-  step_update: { conversation_id: session, step_index: index, step_type: 'user_input', state },
-});
-const answer = (index, text, tokens) => ({
-  event: 'step_update',
-  step_update: {
-    conversation_id: session,
-    step_index: index,
-    step_type: 'agent_response',
-    state: 'DONE',
-    text_delta: text,
-    usage: {
-      input_tokens: tokens,
-      output_tokens: 2,
-      thinking_tokens: 0,
-      cache_read_tokens: 0,
-      total_tokens: tokens + 2,
-    },
-  },
-});
-const result = (text, turn = 1, status = 'SUCCESS') => ({
-  event: 'result',
-  result: {
-    conversation_id: session,
-    response: text,
-    status,
-    num_turns: turn,
-    usage: { input_tokens: turn * 100, output_tokens: turn * 2, total_tokens: turn * 102 },
-    ...(status === 'ERROR' ? { error: 'second turn failed' } : {}),
-  },
-});
-
-async function runNative(script, { signal, registered = true, invocationId = 'inv', onMessage } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'native-followup-'));
-  const workspace = join(root, 'workspace');
-  mkdirSync(workspace);
-  const service = new AgyNativeAgentService({
-    catId: 'gemini38',
-    command: '/usr/bin/true',
-    l0CompilerFn: async () => '# Fixture identity',
-    rawArchive: { append: async () => {} },
-    profile: {
-      enabled: true,
-      profileId: 'gemini38',
-      model,
-      homeRoot: join(root, 'profiles'),
-      trustedWorkspaces: [workspace],
-    },
-  });
-  const state = { writes: [], messages: [], releases: 0 };
-  try {
-    for await (const message of service.invoke('A', {
-      invocationId,
-      workingDirectory: workspace,
-      ...(signal ? { signal } : {}),
-      ...(registered
-        ? {
-            activeRunDispatch: {
-              invocationId,
-              register: (dispatcher) => {
-                state.dispatcher = dispatcher;
-                return () => {
-                  state.releases++;
-                };
-              },
-            },
-          }
-        : {}),
-      spawnCliOverride: async function* (launch) {
-        state.closed = () => launch.stdinCloseSignal.aborted;
-        if (launch.stdinInput) state.writes.push(launch.stdinInput);
-        launch.onStdinReady?.((body) => {
-          assert.equal(state.closed(), false);
-          state.writes.push(body);
-        });
-        yield {
-          event: 'init',
-          conversation_id: session,
-          init: {
-            agent: launch.args[launch.args.indexOf('--agent') + 1],
-            cwd: launch.cwd,
-            model,
-            permission_mode: 'request-review',
-            tools: [],
-          },
-        };
-        yield* script(state);
-      },
-    })) {
-      await onMessage?.(message);
-      state.messages.push(message);
-    }
-    return state;
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-}
-
-for (const mode of ['exit-before-B', 'cancel-after-read', 'error-B', 'success-B']) {
+for (const mode of ['exit-before-B', 'cancel-after-read', 'error-B', 'success-B', 'transport-after-B']) {
   test(
     `public Native terminal preserves its History outcome without waiting for an optional read (${mode})`,
     { timeout: 5000 },
@@ -156,6 +53,8 @@ for (const mode of ['exit-before-B', 'cancel-after-read', 'error-B', 'success-B'
               return;
             }
             yield result('B done.', 2, mode === 'error-B' ? 'ERROR' : 'SUCCESS');
+            if (mode === 'transport-after-B')
+              yield { __cliError: true, message: 'transport failed after B', exitCode: 1, signal: null };
           },
           {
             signal: abort.signal,
@@ -205,7 +104,7 @@ async function append(state, text = 'B', patch = {}, control = {}) {
   );
 }
 
-test('Native reads B only in its next internal turn and completes B only on its own SUCCESS result', async () => {
+test('Native reads B only in its next internal turn and completes B only at its own successful host boundary', async () => {
   let reads = 0;
   const completed = [];
   const state = await runNative(async function* (s) {
@@ -239,9 +138,10 @@ test('Native reads B only in its next internal turn and completes B only on its 
     assert.equal(reads, 1);
     yield answer(3, 'B done.', 20);
     yield result('B done.', 2);
-    assert.deepEqual(completed, [true]);
+    assert.deepEqual(completed, [], 'upstream SUCCESS does not certify process completion');
     assert.equal(s.closed(), true);
   });
+  assert.deepEqual(completed, [true]);
   assert.equal(state.messages.at(-1).errorCode, undefined, JSON.stringify(state.messages));
   assert.equal(state.messages.filter((m) => m.type === 'done').length, 1);
   assert.equal(state.messages.filter((m) => m.type === 'session_init').length, 1);

@@ -25,6 +25,22 @@ const quotaItems = z.array(
     })
     .passthrough(),
 );
+export const accountQuotaObservationSchema = z.object({
+  owner: z.object({ accountRef: z.string(), userId: z.string(), workspaceId: z.string() }).optional(),
+  observedAt: z.number(),
+  status: z.enum(['ok', 'unavailable', 'unsupported']),
+  source: z.literal('codex_official_readonly'),
+  items: quotaItems,
+  error: z.string().optional(),
+  credentialVersion: z.string().optional(),
+  failure: z
+    .object({
+      kind: z.enum(['renewal_required', 'signin_required', 'service_unreachable']),
+      officialDetail: z.string().max(500).optional(),
+    })
+    .optional(),
+  lastSuccess: z.object({ observedAt: z.number(), items: quotaItems }).optional(),
+});
 const accountSchema = z
   .object({
     authType: z.enum(['oauth', 'api_key']),
@@ -44,24 +60,7 @@ const accountSchema = z
       .strict()
       .optional(),
     googleCloud: googleCloudAccountSchema.optional(),
-    quota: z
-      .object({
-        owner: z.object({ accountRef: z.string(), userId: z.string(), workspaceId: z.string() }).optional(),
-        observedAt: z.number(),
-        status: z.enum(['ok', 'unavailable', 'unsupported']),
-        source: z.literal('codex_official_readonly'),
-        items: quotaItems,
-        error: z.string().optional(),
-        credentialVersion: z.string().optional(),
-        failure: z
-          .object({
-            kind: z.enum(['renewal_required', 'signin_required', 'service_unreachable']),
-            officialDetail: z.string().max(500).optional(),
-          })
-          .optional(),
-        lastSuccess: z.object({ observedAt: z.number(), items: quotaItems }).optional(),
-      })
-      .optional(),
+    quota: accountQuotaObservationSchema.optional(),
   })
   .passthrough();
 const credentialSchema = z

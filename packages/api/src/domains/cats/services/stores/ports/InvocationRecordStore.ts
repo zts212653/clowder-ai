@@ -115,6 +115,8 @@ export interface InvocationRecord {
 export interface CreateInvocationInput {
   threadId: string;
   userId: string;
+  /** Known Queue source, bound only by atomic creation; duplicates keep their original binding. */
+  userMessageId?: string;
   targetCats: CatId[];
   intent: 'execute' | 'ideate';
   idempotencyKey: string;
@@ -141,6 +143,8 @@ export interface UpdateInvocationInput {
   executionStartedAt?: number;
   /** CAS guard: update only if current status matches. Returns null on mismatch. */
   expectedStatus?: InvocationStatus;
+  /** CAS guard for a source binding, including an explicitly unbound null snapshot. */
+  expectedUserMessageId?: string | null;
   /** CAS guard: update only if usageByCat is missing or an empty object. Returns null on mismatch. */
   expectedUsageByCatAbsent?: boolean;
   /** F8: Per-cat token usage (key = catId) */
@@ -272,7 +276,7 @@ export class InvocationRecordStore implements IInvocationRecordStore {
       id,
       threadId: input.threadId,
       userId: input.userId,
-      userMessageId: null,
+      userMessageId: input.userMessageId ?? null,
       targetCats: [...input.targetCats],
       intent: input.intent,
       status: 'queued',
@@ -318,6 +322,7 @@ export class InvocationRecordStore implements IInvocationRecordStore {
     if (input.expectedStatus !== undefined && record.status !== input.expectedStatus) {
       return null;
     }
+    if (input.expectedUserMessageId !== undefined && record.userMessageId !== input.expectedUserMessageId) return null;
     if (
       input.expectedUsageByCatAbsent === true &&
       record.usageByCat !== undefined &&

@@ -66,7 +66,7 @@ export const memoryPageReadRoutes: FastifyPluginAsync<MemoryPageReadOptions> = a
 
   app.get('/api/memory/recall/stats', async (request, reply) => {
     const parsed = recallPageQuery.pick({ days: true }).safeParse(request.query);
-    if (!parsed.success) return reply.code(400).send({ error: 'Invalid recall window' });
+    if (!parsed.success || parsed.data.days === '0') return reply.code(400).send({ error: 'Invalid recall window' });
     if (!opts.recallSources?.threadStore) return reply.code(503).send({ error: 'Recall reader unavailable' });
     try {
       return await readMemoryRecallStats(

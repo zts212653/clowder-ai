@@ -43,9 +43,12 @@ export interface FileData {
   mime: string;
   truncated: boolean;
   binary?: boolean;
+  modifiedAt?: string;
   pageCount?: number;
   pageUnit?: 'pages' | 'slides' | 'sheets';
 }
+
+const EMPTY_WORKTREES: WorktreeEntry[] = [];
 
 async function discoverWorktrees(projectPath: string): Promise<WorktreeEntry[]> {
   const params = new URLSearchParams();
@@ -89,9 +92,11 @@ function reconcileDiscoveredWorktree(
 
 export function useWorkspace({
   loadContent = true,
+  loadRoots = true,
   projectPath: threadProjectPath,
 }: {
-  loadContent?: boolean;
+  loadContent?: boolean | number;
+  loadRoots?: boolean | number;
   /** Null waits for the route thread's project; undefined keeps the classic store projection. */
   projectPath?: string | null;
 } = {}) {
@@ -123,7 +128,7 @@ export function useWorkspace({
   } = useWorkspaceSearch(worktreeId);
   const projectKey = projectPath === null ? null : projectPath || 'default';
   const worktreesReadyForProject = projectKey !== null && worktreesProjectPath === projectKey;
-  const currentWorktrees = worktreesReadyForProject ? worktrees : [];
+  const currentWorktrees = worktreesReadyForProject ? worktrees : EMPTY_WORKTREES;
 
   // Fetch worktrees — re-fetches when project changes
   const fetchWorktrees = useCallback(async () => {
@@ -154,8 +159,8 @@ export function useWorkspace({
   }, [normalizeWorktreeId, projectKey, projectPath, setWorktreeAliases, setWorktreeId]);
 
   useEffect(() => {
-    fetchWorktrees();
-  }, [fetchWorktrees]);
+    if (loadRoots) void fetchWorktrees();
+  }, [loadRoots, fetchWorktrees]);
 
   // Fetch tree when worktree changes
   const fetchTree = useCallback(
@@ -243,7 +248,7 @@ export function useWorkspace({
     applyExternalChange,
     dismissExternalChange,
   } = useWorkspaceFileChange({
-    enabled: loadContent,
+    enabled: Boolean(loadContent),
     worktreeId,
     path: openFilePath,
     currentSha: file?.sha256 ?? null,

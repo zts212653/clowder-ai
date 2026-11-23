@@ -166,6 +166,7 @@ test('document replacement retains unchanged text and invalidates changed or rem
     item: { anchor: 'F001', sourcePath: 'features/F001.md', updatedAt: '2026-01-01' },
     passages: ['Stable text', 'Removed text'],
   };
+  await store.upsert([{ ...source.item, kind: 'feature', status: 'active', title: 'Vector invalidation fixture' }]);
   await builder.indexDocumentPassages([source]);
   const keys = db
     .prepare('SELECT passage_id AS id FROM evidence_passages WHERE doc_anchor=? ORDER BY position')

@@ -88,6 +88,15 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     return [...managedRoots].some((root) => repoPath === root || repoPath.startsWith(`${root}/`));
   }
 
+  it('exports the nested Biome configuration scope helper required by public pre-commit', () => {
+    const helper = 'scripts/biome-nested-config-scope.mjs';
+    const hook = readFileSync(resolve(ROOT, '.githooks/pre-commit'), 'utf8');
+    assert.ok(hook.includes(helper), 'bind the real pre-commit companion dependency');
+    assert.ok(managedScripts.has(helper), `${helper} must accompany the exported pre-commit hook`);
+    assert.ok(existsSync(resolve(ROOT, helper)), `${helper} must exist in the frozen source`);
+    assert.ok(!excluded.has(helper), `${helper} must not be excluded from the public tree`);
+  });
+
   it('exports every pnpm dependency patch required by frozen installation as an exact file', () => {
     const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
     const coverage = loadPublicExportCoverage(ROOT);
@@ -115,7 +124,7 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
   });
 
   it('exports the manual desktop acceptance entry and its checked-in support files', () => {
-    const supportFiles = execFileSync('git', ['ls-files', '.github/desktop-acceptance'], {
+    const supportFiles = execFileSync('git', ['-c', 'core.fsmonitor=false', 'ls-files', '.github/desktop-acceptance'], {
       cwd: ROOT,
       encoding: 'utf8',
     })
@@ -307,9 +316,20 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     const inbound = read('cat-cafe-skills/refs/opensource-ops-inbound-pr.md');
     const executor = read('scripts/clowder-merge-execution.mjs');
     assert.match(executor, /authorization-ref/);
+    assert.match(skill, /operator 已明确授予纯 bug 修复的条件合入权限/);
+    assert.match(inbound, /--authorization-ref/);
+    assert.match(inbound, /--authorization-subject/);
+    assert.match(inbound, /--authorization-scope pull_request/);
     for (const doc of [skill, inbound]) {
       assert.doesNotMatch(doc, /Patch[^\n]*(?:自主 merge|自主\s*\/)|条件同时满足才可自主 merge/);
-      assert.match(doc, /第三方 PR[^。\n]*operator[^。\n]*授权/);
+      // Standing operator authority still needs scope and evidence; Patch is not its source.
+      const normalized = doc.replace(/\s+/g, ' ');
+      assert.match(normalized, /不涉及前端改造[、和]\s*(?:猫猫使用方式或)?用户旅程改变/);
+      assert.match(normalized, /独立(?:审查)?\s+APPROVE/);
+      assert.match(normalized, /适用(?:技术)?门禁/);
+      assert.match(normalized, /(?:无需再|不再)逐单请求/);
+      assert.match(normalized, /由 operator 判断/);
+      assert.match(normalized, /混合 PR.{0,100}不能/);
       assert.match(doc, /已(?:有|获)[^。\n]*授权/);
     }
   });
@@ -696,7 +716,17 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
         ? []
         : execFileSync(
             'git',
-            ['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', ...exportPathspecs],
+            [
+              '-c',
+              'core.fsmonitor=false',
+              'ls-files',
+              '--cached',
+              '--others',
+              '--exclude-standard',
+              '-z',
+              '--',
+              ...exportPathspecs,
+            ],
             {
               cwd: ROOT,
               encoding: 'utf8',
@@ -896,7 +926,7 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
       `directory exclusions must not shadow explicit managed paths:\n${shadowedManagedPaths.join('\n')}`,
     );
 
-    const trackedClaudePaths = execFileSync('git', ['-C', ROOT, 'ls-files', '.claude'], {
+    const trackedClaudePaths = execFileSync('git', ['-c', 'core.fsmonitor=false', '-C', ROOT, 'ls-files', '.claude'], {
       encoding: 'utf8',
     })
       .trim()

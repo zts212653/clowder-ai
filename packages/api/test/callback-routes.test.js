@@ -276,10 +276,8 @@ describe('Callback Routes', () => {
   });
 
   test('POST post-message projects only the configured concierge duty cat', async () => {
-    const conciergeConfigStore = {
-      get: async () => ({ dutyCatProfileId: 'opus' }),
-    };
-    const app = await createApp({ conciergeConfigStore });
+    const companionSettings = async () => ({ dutyCatProfileId: 'opus' });
+    const app = await createApp({ companionSettings });
     const thread = threadStore.create('user-1', 'Concierge projection');
     thread.threadKind = 'concierge';
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
@@ -298,10 +296,8 @@ describe('Callback Routes', () => {
   });
 
   test('POST post-message preserves non-duty-cat content on a concierge thread', async () => {
-    const conciergeConfigStore = {
-      get: async () => ({ dutyCatProfileId: 'opus' }),
-    };
-    const app = await createApp({ conciergeConfigStore });
+    const companionSettings = async () => ({ dutyCatProfileId: 'opus' });
+    const app = await createApp({ companionSettings });
     const thread = threadStore.create('user-1', 'Concierge non-duty projection');
     thread.threadKind = 'concierge';
     const { invocationId, callbackToken } = await registry.create('user-1', 'codex', thread.id);
@@ -321,13 +317,11 @@ describe('Callback Routes', () => {
 
   test('POST post-message fails retryably when concierge duty ownership cannot be verified', async () => {
     let available = false;
-    const conciergeConfigStore = {
-      get: async () => {
-        if (!available) throw new Error('config unavailable');
-        return { dutyCatProfileId: 'opus' };
-      },
+    const companionSettings = async () => {
+      if (!available) throw new Error('config unavailable');
+      return { dutyCatProfileId: 'opus' };
     };
-    const app = await createApp({ conciergeConfigStore });
+    const app = await createApp({ companionSettings });
     const thread = threadStore.create('user-1', 'Concierge projection unavailable');
     thread.threadKind = 'concierge';
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
@@ -350,10 +344,8 @@ describe('Callback Routes', () => {
   });
 
   test('POST post-message fails closed when a concierge marker has no typed navigation action', async () => {
-    const conciergeConfigStore = {
-      get: async () => ({ dutyCatProfileId: 'opus' }),
-    };
-    const app = await createApp({ conciergeConfigStore });
+    const companionSettings = async () => ({ dutyCatProfileId: 'opus' });
+    const app = await createApp({ companionSettings });
     const thread = threadStore.create('user-1', 'Concierge marker admission');
     thread.threadKind = 'concierge';
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
@@ -384,10 +376,8 @@ describe('Callback Routes', () => {
   });
 
   test('POST post-message accepts a concierge marker when a typed navigation action is supplied', async () => {
-    const conciergeConfigStore = {
-      get: async () => ({ dutyCatProfileId: 'opus' }),
-    };
-    const app = await createApp({ conciergeConfigStore });
+    const companionSettings = async () => ({ dutyCatProfileId: 'opus' });
+    const app = await createApp({ companionSettings });
     const thread = threadStore.create('user-1', 'Concierge marker action');
     thread.threadKind = 'concierge';
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
@@ -424,10 +414,8 @@ describe('Callback Routes', () => {
   });
 
   test('POST post-message treats marker-shaped fenced examples as durable documentation', async () => {
-    const conciergeConfigStore = {
-      get: async () => ({ dutyCatProfileId: 'opus' }),
-    };
-    const app = await createApp({ conciergeConfigStore });
+    const companionSettings = async () => ({ dutyCatProfileId: 'opus' });
+    const app = await createApp({ companionSettings });
     const thread = threadStore.create('user-1', 'Concierge marker documentation');
     thread.threadKind = 'concierge';
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);

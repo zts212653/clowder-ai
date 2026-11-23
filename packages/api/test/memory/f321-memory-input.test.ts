@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import Fastify from 'fastify';
 import { prepareAbstractiveBatch, toAbstractiveMessages } from '../../src/domains/memory/abstractive-summary-input.js';
-import { parseNaturalLanguageOutput } from '../../src/domains/memory/abstractive-summary-output.js';
 import { IndexBuilder } from '../../src/domains/memory/IndexBuilder.js';
 import { MessageSearchService } from '../../src/domains/memory/MessageSearchService.js';
 import { buildSearchableMessageContent } from '../../src/domains/memory/message-search-content.js';
@@ -71,23 +70,6 @@ test('an oversized message is fully chunked including its tail before reporting 
   );
 });
 
-test('summary output keeps its complete tail and each candidate resolves its own source', () => {
-  const result = parseNaturalLanguageOutput(
-    '# Complete\n\n' +
-      '文'.repeat(1200) +
-      'OUTPUT-TAIL\n\n## Durable Knowledge\n' +
-      '[decision!] Sources belong to each claim — First claim [sources: m2]\n' +
-      '[lesson] Recovery requires actual evidence — Second claim [sources: m1, m2]',
-    input([makeMessage('m1', 'first'), makeMessage('m2', 'second')]),
-  );
-  assert.ok(result?.segments[0].summary.endsWith('OUTPUT-TAIL'));
-  assert.deepEqual(
-    result?.segments[0].candidates?.map((c) => c.evidence.map((e) => e.messageId)),
-    [['m2'], ['m1', 'm2']],
-  );
-  assert.equal(result?.segments[0].candidates?.[0].claim, 'First claim');
-});
-
 test('every quoted or comment fragment repeats its own author after splitting', () => {
   const attachment = {
     ...quote.contentBlocks[0].attachment,
@@ -107,16 +89,6 @@ test('every quoted or comment fragment repeats its own author after splitting', 
   assert.ok(prepared);
   assert.match(prepared.prompts.find((p) => p.includes('QUOTE-TAIL')) ?? '', /Quoted text; author opus55/);
   assert.match(prepared.prompts.find((p) => p.includes('COMMENT-TAIL')) ?? '', /Comment author user/);
-});
-
-test('missing or fabricated candidate sources are not guessed from the first message', () => {
-  const result = parseNaturalLanguageOutput(
-    '# Evidence\n\nSome useful summary.\n' +
-      '[decision] A claim with no evidence — unknown\n' +
-      '[lesson] A claim with invented evidence — unknown [sources: not-in-input]',
-    input(),
-  );
-  assert.equal(result?.segments[0].candidates?.length ?? 0, 0);
 });
 
 test('real attachment comment survives index backfill and canonical message recall', async () => {

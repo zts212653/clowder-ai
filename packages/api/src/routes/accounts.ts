@@ -12,24 +12,27 @@ import type { AccountConfig } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { inspectAccountCatalog, readAccountStoreSnapshot } from '../config/account-store-snapshot.js';
 import { prepareAgyAccount } from '../config/agy-account.js';
+import type { AgyKeychainIdentityInspector } from '../config/agy-quota-identity.js';
 import { resolveCatCatalogPath } from '../config/cat-catalog-store.js';
 import { loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { deleteCatalogAccount, writeCatalogAccount } from '../config/catalog-accounts.js';
 import type { CodexLoginDriver } from '../config/codex-login-driver.js';
-
 import { CodexLoginManager } from '../config/codex-login-manager.js';
 import { describeCodexManagedLayout, prepareCodexManagedLayout } from '../config/codex-managed-layout.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import { deleteCredential, hasCredential, writeCredential } from '../config/credentials.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import { type AgyAccountQuotaSampler, registerAgyQuotaRoutes } from './accounts-agy-quota.js';
+import { registerClaudeQuotaRoutes } from './accounts-claude-quota.js';
 import { registerCodexBindingRoutes } from './accounts-codex-binding.js';
 import { registerCodexLoginRoutes } from './accounts-codex-login.js';
 import { registerCodexQuotaRoutes } from './accounts-codex-quota.js';
+import { type KimiAccountQuotaSampler, registerKimiQuotaRoutes } from './accounts-kimi-quota.js';
 import { inspectNativeAccountDefaults } from './accounts-native-view.js';
 import { resolveAccountProjectRoot } from './accounts-project-root.js';
 import { createBodySchema, deleteBodySchema, projectQuerySchema, updateBodySchema } from './accounts-schemas.js';
-import { accountToView, deriveAccountId } from './accounts-view.js';
+import { accountToViewAsync, deriveAccountId } from './accounts-view.js';
 
 function resolveGlobalConfigRoot(projectRoot?: string): string {
   const envRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT?.trim();
@@ -64,11 +67,20 @@ function findBoundCatIds(projectRoot: string, accountRef: string): string[] | Er
 export const accountsRoutes: FastifyPluginAsync<{
   loginDriver?: CodexLoginDriver;
   quotaFetcher?: typeof fetch;
+  kimiQuotaSampler?: KimiAccountQuotaSampler;
+  agyQuotaSampler?: AgyAccountQuotaSampler;
+  agyKeychainIdentityInspector?: AgyKeychainIdentityInspector;
 }> = async (app, options) => {
   const loginManager = new CodexLoginManager(options.loginDriver);
+  const viewOptions = options.agyKeychainIdentityInspector
+    ? { agyKeychainIdentityInspector: options.agyKeychainIdentityInspector }
+    : undefined;
   registerCodexLoginRoutes(app, loginManager);
   registerCodexBindingRoutes(app);
   registerCodexQuotaRoutes(app, options.quotaFetcher);
+  registerClaudeQuotaRoutes(app);
+  registerKimiQuotaRoutes(app, options.kimiQuotaSampler);
+  registerAgyQuotaRoutes(app, options.agyQuotaSampler, options.agyKeychainIdentityInspector);
   app.addHook('onClose', async () => {
     await loginManager.close();
   });
@@ -92,19 +104,23 @@ export const accountsRoutes: FastifyPluginAsync<{
 
     try {
       const snapshot = inspectAccountCatalog(projectRoot);
-      const providers = Object.entries(snapshot.entries).map(([id, entry]) =>
-        accountToView(
-          id,
-          entry.account.codex ? loginManager.read(projectRoot, id) : entry.account,
-          entry.credential !== undefined,
-          projectRoot,
-        ),
+      const viewTasks: Array<ReturnType<typeof accountToViewAsync>> = Object.entries(snapshot.entries).map(
+        ([id, entry]) =>
+          accountToViewAsync(
+            id,
+            entry.account.codex ? loginManager.read(projectRoot, id) : entry.account,
+            entry.credential !== undefined,
+            projectRoot,
+            false,
+            viewOptions,
+          ),
       );
       const nativeDefaults = inspectNativeAccountDefaults(projectRoot);
       for (const [id, account] of nativeDefaults.defaults) {
         if (!snapshot.entries[id] && !snapshot.unavailableAccounts.some((row) => row.accountRef === id))
-          providers.push(accountToView(id, account, false, projectRoot));
+          viewTasks.push(accountToViewAsync(id, account, false, projectRoot, true, viewOptions));
       }
+      const providers = await Promise.all(viewTasks);
       return {
         projectPath: projectRoot,
         providers,
@@ -192,7 +208,7 @@ export const accountsRoutes: FastifyPluginAsync<{
       });
       return {
         projectPath: projectRoot,
-        profile: accountToView(profileId, account, !!body.apiKey, projectRoot),
+        profile: await accountToViewAsync(profileId, account, !!body.apiKey, projectRoot, false, viewOptions),
       };
     } catch (err) {
       reply.status(400);
@@ -322,7 +338,14 @@ export const accountsRoutes: FastifyPluginAsync<{
       });
       return {
         projectPath: projectRoot,
-        profile: accountToView(params.profileId, account, hasCredential(params.profileId, projectRoot), projectRoot),
+        profile: await accountToViewAsync(
+          params.profileId,
+          account,
+          hasCredential(params.profileId, projectRoot),
+          projectRoot,
+          false,
+          viewOptions,
+        ),
       };
     } catch (err) {
       reply.status(400);

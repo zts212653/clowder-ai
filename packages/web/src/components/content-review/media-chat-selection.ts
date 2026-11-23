@@ -1,6 +1,5 @@
 import {
   type ArtifactReviewAnchor,
-  CONTEXT_ATTACHMENT_MAX_COUNT,
   type ContextAttachment,
   ContextAttachmentsSchema,
   contentModificationOutcome,
@@ -8,7 +7,7 @@ import {
   MediaContextAttachmentSchema,
   reviewedMediaTypeSchema,
 } from '@cat-cafe/shared';
-import { COMPOSER_RECALL_PENDING_COPY, COMPOSER_TOO_LARGE_COPY } from '../composer-refusal-copy';
+import { COMPOSER_TOO_LARGE_COPY } from '../composer-refusal-copy';
 import { projectScreeningComposerConflict } from '../project-screening-composer-group';
 
 /**
@@ -37,8 +36,6 @@ export type MediaSelectionRefusal =
   /** Places outside this original message group, or another version of this work, are already waiting. */
   | 'other_source'
   | 'full'
-  /** The composer already holds the most things a message can carry; a draft past that is discarded, so refuse. */
-  | 'composer_full'
   /** The selection kind must agree with its admitted image or video source. */
   | 'not_image'
   /**
@@ -51,14 +48,12 @@ export type MediaSelectionRefusal =
   | 'too_long'
   /**
    * The place itself is fine, but the composer with it applied would no longer be a collection one message can carry
-   * (the canonical collection rule, including the combined size of what the model is handed). The draft store throws
-   * a collection past that away whole, so it is refused here, before anything is queued or cleared.
+   * (the canonical collection rule, including the combined size of what the model is handed). The selection stays
+   * in its editor when this existing send budget is exceeded.
    */
   | 'too_large'
   /** The shared message schema would reject the result, so it is refused here instead of failing at send. */
-  | 'invalid'
-  /** The input has not yet taken the answer to a recall waiting for it; a place added now would be taken as saved. */
-  | 'recall_pending';
+  | 'invalid';
 
 export type AddMediaSelection =
   | { readonly kind: 'added'; readonly attachment: MediaContextAttachment; readonly selectionId: string }
@@ -68,14 +63,12 @@ export type AddMediaSelection =
 export const MEDIA_SELECTION_REFUSAL_COPY = {
   other_source: '输入框里已有另一幅作品的选区或另一版成片的位置。请先发送或移除它们，再添加这处。',
   full: `一条消息最多 ${MEDIA_SELECTION_LIMIT} 处选区。`,
-  composer_full: '输入框里的引用已满，请先发送或移除几个。',
   not_image: '这份媒体当前不能携带这种选区。图片请圈选或点选；视频请选择时间段或圈这一帧。',
   whole_work_pending: '输入框里已经引用了整件作品。请先移除它，再选区域。',
   selected_places_pending: '输入框里已有这幅作品的选区。请先发送或移除它们，再引用整图。',
   too_long: '这处说明太长了，请精简后再放进对话。',
   too_large: COMPOSER_TOO_LARGE_COPY,
   invalid: '这处选区暂时无法放进对话。',
-  recall_pending: COMPOSER_RECALL_PENDING_COPY,
   no_thread: '请先打开一个对话，再把选区放进去。',
 } as const satisfies Record<MediaSelectionRefusal | 'no_thread', string>;
 
@@ -246,7 +239,7 @@ function refusalBefore(
     MEDIA_SELECTION_LIMIT
   )
     return 'full';
-  if (!pending) return current.length >= CONTEXT_ATTACHMENT_MAX_COUNT ? 'composer_full' : null;
+  if (!pending) return null;
   if (!sameMediaSource(pending, target)) return 'other_source';
   if (pending.selections.length === 0) return 'whole_work_pending';
   return pending.selections.length >= MEDIA_SELECTION_LIMIT ? 'full' : null;
@@ -279,7 +272,6 @@ export function addMediaWork(current: readonly ContextAttachment[], target: Medi
   if (otherMediaSource(current, target)) return { kind: 'refused', reason: 'other_source' };
   if (pending?.selections.length) return { kind: 'refused', reason: 'selected_places_pending' };
   if (pending) return { kind: 'added', attachment: pending };
-  if (current.length >= CONTEXT_ATTACHMENT_MAX_COUNT) return { kind: 'refused', reason: 'composer_full' };
   const parsed = MediaContextAttachmentSchema.safeParse({
     v: 1,
     id: freshAttachmentId(current, target.source),

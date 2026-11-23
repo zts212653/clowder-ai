@@ -7,6 +7,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { parseAcpCatalog } from '../../../api/dist/routes/runtime-model-catalog.js';
 import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -87,7 +88,7 @@ after(async () => {
   }
 });
 
-function mockApi(route, runtimes, writes) {
+function mockApi(route, runtimes, writes, catalog) {
   const request = route.request(),
     url = new URL(request.url());
   // The shared home shell registers its window capability when its test socket connects.
@@ -121,7 +122,7 @@ function mockApi(route, runtimes, writes) {
   if (url.pathname === '/api/cats/native-runtimes') return route.fulfill({ json: { runtimes } });
   if (url.pathname === '/api/cats/runtime-models')
     return route.fulfill({
-      json: {
+      json: catalog ?? {
         status: 'live',
         models: [{ value: 'model-test', label: 'Model test', efforts: [{ value: 'high', label: 'High' }] }],
       },
@@ -153,7 +154,7 @@ function mockApi(route, runtimes, writes) {
   return route.fulfill({ json: {} });
 }
 
-async function proof(runtimes, run) {
+async function proof(runtimes, run, catalog) {
   const context = await browser.newContext(),
     page = await context.newPage(),
     writes = [],
@@ -173,7 +174,7 @@ async function proof(runtimes, run) {
       if (event === 'join_room' && ack) socket.send(`43${ack}${JSON.stringify([{ ok: true, room }])}`);
     });
   });
-  await page.route('**/api/**', (route) => mockApi(route, runtimes, writes));
+  await page.route('**/api/**', (route) => mockApi(route, runtimes, writes, catalog));
   const index = ++proofIndex;
   try {
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
@@ -211,6 +212,37 @@ const dsh = {
   acp: { command: 'node', startupArgs: ['dsh.js', '--profile', 'acp'] },
 };
 
+for (const options of [[{ value: 'duplicate' }, { value: 'duplicate' }], []])
+  test(`unconfirmed ACP defaults keep first-run follow usable (${options.length} choices)`, async () => {
+    const session = { configOptions: [{ id: 'model', currentValue: 'duplicate', options }] };
+    const catalog = parseAcpCatalog(session, session);
+    assert.equal(catalog.defaultModelStatus, 'unavailable');
+    const runtime = {
+      ...dsh,
+      id: 'acp:fixture',
+      label: 'Fixture ACP',
+      acp: { command: 'fixture-acp', startupArgs: [] },
+    };
+    await proof(
+      [runtime],
+      async ({ page, writes }) => {
+        const next = page.getByRole('button', { name: /下一步/ });
+        assert.equal(await next.isEnabled(), true);
+        await page.getByRole('button', { name: '调整', exact: true }).click();
+        await page.getByText(/默认模型尚未确认/).waitFor();
+        assert.equal(await next.isEnabled(), true);
+        await next.click();
+        await page.getByLabel('你想完成什么？').fill('验证跟随默认');
+        await page.getByRole('button', { name: '保存伙伴，前往对话' }).click();
+        await page.getByText('已创建对话：thread-1').waitFor();
+        const members = writes.filter((write) => write.path === '/api/cats');
+        assert.equal(members.length, 1);
+        assert.equal(members[0].body.defaultModel, '');
+      },
+      catalog,
+    );
+  });
+
 test('recommends all three installed tools, skips the demo and creates ordinary chat with native defaults', async () => {
   await proof([codex, claude, dsh], async ({ page, writes }) => {
     for (const label of ['Codex', 'Claude Code', 'DSH'])
@@ -229,7 +261,7 @@ test('recommends all three installed tools, skips the demo and creates ordinary 
     }
     assert.deepEqual(members[2].acp, { command: 'node', startupArgs: ['dsh.js', '--profile', 'acp'] });
     assert.equal(writes.find((write) => write.path === '/api/threads').body.bootcampState, undefined);
-    const drafts = await page.evaluate(() => JSON.parse(sessionStorage.getItem('cat-cafe:thread-drafts')));
+    const drafts = await page.evaluate(() => JSON.parse(localStorage.getItem('cat-cafe:thread-drafts')));
     assert.equal(drafts.length, 1);
     assert.equal(drafts[0][0], 'thread-1');
     const lines = drafts[0][1].split('\n');

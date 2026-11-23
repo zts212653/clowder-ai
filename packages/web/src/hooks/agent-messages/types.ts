@@ -24,6 +24,7 @@ export interface AgentEventMetadata {
 type TurnExecutionProjection = NonNullable<NonNullable<ChatMessage['extra']>['turnExecution']>;
 
 export interface AgentEventExtra {
+  watcher?: NonNullable<ChatMessage['extra']>['watcher'];
   cloudBridgeReturn?: import('@cat-cafe/shared').CloudBridgeReturnV1;
   startupRecovery?: import('@cat-cafe/shared').CodexStartupRecovery;
   outputLayout?: NonNullable<ChatMessage['extra']>['outputLayout'];
@@ -60,6 +61,7 @@ export interface AgentEventFields {
   toolUseId?: string;
   toolExecutionRef?: string;
   toolName?: string;
+  toolResultStatus?: 'ok' | 'error' | 'unknown';
   toolInput?: Record<string, unknown>;
   /** stream = the turn's own output; callback = a post_message with its own stored id. */
   origin?: 'stream' | 'callback';

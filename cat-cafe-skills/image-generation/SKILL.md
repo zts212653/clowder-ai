@@ -155,7 +155,7 @@ codex exec "生成一张猫咖全景图，手绘水彩风格"
 
 2026-11-08 上线（F317）：宿主 CLI 用「猫猫团队 → 账户与登录」里登记的 OpenAI Platform 账号发官方请求，key 由宿主注入，不进命令、响应和日志。完整规则、退出码和限额以 `docs/guides/platform-api-requests.md` 为准；本节只写生图怎么走通。
 
-1. **写请求**：不含密钥的请求 JSON（`accountRef`、`/v1/images/edits` 或 `/v1/images/generations`、multipart `fields`/`files`）。提示词和参考图放在请求 JSON 同目录或其子目录，用相对路径（默认文件根 = 请求 JSON 所在目录）。
+1. **写请求**：不含密钥的请求 JSON（`accountRef`、`/v1/images/edits` 或 `/v1/images/generations`、multipart `fields`/`files`）。`accountRef` 每次按指南「先查账号」现查现填，一个号报 401 或额度不足就换另一个，并告诉 You 是哪个号；不要从旧请求或样例里照抄账号 ID，账号会过期、会被删。提示词和参考图放在请求 JSON 同目录或其子目录，用相对路径（默认文件根 = 请求 JSON 所在目录）。
 2. **发送**：`node <cat-cafe 主仓>/scripts/platform-request.mjs --request <绝对路径>.json`（或主仓里 `pnpm platform:request --request …`）。stdout 一行收据：`callId`、HTTP 状态、`usage`、`responseFile`。
 3. **解码**：从 `responseFile` 读 `data[0].b64_json`，写成 `.png` / `.gif`。
 4. **发布**：`cat_cafe_publish_image`。文件要在允许的文件根里：放在 scratchpad（`/private/tmp/...`）会被拒（`outside allowed file roots`）；放回同一个 `packages/api/uploads/platform-calls/<callId>/` 再发（该目录已 gitignore，原件和收据也在那里）。
@@ -168,7 +168,14 @@ codex exec "生成一张猫咖全景图，手绘水彩风格"
 | 单图 | `model: gpt-image-2.6-sunburst`、`output_format: png`、`quality: xhigh`、`complexity: high`、`size: 1024x1024`（或 `1536x1024`） |
 | GIF | 同上，改 `output_format: gif`、`frame_count: "16"`、`frame_duration_ms: "180"`、`size: 512x512` |
 
-现成请求样例：`.cat-cafe/evidence/f336-production/20261109/argon-start-gif/requests/run-01.json`（GIF）、`.../argon-turnaround/v2/requests/sheet-01-1536x1024.json`（单图）。
+现成请求样例：`.cat-cafe/evidence/f336-production/20261109/argon-start-gif/requests/run-01.json`（GIF）、`.../argon-turnaround/v2/requests/sheet-01-1536x1024.json`（单图）。样例里的 `accountRef` 是当时用的号，已经失效；复制后换成现查到的账号。
+
+**两个模型、三档 `complexity` 怎么选**（F336 11-12～11-13 三轮 25 条 GIF 对照，记录见 *(internal reference removed)*）：
+- `gpt-image-2.6-sunburst` 注重细节、精准编辑；`gpt-image-2.6-flare` 更小更快（GIF 约 30 秒一条，Sunburst 约 80 秒），表演更放得开，会自己加动作线、感叹号、小桃心。家里的猫做互动动图，You 更喜欢 Flare。
+- `complexity` 的 high、medium、low 在两轮里都看不出差别，用默认 high 即可；Flare 的 low 反而跑偏最多。
+- 同样的输入每条演法都不同，是抽卡：一个动作多出几条给 You 挑。
+- 参考图只放 You 认过的同一只猫，最多三张（原头像、起始姿势、目标姿势），不放别的画法的图，哪怕写了「只参考手」：11-12 混进云端 GIF 截帧后，第一帧和后面的猫大小、画风都对不上。
+- 参考图之间条纹、毛量要一致，动图会往细节多的那张靠；人眼记不住上一张的细节，用程序量。生成的猫普遍比参考图大 18–25%，拼接时整条统一缩放。
 
 **画家里的猫**：第一张参考图用 You 认过的 2D 正典（Ragdoll opus55 用 `docs/videos/cucu-pr-flow/assets/references/xianxian-faces/avatars/director-chair.png`，其他猫从 `docs/videos/cucu-pr-flow/character-bible-v0.1.md` §7 和 You 之后认过的 2D 图里找；3D 线的设定图不当 2D 参考），prompt 里写清每张参考图只管什么。GIF 走两步法：先出一张单图，再用「原头像 + 这张单图（当首帧）」出 GIF。背景小道具也写清特征，否则会画成通用物件（11-09 猫粮碗被画成圆颗粒狗粮，You 一眼看出）。
 

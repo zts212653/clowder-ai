@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { readableChoiceBodies } from './f311-readable-choices.bodies.mjs';
 
-const directory = process.env.F311_EVIDENCE_DIR ?? '/tmp/cat-cafe-evidence/f311-readable-choices';
+const directory = process.env.F311_EVIDENCE_DIR ?? join(tmpdir(), 'cat-cafe-evidence/f311-readable-choices');
 const origin = 'http://127.0.0.1:5321';
 const api = 'http://127.0.0.1:3322';
 const bodies = await readableChoiceBodies();

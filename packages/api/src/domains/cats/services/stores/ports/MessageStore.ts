@@ -79,6 +79,7 @@ import {
 } from '../message-search-answer-binding.js';
 import { storedMessageSource } from '../message-source.js';
 import { notifyMessageTimelineChange } from '../notify-message-timeline-change.js';
+import { withPluginMessageRich } from '../plugin-message-rich.js';
 import { type UserMentionHandlingMetadata, UserMentionIndex } from '../user-mention-index.js';
 import {
   getTimelineOrderTime,
@@ -267,6 +268,7 @@ export interface StoredToolEvent {
   detail?: string;
   /** Finalized call input carried by a result; replaces provisional use detail without adding a call. */
   inputDetail?: string;
+  resultMeta?: string;
   timestamp: number;
   /** F153 Phase J AC-J7: native provider tool id, used to pair tool_use ↔ tool_result
    *  and to key the synthesized span on hydrate. Set by provider transformer via
@@ -301,6 +303,8 @@ export interface StoredToolEvent {
  */
 export interface StoredMessage {
   id: string;
+  /** Browser correlation metadata. Project only into the owning user's browser DTOs. */
+  clientMessageId?: string;
   /** Thread this message belongs to (always set after append) */
   threadId: string;
   userId: string;
@@ -872,6 +876,29 @@ export function lifecycleResponseInputsChanged(current: StoredMessage, patch: Li
   );
 }
 
+function assertLifecycleResponseQueueEntry(
+  current: StoredMessage,
+  patch: LifecycleResponseTerminalPatch,
+  entry: QueueLedgerEntry,
+): void {
+  const bound =
+    entry.threadId === current.threadId &&
+    entry.payload.sourceRecordId === current.id &&
+    entry.payload.messageId === current.id;
+  const failureReturn =
+    patch.status === 'failed' &&
+    entry.kind === 'private_input' &&
+    entry.from.kind === 'system' &&
+    entry.from.service === 'message_delivery' &&
+    entry.sourceCategory === 'a2a_failure' &&
+    entry.threadId !== current.threadId &&
+    entry.owner.kind === 'user' &&
+    entry.owner.userId === current.userId &&
+    !entry.payload.messageId &&
+    entry.payload.sourceRecordId.startsWith(`cross-thread-failure:${current.id}:`);
+  if (!bound && !failureReturn) throw new Error('lifecycle Queue admission row must bind its exact response message');
+}
+
 export function prepareLifecycleResponseTerminalWithLedgerTargets(
   current: StoredMessage,
   patch: LifecycleResponseTerminalPatch,
@@ -901,10 +928,12 @@ export function prepareLifecycleResponseTerminalWithLedgerTargets(
   }
   const dispatchedTargets = new Set(current.lifecycle.dispatchRefs?.map((ref) => ref.targetId) ?? []);
   const pendingEntries = entries.flatMap((entry) => {
+    assertLifecycleResponseQueueEntry(current, patch, entry);
+    if (entry.kind === 'private_input') return [entry];
     const targets = entry.targets.filter((targetId) => !dispatchedTargets.has(targetId));
     return targets.length > 0 ? [{ ...entry, targets }] : [];
   });
-  const targetIds = pendingEntries.flatMap((entry) => entry.targets);
+  const targetIds = pendingEntries.filter((entry) => entry.kind !== 'private_input').flatMap((entry) => entry.targets);
   const next = prepareLifecycleResponseTerminalMessage(current, patch);
   const assigned = assignLifecycleDispatchTargetsMetadata(
     next.lifecycle,
@@ -2157,7 +2186,7 @@ export interface IMessageStore {
     ledgerStore: QueueLedgerStore,
     maxQueuedUserEntries?: number,
   ): QueueLedgerMessageAdmissionResult | Promise<QueueLedgerMessageAdmissionResult>;
-  /** Atomically terminalize one response bubble and admit every outbound Queue row it created. */
+  /** D10: atomically terminalize one response and admit local wakes plus exact cross-thread failure controls. */
   commitLifecycleResponseTerminalWithQueueLedgerAdmission(
     messageId: string,
     patch: LifecycleResponseTerminalPatch,
@@ -2905,16 +2934,6 @@ export class MessageStore {
     const index = this.messages.findIndex((message) => message.id === messageId);
     if (index < 0) return { kind: 'not_found' };
     const current = this.messages[index]!;
-    if (
-      entries.some(
-        (entry) =>
-          entry.threadId !== current.threadId ||
-          entry.payload.sourceRecordId !== messageId ||
-          entry.payload.messageId !== messageId,
-      )
-    ) {
-      throw new Error('lifecycle Queue admission row must bind its exact response message');
-    }
     const prepared = prepareLifecycleResponseTerminalWithLedgerTargets(current, patch, entries);
     if (prepared.kind !== 'prepared') return prepared;
     if (prepared.entries.length === 0) {
@@ -2928,7 +2947,10 @@ export class MessageStore {
         ledgerReplayed: true,
       };
     }
-    const admitted = ledgerStore.enqueueNow(prepared.entries, maxQueuedUserEntries);
+    const admitted =
+      new Set(prepared.entries.map((entry) => entry.threadId)).size > 1
+        ? ledgerStore.enqueueAcrossThreadsNow(prepared.entries, maxQueuedUserEntries)
+        : ledgerStore.enqueueNow(prepared.entries, maxQueuedUserEntries);
     if (admitted.outcome === 'full') return { kind: 'full' };
     if (admitted.outcome === 'conflict') {
       return { kind: 'conflict', reason: 'different_terminal', message: structuredClone(current) };
@@ -2983,6 +3005,7 @@ export class MessageStore {
       ...payload,
       id: reservedId ?? generateSortableId(normalizedMessage.timestamp),
       threadId,
+      ...(payload.extra ? { extra: withPluginMessageRich(payload.extra) } : {}),
     };
     this.messages.push(stored);
     this.threadTimeline.upsert(stored);
@@ -3718,7 +3741,9 @@ export class MessageStore {
       !message.deletedAt &&
       isVisible(message) &&
       (!userId || message.userId === userId || isSystemUserMessage(message));
-    if (options?.artifactProjection) {
+    if (options?.artifactProjection || beforeId !== undefined) {
+      // ID-bound windows page from the cursor, not from the global tail. The
+      // timeline stores canonical references, so normal reads retain full bodies.
       const page = this.threadTimeline.readBefore(threadId, timestamp, beforeId, rawLimit);
       return { ...page, messages: page.messages.filter(visible) };
     }
@@ -3733,13 +3758,7 @@ export class MessageStore {
         const bTimestamp = getTimelineOrderTime(b);
         return bTimestamp - aTimestamp || b.id.localeCompare(a.id);
       })
-      .filter((message) => {
-        const effectiveTimestamp = getTimelineOrderTime(message);
-        return (
-          effectiveTimestamp < timestamp ||
-          (effectiveTimestamp === timestamp && beforeId !== undefined && message.id < beforeId)
-        );
-      });
+      .filter((message) => getTimelineOrderTime(message) < timestamp);
     const oldestCandidate = candidates.at(-1);
     return {
       messages: candidates.filter(visible).reverse(),
@@ -3926,7 +3945,9 @@ export class MessageStore {
       ...hostOnly
     } = extra as Record<string, unknown>;
     const previousRich = JSON.stringify(msg.extra?.rich);
-    msg.extra = preserveMessageSearchAnswerBlock({ ...msg.extra, ...hostOnly }, msg.extra?.messageSearchAnswer);
+    msg.extra = withPluginMessageRich(
+      preserveMessageSearchAnswerBlock({ ...msg.extra, ...hostOnly }, msg.extra?.messageSearchAnswer),
+    );
     if (hostOnly.rich !== undefined && previousRich !== JSON.stringify(msg.extra?.rich))
       notifyMessageTimelineChange(this, msg);
     return msg;
@@ -3970,7 +3991,7 @@ export class MessageStore {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
     if (msg.extra?.pluginMessage?.revision !== expectedRevision) return null;
-    msg.extra = { ...msg.extra, pluginMessage };
+    msg.extra = withPluginMessageRich({ ...msg.extra, pluginMessage });
     return msg;
   }
 

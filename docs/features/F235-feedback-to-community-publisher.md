@@ -4,12 +4,30 @@ related_features: [F222, F168, F141, F128]
 topics: [community, publishing, frustration, feedback, github-issue]
 doc_kind: spec
 created: 2026-06-15
-tips_exempt: internal cat-to-community publishing pipeline — no user-facing capability change
+tips_exempt: false
 ---
 
 # F235: Feedback-to-Community Publisher — 一键发布反馈到社区
 
 > **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-06-17
+
+## 会话里把问题整理成 Issue
+
+分析后可让猫将已有结论整理成会话草稿；阅读公开报告、核对仓库后点“核对并继续”，在同一张卡内编辑，最后明确点击“发布到 GitHub”才会外发。GitHub 发布插件不可用时可以编辑并复制报告；只有已配置的目标才提供网页手工提交入口。只有出现经校验的真实 Issue 链接才算提交完成，发布后可展开回看报告。可信执行失败的“确认记录”仍只保存本地记录，展开后可继续同一提单流程，原失败证据仍可查看。
+
+“收起报告”只改变当前视图，不是持久化忽略或取消；准备和编辑阶段均可收起，展开后保留本次未保存文本与同一草稿。插件“取消草稿”是终态，不承诺重新打开后能继续发布同一草稿。发布结果未知时保留同一草稿并显示“重新核对结果”；不创建替代单。已有 `meta.draftId` 的卡片按草稿状态恢复；切换会话或刷新仍沿既有恢复路径，不新增状态存储或承诺恢复未保存编辑。
+
+审阅正文按可选中、复制的 Markdown 原文呈现，编辑和外发继续使用同一份文本；本次不增加 Markdown 渲染或附件加载行为。插件原生 create 成功以 HTTP 200 返回已有草稿（包括发布中），create 的 HTTP 409 为无草稿的错误；结果未知的 HTTP 409 + draft 来自 publish，按同稿核验处理。
+
+小信封发现入口由关联 Host 改动承接，尚未接入本 PR；复用权威读源与计数、打开原卡及处理后状态重读，普通自动报错不全部进入待办。范围确认见 [PR #1975 讨论](https://github.com/zts212653/clowder-ai/pull/1975#issuecomment-6924888881)，信封内直接编辑或发布仍待讨论。
+
+## 2026-11 会话入口收口（Issue #1974）
+
+根因：插件迁移后，F222 的 `CommunityPublishFlow` 只保存 owner 草稿，未挂已有预览卡；Agent 卡又独立维护一次 create/publish，provider 关闭时仍可能给失败按钮。
+
+当前修复将两入口复用同一 `CommunityPublishFlow → CommunityIssuePreviewCard`：Host 已有脱敏器准备显式报告；只在用户点预览后创建插件草稿，另一次确认才发布；成功必须包含同目标真实 GitHub Issue URL/编号。已有 ID 读取原草稿，无 ID 以原 requestId/消息来源恢复；不新设数据表、不删除本地反馈或插件历史。发布插件不可用时可审阅复制报告，仅已配置目标可打开不带正文的 GitHub 网页，均不冒充提交成功。
+
+Architecture cell: 既有会话反馈/F235 + GitHub 插件 owner draft。Map delta: none；Host 新增无存储/无外发的报告预览 consumer，复用现有身份和诊断脱敏器，不迁移 publisher/store owner。Agent 的一次性建议由现有 rich-messaging 指引承接；不新增扫描器，不恢复退休检测。截图/多目标仍是可选 feedback 工作台，本轮不做两插件 adapter/存储合并或自动预填。
 
 ## Architecture Ownership
 

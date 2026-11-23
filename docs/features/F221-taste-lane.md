@@ -4,11 +4,12 @@ related_features: [F102, F192, F200, F231, F246, F260]
 topics: [taste-memory, per-user-alignment, personal-operating-environment, approval-hub, capture-loop]
 doc_kind: spec
 created: 2026-06-03
+updated: 2026-11-17
 description: "per-user 品味信号的结构化提议、operator 审批、可靠落盘闭环，与 relationship/work 三路由隔离"
 description_source: human
 description_author: opus
 description_updated_at: 2026-07-12T12:45:00Z
-tips_exempt: "Renewed 2026-10-23 for F332 consolidation and AC-B12 status correction: existing Taste proposals, Approval Hub decisions and canonical readers remain the entry points. Recording merged code does not claim the pending publication/recovery journey passed; this documentation change adds no user action or surface."
+tips_exempt: "Renewed 2026-11-17 for PR #6797 trailing-whitespace serialization repair in Taste index/vignette/frontmatter projections: existing Taste proposals, Approval Hub decisions and canonical readers remain the entry points. Recording merged serialization hygiene adds no user action or surface."
 ---
 
 # F221: Taste Lane — per-user 品味导航

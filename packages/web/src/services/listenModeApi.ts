@@ -1,4 +1,4 @@
-import type { ListenDocumentIdentity, ListenDocumentState } from '@cat-cafe/shared';
+import type { ListenDocumentIdentity, ListenDocumentState, TtsVoiceSelection } from '@cat-cafe/shared';
 import { apiFetch } from '@/utils/api-client';
 
 export interface SynthesizedListenAsset {
@@ -9,9 +9,14 @@ export interface SynthesizedListenAsset {
   durationSec?: number;
   synthesisMs?: number;
   synthesisFingerprint?: string;
+  reusable?: boolean;
+  voiceSelection?: TtsVoiceSelection;
+  historical?: boolean;
+  warnings?: readonly string[];
 }
 
 export interface LoadedListenDocument extends ListenDocumentState {
+  recordings?: Record<string, SynthesizedListenAsset>;
   cache?: { cachedSentences: number; totalSentences: number; totalBytes: number };
   cacheRun?: { active: boolean; error?: string };
 }
@@ -33,6 +38,7 @@ export type ListenSynthesisEvent =
       format: string;
       durationSec?: number;
       isFinalChunk: boolean;
+      voiceSelection?: TtsVoiceSelection;
     }
   | ({ type: 'asset' } & SynthesizedListenAsset);
 

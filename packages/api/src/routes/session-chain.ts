@@ -1,4 +1,6 @@
 import { resolve } from 'node:path';
+import { sessionCacheRuntimeKey } from '../domains/cats/services/session/cache/session-cache-runtime.js';
+import { projectSessionCacheWarmth } from '../domains/cats/services/session/cache/session-cache-warmth.js';
 import {
   type LocalSessionImportOptions,
   localSessionConflict,
@@ -22,6 +24,7 @@ import {
   humanSessionFirstLine,
   isLocalSessionId,
   localSessionImportTool,
+  type SessionCacheWarmth,
   type SessionRecord,
 } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
@@ -31,6 +34,7 @@ import type { RuntimeSessionMetadata } from '../domains/cats/services/runtime-se
 import type { IRuntimeSessionStore } from '../domains/cats/services/runtime-session/RuntimeSessionStore.js';
 import { backfillBoundSessionHistory } from '../domains/cats/services/session/BoundSessionHistoryImporter.js';
 import type { ISessionSealer } from '../domains/cats/services/session/SessionSealer.js';
+import { catMayReadSession, isWatcherPanelSession } from '../domains/cats/services/session/session-scope.js';
 import type { TranscriptReader } from '../domains/cats/services/session/TranscriptReader.js';
 import {
   canReadThreadRecord,
@@ -182,12 +186,24 @@ function formatRuntimeSessionSummary(metadata: RuntimeSessionMetadata): RuntimeS
   };
 }
 
-async function attachRuntimeSessionSummary<T extends { id: string }>(
+async function attachRuntimeSessionSummary<T extends SessionRecord>(
   session: T,
   runtimeSessionStore?: IRuntimeSessionStore,
-): Promise<Omit<T, 'hostExecutionBoundary'> & { runtimeSession?: RuntimeSessionSummary }> {
-  const { hostExecutionBoundary: _privateBoundary, ...publicSession } = session as T & {
-    hostExecutionBoundary?: unknown;
+): Promise<
+  Omit<T, 'hostExecutionBoundary'> & { cacheWarmth: SessionCacheWarmth; runtimeSession?: RuntimeSessionSummary }
+> {
+  const { hostExecutionBoundary: _privateBoundary, ...visibleSession } = session;
+  const config = catRegistry.tryGet(session.catId)?.config;
+  const publicSession = {
+    ...visibleSession,
+    cacheWarmth: {
+      ...projectSessionCacheWarmth(
+        session,
+        Date.now(),
+        config ? { model: config.defaultModel, runtime: sessionCacheRuntimeKey(config) ?? '' } : undefined,
+      ),
+      bindingSource: config ? ('catalog_default' as const) : ('observed_session' as const),
+    },
   };
   if (!runtimeSessionStore) return publicSession;
   const metadata = await runtimeSessionStore.getBySessionId(session.id);
@@ -198,10 +214,12 @@ async function attachRuntimeSessionSummary<T extends { id: string }>(
   };
 }
 
-async function attachRuntimeSessionSummaries<T extends { id: string }>(
+async function attachRuntimeSessionSummaries<T extends SessionRecord>(
   sessions: T[],
   runtimeSessionStore?: IRuntimeSessionStore,
-): Promise<Array<Omit<T, 'hostExecutionBoundary'> & { runtimeSession?: RuntimeSessionSummary }>> {
+): Promise<
+  Array<Omit<T, 'hostExecutionBoundary'> & { cacheWarmth: SessionCacheWarmth; runtimeSession?: RuntimeSessionSummary }>
+> {
   return Promise.all(sessions.map((session) => attachRuntimeSessionSummary(session, runtimeSessionStore)));
 }
 
@@ -418,7 +436,9 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
         access.scope === 'user' ? userId : undefined,
       );
       diagnostic.phase('visibility_filter');
-      const visibleSessions = filterThreadRecords(access, sessions);
+      const visibleSessions = filterThreadRecords(access, sessions).filter((session) =>
+        catMayReadSession(callerCatId, session),
+      );
       return sendSessions(visibleSessions);
     }
 
@@ -463,6 +483,8 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
     if (!canReadThreadRecord(access, session)) {
       return reply.status(403).send(threadRecordAccessDeniedBody());
     }
+    const callerCatId = request.headers['x-cat-id'] as string | undefined;
+    if (callerCatId && isWatcherPanelSession(session)) return reply.status(404).send({ error: 'Session not found' });
 
     return reply.send(await attachRuntimeSessionSummary(session, runtimeSessionStore));
   });

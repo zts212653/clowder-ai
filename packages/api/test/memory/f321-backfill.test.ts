@@ -16,7 +16,13 @@ function fixture() {
   const messages = new MessageStore();
   const t = threads.create('owner', 'Old idea');
   const rows = Array.from({ length: 201 }, (_, i) =>
-    messages.append({ threadId: t.id, userId: 'owner', catId: null, content: `turn ${i}`, timestamp: i }),
+    messages.append({
+      threadId: t.id,
+      userId: 'owner',
+      from: { kind: 'user', userId: 'owner' },
+      content: `turn ${i}`,
+      timestamp: i,
+    }),
   );
   const repo = new ThreadOverviewRepository({ db, ownerUserId: 'owner', threadStore: threads, messageStore: messages });
   return { db, threads, messages, t, rows, repo };
@@ -91,7 +97,13 @@ test('failed historical attempts rotate durably, reach later threads, and remain
   try {
     for (let n = 0; n < 4; n++) {
       const thread = f.threads.create('owner', `old ${n}`);
-      f.messages.append({ threadId: thread.id, userId: 'owner', catId: null, content: 'history', timestamp: n });
+      f.messages.append({
+        threadId: thread.id,
+        userId: 'owner',
+        from: { kind: 'user', userId: 'owner' },
+        content: 'history',
+        timestamp: n,
+      });
     }
     const failing = new ThreadOverviewBackfill({ repository: f.repo, generate: async () => null });
     const first = await failing.initialize();
@@ -168,14 +180,14 @@ test('historical material and canonical sources also skip system tails while own
     const system = f.messages.append({
       threadId: f.t.id,
       userId: 'system',
-      catId: 'system',
+      from: { kind: 'system', service: 'test-log' },
       content: 'system log',
       timestamp: 202,
     });
     const scheduler = f.messages.append({
       threadId: f.t.id,
       userId: 'scheduler',
-      catId: null,
+      from: { kind: 'system', service: 'scheduler' },
       content: 'scheduler log',
       timestamp: 203,
     });
@@ -212,7 +224,7 @@ test('new threads use normal live compaction immediately while old coverage is s
     f.messages.append({
       threadId: recent.id,
       userId: 'owner',
-      catId: null,
+      from: { kind: 'user', userId: 'owner' },
       timestamp: Date.now(),
       content: 'new idea',
     });

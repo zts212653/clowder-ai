@@ -603,7 +603,7 @@ merge 是把状态写进 main 的不可逆点（其他 session 立即读到）�
 
 1. **识别 Feature**：从 PR title / branch / 正文提取 `F{NNN}`（都没有 → 跳过，纯 TD/hotfix 不需要）。
 2. **声称 vs 代码现实**（人工 — 语义层机器判不了）：
-   - feature doc 里标 ✅ 的 Phase / 打勾的 `[x]` AC，**这个 PR（及历史）的代码真做了吗**？严防"doc 声称完成但代码是 stub / 没做"——糖衣包装"未做"（参 self-evolution「下次一定」）。
+   - feature doc 里标 ✅ 的 Phase / 打勾的 `[x]` AC，**这个 PR（及历史）的代码真做了吗**？严防"doc 声称完成但代码是 stub / 没做"——糖衣包装"未做"。家里已有要求却让 You 重说时，按 `code-as-harness` 入错题本、查断点。
    - **Status 行**和真实开发阶段一致吗？（写 `spec`/`spike` 但代码已在跑 = 撒谎）
    - 反向：代码已做的，doc 漏记了吗？
 3. **机械兜底** `node scripts/check-feature-truth.mjs`（已含在 Step 0 `pnpm gate`）：硬拦**明显**矛盾 —— Status 仍是 pre-development（`spec`/`design`/`idea`/`draft`/`spike`/...）但 `## Timeline` 已有 merged PR 且无 reopen 标记。机器**只抓这一类零歧义 drift，不替你判 AC/Phase 语义**。
@@ -743,11 +743,11 @@ gh pr comment {PR_NUMBER} --body '@codex review'
 
 | 原 reviewer | 降级到 | 说明 |
 |-------------|--------|------|
-| 云端 Codex / 任一Maine Coon（OpenAI 池） | **另一 provider** 的在役非作者 reviewer：Sonnet、kimi 或 gemini-argon（只审不写代码）；按 dossier + F293 可用性选择 | **跨 provider family**：同一 provider 的额度不足时不在其内部换 model |
-| Ragdoll某个体 | 非作者Maine Coon、kimi 或 gemini-argon（只审不写代码） | 稀缺创作/判断席位不进迭代循环 |
+| 云端 Codex / 任一Maine Coon（OpenAI 池） | **另一 provider** 的在役非作者 reviewer：Sonnet、kimi、gemini-argon（只审不写代码）或 gemini-carbon；按 dossier + F293 可用性选择 | **跨 provider family**：同一 provider 的额度不足时不在其内部换 model |
+| Ragdoll某个体 | 非作者Maine Coon、kimi、gemini-argon（只审不写代码）或 gemini-carbon | 稀缺创作/判断席位不进迭代循环 |
 | **禁止** | 作者自己 | 同族不同个体可审，同一个体不能自审 |
 
-Sonnet 与Ragdoll共用 Anthropic 池，所以只作为 OpenAI 池额度不足时的跨 provider 降级选项，不作为Ragdoll个体的降级选项。Siamese里只有 gemini-argon 参与 review，其他Siamese不自动加入常规 reviewer，也不授权 Argon 写代码。
+Sonnet 与Ragdoll共用 Anthropic 池，所以只作为 OpenAI 池额度不足时的跨 provider 降级选项，不作为Ragdoll个体的降级选项。Siamese里 gemini-argon 与 gemini-carbon 参与 review（Carbon 于 2026-11-15 加入候选），其他Siamese不自动加入常规 reviewer，也不授权 Argon 写代码。
 
 **铁律：降级后仍须校验"reviewer ≠ 作者"**——降级表是建议顺序，不能覆盖 self-review 禁令。
 

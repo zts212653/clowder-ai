@@ -14,8 +14,9 @@ import type {
   TurnOutputFence,
   TurnOutputFenceVerdict,
 } from '../../stores/ports/TurnExecutionStore.js';
-import { extractRichFromText } from '../routing/rich-block-extract.js';
-import { sanitizeInjectedContent } from '../routing/route-helpers.js';
+import { restoreTextSourceParts } from '../../text-provenance.js';
+import { projectAuthoredTextParts } from '../message-output-authored-text.js';
+import { prepareResponseText } from '../routing/response-text.js';
 
 /**
  * F117 KD-21: a streaming draft is the in-flight body of its response R and lives exactly as long as
@@ -334,10 +335,21 @@ function streamedContent(
   draft: DraftRecord | undefined,
   explanation: string | undefined,
 ): { content: string; blocks: RichBlock[] } {
+  const parts = draft
+    ? restoreTextSourceParts(draft.content, draft.textProvenance, {
+        threadId: response.threadId,
+        catId: response.catId ?? '',
+        turnInvocationId: response.lifecycle?.kind === 'response' ? response.lifecycle.invocationId : '',
+      })
+    : [];
   const streamed = draft
-    ? extractRichFromText(sanitizeInjectedContent(draft.content))
-    : { cleanText: response.content, blocks: [] };
-  const body = streamed.cleanText.trim();
+    ? prepareResponseText(
+        draft.content,
+        { projectAuthoredText: (transform) => projectAuthoredTextParts(parts, transform) },
+        false,
+      )
+    : { content: response.content, blocks: [] };
+  const body = streamed.content.trim();
   const suffix = explanation && !body.includes(explanation) ? [explanation] : [];
   return { content: [body, ...suffix].filter(Boolean).join('\n\n'), blocks: streamed.blocks };
 }

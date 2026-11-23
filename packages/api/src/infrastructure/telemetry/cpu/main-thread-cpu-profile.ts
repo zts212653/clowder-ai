@@ -5,7 +5,7 @@ const MAX_NODES = 4096;
 const MAX_SAMPLES = 10000;
 type CallFrame = Profiler.ProfileNode['callFrame'];
 type Category = 'api' | 'node' | 'external' | 'idle' | 'gc' | 'native';
-interface SampledCoordinate extends CodeCoordinate {
+export interface SampledCoordinate extends CodeCoordinate {
   selfSamples: number;
   nativeSamples?: number;
 }

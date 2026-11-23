@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { configEventBus } from '../dist/config/config-event-bus.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
@@ -21,7 +23,7 @@ test(
     const { createCloudConversationComposition } = await import(
       '../dist/domains/cats/services/cloud-bridge/plugin-conversation-host/cloud-conversation-composition.js'
     );
-    const projectRoot = await mkdtemp('/tmp/f202-h3c3-production-');
+    const projectRoot = await mkdtemp(join(tmpdir(), 'f202-h3c3-production-'));
     const cats = catConfig({});
     const scheduler = manualScheduler();
     let nextCats = {};
@@ -99,7 +101,7 @@ test(
   },
   async (t) => {
     assert.ok(ARCHIVE);
-    const projectRoot = await mkdtemp('/tmp/f202-h3c3-composition-');
+    const projectRoot = await mkdtemp(join(tmpdir(), 'f202-h3c3-composition-'));
     const registry = new CloudConversationHostRegistry();
     const runtime = createDormantPluginRuntimeComposition({
       projectRoot,

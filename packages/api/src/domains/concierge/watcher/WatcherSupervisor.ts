@@ -10,6 +10,7 @@ import { awaitStoreRead } from '../../cats/services/stores/ports/StoreReadOption
 import type { ILabelStore } from '../../cats/services/stores/ports/ThreadStore.js';
 import type { AgentService } from '../../cats/services/types.js';
 import type { IConciergeConfigStore } from '../ConciergeConfigStore.js';
+import type { WatcherPanelRunner } from './panel/watcher-panel-runner.js';
 import { watcherRetirementPending } from './retirement/watcher-retirement-state.js';
 import { saveWatcherState } from './watcher-checkpoint.js';
 import { effectiveWatcherState, readWatcherPreferences } from './watcher-controls.js';
@@ -28,6 +29,8 @@ interface Options extends WatcherInvocationOwners {
   capability(catId: string): WatcherCapability | Promise<WatcherCapability>;
   report(error: unknown, threadId?: string): void;
   run?: typeof runWatcherInvocation;
+  /** F335: when the panel switch is on, new settled turns go to the panel instead of the single watcher. */
+  panel?: WatcherPanelRunner;
 }
 
 /** F191's durable ordered settlement index is the only wake source. The work commit never awaits this consumer. */
@@ -56,6 +59,7 @@ export class WatcherSupervisor {
       await this.deps.executions.settledHead(this.deps.userId),
     );
     this.cursor = this.floor;
+    await this.deps.panel?.reconcile().catch((error) => this.deps.report(error));
     this.timer = setInterval(() => void this.poll().catch((error) => this.deps.report(error)), 1000);
     this.timer.unref?.();
   }
@@ -64,8 +68,10 @@ export class WatcherSupervisor {
     if (this.timer) clearInterval(this.timer);
     for (const current of this.active.values()) current.abort.abort(new Error('watcher_supervisor_stopped'));
     await Promise.allSettled([...this.active.values()].map((current) => current.promise));
+    await this.deps.panel?.stop();
   }
   controlChanged(threadId?: string): void {
+    this.deps.panel?.controlChanged(threadId);
     void (async () => {
       const preferences = await readWatcherPreferences(this.deps.configs, this.deps.labels, this.deps.userId);
       for (const [id, current] of this.active) {
@@ -92,9 +98,15 @@ export class WatcherSupervisor {
         afterSequence: this.cursor,
         limit: 100,
       });
+      const preferences =
+        this.deps.panel && page.records.length > 0
+          ? await readWatcherPreferences(this.deps.configs, this.deps.labels, this.deps.userId)
+          : undefined;
       for (const source of page.records) {
         if (source.executionKind !== 'ordinary') continue;
-        this.schedule(source.threadId);
+        if (preferences?.config.panel?.enabled)
+          this.deps.panel!.offer(source, Math.max(this.floor, preferences.config.startedAfterSequence ?? 0));
+        else this.schedule(source.threadId);
       }
       this.cursor = page.nextCursor;
     } finally {
@@ -200,6 +212,8 @@ export class WatcherSupervisor {
   private async drain(threadId: string, signal: AbortSignal): Promise<void> {
     const read = <T>(value: T | Promise<T>) => awaitStoreRead(Promise.resolve(value), { signal });
     const preferences = await read(readWatcherPreferences(this.deps.configs, this.deps.labels, this.deps.userId));
+    // The panel owns new turns while it is on; an in-flight single-watcher attempt still settles in reconcile().
+    if (this.deps.panel && preferences.config.panel?.enabled) return;
     const catId = preferences.config.memberCatId;
     const active = this.active.get(threadId);
     if (active) active.catId = catId;

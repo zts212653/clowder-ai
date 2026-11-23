@@ -111,6 +111,27 @@ test('Windows probe PATH retains native path entries', windows, () => {
   assert.equal(probePath().split(delimiter)[0], dirname(process.execPath));
 });
 
+test(
+  'Windows default hidden PowerShell completes official login and status with the fixture CLI',
+  windows,
+  async () => {
+    const f = fixture();
+    try {
+      const driver = createCodexTerminalLoginDriver({ command: f.command, assertSupport: () => {} });
+      const identity = await driver.run({
+        home: f.home,
+        cwd: f.root,
+        signal: new AbortController().signal,
+        onReady: () => {},
+      });
+      assert.equal(identity.userId, 'fixture-user');
+      assert.equal(JSON.parse(readFileSync(join(f.root, 'terminal-result.json'), 'utf8')).exitCode, 0);
+    } finally {
+      f.close();
+    }
+  },
+);
+
 test('Windows terminal worker runs login and status through the same CMD shim in a private home', windows, async () => {
   const f = fixture();
   try {

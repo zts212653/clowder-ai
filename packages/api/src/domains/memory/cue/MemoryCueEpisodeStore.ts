@@ -253,7 +253,7 @@ export class MemoryCueEpisodeStore {
     const details = matterReadDetailsSchema.parse({
       ...input.details,
       entries: [...new Map(input.details.entries.map((entry) => [JSON.stringify(entry), entry])).values()].sort(
-        (a, b) => a.entryId.localeCompare(b.entryId) || a.sourceRevision.localeCompare(b.sourceRevision),
+        (a, b) => a.entryId.localeCompare(b.entryId) || JSON.stringify(a).localeCompare(JSON.stringify(b)),
       ),
     });
     const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');

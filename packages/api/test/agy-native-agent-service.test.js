@@ -217,12 +217,21 @@ describe('F325 one-turn native AGY carrier', () => {
     ['.Agents', 'MCP_CONFIG.JSON'],
   ]) {
     for (const withSensitiveFile of [false, true]) {
-      test(`autoApprove refuses ${directory}/${name}${withSensitiveFile ? ' alongside .env' : ''} before spawn`, async () => {
+      test(`autoApprove refuses unsafe ${directory}/${name}${withSensitiveFile ? ' alongside .env' : ''} before spawn`, async () => {
         const f = fixture(undefined, { autoApprove: true });
         const customization = join(f.workspace, directory, name);
         mkdirSync(join(f.workspace, directory));
-        if (['agents', 'plugins'].includes(name)) mkdirSync(customization);
-        else writeFileSync(customization, '{}');
+        if (name === 'agents') {
+          mkdirSync(join(customization, 'cat-cafe-host-gemini38'), { recursive: true });
+          writeFileSync(join(customization, 'cat-cafe-host-gemini38', 'agent.md'), 'SHADOW\n');
+        } else if (name === 'plugins') {
+          mkdirSync(join(customization, 'evil-plugin'), { recursive: true });
+          writeFileSync(join(customization, 'evil-plugin', 'hooks.json'), '{}');
+        } else if (name === 'skills.json') {
+          writeFileSync(customization, '{"entries":[{"path":"../outside"}]}');
+        } else {
+          writeFileSync(customization, '{}');
+        }
         if (withSensitiveFile) writeFileSync(join(f.workspace, '.env'), 'FIXTURE_ONLY=yes\n');
         let spawned = false;
         try {
@@ -247,6 +256,37 @@ describe('F325 one-turn native AGY carrier', () => {
       });
     }
   }
+
+  for (const readOnly of [false, true])
+    test(`operator executable-workspace opt-in stays within the current turn policy (readOnly=${readOnly})`, async () => {
+      const f = fixture(undefined, { autoApprove: true, allowWorkspaceExecutableConfig: true });
+      mkdirSync(join(f.workspace, '.agents'));
+      writeFileSync(join(f.workspace, '.agents/hooks.json'), '{}');
+      let spawned = false;
+      try {
+        const events = await collect(
+          f.service.invoke('Hello.', {
+            workingDirectory: f.workspace,
+            ...(readOnly ? { toolExecutionPolicy: { mode: 'read_only' } } : {}),
+            spawnCliOverride: async function* (launch) {
+              spawned = true;
+              const frames = fakeEvents(
+                launch.args[launch.args.indexOf('--agent') + 1],
+                launch.cwd,
+                'policy-bound-scope',
+                'Hello.',
+              );
+              frames[0].init.permission_mode = readOnly ? 'request-review' : 'always-proceed';
+              yield* frames;
+            },
+          }),
+        );
+        assert.equal(spawned, !readOnly, JSON.stringify(events));
+        assert.equal(events.at(-1).errorCode, readOnly ? 'AGY_WORKSPACE_CUSTOMIZATION' : undefined);
+      } finally {
+        f.cleanup();
+      }
+    });
 
   test('explicit autoApprove launches a normal repository with official bypass mode and native commands', async () => {
     const f = fixture(undefined, { autoApprove: true, trustedWorkspaces: [] });
@@ -283,7 +323,7 @@ describe('F325 one-turn native AGY carrier', () => {
     }
   });
 
-  test('permission changes require an explicit new session; matching durable bindings resume', async () => {
+  test('permission changes resume on a full-tool session while born-readonly sessions rotate when upgrading to read-write', async () => {
     const f = fixture(undefined, { autoApprove: true, trustedWorkspaces: [] });
     const launches = [];
     const options = {
@@ -303,36 +343,46 @@ describe('F325 one-turn native AGY carrier', () => {
     try {
       const first = await collect(f.service.invoke('Automatic.', options));
       assert.equal(first.at(-1).errorCode, undefined);
-      const mismatch = await collect(
-        f.service.invoke('Read only.', {
+      const readOnlyOnExisting = await collect(
+        f.service.invoke('Read only on existing conversation.', {
           ...options,
           sessionId: 'mode-1',
           nativeSessionBinding: first[0].nativeSessionBinding,
           toolExecutionPolicy: { mode: 'read_only' },
         }),
       );
-      assert.equal(mismatch.at(-1).errorCode, 'AGY_NATIVE_RESUME_MISMATCH');
-      assert.equal(launches.length, 1);
-      const readonly = await collect(
-        f.service.invoke('Read only.', {
-          ...options,
-          toolExecutionPolicy: { mode: 'read_only' },
-        }),
-      );
-      assert.equal(readonly.at(-1).errorCode, undefined);
+      assert.equal(readOnlyOnExisting.at(-1).errorCode, undefined);
       assert.ok(launches[1].args.includes('--sandbox'));
       assert.ok(!launches[1].args.includes('--dangerously-skip-permissions'));
-      assert.ok(!launches[1].args.includes('--conversation'), 'a permissive session cannot be resumed as read-only');
-      const resumed = await collect(
-        f.service.invoke('Read only again.', {
+      assert.deepEqual(launches[1].args.slice(-2), ['--conversation', 'mode-1']);
+
+      // A session born in read_only resumes in read_only, and rotates cleanly if upgraded to read-write
+      const bornReadonly = await collect(
+        f.service.invoke('Read only fresh.', {
           ...options,
-          sessionId: 'mode-2',
-          nativeSessionBinding: readonly[0].nativeSessionBinding,
           toolExecutionPolicy: { mode: 'read_only' },
         }),
       );
-      assert.equal(resumed.at(-1).errorCode, undefined);
-      assert.ok(launches[2].args.includes('--conversation'), 'same-mode sessions still resume');
+      assert.equal(bornReadonly.at(-1).errorCode, undefined);
+      const resumedReadonly = await collect(
+        f.service.invoke('Read only again.', {
+          ...options,
+          sessionId: bornReadonly[0].sessionId,
+          nativeSessionBinding: bornReadonly[0].nativeSessionBinding,
+          toolExecutionPolicy: { mode: 'read_only' },
+        }),
+      );
+      assert.equal(resumedReadonly.at(-1).errorCode, undefined);
+      assert.ok(launches.at(-1).args.includes('--conversation'));
+
+      const upgradeFromReadonly = await collect(
+        f.service.invoke('Upgrade to read-write.', {
+          ...options,
+          sessionId: bornReadonly[0].sessionId,
+          nativeSessionBinding: bornReadonly[0].nativeSessionBinding,
+        }),
+      );
+      assert.equal(upgradeFromReadonly.at(-1).errorCode, 'AGY_NATIVE_RESUME_MISMATCH');
     } finally {
       f.cleanup();
     }

@@ -1,0 +1,12 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 基础：盒模型、根元素、通用工具类 */
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body, #app { height: 100%; overflow: clip; }
+body { timeline-scope: --chat-stream; margin: 0; background: var(--bg-page); color: var(--fg-strong); font: 400 var(--fs-l)/1.55 var(--font-text); -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: none; }   /* 键盘只做功能键（回车、Esc、菜单方向键），不画键盘焦点框：按 Esc 关掉弹层后，留在触发处的焦点不该冒出描边 */
+.ic { flex-shrink: 0; display: block; }
+.mono { font-family: var(--font-mono); font-size: var(--mono-em); }   /* 等宽是值的种类：字号跟着所在的文字角色，只按等宽字体的视觉大小缩一点 */
+.num { font-variant-numeric: tabular-nums; }
+.sr { position: absolute; width: var(--sp-hairline); height: var(--sp-hairline); overflow: hidden; clip: rect(0 0 0 0); }

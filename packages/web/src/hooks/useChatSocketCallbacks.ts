@@ -9,13 +9,19 @@ interface ExternalDeps {
   threadId: string;
   handleAgentMessage: SocketCallbacks['onMessage'];
   onIndexEvent?: SocketCallbacks['onIndexEvent'];
+  sourceNeeded?: (source: string, threadId?: string) => boolean;
 }
 
 /**
  * Socket event callbacks for a chat thread.
  * Extracted from ChatContainer to reduce file size.
  */
-export function useChatSocketCallbacks({ threadId, handleAgentMessage, onIndexEvent }: ExternalDeps): SocketCallbacks {
+export function useChatSocketCallbacks({
+  threadId,
+  handleAgentMessage,
+  onIndexEvent,
+  sourceNeeded = () => true,
+}: ExternalDeps): SocketCallbacks {
   const {
     updateThreadTitle,
     updateThreadParticipants,
@@ -24,6 +30,7 @@ export function useChatSocketCallbacks({ threadId, handleAgentMessage, onIndexEv
     setIntentMode,
     setTargetCats,
     removeThreadMessage,
+    clearThreadMessageDeletion,
     requestStreamCatchUp,
   } = useChatStore(
     useShallow((s) => ({
@@ -34,6 +41,7 @@ export function useChatSocketCallbacks({ threadId, handleAgentMessage, onIndexEv
       setIntentMode: s.setIntentMode,
       setTargetCats: s.setTargetCats,
       removeThreadMessage: s.removeThreadMessage,
+      clearThreadMessageDeletion: s.clearThreadMessageDeletion,
       requestStreamCatchUp: s.requestStreamCatchUp,
     })),
   );
@@ -75,38 +83,49 @@ export function useChatSocketCallbacks({ threadId, handleAgentMessage, onIndexEv
       },
       onTaskCreated: (task) => {
         const t = task as Record<string, unknown>;
-        if (t.threadId !== threadId || t.kind === 'pr_tracking') return;
+        if (
+          !sourceNeeded('project.workbench.tasks', String(t.threadId)) ||
+          t.threadId !== threadId ||
+          t.kind === 'pr_tracking'
+        )
+          return;
         addTask(task as unknown as TaskItem);
       },
       onTaskUpdated: (task) => {
         const t = task as Record<string, unknown>;
-        if (t.threadId !== threadId || t.kind === 'pr_tracking') return;
+        if (
+          !sourceNeeded('project.workbench.tasks', String(t.threadId)) ||
+          t.threadId !== threadId ||
+          t.kind === 'pr_tracking'
+        )
+          return;
         updateTask(task as unknown as TaskItem);
       },
       // onThreadSummary removed (clowder-ai#343): summaries no longer injected into chat flow.
       onMessageDeleted: (data: { messageId: string; threadId: string }) =>
-        removeThreadMessage(data.threadId, data.messageId),
+        sourceNeeded('chat.messages', data.threadId) && removeThreadMessage(data.threadId, data.messageId),
       onMessageRestored: (data: { messageId: string; threadId: string }) => {
+        if (!sourceNeeded('chat.messages', data.threadId)) return;
+        clearThreadMessageDeletion(data.threadId, data.messageId);
         requestStreamCatchUp(data.threadId);
       },
       onMessageRecalled: (data) => {
+        if (!sourceNeeded('chat.messages', data.threadId)) return;
         if (data.verdict === 'zero_exposure') {
           removeThreadMessage(data.threadId, data.messageId);
           return;
         }
-        requestStreamCatchUp(data.threadId);
+        if (sourceNeeded('chat.messages', data.threadId)) requestStreamCatchUp(data.threadId);
       },
       onMessageReceiptUpdated: (data) => {
-        requestStreamCatchUp(data.threadId);
+        if (sourceNeeded('chat.messages', data.threadId)) requestStreamCatchUp(data.threadId);
       },
       onCustodyOfferUpdated: (data) => {
-        requestStreamCatchUp(data.threadId);
+        if (sourceNeeded('chat.messages', data.threadId)) requestStreamCatchUp(data.threadId);
       },
       onThreadBranched: () => {
         void invalidateSidebarProjection();
       },
-      // B-5: Guide events now flow directly from useSocket → guideStore.reduceServerEvent
-      // (CustomEvent bridge removed — no onGuideStart/onGuideControl/onGuideComplete needed)
       onIndexEvent,
     }),
     [
@@ -120,8 +139,10 @@ export function useChatSocketCallbacks({ threadId, handleAgentMessage, onIndexEv
       addTask,
       updateTask,
       removeThreadMessage,
+      clearThreadMessageDeletion,
       requestStreamCatchUp,
       onIndexEvent,
+      sourceNeeded,
       threadId,
     ],
   );

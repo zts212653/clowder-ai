@@ -1,7 +1,7 @@
 import { lstat, readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { fetchOfficialPackageArchive, registeredBundledArchive } from './bundled-package-source.js';
-import { staticEditorContributions } from './content-editor-runtime/admission.js';
+import { isStaticContentProviderType, staticContentProviderContributions } from './content-editor-runtime/admission.js';
 import { readAgentClientMetadata } from './declared/agent-client-metadata.js';
 import { desktopWindowContribution } from './desktop-window-runtime/admission.js';
 import { FilesystemVerifiedPluginPackageLocator, type VerifiedPluginPackage } from './external-runtime/index.js';
@@ -381,11 +381,11 @@ export class OfficialPluginPackageInstaller {
       }
       const rejection = await readPackageCapabilityRejection(located.manifest, located.rootDir);
       if (rejection) throw new OfficialPluginInstallError('UNSUPPORTED_TRANSPORT', rejection);
-      const staticEditors = staticEditorContributions(located.manifest);
-      const declaresStaticEditor =
-        located.manifest.contributions?.some((item) => item.type === 'content-editor-provider') === true ||
+      const staticProviders = staticContentProviderContributions(located.manifest);
+      const declaresStaticProvider =
+        located.manifest.contributions?.some((item) => isStaticContentProviderType(item.type)) === true ||
         located.manifest.features.some(
-          (feature) => feature.contributions?.some((item) => item.type === 'content-editor-provider') === true,
+          (feature) => feature.contributions?.some((item) => isStaticContentProviderType(item.type)) === true,
         );
       const desktopWindow = desktopWindowContribution(located.manifest);
       const declaresDesktopWindow =
@@ -393,8 +393,8 @@ export class OfficialPluginPackageInstaller {
         located.manifest.features.some(
           (feature) => feature.contributions?.some((item) => item.type === 'desktop-window') === true,
         );
-      if (declaresStaticEditor || declaresDesktopWindow) {
-        const admitted = declaresDesktopWindow ? desktopWindow !== undefined : staticEditors.length > 0;
+      if (declaresStaticProvider || declaresDesktopWindow) {
+        const admitted = declaresDesktopWindow ? desktopWindow !== undefined : staticProviders.length > 0;
         if (!admitted) {
           throw new OfficialPluginInstallError(
             'UNSUPPORTED_TRANSPORT',
@@ -403,7 +403,7 @@ export class OfficialPluginPackageInstaller {
         }
         // Static builtin admission still consumes the exact archive and public
         // manifest. Validate renderer bytes now; admission never starts a server.
-        await snapshotPluginSurfaceAssets(located, desktopWindow ? [desktopWindow] : staticEditors);
+        await snapshotPluginSurfaceAssets(located, desktopWindow ? [desktopWindow] : staticProviders);
         if (desktopWindow) {
           try {
             await this.options.prepareDesktopComponent?.();

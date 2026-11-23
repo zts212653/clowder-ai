@@ -16,7 +16,7 @@ export interface RoutingContextQueryState {
   refresh: () => Promise<boolean>;
 }
 
-export function useRoutingContext(): RoutingContextQueryState {
+export function useRoutingContext(needed: boolean | number = true): RoutingContextQueryState {
   const [data, setData] = useState<RoutingContextReadModelV1 | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,11 +39,11 @@ export function useRoutingContext(): RoutingContextQueryState {
 
   useEffect(() => {
     mounted.current = true;
-    void refresh();
+    if (needed) void refresh();
     return () => {
       mounted.current = false;
     };
-  }, [refresh]);
+  }, [needed, refresh]);
 
   return { data, loading, error, refresh };
 }

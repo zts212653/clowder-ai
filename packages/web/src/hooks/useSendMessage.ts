@@ -3,12 +3,6 @@
 import type { ContextAttachment, MessageWorkDisposition } from '@cat-cafe/shared';
 import { routingConfirmationRequiredSchema } from '@cat-cafe/shared/routing-preview';
 import { useCallback, useState } from 'react';
-import {
-  acknowledgeSendComposerDraftConsumption,
-  type ComposerDraftConsumption,
-} from '@/components/composer-draft-consumption';
-import { observeComposerDraft } from '@/components/composer-draft-flush-registry';
-import { useOptionalConfirm } from '@/components/useConfirm';
 import { useChatCommands } from '@/hooks/useChatCommands';
 import { type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
@@ -24,15 +18,12 @@ export interface WhisperOptions {
 export interface SendMessageAdmissionOptions {
   /** A recoverable first-message owner supplies the same key on every retry. */
   idempotencyKey?: string;
-  /** Set by the ChatInput admission adapter; domain/interactive sends preserve the mounted draft. */
-  consumeComposerDraft?: boolean;
   messageDisposition?: MessageWorkDisposition;
 }
 
 interface MessageAdmissionResponse {
   status?: string;
   gameThreadId?: string;
-  composerDraftConsumption?: ComposerDraftConsumption;
 }
 
 /**
@@ -40,8 +31,11 @@ interface MessageAdmissionResponse {
  * exclusively from lifecycle events after server admission; this hook never creates
  * an optimistic History bubble or a client-owned invocation.
  */
-export function useSendMessage(activeThreadId?: string) {
-  const confirm = useOptionalConfirm();
+export type RoutingConfirmation = (
+  request: ReturnType<typeof routingConfirmationRequiredSchema.parse>,
+) => Promise<boolean>;
+
+export function useSendMessage(activeThreadId?: string, confirm?: RoutingConfirmation) {
   const addMessageToThread = useChatStore((state) => state.addMessageToThread);
   const { processCommand } = useChatCommands();
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle');
@@ -88,9 +82,6 @@ export function useSendMessage(activeThreadId?: string) {
       admissionOptions?: SendMessageAdmissionOptions,
     ) => {
       const threadId = overrideThreadId ?? activeThreadId ?? useChatStore.getState().currentThreadId;
-      const composerDraftRevision = admissionOptions?.consumeComposerDraft
-        ? observeComposerDraft(threadId)?.revision
-        : undefined;
       const hasImages = Boolean(images?.length);
       setUploadError(null);
       setUploadStatus(hasImages ? 'uploading' : 'idle');
@@ -112,8 +103,6 @@ export function useSendMessage(activeThreadId?: string) {
             }
             for (const catId of explicitTargetCats ?? []) formData.append('mentions', catId);
             for (const catId of confirmedTargetCats ?? []) formData.append('confirmedTargetCats', catId);
-            if (composerDraftRevision !== undefined)
-              formData.append('composerDraftRevision', String(composerDraftRevision));
             if (whisper) {
               formData.append('visibility', whisper.visibility);
               for (const catId of whisper.whisperTo) formData.append('whisperTo', catId);
@@ -135,7 +124,6 @@ export function useSendMessage(activeThreadId?: string) {
                 ...(admissionOptions?.messageDisposition
                   ? { messageDisposition: admissionOptions.messageDisposition }
                   : {}),
-                ...(composerDraftRevision !== undefined ? { composerDraftRevision } : {}),
                 ...(whisper ? { visibility: whisper.visibility, whisperTo: whisper.whisperTo } : {}),
                 ...(replyToId ? { replyTo: replyToId } : {}),
                 ...(explicitTargetCats?.length ? { mentions: explicitTargetCats } : {}),
@@ -154,14 +142,7 @@ export function useSendMessage(activeThreadId?: string) {
           const redirect = routingConfirmationRequiredSchema.safeParse(payload);
           if (redirect.success) {
             if (!confirm) throw new Error('需要在聊天页面确认实际接收者后才能改发。');
-            const unavailable = redirect.data.unavailable.map((member) => member.displayName).join('、');
-            const targets = redirect.data.targets.map((member) => member.displayName).join('、');
-            const accepted = await confirm({
-              title: '确认改发角色',
-              message: `${unavailable}当前不可用。是否将这条消息改发给${targets}？`,
-              confirmLabel: `改发给${targets}`,
-              cancelLabel: '取消发送',
-            });
+            const accepted = await confirm(redirect.data);
             if (!accepted) {
               setUploadStatus('idle');
               return false;
@@ -179,7 +160,6 @@ export function useSendMessage(activeThreadId?: string) {
         if (admission?.status !== 'game_started' && admission?.status !== 'queued') {
           throw new Error('Server did not return a canonical Queue admission');
         }
-        acknowledgeSendComposerDraftConsumption(threadId, admission);
         // A successful send must remain visible even if its Queue socket event was
         // missed. Reuse the same fenced server snapshot as reconnect, not a local bubble.
         if (admission.status === 'queued') void reconcileThreadWithServer(threadId, () => false, 'SendAdmission');

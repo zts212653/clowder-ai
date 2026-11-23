@@ -133,6 +133,15 @@ import { CallbackAuthTurnExecutionLifecycle } from './domains/cats/services/agen
 import type { CollaborationContinuityCapsuleV1 } from './domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
 import { createTaskProgressStore } from './domains/cats/services/agents/invocation/createTaskProgressStore.js';
 import { createExitedCliExecutionRecovery } from './domains/cats/services/agents/invocation/ExitedCliExecutionRecovery.js';
+import {
+  HostSleepContinuationScheduler,
+  recoverOwedContinuations,
+} from './domains/cats/services/agents/invocation/host-sleep/HostSleepContinuationScheduler.js';
+import { createHostSleepEvidenceReader } from './domains/cats/services/agents/invocation/host-sleep/HostSleepEvidence.js';
+import {
+  createRuntimeStopProbe,
+  runtimeStopRecordFile,
+} from './domains/cats/services/agents/invocation/host-sleep/RuntimeStopEvidence.js';
 import { InvocationOwnerReaper } from './domains/cats/services/agents/invocation/InvocationOwnerReaper.js';
 import { startSerializedInvocationOwnerReaperInterval } from './domains/cats/services/agents/invocation/InvocationOwnerReaperInterval.js';
 import {
@@ -161,7 +170,10 @@ import {
   responseOutcomeForEndedTurn,
   settleResponseFromDraft,
 } from './domains/cats/services/agents/invocation/response-draft-settlement.js';
-import { continueRestartInterruptedCats } from './domains/cats/services/agents/invocation/restart-continuation/RestartContinuation.js';
+import {
+  continueInterruptedCats,
+  continueRestartInterruptedCats,
+} from './domains/cats/services/agents/invocation/restart-continuation/RestartContinuation.js';
 import { SessionContinuationCoordinator } from './domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
 import { SessionMutex } from './domains/cats/services/agents/invocation/SessionMutex.js';
 import { sharedMcpDeploymentId } from './domains/cats/services/agents/invocation/shared-mcp-launch.js';
@@ -170,7 +182,11 @@ import {
   type SidebarTerminalExecution,
 } from './domains/cats/services/agents/invocation/sidebar-presence-source.js';
 import { listenBeforeTurnExecutionRecovery } from './domains/cats/services/agents/invocation/TurnExecutionStartupReconciler.js';
-import { createThreadExecutionSituationSource } from './domains/cats/services/agents/invocation/thread-execution-situation.js';
+import {
+  createThreadExecutionSituationSource,
+  readRecentStops,
+} from './domains/cats/services/agents/invocation/thread-execution-situation.js';
+
 import {
   findWindowsLiveOwner,
   stopWithWindowsJobProof,
@@ -290,6 +306,7 @@ import { EntityMemoryLifecycleStore } from './domains/memory/entity/EntityMemory
 import { sharedProactiveCandidateNudgeReceiptStore } from './domains/memory/entity-nudge-state.js';
 import { createEventMemoryCorrectionProposalStore } from './domains/memory/event/createEventMemoryCorrectionProposalStore.js';
 import { EventMemoryLifecycleService } from './domains/memory/event/EventMemoryLifecycleService.js';
+import { createMemoryClerkEligibility } from './domains/memory/MemoryClerkEligibility.js';
 import {
   InMemoryOwnerMemoryActionReceiptStore,
   OwnerMemoryActionCoordinator,
@@ -443,6 +460,8 @@ import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/sche
 import { securityHeadersPlugin } from './infrastructure/security-headers.js';
 import { sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
 import { startupMilestone } from './infrastructure/startup-diagnostics.js';
+import type { startEventLoopTripwire } from './infrastructure/telemetry/cpu/event-loop-tripwire.js';
+import { initializeWithEventLoopTripwire } from './infrastructure/telemetry/cpu/event-loop-tripwire-startup.js';
 import { startProcessCpuCapture } from './infrastructure/telemetry/cpu/process-cpu-capture.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
 import { avatarsRoutes } from './routes/avatars.js';
@@ -656,11 +675,21 @@ function hasRuntimeSessionDrain(service: AgentService): service is AgentService 
 
 async function main(): Promise<void> {
   startupMilestone('module-graph-loaded');
+  const loggerContext = await import('./infrastructure/logger.js');
+  await initializeWithEventLoopTripwire(
+    { logger: loggerContext.logger, logDir: loggerContext.LOG_DIR_PATH },
+    (tripwire) => initializeApi(loggerContext, tripwire),
+  );
+}
+
+async function initializeApi(
+  { logger: customLogger, isDebugMode, LOG_DIR_PATH }: typeof import('./infrastructure/logger.js'),
+  eventLoopTripwire: ReturnType<typeof startEventLoopTripwire>,
+): Promise<void> {
   // #1838: the API itself stays outside every kernel job, so the background services and managed
   // jobs it starts survive its restart. Each covered Windows provider gets its own host job instead.
   const acpHostPolicy = resolveAcpHostPolicy();
   let managedCommandWakeRecovery: ManagedCommandWakeRecoverySweep | undefined;
-  const { logger: customLogger, isDebugMode, LOG_DIR_PATH } = await import('./infrastructure/logger.js');
   let sessionHookAuthenticationReady = (): boolean => false;
 
   // F152: Initialize OpenTelemetry SDK (must be early, before routes)
@@ -673,6 +702,7 @@ async function main(): Promise<void> {
   const { saveSpan } = await import('./utils/member-save-diagnostics.js');
 
   const app = createApiServer({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
+  app.addHook('onClose', async () => eventLoopTripwire.close());
   reportAcpHostPolicy(app.log, acpHostPolicy);
   const messageReadDiagnostics = registerMessageReadDiagnostics(app);
   const privateUserId = (process.env.CAT_CAFE_USER_ID ?? 'default-user').trim();
@@ -918,6 +948,7 @@ async function main(): Promise<void> {
       });
       if (context) {
         runtimeDeploymentContext = context;
+        eventLoopTripwire.setBootId(context.bootId);
         runtimeDeploymentRevision = context.runningRevision;
         recordRuntimeStartupFailure = async (reason) => {
           await context.ledger.recordStartupFailure({
@@ -1484,6 +1515,9 @@ async function main(): Promise<void> {
   const readDiagnostics = createSqliteReadDiagnostics({
     onSlowRead: (event) => app.log.warn({ module: 'sqlite-read', ...event }, 'Slow synchronous SQLite .all read'),
   });
+  // Every store's degraded vector search, in this process or reported by a read worker.
+  const { logVectorSearchDegradesTo } = await import('./domains/memory/vector-search-degrade-report.js');
+  logVectorSearchDegradesTo(app.log);
   // Resolve embed mode. Priority:
   //   1. If the user enabled the Embedding service in console (service.enabled=true),
   //      force the in-process mode to 'on' (or honor an explicit 'shadow' / 'on' env
@@ -1981,11 +2015,18 @@ async function main(): Promise<void> {
 
   // F293 Phase B: one durable composition for owner API, cognition and every
   // dispatch preflight. No Redis means typed 503/degradation, never memory truth.
+  const { SessionCacheReadService } = await import('./domains/cats/services/session/cache/SessionCacheReadService.js');
+  const sessionCacheReadService = new SessionCacheReadService(
+    sessionChainStore,
+    100,
+    (catId) => catRegistry.getAllConfigs()[catId],
+  );
   const routingContextRuntime = redisClient
     ? createRoutingContextRuntime({
         redis: redisClient,
         projectRoot: resolveActiveProjectRoot(),
         getConfigs: () => catRegistry.getAllConfigs(),
+        sessionCache: sessionCacheReadService,
       })
     : undefined;
 
@@ -2592,12 +2633,14 @@ async function main(): Promise<void> {
   const worldKnowledgeAdapter = new WorldKnowledgeAdapter(memoryServices.evidenceStore);
   const worldContextProvider = new WorldContextProvider(worldStore, worldKnowledgeAdapter);
 
-  // F229: Concierge config store — created before AgentRouter so it can be passed into
-  // invocationDeps for routing-layer 岗位 prompt injection (ConciergeRoutingInterceptor).
+  // F229: Concierge runtime state store — created before AgentRouter.
   const { RedisConciergeConfigStore: _RCCSEarly, MemoryConciergeConfigStore: _MCCSEarly } = await import(
     './domains/concierge/ConciergeConfigStore.js'
   );
   const conciergeConfigStoreShared = redis ? new _RCCSEarly(redis) : new _MCCSEarly();
+  // 猫猫球's settings are official.companion's plugin configuration (read when used, after plugins compose).
+  const { readCompanionSettings } = await import('./domains/concierge/companion-settings.js');
+  const companionSettings = () => readCompanionSettings(pluginManagerRuntime.configuration);
 
   // F229 Phase B: TriagePlan store (needed by AgentRouter for reply validator)
   const { RedisConciergeTriagePlanStore: _RTPSEarly, MemoryConciergeTriagePlanStore: _MTPSEarly } = await import(
@@ -2839,6 +2882,8 @@ async function main(): Promise<void> {
     messageStore,
     listActiveRuns: (threadId) =>
       invocationTracker.getActiveSlots(threadId).flatMap((slot) => (slot.activeRun ? [slot.activeRun] : [])),
+    // F337: this thread's newest settled turns; a full page is reported as incomplete coverage.
+    listRecentStops: ({ threadId, userId }) => readRecentStops(turnExecutionStore, { threadId, userId }, Date.now()),
   });
   // F117 K2: the Claude Agent SDK carrier runs PreCompact and SessionStart(compact) in-process. They
   // reuse the session hooks route's seal and post-compact projection; an in-process hook is
@@ -2929,9 +2974,46 @@ async function main(): Promise<void> {
         invocationDeps: () => router.getStrategyDeps().invocationDeps,
       })
     : undefined;
+  // F337: a turn a machine sleep cut off is told apart from a provider failure and continued after the lid opens.
+  const hostSleepEvidence = createHostSleepEvidenceReader();
+  // F337: set when the API's own SIGTERM arrives (often after its providers already died; see the probe below).
+  const runtimeStop = { begun: false };
+  // The launcher signals provider children before the API, so the stop record (written before any
+  // signal) is what tells a turn the stop began; the SIGTERM flag covers stops without a record.
+  const isRuntimeShuttingDown = createRuntimeStopProbe({
+    begun: () => runtimeStop.begun,
+    recordFile:
+      declaredRuntimeRoot && declaredDeploymentId
+        ? runtimeStopRecordFile({ projectRoot: declaredRuntimeRoot, deploymentId: declaredDeploymentId }).catch(
+            () => undefined,
+          )
+        : undefined,
+  });
+  const hostSleepContinuation = new HostSleepContinuationScheduler({
+    readEvidence: hostSleepEvidence,
+    continueCats: (invocationIds, kind) =>
+      continueInterruptedCats(
+        {
+          turns: turnExecutionStore,
+          messages: messageStore,
+          queue: invocationQueue,
+          deliver: schedulerDeliver,
+          log: app.log,
+        },
+        invocationIds,
+        kind,
+      ),
+    settleOwed: (invocationIds) => turnExecutionStore.settleOwedContinuations(invocationIds),
+    log: app.log,
+  });
   router = new AgentRouter({
     ...(rootMemberSessions ? { scopedMemberRouting: rootMemberSessions.routing } : {}),
     ownerAskCorrectionDeliver: schedulerDeliver,
+    hostSleep: {
+      readEvidence: hostSleepEvidence,
+      scheduleContinuation: (input) => hostSleepContinuation.schedule(input),
+    },
+    isRuntimeShuttingDown,
     ordinaryTaskHandoffs,
     messageSearchAnswerService,
     ownedWaitStatusReader,
@@ -2978,7 +3060,7 @@ async function main(): Promise<void> {
     ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
     turnCustodyProjectionService,
     frustrationIssueStore,
-    conciergeConfigStore: conciergeConfigStoreShared,
+    companionSettings,
     conciergeTriagePlanStore,
     cloudInvokeBridge,
     cloudReturnGrantStore,
@@ -3429,6 +3511,7 @@ async function main(): Promise<void> {
 
   // Register routes (socketManager injected, no circular import)
   const messagesOpts = {
+    turnExecutionStore,
     onStoredProjectMessage: async (
       message: import('./domains/cats/services/stores/ports/MessageStore.js').StoredMessage,
     ) => projectMessageProducer?.(message),
@@ -3555,7 +3638,7 @@ async function main(): Promise<void> {
           stopUnconfirmedProvider: (record: TurnExecutionRecord) =>
             stopWithWindowsJobProof({ store: turnExecutionStore, record, dataDir: process.env.CAT_CAFE_DATA_DIR }),
           findWindowsLiveOwner: (records: readonly TurnExecutionRecord[]) =>
-            findWindowsLiveOwner({ records, dataDir: process.env.CAT_CAFE_DATA_DIR }),
+            findWindowsLiveOwner({ records, store: turnExecutionStore, dataDir: process.env.CAT_CAFE_DATA_DIR }),
         }
       : {}),
   });
@@ -4586,7 +4669,7 @@ async function main(): Promise<void> {
   const conciergeThreadServiceShared = new ConciergeThreadService({
     threadStore,
     redis: redis ?? undefined,
-    conciergeConfigStore: conciergeConfigStoreShared,
+    companionSettings,
   });
   // F229 PR-A3b: relay + confirmation stores
   const { RedisConciergeRelayStore, MemoryConciergeRelayStore } = await import(
@@ -4602,6 +4685,7 @@ async function main(): Promise<void> {
   // F229 Phase B: triage plan store — already created above for AgentRouter, reuse here
   await app.register(conciergeRoutes, {
     conciergeConfigStore: conciergeConfigStoreShared,
+    companionSettings,
     conciergeThreadService: conciergeThreadServiceShared,
     conciergeRelayStore,
     conciergeConfirmationStore,
@@ -4659,6 +4743,7 @@ async function main(): Promise<void> {
     queue: invocationQueue,
     maySpeak: watcherMaySpeak,
     outputFence: watcherOutputFence,
+    panelNudge: (input) => watcherPanel.acceptNudge(input),
     afterNudge: async (input) =>
       watcherReceipts?.nudge({
         ...input,
@@ -4684,9 +4769,49 @@ async function main(): Promise<void> {
         );
     },
   });
+  // F335 panel: off until the owner turns it on in Settings; the ledger is durable (TTL=0).
+  const { InMemoryWatcherPanelLedger, RedisWatcherPanelLedger } = await import(
+    './domains/concierge/watcher/panel/watcher-panel-ledger.js'
+  );
+  const watcherPanelLedger = redis ? new RedisWatcherPanelLedger(redis) : new InMemoryWatcherPanelLedger();
+  const { WatcherPanelRunner } = await import('./domains/concierge/watcher/panel/watcher-panel-runner.js');
+  const watcherPanel = new WatcherPanelRunner({
+    userId: privateUserId,
+    configs: conciergeConfigStoreShared,
+    labels: labelStore,
+    ledger: watcherPanelLedger,
+    registry,
+    executions: turnExecutionStore,
+    sessions: sessionChainStore,
+    messages: messageStore,
+    threads: threadStore,
+    transcript: transcriptWriter,
+    apiUrl: `http://127.0.0.1:${PORT}`,
+    service: (catId) => router.getStrategyDeps().services[catId],
+    queue: invocationQueue,
+    publish: (stored) =>
+      socketManager?.broadcastToRoom(`thread:${stored.threadId}`, 'connector_message', {
+        threadId: stored.threadId,
+        message: {
+          id: stored.id,
+          from: stored.from,
+          type: 'connector',
+          content: stored.content,
+          source: stored.source,
+          timestamp: stored.timestamp,
+        },
+      }),
+    report: (error, threadId) =>
+      app.log.warn({ err: error, threadId }, 'Watcher panel round failed; ordinary work remains independent'),
+  });
+  await app.register((await import('./routes/watcher-panel.js')).watcherPanelRoutes, {
+    ledger: watcherPanelLedger,
+    turnExecutionStore,
+  });
   // Always on: the settings switch (default: only threads the owner picks) decides what is watched.
   const { WatcherSupervisor } = await import('./domains/concierge/watcher/WatcherSupervisor.js');
   watcherSupervisor = new WatcherSupervisor({
+    panel: watcherPanel,
     maySpeak: watcherMaySpeak,
     userId: privateUserId,
     configs: conciergeConfigStoreShared,
@@ -4830,7 +4955,7 @@ async function main(): Promise<void> {
     }
     const { conciergeLiveRoutes } = await import('./routes/concierge-live.js');
     await app.register(conciergeLiveRoutes, {
-      configStore: conciergeConfigStoreShared,
+      companionSettings,
       ownerUserId: privateUserId,
       sessions: liveCompanionSessions,
       pageActionOwner,
@@ -5067,7 +5192,7 @@ async function main(): Promise<void> {
     ownedWaitStatusReader,
     backlogStore,
     threadStore,
-    conciergeConfigStore: conciergeConfigStoreShared,
+    companionSettings,
     sessionChainStore,
     runtimeSessionStore,
     proposalStore,
@@ -5736,6 +5861,8 @@ async function main(): Promise<void> {
     './domains/plugin/manager/package-assets/builtin-package-materializer.js'
   );
   const pluginManagerRuntime = createPluginManagerRuntimeComposition({
+    pluginOperationChanged: (pluginId) =>
+      socketManager?.emitToUser(privateUserId, 'plugin_operation_changed', { pluginId }),
     runtime: pluginRuntime,
     catalogProvider: pluginManagerCatalog,
     marketplaces: { sources: marketplaceSources, repository: marketplaceRepository },
@@ -5744,6 +5871,7 @@ async function main(): Promise<void> {
       await companionDesktopComponent.prepare();
     },
     catalogManifests: OFFICIAL_BUNDLED_MANIFESTS,
+    threads: threadStore,
   });
   router.addressedPlugins = pluginManagerRuntime.addressedTargets;
   const { AddressedPluginQueueDelivery } = await import(
@@ -5887,6 +6015,7 @@ async function main(): Promise<void> {
   );
   const { registerCollaborativeContentRoutes } = await import('./routes/collaborative-content-routes.js');
   const { registerWorkspaceContentEditorRoutes } = await import('./routes/workspace-content-editor-routes.js');
+  const { registerWorkspaceContentPreviewRoutes } = await import('./routes/workspace-content-preview-routes.js');
   let projectCatGrants:
     | import('./domains/collaborative-content/workspace-review/project-message/cat-grants.js').ProjectMessageCatGrants
     | undefined;
@@ -5930,6 +6059,10 @@ async function main(): Promise<void> {
   namedCatContentHolder.current = collaborativeContent.namedCats;
   registerCollaborativeContentRoutes(app, { ...collaborativeContent, ownerUserId: privateUserId });
   registerWorkspaceContentEditorRoutes(app, { workspace: collaborativeContent.workspace, ownerUserId: privateUserId });
+  registerWorkspaceContentPreviewRoutes(app, {
+    workspace: collaborativeContent.workspacePreview,
+    ownerUserId: privateUserId,
+  });
   const { createWorkspaceContentReviewComposition } = await import(
     './domains/collaborative-content/workspace-review/composition.js'
   );
@@ -5969,12 +6102,7 @@ async function main(): Promise<void> {
     mediaDir: getDefaultConnectorMediaDir(process.env.CONNECTOR_MEDIA_DIR),
   });
   const { pluginWebhookForwardingRoutes } = await import('./routes/plugin/plugin-webhook-forwarding-routes.js');
-  await app.register(pluginWebhookForwardingRoutes, {
-    webhooks: pluginRuntime.supervisor,
-    ui: pluginRuntime.supervisor.ui,
-  });
-  const { pluginUiRoutes } = await import('./routes/plugin/plugin-ui-routes.js');
-  await app.register(pluginUiRoutes, { ui: pluginRuntime.supervisor.ui });
+  await app.register(pluginWebhookForwardingRoutes, { webhooks: pluginRuntime.supervisor });
 
   // F246/F313: one registry and one renderer projection. The F266 writer stays
   // fenced until an owner-backed resolver/dispatcher and a v1_active epoch are
@@ -6499,6 +6627,10 @@ async function main(): Promise<void> {
       },
       authorizeActor: async (actor, operation) => {
         const record = actor.invocationId ? await registry.peekRecord(actor.invocationId) : null;
+        if (record?.toolExecutionPolicy?.mode === 'watcher_panel')
+          return (
+            actor.byline === 'watcher' && (operation === 'facts' || (await watcherPanel.maySpeak(record.invocationId)))
+          );
         if (record?.toolExecutionPolicy?.mode !== 'watcher') return true;
         return (
           actor.byline === 'watcher' &&
@@ -6767,7 +6899,7 @@ async function main(): Promise<void> {
     },
     socketManager,
   });
-  // F260 Phase A: callback route for cat_cafe_propose_entity tool (cat-auth)
+  // F260 Phase A: entity proposal callback route (cat-auth; cats reach it via cat_cafe_remember target entity)
   // Must use app.register() — Fastify encapsulation scopes the callback auth
   // preHandler hook to this plugin. Plain function call on top-level app would
   // skip the hook → 401 unknown_invocation (bug fix, 2026-07-10).
@@ -6787,7 +6919,7 @@ async function main(): Promise<void> {
     getIndexProjection: () => memoryServices.publishedDocuments?.getStatus(),
     approvalCoordinator: tasteApprovalCoordinator,
   });
-  // F221 Phase B: callback route for cat_cafe_propose_taste tool (cat-auth)
+  // F221 Phase B: taste proposal callback route (cat-auth; cats reach it via cat_cafe_remember target taste)
   await app.register(callbackProposeTasteRoutes, {
     registry,
     tasteProposalStore,
@@ -7117,7 +7249,10 @@ async function main(): Promise<void> {
   });
   await app.register(exportRoutes, { messageStore, threadStore });
   await app.register(debugInvocationExportRoutes, { projectRoot: findMonorepoRoot(process.cwd()) });
-  await app.register(configRoutes, { threadStore });
+  await app.register(configRoutes, {
+    threadStore,
+    builtinThemesRoot: join(runtimeEntrypointRoot, 'packages/web/public/pdl/themes'),
+  });
   await app.register(configSecretsRoutes);
   await app.register(rulesRoutes);
   await app.register(promptInjectionRoutes);
@@ -7824,10 +7959,6 @@ async function main(): Promise<void> {
     }
   });
 
-  // F192 Phase I: the observer is created after listen alongside the scheduler
-  // delivery boundary, so register cleanup now and late-bind its handle below.
-  let designGateThresholdObserver: { close(): void } | null = null;
-  app.addHook('onClose', async () => designGateThresholdObserver?.close());
   let processCpuCapture: { close(): Promise<void> } | undefined;
   app.addHook('onClose', async () => processCpuCapture?.close());
   let detachManagedWaitEvents: (() => void) | undefined;
@@ -7948,12 +8079,21 @@ async function main(): Promise<void> {
           },
           childRecovery.invocationIds,
         );
+        // F337: continuations still owed — sleeps promised before this restart, and turns the previous
+        // stop cut off — recovered from the durable owed set (delivery is idempotent and skips cats
+        // that already ran again).
+        const owedContinuation = await recoverOwedContinuations({
+          turns: turnExecutionStore,
+          scheduler: hostSleepContinuation,
+          log: app.log,
+        }).catch((error: unknown) => ({ error: String(error) }));
         app.log.info(
           {
             authRecovery,
             childRecovery,
             startupRecovery,
             restartContinuation,
+            owedContinuation,
             windowsJobRecovery: { released: windowsJobTeardowns.released, ...windowsJobEvidence },
           },
           '[api] F298 callback auth + TurnExecution + Queue/History startup recovery completed',
@@ -8341,7 +8481,7 @@ async function main(): Promise<void> {
   const hydrated = taskRunnerV2.hydrateDynamic(dynamicTaskStore, templateRegistry);
   if (hydrated > 0) app.log.info(`[api] F139: hydrated ${hydrated} dynamic task(s)`);
 
-  // F192 livefix OQ-17: Register daily + weekly eval domain tasks (reads eval-domains/*.yaml, triggers eval cats)
+  // Retired automatic task identities remain visible in the schedule overview.
   const { createEvalDomainDailySpec, createEvalDomainWeeklySpec } = await import(
     './infrastructure/harness-eval/domain/eval-domain-daily.js'
   );
@@ -8355,9 +8495,8 @@ async function main(): Promise<void> {
   //   eval:capability-wakeup wired iff toolEventLog + skillLoadEventLog exist;
   //   eval:memory wired iff memoryServices.markerQueue exists (always-present in
   //     production but gated for parity with test/edge configs).
-  // This gates scheduled daily/weekly invocations' publish instructions on actual runtime support
-  // — without this, scheduled eval would tell cat to publish even when no Redis/markers →
-  // handler 501 → wasted run. Mirrors the eval-hub.ts route-layer gating.
+  // Gate retained F311 on-demand publish instructions on actual runtime support,
+  // matching the eval-hub route's generators. Automatic evaluation is retired.
   const wiredPublishDomains = new Set<EvalDomainId>(['eval:a2a']);
   wiredPublishDomains.add('eval:external-case-closure');
   wiredPublishDomains.add('eval:task-outcome');
@@ -8366,7 +8505,7 @@ async function main(): Promise<void> {
   wiredPublishDomains.add('eval:sop');
   // F245 PR1b: eval:friction provider is unconditionally wired (pure ctor; embedding
   // optional). Mirror task-outcome — unconditional add (must match the verdictGenerators
-  // map above, else split-brain: scheduled fire would 501).
+  // map above, else an on-demand invocation could advertise an unavailable generator).
   wiredPublishDomains.add('eval:friction');
   // F236 Track-2: eval:anchor-first provider is unconditionally wired (pure ctor,
   // no store deps — wraps in-memory getAnchorTelemetryRollup). Same rationale as friction.
@@ -8383,45 +8522,9 @@ async function main(): Promise<void> {
   if (memoryServices.markerQueue) {
     wiredPublishDomains.add('eval:memory');
   }
-  // Direction B (clowder-ai#923 fix): per-domain publish-prereq probe.
-  // wiredPublishDomains answers "is the generator registered?" but a stale runtime can
-  // have the generator AND lack the sourceRefs validator that current eval cats expect.
-  // This probe runs once per (domain, cron fire) — its first call dynamically imports
-  // the adapter and caches the result; the cached value answers all subsequent calls.
-  // Unknown domains pass through (true) — only domains with a registered probe can fail
-  // closed. Adding a domain to the switch is opt-in defense; omitting one is no-op.
-  const publishPrereqCache = new Map<string, boolean>();
-  const publishPrereqProbe = async (domainId: EvalDomainId): Promise<boolean> => {
-    const cached = publishPrereqCache.get(domainId);
-    if (cached !== undefined) return cached;
-    let ok: boolean;
-    try {
-      if (domainId === 'eval:a2a') {
-        // 砚砚 R1 P1 fix: `isA2aSourceRefs` is exported from `validation.ts`, not from
-        // `a2a-generator-adapter.ts` (the adapter imports + calls it but does not re-export).
-        // Probing the adapter's namespace would always miss the symbol → probe would mark
-        // a healthy runtime as "missing prereq" → eval:a2a skipped forever (P1).
-        const mod = await import('./infrastructure/harness-eval/publish-verdict/validation.js');
-        // isA2aSourceRefs is the post-fix validator; absence on a stale runtime means
-        // the publish flow will throw infra blockers when the cat calls publish_verdict.
-        ok = typeof (mod as { isA2aSourceRefs?: unknown }).isA2aSourceRefs === 'function';
-      } else {
-        ok = true; // Future per-domain probes plug in here.
-      }
-    } catch {
-      ok = false;
-    }
-    publishPrereqCache.set(domainId, ok);
-    return ok;
-  };
   const evalScheduleOpts = {
     harnessFeedbackRoot: resolve(repoRoot, 'docs', 'harness-feedback'),
-    threadStore,
     defaultUserId: getOwnerUserId(),
-    listDynamicTasks: () => dynamicTaskStore.getAll(),
-    redis: redisClient ?? undefined,
-    wiredPublishDomains,
-    publishPrereqProbe,
     triggerStore: redisClient
       ? new (
           await import('./infrastructure/harness-eval/domain/eval-domain-trigger-store.js')
@@ -8433,10 +8536,7 @@ async function main(): Promise<void> {
   // F245 PR2: N-day cadence — eval:friction runs every-3d (not weekly)
   taskRunnerV2.register(createEvalDomainNDaySpec(evalScheduleOpts));
 
-  // F192 Phase I: replay the current F303 cumulative source map at startup and observe
-  // later durable YAML revisions through the same dispatcher/receipt plane as weekly cron.
-  // A missed/degraded watch is recovered by startup replay and the weekly time fallback.
-  const designGateTriggerProvider = designGateEpisodeSourceProvider;
+  // Preserve F311 explicit round delivery during migration; threshold events return retired.
   const evalDomainTriggerStore = evalScheduleOpts.triggerStore;
   if (evalDomainTriggerStore) {
     const { dispatchEvolutionProgramThresholdTrigger } = await import(
@@ -8464,175 +8564,21 @@ async function main(): Promise<void> {
         wiredPublishDomains,
       });
   }
-  if (designGateTriggerProvider && evalDomainTriggerStore) {
-    const { loadDesignGateThresholdDomain, observeDesignGateThresholdTrigger, startDesignGateThresholdObserver } =
-      await import('./infrastructure/harness-eval/design-gate/design-gate-threshold-trigger.js');
-    const designGateDomain = loadDesignGateThresholdDomain(evalScheduleOpts.harnessFeedbackRoot);
-    if (designGateDomain) {
-      designGateThresholdObserver = startDesignGateThresholdObserver({
-        sourceMapRoot: resolve(evalScheduleOpts.harnessFeedbackRoot, 'design-gate', 'source-maps'),
-        observe: () =>
-          observeDesignGateThresholdTrigger({
-            provider: designGateTriggerProvider,
-            domain: designGateDomain,
-            store: evalDomainTriggerStore,
-            deliver: schedulerDeliver,
-            defaultUserId: evalScheduleOpts.defaultUserId,
-            wiredPublishDomains,
-            threadStore,
-            redis: redisClient ?? undefined,
-          }),
-        logger: {
-          info: (details, message) => app.log.info(details, message),
-          warn: (details, message) => app.log.warn(details, message),
-        },
-      });
-    } else {
-      app.log.info('[api] F192 Phase I: design-gate threshold observer disabled by domain registry');
-    }
-  }
+  // F192 automatic source-map observation/startup replay is retired.
 
-  // F266: lifecycle reconciliation is Redis-gated. It only appends canonical
-  // lifecycle facts; projections stay pure and no Git/GitHub mutation port is wired.
-  if (reevalClosureEventLog && redis) {
-    const [
-      { createReevalClosureTaskSpec, loadReevalClosureSubjects },
-      { getEvalCatOverride },
-      { ReevalCaseResponsibilityService },
-      { ReevalCaseReevaluationService },
-      { createReevalCaseTaskQueueAdmission, ReevalCaseTaskDispatcher },
-      { resolveUniqueFeatureThreadId },
-    ] = await Promise.all([
-      import('./infrastructure/harness-eval/reeval-closure-task-spec.js'),
-      import('./infrastructure/harness-eval/domain/eval-domain-override.js'),
-      import('./infrastructure/harness-eval/reeval-case-responsibility.js'),
-      import('./infrastructure/harness-eval/reeval-case-reevaluation.js'),
-      import('./infrastructure/harness-eval/reeval-case-task-dispatch.js'),
-      import('./routes/feature-thread-resolver.js'),
-    ]);
-    const f266AdmissionService = actionSuccessorAdmissionService;
-    const taskDispatcher = f266AdmissionService
-      ? new ReevalCaseTaskDispatcher({
-          log: { warn: app.log.warn.bind(app.log) },
-          admit: createReevalCaseTaskQueueAdmission(async (request) => {
-            if (!socketManager) return { outcome: 'not_admitted' };
-            const a2aDeps = {
-              socketManager,
-              messageStore,
-              ...(invocationTracker ? { invocationTracker } : {}),
-              ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
-              queueProcessor,
-              invocationQueue,
-              log: app.log,
-            };
-            // Exact fan-out and action provenance are decided before atomic admission.
-            const plan = planA2AFanoutAdmission(
-              { invocationQueue },
-              {
-                targetCats: [request.targetCatId],
-                content: request.message.content,
-                userId: request.userId,
-                ownerAuthProvenance: 'unknown',
-                threadId: request.threadId,
-                createdAt: request.message.timestamp ?? Date.now(),
-                callerCatId: request.callerCatId,
-                actionSuccessorFence: request.actionSuccessorFence,
-              },
-            );
-            if (!plan.acceptedTargetCats.includes(request.targetCatId)) {
-              return { outcome: 'not_admitted' };
-            }
-            // INV-I1: one transaction for the carrier Message and its Queue row.
-            const admission = await appendA2ASourceWithLedgerAdmission(
-              { messageStore, invocationQueue },
-              request.message,
-              {
-                plan,
-                ownerAuthProvenance: 'unknown',
-                actionSuccessorFence: request.actionSuccessorFence,
-              },
-            );
-            // Queue commit is the durable boundary (INV-I2). Publication only wakes a drain the
-            // admitted row already entitles, so its failure must not un-admit the carrier — the
-            // old code reported `carrier_delivery_failed` here while the work really was durable.
-            try {
-              await enqueueA2ATargets(a2aDeps, {
-                targetCats: [request.targetCatId],
-                content: request.message.content,
-                userId: request.userId,
-                ownerAuthProvenance: 'unknown',
-                threadId: request.threadId,
-                triggerMessage: admission.message,
-                callerCatId: request.callerCatId,
-                actionSuccessorFence: request.actionSuccessorFence,
-                preplannedAdmission: plan,
-                ...(admission.preAdmittedEntries
-                  ? {
-                      preAdmittedEntries: admission.preAdmittedEntries,
-                      preAdmittedReplayed: admission.preAdmittedReplayed,
-                    }
-                  : {}),
-              });
-            } catch (error) {
-              app.log.warn(
-                {
-                  err: error,
-                  messageId: admission.message.id,
-                  leaseId: request.actionSuccessorFence.leaseId,
-                  leaseGeneration: request.actionSuccessorFence.generation,
-                },
-                'F266 stable-case carrier publication failed after durable admission; the Queue row stands',
-              );
-            }
-            return { outcome: 'admitted', messageId: admission.message.id };
-          }),
-        })
-      : undefined;
-    const responsibilityService =
-      f266AdmissionService && taskDispatcher
-        ? new ReevalCaseResponsibilityService({
-            taskStore,
-            eventLog: reevalClosureEventLog,
-            admissionService: f266AdmissionService,
-            taskDispatcher,
-            resolveFeatureThreadId: (featureId, ownerUserId) =>
-              resolveUniqueFeatureThreadId(threadStore, backlogStore, ownerUserId, featureId, app.log),
-            ownerUserId: privateUserId,
-          })
-        : undefined;
-    const reevaluationService =
-      f266AdmissionService && taskDispatcher
-        ? new ReevalCaseReevaluationService({
-            taskStore,
-            eventLog: reevalClosureEventLog,
-            admissionService: f266AdmissionService,
-            taskDispatcher,
-            ownerUserId: privateUserId,
-          })
-        : undefined;
-    taskRunnerV2.register(
-      createReevalClosureTaskSpec({
-        eventLog: reevalClosureEventLog,
-        loadSubjects: () =>
-          loadReevalClosureSubjects({
-            harnessFeedbackRoot: evalHarnessFeedbackRoot,
-            eventLog: reevalClosureEventLog,
-            ...(f266Cutover.status === 'active' ? { frictionV3Cutover: f266Cutover.rootActivation } : {}),
-            resolveAssignedEvalCatId: async (domainId, registryCatId) =>
-              (await getEvalCatOverride(redis, domainId))?.catId ?? registryCatId,
-          }),
-        ...(responsibilityService ? { responsibilityService } : {}),
-        ...(reevaluationService ? { reevaluationService } : {}),
-        log: { info: app.log.info.bind(app.log), warn: app.log.warn.bind(app.log) },
-      }),
-    );
-    app.log.info('[api] F266: eval verdict closure reconciler registered');
-  }
+  // Keep the retired scheduler identity visible without composing automatic repair dispatchers.
+  const { createReevalClosureTaskSpec } = await import('./infrastructure/harness-eval/reeval-closure-task-spec.js');
+  taskRunnerV2.register(createReevalClosureTaskSpec());
+  app.log.info('[api] F192/F266: automatic evaluation and closure reconciliation retired');
 
   if (deferredPersonMemoryReceiptStore) {
     const { ensureMemoryOperationsThread } = await import('./domains/memory/MemoryOperationsThread.js');
     taskRunnerV2.register(
       createDeferredPersonMemoryDailyTaskSpec({
+        isActorEligible: createMemoryClerkEligibility({
+          agentRegistry,
+          getConfig: (catId) => catRegistry.tryGet(catId)?.config,
+        }),
         receiptStore: deferredPersonMemoryReceiptStore,
         messageStore,
         ...(writeOpportunityTerminalLedger ? { writeOpportunityTerminalLedger } : {}),
@@ -8762,6 +8708,7 @@ async function main(): Promise<void> {
       return;
     }
     shuttingDown = true;
+    runtimeStop.begun = true;
 
     let exitCode = 0;
     try {

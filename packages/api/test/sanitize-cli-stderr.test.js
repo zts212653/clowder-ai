@@ -105,6 +105,95 @@ test('redacts URL query string entirely', () => {
   assert.ok(!out.includes('sk-abc123def456ghijklmnop'), `token leaked via query: ${out}`);
 });
 
+test('keeps natural-language questions while redacting actual URL queries', () => {
+  const input =
+    '为什么失败？我重试了三次。Why?Still failing. 怎么回事?我重试了。 https://example.test/path?code=private-code';
+  assert.equal(
+    sanitizeCliStderr(input),
+    '为什么失败？我重试了三次。Why?Still failing. 怎么回事?我重试了。 https://example.test/path?[QUERY_REDACTED]',
+  );
+});
+
+test('redacts query strings in relative HTTP requests and schemeless URLs', () => {
+  [
+    '/v1/foo?email=private-address',
+    '//example.test/path?code=private-code',
+    'example.test/path?code=private-code',
+    'https://example.test/path?q=中文',
+    'https://example.test/path?opaque-query',
+    'localhost:3000/x?token=1',
+    '127.0.0.1:3000/x?token=1',
+    '10.0.0.5:8080/path?auth=hunter2hunter2',
+    'api/v1/users?sid=deadbeef12',
+    'https://例子.测试/路径?session=private-session',
+  ].forEach((url) => {
+    const out = sanitizeCliStderr(`GET ${url} HTTP/1.1`);
+    assert.equal(out, `GET ${url.slice(0, url.indexOf('?') + 1)}[QUERY_REDACTED] HTTP/1.1`);
+  });
+});
+
+test('redacts URL queries immediately following a log or HTTP header colon', () => {
+  ['Location:', 'url:'].forEach((prefix) => {
+    assert.equal(sanitizeCliStderr(`${prefix}https://x.test/a?token=1`), `${prefix}https://x.test/a?[QUERY_REDACTED]`);
+  });
+});
+
+test('keeps Chinese question boundaries while redacting the URL that follows', () => {
+  [
+    ['为什么？https://x.test/a?token=1', '为什么？https://x.test/a?[QUERY_REDACTED]'],
+    ['？localhost:3004/x?token=1', '？localhost:3004/x?[QUERY_REDACTED]'],
+    ['为什么？api/v1/users?sid=deadbeef12', '为什么？api/v1/users?[QUERY_REDACTED]'],
+    ['(见)https://x.test/a?token=1', '(见)https://x.test/a?[QUERY_REDACTED]'],
+    ['为什么？https://x.test/a?token=1？后面', '为什么？https://x.test/a?[QUERY_REDACTED]？后面'],
+    ['为什么？我重试?了', '为什么？我重试?了'],
+  ].forEach(([input, expected]) => assert.equal(sanitizeCliStderr(input), expected));
+});
+
+test('keeps fullwidth question punctuation and conservatively redacts ambiguous filenames', () => {
+  const input =
+    '访问 https://x.test/a？页面空白\n访问 /settings？就报错\n访问 example.com？为什么打不开\nC:\\tmp\\file.txt?not-a-url';
+  assert.equal(sanitizeCliStderr(input), input.replace('?not-a-url', '?[QUERY_REDACTED]'));
+});
+
+test('redacts URL queries inside parentheses and after literal path parentheses', () => {
+  [
+    ['((https://x.test/a?token=1))', '((https://x.test/a?[QUERY_REDACTED]))'],
+    ['https://x.test/a(b?token=1', 'https://x.test/a(b?[QUERY_REDACTED]'],
+    ['fetch(localhost?sid=abcd1234)', 'fetch(localhost?[QUERY_REDACTED])'],
+  ].forEach(([input, expected]) => assert.equal(sanitizeCliStderr(input), expected));
+});
+
+['sid', 'session', 'auth', 'code'].forEach((key) => {
+  test(`redacts ${key} queries after closing path parentheses and stray question marks`, () => {
+    [
+      ['GET https://en.example.org/wiki/Foo_(bar)', ' ok'],
+      ['GET https://x.test/a)', ' ok'],
+      ['GET /api/Foo_(bar)', ' ok'],
+      ['ERR ?(localhost:3004/x', ')'],
+      ['Why?(localhost:3004/x', ')'],
+      ['ERR ?https://x.test/a', ''],
+      ['Why?https://x.test/a', ''],
+      ['ERR ??https://x.test/a', ''],
+      ['GET https://x.test/a(b(c))', ' ok'],
+      ['ERR ?(localhost:3004/x', ''],
+      ['https://x.test/a)', ''],
+    ].forEach(([prefix, suffix]) => {
+      assert.equal(sanitizeCliStderr(`${prefix}?${key}=abcd1234${suffix}`), `${prefix}?[QUERY_REDACTED]${suffix}`);
+    });
+  });
+});
+
+[':/', '(', '(/', '(a', 'a?', '?(', '?'].forEach((pattern) => {
+  test(`URL query scanning stays bounded on long ${pattern} output`, () => {
+    const input = pattern.repeat(65_536 / pattern.length);
+    const startedAt = performance.now();
+    const out = sanitizeCliStderr(input);
+    const elapsedMs = performance.now() - startedAt;
+    assert.strictEqual(out, input);
+    assert.ok(elapsedMs < 500, `64 KiB query scanning took ${elapsedMs.toFixed(1)}ms`);
+  });
+});
+
 test('redacts URL userinfo credentials while retaining the destination host', () => {
   const input = 'ERR_PNPM_NO_OFFLINE_TARBALL https://alice:review-password@registry.example.test/pkg.tgz';
   const out = sanitizeCliStderr(input);

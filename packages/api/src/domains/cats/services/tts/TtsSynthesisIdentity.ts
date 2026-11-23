@@ -10,12 +10,33 @@ import { beginTtsIdentityObservation, readCachedTtsIdentity, recordTtsIdentity }
 
 // Narrow migration compatibility for the original unprofiled backends/defaults.
 // An arbitrary repo ID or local path is not evidence of its loaded architecture.
-const legacyCacheModels = new Set(['qwen3-clone', 'mlx-audio', 'edge-tts', 'sapi', 'piper'].map(normalizeTtsModelId));
+const legacyCacheModels = new Map(
+  ['qwen3-clone', 'mlx-audio', 'edge-tts', 'sapi', 'piper'].map((backend) => [normalizeTtsModelId(backend), backend]),
+);
 
 export interface TtsSynthesisIdentity {
   readonly model: string;
   readonly generationProfile: string | null;
   readonly cacheOnly: boolean;
+  readonly referenceAudioSupport?: boolean;
+  readonly referenceAudioContentSupport?: boolean;
+  readonly voiceIdSupport?: boolean;
+  readonly backend?: string;
+}
+
+function voiceCapabilities(backend: string | undefined) {
+  switch (backend) {
+    case 'qwen3-clone':
+      return { referenceAudioSupport: true, voiceIdSupport: false };
+    case 'mlx-audio':
+    case 'edge-tts':
+      return { referenceAudioSupport: false, voiceIdSupport: true };
+    case 'sapi':
+    case 'piper':
+      return { referenceAudioSupport: false, voiceIdSupport: false };
+    default:
+      return {};
+  }
 }
 
 export function readGenerationProfile(value: unknown): string | null {
@@ -58,12 +79,17 @@ export async function prepareTtsIdentity(
       if (selectedModel && normalizeTtsModelId(receipt.model) !== normalizeTtsModelId(selectedModel)) {
         throw new Error('Cached TTS identity differs from the selected model');
       }
-      return { model: receipt.model, generationProfile: receipt.generationProfile, cacheOnly: true };
+      return { ...receipt, cacheOnly: true, ...voiceCapabilities(receipt.backend) };
     }
     // Only evidenced legacy models may probe their pre-profile namespace.
     // Unknown/custom models need a live observation, regardless of their name.
     if (selectedModel && legacyCacheModels.has(normalizeTtsModelId(selectedModel))) {
-      return { model: selectedModel, generationProfile: null, cacheOnly: true };
+      return {
+        model: selectedModel,
+        generationProfile: null,
+        cacheOnly: true,
+        ...voiceCapabilities(legacyCacheModels.get(normalizeTtsModelId(selectedModel))),
+      };
     }
     if (selectedModel)
       throw new TtsCacheIdentityError(
@@ -80,10 +106,19 @@ export async function prepareTtsIdentity(
     model = normalizeTtsModelId(identity);
   }
   verifyHealth(health, model);
+  const backend = ['qwen3-clone', 'mlx-audio', 'edge-tts', 'sapi', 'piper'].includes(String(health.details?.backend))
+    ? String(health.details?.backend)
+    : undefined;
   const identity = {
     model,
     generationProfile: readGenerationProfile(health.details?.generation_profile),
     cacheOnly: false,
+    ...(backend ? { backend } : {}),
+    ...voiceCapabilities(backend),
+    referenceAudioContentSupport:
+      backend === 'qwen3-clone' &&
+      Array.isArray(health.details?.capabilities) &&
+      health.details.capabilities.includes('reference-audio-content-v1'),
   };
   if (observation) recordTtsIdentity(observation, identity);
   return identity;

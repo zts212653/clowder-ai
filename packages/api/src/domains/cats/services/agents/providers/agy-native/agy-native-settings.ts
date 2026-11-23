@@ -10,10 +10,21 @@ export interface AgyNativeSettingsInput {
   readonly policy: ReturnType<typeof buildAgyNativePolicy>;
   /** Account admission is monotonic across concurrently admitted workspaces. */
   readonly retainTrustedWorkspaces?: boolean;
+  /** Shared account baselines tolerate benign CLI UI keys while still blocking auth/execution overrides. */
+  readonly tolerateUnknownKeys?: boolean;
 }
 
 const PROFILE_SETTING_KEYS = new Set(['modelProvider', 'model', 'trustedWorkspaces', 'colorScheme']);
 const HOST_POLICY_KEYS = new Set(['permissions', 'toolPermission', 'enableTerminalSandbox', 'allowNonWorkspaceAccess']);
+const FORBIDDEN_OVERRIDE_KEYS = new Set([
+  'auth',
+  'apiKey',
+  'statusLine',
+  'hooks',
+  'mcpServers',
+  'commandExecutionPolicy',
+  'baseUrl',
+]);
 
 function requireSafeDirectory(path: string): void {
   const stat = lstatSync(path);
@@ -55,11 +66,20 @@ export function materializeAgyNativeSettings(input: AgyNativeSettingsInput): str
     throw new Error('AGY native OAuth profile cannot select an API-key modelProvider');
   }
   for (const key of Object.keys(existing)) {
-    if (!PROFILE_SETTING_KEYS.has(key) && !HOST_POLICY_KEYS.has(key)) {
+    if (FORBIDDEN_OVERRIDE_KEYS.has(key)) {
+      throw new Error(`Unsupported AGY native profile setting: ${key}`);
+    }
+    if (!input.tolerateUnknownKeys && !PROFILE_SETTING_KEYS.has(key) && !HOST_POLICY_KEYS.has(key)) {
       throw new Error(`Unsupported AGY native profile setting: ${key}`);
     }
   }
-  const retained = Object.fromEntries(Object.entries(existing).filter(([key]) => PROFILE_SETTING_KEYS.has(key)));
+  const retained = Object.fromEntries(
+    Object.entries(existing).filter(
+      ([key]) =>
+        PROFILE_SETTING_KEYS.has(key) ||
+        (input.tolerateUnknownKeys && !HOST_POLICY_KEYS.has(key) && !FORBIDDEN_OVERRIDE_KEYS.has(key)),
+    ),
+  );
   const next = {
     ...retained,
     model: input.model,

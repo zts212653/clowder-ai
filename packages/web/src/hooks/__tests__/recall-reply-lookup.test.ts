@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/utils/api-client';
-import { lookupRecallReply } from '../recall-reply-lookup';
+import { lookupRecallReply, readRecallReplyPage } from '../recall-reply-lookup';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 const fetchPage = vi.mocked(apiFetch);
@@ -53,5 +53,9 @@ describe('F321 older reply lookup', () => {
     fetchPage.mockResolvedValue(new Response(JSON.stringify({ replies: [], replyCursor: request.cursor })));
     await expect(lookupRecallReply(request)).rejects.toThrow('did not advance');
     expect(fetchPage).toHaveBeenCalledOnce();
+  });
+  it('rejects an error envelope instead of exposing it as an empty reply page', async () => {
+    fetchPage.mockResolvedValue(new Response('{"error":"Unavailable"}'));
+    await expect(readRecallReplyPage(input())).rejects.toThrow('Reply projection unavailable');
   });
 });

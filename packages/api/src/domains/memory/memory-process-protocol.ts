@@ -1,4 +1,5 @@
 import type { EntityConflictResolutionRequest } from '@cat-cafe/shared';
+import type { FileVectorReadWindowSnapshot } from './file-vector-read-window.js';
 import type { EmbedModelInfo, EntityMutationContext, EntityRecord, SearchOptions } from './interfaces.js';
 import type { MemoryReadDiagnostic } from './memory-read-execution.js';
 import type { MessagePassageSearchOptions } from './message-passage-search-types.js';
@@ -70,9 +71,10 @@ export type ParentMessage =
       error?: ProcessError;
     };
 export type ChildMessage =
+  | { type: 'message-vectors-started'; id: number }
   | { type: 'read-diagnostic'; id: number; diagnostic: MemoryReadDiagnostic }
-  | { type: 'result'; id: number; value?: unknown; error?: ProcessError }
-  | { type: 'started'; id: number; pid: number }
+  | { type: 'result'; id: number; value?: unknown; error?: ProcessError; readWindow?: FileVectorReadWindowSnapshot }
+  | { type: 'started'; id: number; pid: number; readWindow?: FileVectorReadWindowSnapshot }
   | { type: 'embedding'; id: number; method: 'load' | 'reprobeIfNeeded' | 'embed'; texts?: string[] };
 export function encodeProcessError(error: unknown): ProcessError {
   return error instanceof Error

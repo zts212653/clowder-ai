@@ -5,7 +5,7 @@
  * Used by route-serial / route-parallel tool_result handler to merge
  * result-side data back into the event log via ToolEventLog.updateSummary().
  *
- * MCP tool wrappers (evidence-tools, graph-tools, recent-tools) embed
+ * MCP tool wrappers (evidence-tools; graph_resolve/list_recent until F332 F2 retired them) embed
  * machine-readable result markers in their text output; this parser
  * extracts the structured summary the aggregator needs.
  */
@@ -76,6 +76,8 @@ export function deriveResultSummary(normalizedToolName: string, content: unknown
       return derivePersonMemoryProposalResult(text);
     case 'record_proactive_memory_abstention':
       return deriveProactiveMemoryAbstentionResult(text);
+    case 'remember':
+      return deriveRememberResult(text);
     default:
       return deriveGenericError(text) ?? {};
   }
@@ -102,6 +104,48 @@ function deriveProactiveMemoryAbstentionResult(text: string): ResultSummary {
   const value = parseExactJsonRecord(text, ['status']);
   if (value?.status !== 'recorded') return {};
   return { proactiveMemoryOutcome: 'abstention_recorded' };
+}
+
+/**
+ * cat_cafe_remember forwards each item to its original route (2026-11-13 the per-kind tools left the
+ * cat surface). Only accepted person / person_defer / person_abstain rows become proactive-memory
+ * outcomes, keyed by itemId so the evaluator can read the matching item payload.
+ */
+function deriveRememberResult(text: string): ResultSummary {
+  // A refused row carries its own `error`; only a non-JSON callback failure is a tool error.
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return deriveGenericError(text) ?? {};
+  }
+  const results = body && typeof body === 'object' ? (body as { results?: unknown }).results : undefined;
+  if (!Array.isArray(results)) return {};
+  const outcomes = results.flatMap((row) => {
+    const outcome = rememberRowOutcome(row);
+    return outcome ? [outcome] : [];
+  });
+  return outcomes.length > 0 ? { proactiveMemoryOutcomes: outcomes } : {};
+}
+
+function rememberRowOutcome(row: unknown): { itemId: string; outcome: string } | null {
+  if (!row || typeof row !== 'object') return null;
+  const { itemId, target, statusCode, result } = row as Record<string, unknown>;
+  if (typeof itemId !== 'string' || typeof statusCode !== 'number' || statusCode < 200 || statusCode >= 300)
+    return null;
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
+  const value = result as Record<string, unknown>;
+  if (target === 'person') {
+    const summary = derivePersonMemoryProposalResult(JSON.stringify(value));
+    return summary.proactiveMemoryOutcome === 'proposal_submitted' ? { itemId, outcome: 'proposal_submitted' } : null;
+  }
+  if (target === 'person_defer')
+    return typeof value.receiptId === 'string' && typeof value.status === 'string' && value.status !== 'stale_ignored'
+      ? { itemId, outcome: 'deferred_receipt_recorded' }
+      : null;
+  if (target === 'person_abstain')
+    return value.status === 'recorded' ? { itemId, outcome: 'abstention_recorded' } : null;
+  return null;
 }
 
 function parseExactJsonRecord(text: string, allowedKeys: readonly string[]): Record<string, unknown> | null {
@@ -186,6 +230,28 @@ function extractText(content: unknown): string {
   return '';
 }
 
+/**
+ * F332 find: beside other find groups a coverage page may use compact rows — one `rows: anchor [matchType] [fields]`
+ * header, then `  anchor: <anchor> [matchType:x] [values]` per row, where a sourcePath equal to the anchor is "=".
+ * Returns a reader of one row block's sourcePath so the same original Read still pairs with its candidate.
+ */
+function compactCoverageSourcePathReader(text: string): (block: string, anchor: string) => string | undefined {
+  const header = /^rows: anchor \[matchType\] \[([^\]]*)\]/m.exec(text);
+  const index = header ? header[1]!.split(', ').indexOf('sourcePath') : -1;
+  if (index < 0) return () => undefined;
+  return (block, anchor) => {
+    const row = /^\s+anchor:\s+\S+ \[matchType:[^\]]+\] (\[.*\])$/m.exec(block)?.[1];
+    if (!row) return undefined;
+    try {
+      const value = (JSON.parse(row) as unknown[])[index];
+      if (value === '=') return anchor;
+      return typeof value === 'string' && value ? value : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+}
+
 function deriveSearchEvidence(text: string): ResultSummary {
   const meta = parseRecallMetaFromText(text);
   const summary: ResultSummary = meta ? { ...meta } : {};
@@ -221,6 +287,7 @@ function deriveSearchEvidence(text: string): ResultSummary {
   // lines pair to their own anchor instead of a global regex drifting
   // across result blocks when sourcePath is absent on some results.
   const f200Cands: Array<{ anchor: string; rank: number; docKind?: string; sourcePath?: string }> = [];
+  const compactSourcePath = compactCoverageSourcePathReader(text);
   const anchorMatches = [...text.matchAll(/^\s+anchor:\s+(\S+)/gm)];
   for (let i = 0; i < anchorMatches.length; i++) {
     const anchor = anchorMatches[i]![1]!;
@@ -228,7 +295,7 @@ function deriveSearchEvidence(text: string): ResultSummary {
     const blockEnd = i + 1 < anchorMatches.length ? (anchorMatches[i + 1]!.index ?? text.length) : text.length;
     const block = text.slice(blockStart, blockEnd);
     const docKind = /^\s+type:\s+(\S+)/m.exec(block)?.[1];
-    const sourcePath = /^\s+sourcePath:\s+(\S+)/m.exec(block)?.[1];
+    const sourcePath = /^\s+sourcePath:\s+(\S+)/m.exec(block)?.[1] ?? compactSourcePath(block, anchor);
     f200Cands.push({ anchor, rank: f200Cands.length, docKind, ...(sourcePath ? { sourcePath } : {}) });
   }
   if (f200Cands.length > 0) summary._f200Candidates = f200Cands;

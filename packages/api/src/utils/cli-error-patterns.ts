@@ -36,8 +36,8 @@ const PEM = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVAT
 // URL userinfo. Anchoring the scheme after a non-scheme character prevents the
 // engine from retrying an unbounded scheme prefix at every word boundary.
 const URL_USERINFO = /(^|[^a-z0-9+.-])([a-z][a-z0-9+.-]*:\/\/)[^/\s'"<>@]+@/gi;
-// URL query — everything after ? until whitespace or closing quote/paren
-const URL_QUERY = /(\?)([^\s'"<>)]+)/g;
+// Tokenize once; the sanitizer scans query delimiters without treating URL parentheses as boundaries.
+const URL_QUERY = /[^\s'"<>？]+/g;
 // URL fragment — OAuth implicit/callback flows often place access_token/state after #.
 // Redact only fragments carrying sensitive keys so ordinary issue anchors remain readable.
 const URL_FRAGMENT = /(#)(?=[^\s'"<>)\n]*(?:access_token|id_token|refresh_token|state|code)=)([^\s'"<>)]+)/gi;
@@ -217,7 +217,8 @@ export const CLASSIFIER_PATTERNS: Array<{ code: CliErrorReasonCode; regex: RegEx
   },
   {
     code: 'spawn_failed',
-    regex: /(spawn.*ENOENT|spawn.*EACCES|ENOENT.*spawn|EACCES.*spawn)/i,
+    regex:
+      /\bspawn(?:Sync)?\b[^\r\n]*\b(ENOENT|EACCES|EPERM|UNKNOWN|ENOEXEC)\b|\b(ENOENT|EACCES|EPERM|UNKNOWN|ENOEXEC)\b[^\r\n]*\bspawn(?:Sync)?\b/i,
   },
   {
     code: 'context_window_exceeded',

@@ -2,12 +2,16 @@ import { deploymentDefaults } from '@cat-cafe/shared';
 import { isPathAllowed } from '../utils/path-validator.js';
 import { authorizeInvocationTool, invocationFetch, resolveInvocationEnv } from './invocation-auth.js';
 
-export async function handlePublishedFileSlice(input: {
-  path: string;
-  startLine: number;
-  endLine?: number;
-  charOffset?: number;
-}) {
+export async function handlePublishedFileSlice(
+  input: {
+    path: string;
+    startLine: number;
+    endLine?: number;
+    charOffset?: number;
+    expectedRevision?: string;
+  },
+  authorityToolName = 'cat_cafe_read_file_slice',
+) {
   const match = /^cat-cafe:\/\/published\/([a-f0-9]{16})\/([^/?#]+)$/u.exec(input.path);
   if (!match) return failure('Invalid published source reference');
   let anchor: string;
@@ -16,7 +20,7 @@ export async function handlePublishedFileSlice(input: {
   } catch {
     return failure('Invalid published source reference encoding');
   }
-  await authorizeInvocationTool('cat_cafe_read_file_slice');
+  await authorizeInvocationTool(authorityToolName);
   const userId = resolveInvocationEnv('CAT_CAFE_USER_ID')?.trim();
   const base = resolveInvocationEnv('CAT_CAFE_API_URL') ?? deploymentDefaults.apiBaseUrl;
   const params = new URLSearchParams({
@@ -43,11 +47,28 @@ export async function handlePublishedFileSlice(input: {
     };
     if (!data.authorizationPath || !isPathAllowed(data.authorizationPath))
       return failure('Access denied: published source is not within allowed directories');
-    await authorizeInvocationTool('cat_cafe_read_file_slice');
+    await authorizeInvocationTool(authorityToolName);
+    if (input.expectedRevision !== undefined && input.expectedRevision !== data.sourceVersion)
+      return failure('source_revision_changed; restart from the current published source');
     const next = data.next
       ? `\nSource continues; next slice: cat_cafe_read_file_slice(${JSON.stringify({ path: input.path, ...data.next })})`
       : '';
     return {
+      structuredContent: {
+        version: data.sourceVersion,
+        complete: !data.next,
+        ...(data.next
+          ? {
+              nextRef: {
+                kind: 'file',
+                path: input.path,
+                ...data.next,
+                endLine: data.next.startLine + (input.endLine === undefined ? 119 : input.endLine - input.startLine),
+                expectedRevision: data.sourceVersion,
+              },
+            }
+          : {}),
+      },
       content: [
         {
           type: 'text' as const,

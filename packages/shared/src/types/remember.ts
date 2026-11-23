@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { MatterWriteRef } from './matter-memory.js';
 
 export const REMEMBER_TARGETS = [
   'profile',
@@ -11,6 +12,11 @@ export const REMEMBER_TARGETS = [
   'event_correction',
   'matter',
 ] as const;
+/** Targets whose original tools never posted a chat card; remember keeps them off the group card too. */
+export const REMEMBER_QUIET_TARGETS: ReadonlySet<(typeof REMEMBER_TARGETS)[number]> = new Set([
+  'person_defer',
+  'person_abstain',
+]);
 export const rememberItemSchema = z
   .object({
     itemId: z.string().min(1).max(64),
@@ -39,6 +45,9 @@ export interface RememberGroupRow {
   proposalId?: string;
   messageId?: string;
   resultRef?: string;
+  matterWriteRef?: MatterWriteRef;
+  /** Original subject reference for reading a person revision through its owner page. */
+  personId?: string;
   status?: string;
   error?: string;
 }
@@ -55,6 +64,7 @@ export interface RememberRowResult {
 }
 export interface RememberResult {
   groupId: string;
-  messageId: string;
+  /** Absent when every item was quiet, so no group card was posted. */
+  messageId?: string;
   results: RememberRowResult[];
 }

@@ -77,7 +77,7 @@ export const pluginNativeActionRoutes: FastifyPluginAsync<PluginNativeActionRout
       'Native plugin invocation verified',
     );
     let fence: ReturnType<typeof captureNativeCallbackCurrentness> | undefined;
-    const onAbort = () => fence?.close();
+    const onAbort = () => fence?.close('cancelled');
     const onClose = () => {
       if (!reply.raw.writableEnded) onAbort();
     };

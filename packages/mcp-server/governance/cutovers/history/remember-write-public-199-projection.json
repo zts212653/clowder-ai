@@ -1,0 +1,48 @@
+{
+  "targetHead": "1ac5dfe475b86aa7119984be56d6a2663b445df3",
+  "baselineBlob": "7b94a3d9e5c435112bfa9d1fba4d6b034e42e639",
+  "beforeCount": 199,
+  "afterCount": 191,
+  "removedEntries": [
+    {
+      "name": "cat_cafe_defer_person_memory_delta",
+      "resourceFamily": "memory-write",
+      "runtimeProfiles": ["full"]
+    },
+    {
+      "name": "cat_cafe_propose_entity",
+      "resourceFamily": "identity-proposal",
+      "runtimeProfiles": ["full"]
+    },
+    {
+      "name": "cat_cafe_propose_event_memory_correction",
+      "resourceFamily": "identity-proposal",
+      "runtimeProfiles": ["full"]
+    },
+    {
+      "name": "cat_cafe_propose_person_memory",
+      "resourceFamily": "person-memory",
+      "runtimeProfiles": ["full"]
+    },
+    {
+      "name": "cat_cafe_propose_profile_update",
+      "resourceFamily": "identity-proposal",
+      "runtimeProfiles": ["full"]
+    },
+    {
+      "name": "cat_cafe_propose_taste",
+      "resourceFamily": "identity-proposal",
+      "runtimeProfiles": ["full"]
+    },
+    {
+      "name": "cat_cafe_record_proactive_memory_abstention",
+      "resourceFamily": "memory-write",
+      "runtimeProfiles": ["full"]
+    },
+    {
+      "name": "cat_cafe_write_memory_matter",
+      "resourceFamily": "memory-matter",
+      "runtimeProfiles": ["full"]
+    }
+  ]
+}

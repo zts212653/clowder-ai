@@ -57,11 +57,11 @@ export function resolveUserCapsule(profileDir: string, relationshipKey: string) 
   const entries = [
     [
       relationshipPrimerRelativePath(relationshipKey),
-      `关系轨迹: ${CURRENT_RELATIONSHIP_PROFILE_URI}（cat_cafe_read_profile 按需读）`,
+      `关系轨迹: ${CURRENT_RELATIONSHIP_PROFILE_URI}（cat_cafe_read_memory ref={kind:"profile",layer:"primer"} 按需读）`,
     ],
     [
       profileCorpusRelativePath(),
-      `共享事实: ${CURRENT_CORPUS_PROFILE_URI}（cat_cafe_read_profile layer=corpus 按需读）`,
+      `共享事实: ${CURRENT_CORPUS_PROFILE_URI}（cat_cafe_read_memory ref={kind:"profile",layer:"corpus"} 按需读）`,
     ],
   ].flatMap(([path, entry]) => {
     try {

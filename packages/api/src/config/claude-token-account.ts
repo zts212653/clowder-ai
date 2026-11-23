@@ -1,6 +1,7 @@
 /** F320: token identity is private; session/config roots continue to belong to the host. */
 import { createHash } from 'node:crypto';
 import type { AccountConfig, CredentialEntry, ExecutionAccountSnapshot } from '@cat-cafe/shared';
+import { claudeQuotaCredentialVersion } from './claude-quota-identity.js';
 
 interface ClaudeExecutionAccountInput {
   id: string;
@@ -22,11 +23,13 @@ export function claudeTokenEnvironment(credential?: CredentialEntry): Record<str
   return { CLAUDE_CODE_OAUTH_TOKEN: credential.accessToken };
 }
 export function claudeExecutionAccountSnapshot(account: ClaudeExecutionAccountInput): ExecutionAccountSnapshot {
+  const credentialVersion = claudeQuotaCredentialVersion(account);
   return Object.freeze({
     accountRef: account.id,
     displayName: account.displayName ?? account.id,
     authType: account.authType,
-    accountRevision: createHash('sha256').update(JSON.stringify(account)).digest('hex'),
+    accountRevision: createHash('sha256').update(JSON.stringify({ account, credentialVersion })).digest('hex'),
+    ...(credentialVersion ? { credentialVersion } : {}),
     // auth status reports loggedIn even for fake tokens; no verified identity is manufactured.
   });
 }

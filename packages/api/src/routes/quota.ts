@@ -25,6 +25,14 @@ import { type CodexAccountLaunchDescriptor, resolveCodexAccountLaunch } from '..
 import type { RoutingQuotaSnapshotObserver } from '../domains/routing-context/F051QuotaRoutingSignalAdapter.js';
 import { resolveCliCommand } from '../utils/cli-resolve.js';
 import { fetchCodexQuota } from './codex-quota-fetch.js';
+import {
+  hasUnclosedSynchronizedOutput,
+  parseKimiCliUsageOutput,
+  parseKimiRelativeDurationMs,
+  renderTerminalScreenRows,
+} from './kimi-cli-usage-parser.js';
+
+export { parseKimiCliUsageOutput, parseKimiRelativeDurationMs, renderTerminalScreenRows };
 
 const execFileAsync = promisify(execFile);
 
@@ -241,7 +249,7 @@ const CODEX_CREDENTIALS_PATH_ENV = 'CODEX_CREDENTIALS_PATH';
 const KIMI_AUTH_TOKEN_ENV = 'KIMI_AUTH_TOKEN';
 const KIMI_QUOTA_API_FALLBACK_ENABLED_ENV = 'KIMI_QUOTA_API_FALLBACK_ENABLED';
 const KIMI_CLI_PROBE_TIMEOUT_MS = 15_000;
-const KIMI_CLI_IDLE_SETTLE_MS = 350;
+const KIMI_CLI_IDLE_SETTLE_MS = 2_500;
 
 function isTruthyFlag(raw: string | undefined): boolean {
   if (!raw) return false;
@@ -363,42 +371,6 @@ export function listQuotaProbeDescriptors(env: NodeJS.ProcessEnv = process.env):
   ];
 }
 
-function stripAnsi(text: string): string {
-  return text.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
-}
-
-export function parseKimiCliUsageOutput(text: string): CodexUsageItem[] {
-  const cleaned = stripAnsi(text);
-  const items: CodexUsageItem[] = [];
-  for (const line of cleaned.split(/\r?\n/)) {
-    const lower = line.toLowerCase();
-    const percentMatch = line.match(/(\d+)%\s+left/i);
-    if (!percentMatch) continue;
-    const remaining = normalizePercent(Number.parseInt(percentMatch[1] ?? '', 10));
-    const resetMatch = line.match(/\(resets\s+in\s+(.+?)\)/i);
-    if (lower.includes('weekly')) {
-      items.push({
-        label: '每周使用限额',
-        usedPercent: remaining,
-        percentKind: 'remaining',
-        poolId: 'kimi-weekly',
-        ...(resetMatch?.[1] ? { resetsText: `Resets in ${resetMatch[1].trim()}` } : {}),
-      });
-      continue;
-    }
-    if (lower.includes('5h') || lower.includes('5 hour') || lower.includes('5-hour')) {
-      items.push({
-        label: '5小时使用限额',
-        usedPercent: remaining,
-        percentKind: 'remaining',
-        poolId: 'kimi-rate-limit',
-        ...(resetMatch?.[1] ? { resetsText: `Resets in ${resetMatch[1].trim()}` } : {}),
-      });
-    }
-  }
-  return items;
-}
-
 const KIMI_BILLING_URL = 'https://www.kimi.com/apiv2/kimi.gateway.billing.v1.BillingService/GetUsages';
 
 interface KimiUsageResponse {
@@ -431,30 +403,66 @@ function resolveKimiAuthToken(env: NodeJS.ProcessEnv = process.env): string | nu
   return null;
 }
 
-async function probeKimiQuotaViaCli(env: NodeJS.ProcessEnv = process.env): Promise<CodexUsageItem[]> {
-  if (kimiCliProbeOverrideForTests) return kimiCliProbeOverrideForTests(env);
+export interface KimiCliProbeOptions {
+  cliCommand?: string;
+  observedAtMs?: number;
+  onObservedAt?: (observedAtMs: number) => void;
+  sendDelayMs?: number;
+  submitDelayMs?: number;
+  startFallbackMs?: number;
+  idleSettleMs?: number;
+  probeTimeoutMs?: number;
+  isolatedEnv?: boolean;
+  spawnPty?: typeof pty.spawn;
+}
 
-  const kimiCommand = resolveCliCommand('kimi');
+export async function probeKimiQuotaViaCli(
+  env: NodeJS.ProcessEnv = process.env,
+  options?: KimiCliProbeOptions,
+): Promise<CodexUsageItem[]> {
+  if (kimiCliProbeOverrideForTests && !options?.spawnPty) {
+    const sampledAt = options?.observedAtMs ?? Date.now();
+    options?.onObservedAt?.(sampledAt);
+    return kimiCliProbeOverrideForTests(env);
+  }
+
+  const kimiCommand = options?.cliCommand ?? resolveCliCommand('kimi');
   if (!kimiCommand) throw new Error('Kimi CLI not found in PATH');
+
+  const spawnPty = options?.spawnPty ?? pty.spawn;
+  const sendDelayMs = options?.sendDelayMs ?? 150;
+  const submitDelayMs = options?.submitDelayMs ?? 200;
+  const startFallbackMs = options?.startFallbackMs ?? 4_500;
+  const idleSettleMs = options?.idleSettleMs ?? KIMI_CLI_IDLE_SETTLE_MS;
+  const probeTimeoutMs = options?.probeTimeoutMs ?? KIMI_CLI_PROBE_TIMEOUT_MS;
+  const childEnv: Record<string, string> = {};
+  const rawEnv = options?.isolatedEnv ? env : { ...process.env, ...env };
+  for (const [k, v] of Object.entries(rawEnv)) {
+    if (typeof v === 'string') childEnv[k] = v;
+  }
 
   return await new Promise<CodexUsageItem[]>((resolve, reject) => {
     let settled = false;
     let sentUsage = false;
+    let submittedUsage = false;
+    let enterTimer: ReturnType<typeof setTimeout> | null = null;
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let output = '';
 
-    const proc = pty.spawn(kimiCommand, [], {
+    const proc = spawnPty(kimiCommand, [], {
       name: 'xterm-color',
       cols: 120,
       rows: 40,
       cwd: process.cwd(),
-      env: { ...process.env, ...env },
+      env: childEnv,
     });
 
     const finish = (value: CodexUsageItem[] | null, error?: Error) => {
       if (settled) return;
       settled = true;
       clearTimeout(startTimer);
-      clearTimeout(idleTimer);
+      if (enterTimer) clearTimeout(enterTimer);
+      if (idleTimer) clearTimeout(idleTimer);
       clearTimeout(timeoutTimer);
       try {
         proc.kill();
@@ -465,9 +473,24 @@ async function probeKimiQuotaViaCli(env: NodeJS.ProcessEnv = process.env): Promi
       else resolve(value ?? []);
     };
 
-    const tryParse = (): boolean => {
-      const items = parseKimiCliUsageOutput(output);
-      if (items.length > 0) {
+    const armIdleSettle = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        if (hasUnclosedSynchronizedOutput(output)) return;
+        if (!tryParse(false)) {
+          finish(null, new Error('Kimi CLI /usage output did not contain quota data'));
+        }
+      }, idleSettleMs);
+    };
+
+    const tryParse = (requireComplete = false): boolean => {
+      if (hasUnclosedSynchronizedOutput(output)) return false;
+      const sampledAt = options?.observedAtMs ?? Date.now();
+      const items = parseKimiCliUsageOutput(output, sampledAt);
+      const pools = new Set(items.map((item) => item.poolId));
+      const complete = pools.has('kimi-rate-limit') && pools.has('kimi-weekly');
+      if (requireComplete ? complete : items.length >= 1) {
+        options?.onObservedAt?.(sampledAt);
         finish(items);
         return true;
       }
@@ -477,39 +500,51 @@ async function probeKimiQuotaViaCli(env: NodeJS.ProcessEnv = process.env): Promi
     const sendUsage = () => {
       if (settled || sentUsage) return;
       sentUsage = true;
-      try {
-        proc.write('/usage\r');
-      } catch (error) {
-        finish(null, error instanceof Error ? error : new Error(String(error)));
-      }
+      enterTimer = setTimeout(() => {
+        if (settled) return;
+        try {
+          proc.write('/usage');
+          enterTimer = setTimeout(() => {
+            if (settled) return;
+            submittedUsage = true;
+            try {
+              proc.write('\r');
+              armIdleSettle();
+            } catch (error) {
+              finish(null, error instanceof Error ? error : new Error(String(error)));
+            }
+          }, submitDelayMs);
+        } catch (error) {
+          finish(null, error instanceof Error ? error : new Error(String(error)));
+        }
+      }, sendDelayMs);
     };
 
-    const startTimer = setTimeout(sendUsage, 500);
-    let idleTimer = setTimeout(() => {
-      if (!tryParse()) {
-        finish(null, new Error('Kimi CLI /usage output did not contain quota data'));
-      }
-    }, KIMI_CLI_IDLE_SETTLE_MS);
+    const startTimer = setTimeout(sendUsage, startFallbackMs);
     const timeoutTimer = setTimeout(() => {
-      finish(null, new Error(`Kimi CLI quota probe timed out after ${Math.round(KIMI_CLI_PROBE_TIMEOUT_MS / 1000)}s`));
-    }, KIMI_CLI_PROBE_TIMEOUT_MS);
+      finish(null, new Error(`Kimi CLI quota probe timed out after ${Math.round(probeTimeoutMs / 1000)}s`));
+    }, probeTimeoutMs);
 
     proc.onData((chunk) => {
       output += chunk;
-      if (!sentUsage && /💫|weekly limit|5h limit|api usage/i.test(output)) {
+      const cleaned = renderTerminalScreenRows(output)
+        .map((r) => r.text)
+        .join('\n');
+      if (!sentUsage && (cleaned.includes('│ >') || /💫|weekly limit|5h limit|api usage/i.test(cleaned))) {
         sendUsage();
       }
-      clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => {
-        if (!tryParse()) {
-          finish(null, new Error('Kimi CLI /usage output did not contain quota data'));
-        }
-      }, KIMI_CLI_IDLE_SETTLE_MS);
+      if (tryParse(true)) return;
+      if (submittedUsage) {
+        armIdleSettle();
+      }
     });
 
     proc.onExit(() => {
-      if (!tryParse()) {
-        finish(null, new Error('Kimi CLI exited before quota data was parsed'));
+      if (!tryParse(false)) {
+        const message = hasUnclosedSynchronizedOutput(output)
+          ? 'Kimi CLI exited with an unclosed synchronized output frame'
+          : 'Kimi CLI exited before quota data was parsed';
+        finish(null, new Error(message));
       }
     });
   });

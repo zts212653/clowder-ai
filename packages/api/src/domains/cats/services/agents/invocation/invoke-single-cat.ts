@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { nativeClaudeQuotaSourceKnown } from '../../../../../config/claude-quota-source.js';
+import { observeClaudeQuotaMessage } from '../../../../../config/claude-quota-store.js';
 import { redactClaudeLaunchToken } from '../../../../../config/claude-token-account.js';
 import type {
   ContextSourceAdmission,
@@ -6,19 +8,24 @@ import type {
   ContextSourceIngress,
 } from '../../../../memory/cue/ContextSourceAdmission.js';
 import { ContextSourceWorkBudget } from '../../../../memory/cue/ContextSourceWorkBudget.js';
+import { sessionCacheRuntimeKey } from '../../session/cache/session-cache-runtime.js';
+import { observeSessionCache } from '../../session/cache/session-cache-warmth.js';
 import { captureInvocationL0Input } from '../providers/l0-input-capture.js';
 import { agentServiceGeneration } from '../registry/AgentRegistry.js';
 import { ExecutionAdmissionConflict, StaleServiceSourceConflict } from '../registry/AgentServiceUnavailableError.js';
 import { deepFreeze, type FrozenExecutionBinding, freezeExecutionAccountBinding } from './execution-account-binding.js';
-import { freezeExecutionWorkspace } from './execution-workspace.js';
+import { freezeExecutionWorkspace, requiresAgyThreadWorkspace } from './execution-workspace.js';
 import { captureHostExecutionBoundary, changedHostExecutionBoundary } from './host-execution-boundary.js';
+import { findSleepInterruption } from './host-sleep/HostSleepEvidence.js';
 import { InvocationServiceScope } from './invocation-service-scope.js';
 import {
   isConfirmedNativeAuthFailure,
   NATIVE_AUTH_CONTINUATION_PROMPT,
   type NativeAuthContinuation,
 } from './native-auth-continuation.js';
+import { isContinuationMessage } from './restart-continuation/RestartContinuation.js';
 import { protectNativeProviderResult } from './secret-provider-result.js';
+import { HOST_CUT, HOST_SLEEP_TERMINAL_REASON, type HostCutKind } from './stop-reason-wording.js';
 /**
  * Single Cat Invocation
  * 单猫调用的核心逻辑，从 AgentRouter 提取。
@@ -188,6 +195,7 @@ import {
 } from '../providers/opencode-config-writer.js';
 import { prepareSessionCredentialFile, releaseInvocationCredentialFile } from '../providers/session-credential-file.js';
 import { appendTranscriptPathHints } from '../providers/transcript-path-hints.js';
+import { applyVerifiedNativeModelToInvocationSnapshot } from './capacity/observed-context-capacity.js';
 import {
   continuityDispositionFromProviderEvidence,
   resolveContextContinuity,
@@ -365,12 +373,6 @@ function resolveMemoryCueLegacyFallbacks(
     if (admitted.has(opportunityId)) return [];
     return [{ opportunityId }];
   });
-}
-
-function isSubjectSeenNudgeSeed(
-  seed: MemoryCueOpportunitySeed,
-): seed is Extract<MemoryCueOpportunitySeed, { kind: 'subject_seen' }> {
-  return seed.kind === 'subject_seen' && seed.producer === 'entity_nudge';
 }
 
 function subjectSeenSeedMatchesNudge(
@@ -1165,6 +1167,16 @@ async function syncAntigravityRuntimeMetadata(input: {
  * Shared dependencies for all cat invocations within one AgentRouter
  */
 export interface InvocationDeps {
+  /** F337: tells a mid-turn machine sleep apart from a provider failure and waits for the lid to open. */
+  readonly hostSleep?: {
+    readonly readEvidence: import('./host-sleep/HostSleepEvidence.js').HostSleepEvidenceReader;
+    readonly scheduleContinuation: (input: { readonly invocationId: string; readonly sleptAt: number }) => void;
+  };
+  /**
+   * F337: true once the runtime's own stop began (its stop record targets this process, or the API's
+   * SIGTERM arrived); turns ending after it are continued after the restart.
+   */
+  readonly isRuntimeShuttingDown?: () => boolean | Promise<boolean>;
   /** Scheduler system delivery used to wake a cat whose reply waited for an absent owner without a mention. */
   readonly ownerAskCorrectionDeliver?: (
     opts: import('../../../../../infrastructure/scheduler/types.js').DeliverOpts,
@@ -1228,8 +1240,8 @@ export interface InvocationDeps {
   readonly guideSessionStore?: import('../../../../guides/GuideSessionRepository.js').IGuideSessionStore;
   /** F155 B-6: Dismiss tracker for guide offer suppression */
   readonly dismissTracker?: import('../../../../guides/GuideDismissTracker.js').IGuideDismissTracker;
-  /** F229: Concierge config store for duty-cat岗位 prompt injection (optional, fail-open) */
-  readonly conciergeConfigStore?: import('../../../../concierge/ConciergeConfigStore.js').IConciergeConfigStore;
+  /** F229: 猫猫球 settings for duty-cat岗位 prompt injection (optional, fail-open) */
+  readonly companionSettings?: import('../../../../concierge/companion-settings.js').ReadCompanionSettings;
   /** F229 Phase B: TriagePlan store for triage-plan marker → confirm/cancel card actions (optional, fail-open) */
   readonly conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
   /**
@@ -1418,22 +1430,12 @@ export interface InvocationParams {
     seed: MemoryCueOpportunitySeed;
     promptContext: string;
   }[];
-  /** Route-level candidates, presented and accounted only for this exact consumer. */
+  /** One route-level candidate set feeds reading metadata and any private-person cues. */
   readonly entityNudgePresentation?: {
     readonly service: EntityNudgeService;
     readonly candidates: EntityNudgeCandidateBatch;
     readonly sourceMessageId: string;
-  };
-  /**
-   * Person entity candidates projected as typed F287 Memory Cues. They still
-   * use F260's per-consumer cooldown, but their delivery is confirmed only if
-   * their exact Cue envelope is admitted into the provider request.
-   */
-  readonly entityNudgeCuePresentation?: {
-    readonly service: EntityNudgeService;
-    readonly candidates: EntityNudgeCandidateBatch;
-    readonly sourceMessageId: string;
-    readonly seeds: readonly Extract<MemoryCueOpportunitySeed, { kind: 'subject_seen' }>[];
+    readonly seeds?: readonly Extract<MemoryCueOpportunitySeed, { kind: 'subject_seen' }>[];
   };
 }
 
@@ -1494,8 +1496,7 @@ export async function prepareInvocationExecutionBinding(
       userId: input.userId,
       provider: catConfig?.clientId,
       ...(input.signal ? { signal: input.signal } : {}),
-      requiresAgyWorkspace:
-        Boolean(input.service && usesAgyNativeCarrier(input.service)) || carrier?.carrier === 'agy_acp',
+      requiresAgyWorkspace: Boolean(input.service && requiresAgyThreadWorkspace(input.service)),
     });
     input.signal?.throwIfAborted();
     const [effort, speed] = await Promise.allSettled([
@@ -1795,6 +1796,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     callerSignal?.throwIfAborted();
     const running = await deps.turnExecutionStore.listRunningByUser(userId);
     const liveOwner = await findWindowsLiveOwner({
+      store: deps.turnExecutionStore,
       records: running.filter((record) => record.threadId === threadId && record.catId === catId),
     });
     if (liveOwner) {
@@ -1900,6 +1902,71 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   let turnExecutionCompletedSuccessfully = false;
   let routingDispatchFailureClass: RoutingDispatchFailureClass | undefined;
   let routingFailureObservedAt: number | undefined;
+  // F337: whether the host, not the provider, cut this turn off: the runtime's own stop (it kills provider
+  // children before the API exits) or a machine sleep. Read once, at the first failure; null = the
+  // provider's own failure, or no readable evidence.
+  type HostCut = { readonly kind: HostCutKind; readonly sleptAt?: number };
+  let hostCut: HostCut | null | undefined;
+  // A turn that was itself a continuation is not woken again (loop guard), so it must not promise to be.
+  let hostCutRepeat = false;
+  const resolveHostCut = async (): Promise<HostCut | null> => {
+    if (hostCut !== undefined) return hostCut;
+    hostCut = null;
+    if (await deps.isRuntimeShuttingDown?.()) {
+      hostCut = { kind: 'restart_shutdown' };
+    } else if (deps.hostSleep) {
+      const failedAt = Date.now();
+      try {
+        const evidence = await deps.hostSleep.readEvidence({ from: executionStartedAt, to: failedAt });
+        const sleep = findSleepInterruption(evidence, { turnStartedAt: executionStartedAt, failedAt });
+        if (sleep) hostCut = { kind: 'host_sleep', sleptAt: sleep.sleptAt };
+      } catch {
+        hostCut = null;
+      }
+    }
+    const triggerMessageId = params.executionCausal?.triggerMessageId ?? params.a2aTriggerMessageId;
+    if (hostCut && triggerMessageId) {
+      try {
+        hostCutRepeat = isContinuationMessage(await deps.messageStore?.getById(triggerMessageId));
+      } catch {
+        // Unknown trigger: do not promise a wake the loop guard may refuse.
+        hostCutRepeat = true;
+      }
+    }
+    return hostCut;
+  };
+  /** The host cut the turn off, the provider did not fail: no availability penalty. */
+  const clearDispatchFailure = (): void => {
+    routingDispatchFailureClass = undefined;
+    routingFailureObservedAt = undefined;
+  };
+  /**
+   * At a stop that is not a provider error event (an exception, a consumer that stopped reading): once
+   * the runtime's stop began, it is that cut. A cut seen earlier in the turn stands.
+   */
+  const cutAtStop = async (): Promise<(typeof HOST_CUT)[HostCutKind] | undefined> => {
+    const resolved = hostCut === undefined && (await deps.isRuntimeShuttingDown?.()) ? await resolveHostCut() : hostCut;
+    if (!resolved) return undefined;
+    const cut = HOST_CUT[resolved.kind];
+    turnExecutionFailureReason = hostCutRepeat ? cut.repeatTerminalReason : cut.terminalReason;
+    clearDispatchFailure();
+    return cut;
+  };
+  const noteProviderFailure = async (out: AgentMessage): Promise<void> => {
+    const resolved = await resolveHostCut();
+    if (!resolved) {
+      turnExecutionFailureReason ??= 'provider_execution_failed';
+      return;
+    }
+    const cut = HOST_CUT[resolved.kind];
+    turnExecutionFailureReason ??= hostCutRepeat ? cut.repeatTerminalReason : cut.terminalReason;
+    clearDispatchFailure();
+    // Say so in the reply the owner and the waiting caller read; the response reason comes from
+    // `done.errorCode`, so carry the cut there for receipts too.
+    const note = hostCutRepeat ? cut.repeatNote : cut.note;
+    if (out.type === 'error') out.error = `${out.error ?? ''}${note}`.trim();
+    if (out.type === 'done') out.errorCode = hostCutRepeat ? cut.repeatErrorCode : cut.errorCode;
+  };
   // F153: Record cat invocation count with trigger type
   const triggerType = params.a2aTriggerMessageId ? 'mention' : params.parentInvocationId ? 'routing' : 'default';
   catInvocationCount.add(1, { [AGENT_ID]: catId, [TRIGGER]: triggerType });
@@ -1988,17 +2055,13 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   let memoryCuePresentationEnvelopes: readonly InvocationPresentationEnvelope[] = [];
   let omittedMemoryCueOpportunityIds: readonly string[] = [];
   let entityNudgePromptPresentation: EntityNudgePromptPresentation | undefined;
-  let entityNudgeCuePromptPresentation:
-    | {
-        readonly source: NonNullable<InvocationParams['entityNudgeCuePresentation']>;
-        readonly presentation: EntityNudgePromptPresentation;
-      }
-    | undefined;
   const resolveInvocationMemoryCues = async (): Promise<void> => {
     invocationPromptAdditions.length = 0;
     if (isScopedMember) return;
     if (deps.matterMemoryService && params.ownerAuthProvenance === 'strict') {
-      invocationPromptAdditions.push(await matterOpeningDirectory(deps.matterMemoryService, userId, catId, threadId));
+      invocationPromptAdditions.push(
+        await matterOpeningDirectory(deps.matterMemoryService, userId, catId, threadId, { invocationId }),
+      );
     }
     if (deps.runtimeInteractionPort && params.ownerAuthProvenance === 'strict') {
       try {
@@ -2016,7 +2079,6 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     memoryCuePresentationEnvelopes = [];
     omittedMemoryCueOpportunityIds = [];
     const serverScope = { ownerUserId: userId, threadId, invocationId };
-    const cueSource = params.entityNudgeCuePresentation;
     let seeds = params.memoryCueOpportunitySeeds ?? [];
     if (deps.contextSourceAdmission && contextSourceDecision && params.contextSourceIngress && !params.liveCompanion) {
       const seed = await contextSourceBudget
@@ -2040,25 +2102,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         seeds = [...seeds, seed];
       }
     }
-    let fallbacks = params.memoryCueLegacyFallbacks;
-    if (cueSource) {
-      entityNudgeCuePromptPresentation ??= {
-        source: cueSource,
-        presentation: cueSource.service.preparePresentation(cueSource.candidates, {
-          catId: catId as string,
-          invocationId,
-          sourceMessageId: cueSource.sourceMessageId,
-        }),
-      };
-      const sourceSeeds = new Set<MemoryCueOpportunitySeed>(cueSource.seeds);
-      const admittedNudges = entityNudgeCuePromptPresentation.presentation.result.nudges;
-      const mayPresentSeed = (seed: MemoryCueOpportunitySeed): boolean => {
-        if (!sourceSeeds.has(seed) || !isSubjectSeenNudgeSeed(seed)) return true;
-        return admittedNudges.some((nudge) => subjectSeenSeedMatchesNudge(seed, nudge));
-      };
-      seeds = seeds.filter(mayPresentSeed);
-      fallbacks = fallbacks?.filter((fallback) => mayPresentSeed(fallback.seed));
-    }
+    const fallbacks = params.memoryCueLegacyFallbacks;
     if (
       deps.profileCueOpportunitySource &&
       params.invocationOrigin === 'interactive' &&
@@ -2164,38 +2208,56 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   const resolveEntityNudgePresentation = (): void => {
     const source = params.entityNudgePresentation;
     if (!source) return;
-    entityNudgePromptPresentation ??= source.service.preparePresentation(source.candidates, {
-      catId: catId as string,
-      invocationId,
-      sourceMessageId: source.sourceMessageId,
+    // Resolve the bounded person sources before applying the shared F260 cap:
+    // a person with neither independent reading metadata nor a private cue must
+    // not displace a later readable entity.
+    const sourceSeeds = new Map(
+      (source.seeds ?? []).map((seed) => [
+        memoryCueOpportunityId(seed, { ownerUserId: userId, threadId, invocationId }),
+        seed,
+      ]),
+    );
+    const typedEntityIds = new Set<string>();
+    for (const envelope of memoryCuePresentationEnvelopes) {
+      if (envelope.receipt.domain !== 'memory_cue') continue;
+      const seed = sourceSeeds.get(envelope.receipt.receipt.event.opportunityId);
+      if (seed) typedEntityIds.add(seed.payload.entityId);
+    }
+    entityNudgePromptPresentation ??= source.service.preparePresentation(
+      source.candidates,
+      { catId: catId as string, invocationId, sourceMessageId: source.sourceMessageId },
+      typedEntityIds,
+    );
+    const admittedNudges = entityNudgePromptPresentation.result.nudges;
+    memoryCuePresentationEnvelopes = memoryCuePresentationEnvelopes.filter((envelope) => {
+      if (envelope.receipt.domain !== 'memory_cue') return true;
+      const seed = sourceSeeds.get(envelope.receipt.receipt.event.opportunityId);
+      return !seed || admittedNudges.some((nudge) => subjectSeenSeedMatchesNudge(seed, nudge));
     });
     if (entityNudgePromptPresentation.promptContext) {
       invocationPromptAdditions.push(entityNudgePromptPresentation.promptContext);
     }
   };
-  const confirmEntityNudgeCuePresentation = (preparedBody: string): void => {
-    const pending = entityNudgeCuePromptPresentation;
-    if (!pending || pending.presentation.result.nudges.length === 0) return;
-    const attempt = currentPresentationAttempt;
-    if (!attempt) throw new Error('entity_nudge_cue_presentation_attempt_unavailable');
-    const admittedPromptSegments = new Map<string, string>();
-    for (const admitted of attempt.admitted) {
-      if (admitted.envelope.receipt.domain !== 'memory_cue') continue;
-      admittedPromptSegments.set(admitted.envelope.receipt.receipt.event.opportunityId, admitted.promptSegment);
-    }
-    const exactNudges: NudgePayload[] = [];
-    for (const nudge of pending.presentation.result.nudges) {
-      const seed = pending.source.seeds.find((candidate) => subjectSeenSeedMatchesNudge(candidate, nudge));
-      if (!seed) throw new Error('entity_nudge_cue_seed_mapping_unavailable');
-      const opportunityId = memoryCueOpportunityId(seed, { ownerUserId: userId, threadId, invocationId });
-      const promptSegment = admittedPromptSegments.get(opportunityId);
-      if (!promptSegment) continue;
-      if (!preparedBody.includes(promptSegment)) {
-        throw new Error('entity_nudge_cue_prepared_prompt_not_exact');
+  const confirmEntityNudgePresentation = (preparedBody: string | undefined): void => {
+    const presentation = entityNudgePromptPresentation;
+    const source = params.entityNudgePresentation;
+    if (!presentation || !source) return;
+    if (preparedBody === undefined) throw new Error('entity_nudge_prepared_prompt_unavailable');
+    const confirmed = new Set(presentation.renderedNudges);
+    for (const seed of source.seeds ?? []) {
+      const id = memoryCueOpportunityId(seed, { ownerUserId: userId, threadId, invocationId });
+      const delivered = (currentPresentationAttempt?.admitted ?? []).filter(
+        ({ envelope }) =>
+          envelope.receipt.domain === 'memory_cue' && envelope.receipt.receipt.event.opportunityId === id,
+      );
+      if (delivered.length === 0) continue;
+      if (delivered.some(({ promptSegment }) => !preparedBody.includes(promptSegment))) {
+        throw new Error('entity_nudge_prepared_prompt_not_exact');
       }
-      exactNudges.push(nudge);
+      const nudge = presentation.result.nudges.find((candidate) => subjectSeenSeedMatchesNudge(seed, candidate));
+      if (nudge) confirmed.add(nudge);
     }
-    if (exactNudges.length > 0) pending.presentation.confirmAssembled(exactNudges);
+    presentation.confirmAssembled([...confirmed]);
   };
   const asrPersonMemoryPromptService = new AsrPersonMemoryOpportunityPromptService({
     ...(deps.writeOpportunityTerminalLedger ? { terminalLedger: deps.writeOpportunityTerminalLedger } : {}),
@@ -4308,6 +4370,28 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       }
     };
 
+    const recordTranscriptEvent = async (msg: AgentMessage) => {
+      // F24 Phase C: Record event to transcript buffer (best-effort)
+      if (deps.transcriptWriter && deps.sessionChainStore) {
+        try {
+          const activeRec = await deps.sessionChainStore.getActive(catId, threadId, userId);
+          if (activeRec) {
+            const sessInfo: TranscriptSessionInfo = {
+              sessionId: activeRec.id,
+              threadId,
+              catId: activeRec.catId,
+              ...(activeRec.cliSessionId ? { cliSessionId: activeRec.cliSessionId } : {}),
+              seq: activeRec.seq,
+            };
+            // Record the raw agent message as a transcript event
+            deps.transcriptWriter.appendEvent(sessInfo, msg as unknown as Record<string, unknown>, invocationId);
+          }
+        } catch {
+          /* best-effort */
+        }
+      }
+    };
+
     const processMessage = async (msg: AgentMessage): Promise<AgentMessage[]> => {
       msg = redactClaudeLaunchToken(msg, resolvedAccount?.claude ? accountEnv?.CLAUDE_CODE_OAUTH_TOKEN : undefined);
       if (executionAccount && msg.metadata)
@@ -4319,6 +4403,21 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
             ...(msg.metadata.usage ? { usage: { ...msg.metadata.usage, executionAccount } } : {}),
           },
         };
+      if (provider === 'anthropic')
+        observeClaudeQuotaMessage(
+          frozenExecutionBinding.projectRoot,
+          executionAccount,
+          msg.metadata?.model ?? catConfig?.defaultModel ?? '',
+          msg,
+          resolvedAccount?.claude
+            ? undefined
+            : () =>
+                nativeClaudeQuotaSourceKnown(
+                  frozenExecutionBinding.workspace.workingProjectRoot ?? frozenExecutionBinding.projectRoot,
+                  catConfig?.cliConfigArgs ?? [],
+                  accountEnv,
+                ),
+        );
       const outputs: AgentMessage[] = [];
 
       // clowder#915 (cloud P1): F8/F24 usage + context_health block extracted so
@@ -4413,6 +4512,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
               catId,
               capability: service.contextCapability?.() ?? invocationCapacitySnapshot.capability,
               reportedWindowSize: msg.metadata.usage.contextWindowSize,
+              observedWindow: msg.metadata.contextWindowObservation,
             });
             if (deps.sessionChainStore) {
               invocationCapacitySnapshot = await applyActiveSessionCapacityPin({
@@ -4496,13 +4596,29 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
               const activeRecord = await deps.sessionChainStore.getActive(catId, threadId, userId);
               if (activeRecord) {
                 const u = msg.metadata?.usage!;
+                const cacheRuntime = sessionCacheRuntimeKey(hostExecutionBoundary);
                 await deps.sessionChainStore.update(activeRecord.id, {
                   contextHealth: health,
                   lastUsage: {
                     ...(u.inputTokens != null ? { inputTokens: u.inputTokens } : {}),
                     ...(u.outputTokens != null ? { outputTokens: u.outputTokens } : {}),
                     ...(u.cacheReadTokens != null ? { cacheReadTokens: u.cacheReadTokens } : {}),
+                    ...(u.cacheCreation5mTokens != null ? { cacheCreation5mTokens: u.cacheCreation5mTokens } : {}),
+                    ...(u.cacheCreation1hTokens != null ? { cacheCreation1hTokens: u.cacheCreation1hTokens } : {}),
                     ...(u.costUsd != null ? { costUsd: u.costUsd } : {}),
+                    cacheObservation:
+                      !cacheRuntime || hadStreamError || msg.errorCode || signal?.aborted
+                        ? undefined
+                        : observeSessionCache({
+                            record: activeRecord,
+                            invocationId,
+                            runtime: cacheRuntime,
+                            model: msg.metadata?.model ?? frozenExecutionBinding.executionPreferences?.model ?? '',
+                            requestStartedAt: executionStartedAt,
+                            observedAt: health.measuredAt,
+                            contextTokens: usedTokens,
+                            usage: u,
+                          }),
                   },
                   updatedAt: Date.now(),
                 });
@@ -5166,6 +5282,14 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           }
         }
 
+        if (invocationCapacitySnapshot && msg.nativeSessionBinding) {
+          invocationCapacitySnapshot = applyVerifiedNativeModelToInvocationSnapshot(
+            invocationCapacitySnapshot,
+            msg.nativeSessionBinding,
+            msg.sessionId,
+          );
+        }
+
         if (sessionRuntimeBindingAccepted) {
           appliedIdentityCoordinate = isBgCarrier ? (invocationPolicyRecordId ?? bgChainKey) : msg.sessionId;
           try {
@@ -5342,6 +5466,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
 
         // F8/F24 usage + context_health (extracted to helper for clowder#915
         // — see processUsageAndContextHealth declaration at top of processMessage).
+        // #1580: seal clears the active pointer and flushes the transcript.
+        // Record the real done in its current session before either can happen.
+        await recordTranscriptEvent(msg);
         await processUsageAndContextHealth(msg);
 
         // clowder#915 R4 cloud P1 #3 (defer seal execution): if an earlier
@@ -5515,25 +5642,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         }
       }
 
-      // F24 Phase C: Record event to transcript buffer (best-effort)
-      if (deps.transcriptWriter && deps.sessionChainStore) {
-        try {
-          const activeRec = await deps.sessionChainStore.getActive(catId, threadId, userId);
-          if (activeRec) {
-            const sessInfo: TranscriptSessionInfo = {
-              sessionId: activeRec.id,
-              threadId,
-              catId: activeRec.catId,
-              ...(activeRec.cliSessionId ? { cliSessionId: activeRec.cliSessionId } : {}),
-              seq: activeRec.seq,
-            };
-            // Record the raw agent message as a transcript event
-            deps.transcriptWriter.appendEvent(sessInfo, msg as unknown as Record<string, unknown>, invocationId);
-          }
-        } catch {
-          /* best-effort */
-        }
-      }
+      if (msg.type !== 'done') await recordTranscriptEvent(msg);
 
       return outputs;
     };
@@ -5542,18 +5651,19 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       if (!sourceMsg) return;
       const messageObservedAt = Date.now();
       for (const out of await processMessage(sourceMsg)) {
-        routingDispatchFailureClass ??= classifyRoutingDispatchFailure({
-          ...(out.metadata?.cliDiagnostics?.reasonCode
-            ? { cliReasonCode: out.metadata.cliDiagnostics.reasonCode }
-            : {}),
-          ...(out.errorCode ? { providerErrorCode: out.errorCode } : {}),
-        });
+        if (!hostCut)
+          routingDispatchFailureClass ??= classifyRoutingDispatchFailure({
+            ...(out.metadata?.cliDiagnostics?.reasonCode
+              ? { cliReasonCode: out.metadata.cliDiagnostics.reasonCode }
+              : {}),
+            ...(out.errorCode ? { providerErrorCode: out.errorCode } : {}),
+          });
         if (routingDispatchFailureClass !== undefined) routingFailureObservedAt ??= messageObservedAt;
         if (out.type === 'error') {
           hadError = true;
           const cancelled = out.errorCode === 'INVOCATION_CANCELLED';
           hadProviderCancellation ||= cancelled;
-          if (!cancelled) turnExecutionFailureReason ??= 'provider_execution_failed';
+          if (!cancelled) await noteProviderFailure(out);
           terminalTaskProgressStatus = 'interrupted';
           terminalInterruptReason = cancelled ? 'aborted' : 'error';
         }
@@ -5562,7 +5672,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
             hadProviderCancellation = true;
             terminalTaskProgressStatus = 'interrupted';
             terminalInterruptReason = 'aborted';
-          } else turnExecutionFailureReason ??= 'provider_execution_failed';
+          } else await noteProviderFailure(out);
         }
         await maybePersistTaskProgress(out);
         if (out.type === 'done' && terminalTaskProgressStatus === null) {
@@ -5579,7 +5689,8 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         }
         if (out.type === 'done') {
           if (hadError && out.errorCode === undefined) {
-            out.errorCode = 'PROVIDER_EXECUTION_FAILED';
+            const cut = hostCut ? HOST_CUT[hostCut.kind] : undefined;
+            out.errorCode = cut ? (hostCutRepeat ? cut.repeatErrorCode : cut.errorCode) : 'PROVIDER_EXECUTION_FAILED';
           }
           await finalizeTaskProgress();
           if (!out.tracing) {
@@ -5728,10 +5839,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
               },
             }
           : {}),
-        ...(generationRecorder ||
-        entityNudgePromptPresentation ||
-        entityNudgeCuePromptPresentation ||
-        deps.memoryCuePromptService
+        ...(generationRecorder || entityNudgePromptPresentation || deps.memoryCuePromptService
           ? {
               beforeProviderLaunch: async (prepared) => {
                 signal?.throwIfAborted();
@@ -5805,7 +5913,6 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
                 }
 
                 const presentation = entityNudgePromptPresentation;
-                const hasCueNudge = Boolean(entityNudgeCuePromptPresentation?.presentation.result.nudges.length);
                 // These continuations carry only recovery context; the original
                 // prompt already delivered and confirmed its nudges. Requiring
                 // or confirming them again either blocks recovery or double-writes
@@ -5815,18 +5922,11 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
                     'body' in prepared.message &&
                     prepared.message.body === '') ||
                   isCodexCompactionContinuation(prepared);
-                if (
-                  !liveFollowup &&
-                  !isContextContinuation &&
-                  !nativeAuthContinuation &&
-                  (presentation?.promptContext || hasCueNudge)
-                ) {
+                if (!liveFollowup && !isContextContinuation && !nativeAuthContinuation && presentation) {
                   if (!('body' in prepared.message)) throw new Error('entity_nudge_prepared_prompt_unavailable');
                   if (presentation?.promptContext && !prepared.message.body.includes(presentation.promptContext)) {
                     throw new Error('entity_nudge_prepared_prompt_not_exact');
                   }
-                  presentation?.confirmAssembled();
-                  confirmEntityNudgeCuePresentation(prepared.message.body);
                 }
                 if (
                   !liveFollowup &&
@@ -5838,6 +5938,16 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
                   await currentPresentationAttempt.release('source_changed_before_provider');
                   sourceRefreshRequired = true;
                   throw new Error('memory_cue_source_changed_before_provider');
+                }
+                if (!liveFollowup && !isContextContinuation && !nativeAuthContinuation) {
+                  // The asynchronous cue revalidation above may race an Entity
+                  // correction/retirement. Keep this check and confirmation in
+                  // the same synchronous turn so the main reply can rebuild.
+                  if (presentation && !presentation.isCurrent()) {
+                    sourceRefreshRequired = true;
+                    throw new Error('entity_source_changed_before_provider');
+                  }
+                  confirmEntityNudgePresentation('body' in prepared.message ? prepared.message.body : undefined);
                 }
                 return committed;
               },
@@ -6440,10 +6550,12 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         sourceRefreshRequired = false;
         await terminateCurrentRequestGeneration('replaced', 'source_changed_before_provider');
         await presentationDelivery?.release('source_changed_before_provider');
-        // Only metadata already rejected by its source fence is rebuilt; this retry made no provider request.
-        memoryCuePresentationEnvelopes = memoryCuePresentationEnvelopes.filter(
-          (envelope) => !invalidSourceKeys.has(memoryCuePresentationKey(envelope)),
-        );
+        // Both projections belong to the same entity revision. Re-resolve before
+        // rebuilding so a retired entity cannot retain a previously resolved
+        // private-person handle. This rejected attempt made no provider request.
+        entityNudgePromptPresentation = undefined;
+        await resolveInvocationMemoryCues();
+        resolveEntityNudgePresentation();
         if (!usesProviderContinuityPreflight) await prepareCurrentPresentationDelivery();
         attempt -= 1;
         continue;
@@ -6811,7 +6923,28 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       turnExecutionFailureReason === undefined &&
       signal?.aborted !== true
     ) {
-      turnExecutionInterruptionReason = 'provider_ended_without_terminal_done';
+      if (await deps.isRuntimeShuttingDown?.()) {
+        // F337: a provider the runtime's stop took down may just close its stream. End the turn the way
+        // its own failure would, so the reply and the caller's receipt say why (the same pipeline decides).
+        for await (const out of streamProcessedOutputs({
+          type: 'error' as const,
+          catId,
+          error: 'provider 在 runtime 停服时退出了',
+          timestamp: Date.now(),
+        })) {
+          yield out;
+        }
+        for await (const out of streamProcessedOutputs({
+          type: 'done' as const,
+          catId,
+          isFinal: isLastCat,
+          timestamp: Date.now(),
+        })) {
+          yield out;
+        }
+      } else {
+        turnExecutionInterruptionReason = 'provider_ended_without_terminal_done';
+      }
     }
     didComplete = true; // F118 AC-C5: Normal completion reached
   } catch (err) {
@@ -6852,6 +6985,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
 
     hadError = true;
     turnExecutionFailureReason ??= 'invocation_exception';
+    // F337: an exception once the runtime's stop began (or after a cut seen earlier) is that cut; the
+    // reply and the receipt carry it. A user stop or timeout stays what it is.
+    const cut = signal.aborted ? undefined : await cutAtStop();
     didWriteAudit = true; // F118 AC-C5: Catch block wrote audit, don't double-write in finally
     if (err instanceof SessionRolloverCommitError) {
       for (const lifecycleMessage of err.lifecycleMessages) {
@@ -6861,7 +6997,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     yield {
       type: 'error' as const,
       catId,
-      error: err instanceof Error ? err.message : String(err),
+      error: `${err instanceof Error ? err.message : String(err)}${cut ? (hostCutRepeat ? cut.repeatNote : cut.note) : ''}`,
       timestamp: Date.now(),
     };
     await finalizeTaskProgress();
@@ -6872,6 +7008,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       catId,
       isFinal: isLastCat,
       timestamp: Date.now(),
+      ...(cut ? { errorCode: hostCutRepeat ? cut.repeatErrorCode : cut.errorCode } : {}),
       tracing: { traceId: sc.traceId, spanId: sc.spanId, ...(parentSid ? { parentSpanId: parentSid } : {}) },
     };
   } finally {
@@ -6904,18 +7041,22 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         terminal = { status: 'failed', endedAt: Date.now(), terminalReason: MEMBER_TIMEOUT_REASON };
       } else if (callerSignal?.aborted || hadProviderCancellation) {
         terminal = { status: 'canceled', endedAt: Date.now(), terminalReason: 'user_cancel' };
-      } else if (turnExecutionFailureReason !== undefined || hadError) {
-        terminal = {
-          status: 'failed',
-          endedAt: Date.now(),
-          terminalReason: turnExecutionFailureReason ?? 'provider_execution_failed',
-        };
       } else {
-        terminal = {
-          status: 'interrupted',
-          endedAt: Date.now(),
-          terminalReason: turnExecutionInterruptionReason ?? 'generator_returned_without_completion',
-        };
+        // F337: the stream and exception paths already said why; this covers a consumer that stopped
+        // reading after the runtime's stop began, which has no reply left to carry it.
+        if (turnExecutionFailureReason === undefined && !hadError && hostCut === undefined) await cutAtStop();
+        terminal =
+          turnExecutionFailureReason !== undefined || hadError
+            ? {
+                status: 'failed',
+                endedAt: Date.now(),
+                terminalReason: turnExecutionFailureReason ?? 'provider_execution_failed',
+              }
+            : {
+                status: 'interrupted',
+                endedAt: Date.now(),
+                terminalReason: turnExecutionInterruptionReason ?? 'generator_returned_without_completion',
+              };
       }
       try {
         // #1838: a host exit is not a stopped tree. A provider in host jobs is torn down only once
@@ -6925,6 +7066,15 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
           await deps.turnExecutionStore.recordProviderTeardown?.(invocationId, terminal.endedAt);
         }
         const result = await deps.turnExecutionStore.transitionTerminal(invocationId, terminal);
+        // A restart's cut turns are owed in the store and continued by the next boot.
+        if (
+          hostCut?.kind === 'host_sleep' &&
+          hostCut.sleptAt !== undefined &&
+          result.record?.status === 'failed' &&
+          result.record.terminalReason === HOST_SLEEP_TERMINAL_REASON
+        ) {
+          deps.hostSleep?.scheduleContinuation({ invocationId, sleptAt: hostCut.sleptAt });
+        }
         if (result.outcome === 'not_found' || result.record === null) {
           log.error({ invocationId, terminal }, 'Turn execution disappeared before terminal transition');
         } else if (

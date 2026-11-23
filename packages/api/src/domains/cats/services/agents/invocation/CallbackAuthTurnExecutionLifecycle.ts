@@ -118,6 +118,22 @@ export class CallbackAuthTurnExecutionLifecycle implements ITurnExecutionStore {
     return this.store.listSettled(...args);
   }
 
+  listRecentSettled(...args: Parameters<ITurnExecutionStore['listRecentSettled']>) {
+    return this.store.listRecentSettled(...args);
+  }
+
+  hasMemberTurnStartedAfter(...args: Parameters<ITurnExecutionStore['hasMemberTurnStartedAfter']>) {
+    return this.store.hasMemberTurnStartedAfter(...args);
+  }
+
+  listOwedContinuations() {
+    return this.store.listOwedContinuations();
+  }
+
+  settleOwedContinuations(...args: Parameters<ITurnExecutionStore['settleOwedContinuations']>) {
+    return this.store.settleOwedContinuations(...args);
+  }
+
   settleOutputFence(
     invocationId: string,
     verdict: TurnOutputFenceVerdict,

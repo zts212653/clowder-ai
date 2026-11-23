@@ -9,7 +9,7 @@ import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceSto
 import { ensurePassageVectorTable, ensureVectorTable } from '../../dist/domains/memory/schema.js';
 import { VectorStore } from '../../dist/domains/memory/VectorStore.js';
 
-async function fixture(t) {
+async function fixture(t, embed) {
   const root = mkdtempSync(join(tmpdir(), 'message-queue-worker-'));
   const store = new SqliteEvidenceStore(join(root, 'evidence.sqlite'));
   await store.initialize();
@@ -60,6 +60,7 @@ async function fixture(t) {
       getModelInfo: () => ({ modelId: 'queue-ipc', modelRev: '1', dim: 4 }),
       embed: async (texts) => {
         calls++;
+        if (embed) return embed(texts);
         return texts.map(() => new Float32Array([1, 0, 0, 0]));
       },
     },
@@ -103,6 +104,52 @@ test('real message worker carries the queue selector, filters and RRF order for 
   }
   assert.equal(f.calls(), 3, 'all embeddings are served by the controlled parent RPC fixture');
 });
+
+test(
+  'a stalled hybrid vector branch returns a fresh lexical read inside the original deadline',
+  { timeout: 15000 },
+  async (t) => {
+    let release;
+    let entered;
+    const held = new Promise((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise((resolve) => {
+      entered = resolve;
+    });
+    const f = await fixture(t, () => {
+      entered();
+      return held;
+    });
+    const deadlineAt = Date.now() + 10000;
+    try {
+      const reading = f.store.searchMessagePassages('Cedar 取名', {
+        visibleThreadIds: ['visible'],
+        mode: 'hybrid',
+        sort: 'relevance',
+        candidateOrder: 'relevance',
+        excludeSource: { threadId: 'visible', messageId: 'current' },
+        deadlineAt,
+      });
+      await started;
+      f.store.getDb().prepare("DELETE FROM evidence_passages WHERE passage_id='msg-retelling-0'").run();
+      const result = await reading;
+      assert.ok(Date.now() < deadlineAt);
+      assert.equal(result.meta.degraded, true);
+      assert.equal(result.meta.effectiveMode, 'lexical');
+      assert.equal(result.meta.degradeReason, 'passage_vector_budget_exhausted');
+      assert.equal(result.passages.length, 4);
+      assert.ok(
+        result.passages.every((p) => p.messageId !== 'retelling-0'),
+        'do not reuse the interrupted read',
+      );
+      assert.ok(result.passages.every((p) => p.threadId === 'visible' && p.messageId.startsWith('retelling-')));
+      assert.equal(f.calls(), 1, 'the retry must not request vectors again');
+    } finally {
+      release([new Float32Array([1, 0, 0, 0])]);
+    }
+  },
+);
 
 test('queue selector preserves pre-worker cancellation and the original absolute deadline', async (t) => {
   const f = await fixture(t);

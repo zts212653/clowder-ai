@@ -16,6 +16,7 @@ import {
 } from 'react';
 import type { Components } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
+import type { PluggableList } from 'unified';
 import 'katex/dist/katex.min.css';
 import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 import { hexToRgba } from '@/lib/color-utils';
@@ -40,6 +41,7 @@ import { ChatReferenceDemand, useChatReferenceDemand } from './chat-references/u
 import { ListenSentenceSpan } from './listen-mode/ListenSentenceSpan';
 import { MermaidDiagram } from './MermaidDiagram';
 import { ProviderCitationContext, projectProviderCitations } from './markdown-provider-citations';
+import { type MarkdownSourceHighlight, remarkSourceHighlight } from './markdown-source-highlight';
 import { createWorkspaceImageComponent, createWorkspaceLinkComponent } from './workspace-md-components';
 
 /* ── @mention highlighting ─────────────────────────────────── */
@@ -384,6 +386,8 @@ interface Props {
    *  are excluded — textProcessor never touches code block content.
    *  Useful for replacing text patterns (e.g. markers) with interactive elements. */
   textProcessor?: (children: ReactNode) => ReactNode;
+  /** A range in the prepared Markdown source, used by verified message excerpts. */
+  sourceHighlight?: MarkdownSourceHighlight;
   /** F279 sentence projection for rendered Workspace Markdown. */
   listenSentences?: ListenSentence[];
   activeListenAnchor?: string;
@@ -427,6 +431,7 @@ export const MarkdownContent = memo(function MarkdownContent({
   sourcePath,
   worktreeId,
   textProcessor,
+  sourceHighlight,
   listenSentences,
   activeListenAnchor,
   onListenSentenceStart,
@@ -484,6 +489,7 @@ export const MarkdownContent = memo(function MarkdownContent({
         <MarkdownSurface
           remarkPlugins={[
             ...chatMarkdownPlugins(!!referenceThreadId),
+            ...(sourceHighlight ? ([[remarkSourceHighlight, sourceHighlight]] satisfies PluggableList) : []),
             ...(listenSentences?.length ? [createListenSentenceRemarkPlugin(listenSentences)] : []),
           ]}
           rehypePlugins={[rehypeKatex]}

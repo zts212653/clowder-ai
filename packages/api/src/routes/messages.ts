@@ -53,6 +53,7 @@ import {
   type StoredMessage,
 } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { deriveAutoThreadTitle, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import type { ITurnExecutionStore } from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
 import {
   getTimelineOrderTime,
   isInternalNonQuotableParent,
@@ -63,7 +64,9 @@ import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { normalizeJsonUnicode } from '../utils/json-unicode.js';
 import { buildThreadDeepLink } from '../utils/thread-deep-link.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
+import { isCanceledWatcherCallbackCard } from './canceled-watcher-callback.js';
 import { registerGenerationMessagesRoute } from './generation-messages.js';
+import { registerMessageAttemptReceipt } from './message-attempt-receipt.js';
 import { observeMessageSend } from './message-send-diagnostics.js';
 import { importStoredProjectMessage } from './messages-project-review.js';
 import { captureSentComposerDraftConsumption } from './sent-composer-draft-consumption.js';
@@ -138,6 +141,7 @@ function bundleAdmissionErrorMessage(reason: MessageBundleAdmissionFailureReason
 export interface MessagesRoutesOptions {
   onStoredProjectMessage?: (message: StoredMessage) => Promise<void>;
   registry: InvocationRegistry;
+  turnExecutionStore?: Pick<ITurnExecutionStore, 'get'>;
   messageStore: IMessageStore;
   socketManager: SocketManager;
   router: AgentRouter;
@@ -298,6 +302,7 @@ const MAX_FILES = 5;
 
 export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (app, opts) => {
   registerGenerationMessagesRoute(app, opts.messageStore);
+  registerMessageAttemptReceipt(app, opts.messageStore);
   const uploadDir = getDefaultUploadDir(opts.uploadDir ?? process.env.UPLOAD_DIR);
 
   // Register multipart parser for image uploads
@@ -656,6 +661,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       timestamp: Date.now(),
       threadId: resolvedThreadId,
       idempotencyKey: resolvedIdempotencyKey,
+      clientMessageId: resolvedIdempotencyKey,
       deliveryStatus: 'queued',
       ...(contentBlocks ? { contentBlocks } : {}),
       ...(whisperVisibility && whisperRecipients
@@ -1115,6 +1121,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     } as const;
 
     type StoredMsg = Awaited<ReturnType<typeof opts.messageStore.getByThread>>[number];
+    const filterBrowserMessages = async (messages: readonly StoredMsg[]): Promise<StoredMsg[]> => {
+      const visible = await Promise.all(
+        messages.map(
+          async (message) =>
+            message.source?.connector !== 'routing-guard-failure' &&
+            !(await isCanceledWatcherCallbackCard(message, opts.turnExecutionStore)),
+        ),
+      );
+      return messages.filter((_, index) => visible[index]);
+    };
     const allVisible: StoredMsg[] = [];
     let cursorTs = beforeTs;
     let cursorId = beforeId;
@@ -1143,7 +1159,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       // `routing-guard-failure` is a retired producer. Keep this read-boundary
       // exclusion only so rows written by older releases never reappear after
       // upgrade; current runtime code must not append or broadcast new rows.
-      const batchVisible = rawBatch.filter((m) => m.source?.connector !== 'routing-guard-failure');
+      const batchVisible = await filterBrowserMessages(rawBatch);
 
       // Prepend: each subsequent batch is chronologically older
       allVisible.unshift(...batchVisible);
@@ -1169,7 +1185,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     const historyPageCursor = oldest ? `${getTimelineOrderTime(oldest)}:${oldest.id}` : null;
     // Publication order can advance for a response whose timeline position is
     // older than this window. Recover those records before acknowledging them.
-    const recovered = changes?.messages ?? [];
+    const recovered = await filterBrowserMessages(changes?.messages ?? []);
     const page = [...new Map([...timelinePage, ...recovered].map((message) => [message.id, message])).values()].sort(
       (a, b) => getTimelineOrderTime(a) - getTimelineOrderTime(b) || a.id.localeCompare(b.id),
     );
@@ -1192,6 +1208,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       const type: TimelineItem['type'] = timelineMessageKind(from, Boolean(m.source)) ?? 'user';
       return {
         id: m.id,
+        ...(m.userId === userId && from.kind === 'user' && m.clientMessageId
+          ? { clientMessageId: m.clientMessageId }
+          : {}),
         type,
         from,
         catId: m.catId,
@@ -1203,7 +1222,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         ...(m.metadata ? { metadata: m.metadata } : {}),
         ...(m.origin ? { origin: m.origin } : {}),
         ...(m.thinking ? { thinking: m.thinking } : {}),
-        ...(m.extra?.cloudBridgeReturn ||
+        ...(m.extra?.watcher ||
+        m.extra?.cloudBridgeReturn ||
         m.extra?.outputLayout ||
         m.extra?.runtimeInteractionCard ||
         m.extra?.pluginAddressedReceipt ||
@@ -1234,6 +1254,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         m.extra?.recovery
           ? {
               extra: {
+                ...(m.extra?.watcher ? { watcher: m.extra.watcher } : {}),
                 ...(m.extra?.cloudBridgeReturn ? { cloudBridgeReturn: m.extra.cloudBridgeReturn } : {}),
                 ...(m.extra?.outputLayout ? { outputLayout: m.extra.outputLayout } : {}),
                 ...(m.extra?.runtimeInteractionCard ? { runtimeInteractionCard: m.extra.runtimeInteractionCard } : {}),
@@ -1259,7 +1280,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 ...(m.extra?.coordination ? { coordination: m.extra.coordination } : {}),
                 ...(m.extra?.isExplicitPost ? { isExplicitPost: true } : {}),
                 ...(m.extra?.stream ? { stream: m.extra.stream } : {}),
-                ...(m.extra?.targetCats ? { targetCats: m.extra.targetCats } : {}),
+                ...(m.extra?.targetCats || m.extra?.watcher
+                  ? { targetCats: m.extra?.targetCats ?? [...m.mentions] }
+                  : {}),
                 ...(m.extra?.messageBundle ? { messageBundle: m.extra.messageBundle } : {}),
                 ...(m.extra?.evolutionUseSourceV1 ? { evolutionUseSourceV1: m.extra.evolutionUseSourceV1 } : {}),
                 ...(m.extra?.scheduler ? { scheduler: m.extra.scheduler } : {}),

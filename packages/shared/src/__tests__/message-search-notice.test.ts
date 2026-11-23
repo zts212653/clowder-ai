@@ -25,6 +25,25 @@ const explain = (
   });
 
 describe('one qualification explanation for cat and human consumers', () => {
+  it.each([
+    ['passage_vector_budget_exhausted', '语义检索未在时限内完成'],
+    ['passage_vector_admission_budget_insufficient', '剩余时间不足，未启动语义检索'],
+  ])('discloses lexical-only results for %s without inventing a vector attempt', (degradeReason, explanation) => {
+    const notice = messageSearchNotice({
+      results: [{}],
+      meta: {
+        resultKind: 'sources',
+        effectiveMode: 'lexical',
+        degraded: true,
+        degradeReason,
+      },
+    });
+    expect(notice.coverage).toContain(explanation);
+    if (degradeReason === 'passage_vector_admission_budget_insufficient')
+      expect(notice.coverage).not.toContain('未在时限内完成');
+    expect(notice.coverage).toContain('只列字面匹配');
+    expect(notice.summary).toContain('可打开的原文');
+  });
   it('explains selected material without turning the cat judgment into qualification counts', () => {
     const notice = messageSearchNotice({ results: [{}], meta: { resultKind: 'selected-answer', hasMore: true } });
     expect(notice.summary).toContain('猫选出的 1 处来源');

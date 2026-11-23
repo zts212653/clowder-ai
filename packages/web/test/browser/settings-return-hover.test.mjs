@@ -43,7 +43,7 @@ before(async () => {
 after(async () => browser?.close());
 registerShortSettingsReturnCase({ browser: () => browser, bundle: () => bundle, origin });
 
-for (const input of ['hover', 'click', 'timeout', 'timeout-click']) {
+for (const input of ['hover', 'click', 'wheel', 'key', 'timeout', 'timeout-click']) {
   test(`Settings return with native ${input} while history is pending`, { timeout: 15000 }, async () => {
     const page = await browser.newPage();
     const errors = [];
@@ -125,12 +125,15 @@ for (const input of ['hover', 'click', 'timeout', 'timeout-click']) {
       await page.mouse.move(box.x + 100, box.y + 140);
       const clicks = input === 'click' || input === 'timeout-click';
       if (clicks) await page.mouse.click(box.x + 100, box.y + 160);
+      if (input === 'wheel') await page.mouse.wheel(0, 120);
+      if (input === 'key') await page.keyboard.press('PageDown');
+      const takesOver = clicks || input === 'wheel' || input === 'key';
       assert.ok(pendingHistory, 'the real history request must be held before native input');
-      if (clicks) {
+      if (takesOver) {
         await page.waitForFunction(
           () => document.querySelector('[data-testid="return-state"]')?.dataset.returning === 'false',
         );
-        assert.equal(await page.getByTestId('return-state').getAttribute('data-notice'), 'interrupted');
+        assert.equal(await page.getByTestId('return-state').getAttribute('data-notice'), '');
         assert.equal(await page.getByTestId('return-state').getAttribute('data-source'), 'true');
       } else {
         assert.equal(await page.getByTestId('return-state').getAttribute('data-returning'), 'true');
@@ -151,12 +154,12 @@ for (const input of ['hover', 'click', 'timeout', 'timeout-click']) {
         (r) => r.kind === 'reading_restore',
       );
       assert.equal(new Set(readingRecords.map((r) => r.operationId)).size, 1);
-      if (clicks)
+      if (takesOver)
         assert.ok(
           readingRecords.some((r) => r.phase === 'cancel' && r.cancelSource === 'native_input' && r.inputTrusted),
         );
-      if (clicks) {
-        assert.equal(state.notice, 'interrupted');
+      if (takesOver) {
+        assert.equal(state.notice, '', 'native reading takeover must not publish an error');
         assert.equal(state.source, 'true');
       } else {
         assert.equal(state.notice, '', 'native hover must not publish a Return to conversation error');

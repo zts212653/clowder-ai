@@ -1,12 +1,14 @@
 ---
 name: rich-messaging
-tips_exempt: "2026-11-07 renewal: member-side purpose routing now reuses the existing HTML Works capability and fixed-version cards; users request the result in ordinary Chat, with no new operation or carrier approval. The existing HTML Works guide/tip covers the human entry."
+tips_exempt: "Renewed 2026-11-17: Thread Issue draft discovery is already surfaced by feature-f235-conversation-issue. The added section routes agents through that existing review and owner-confirmation flow; it adds no separate user command or grant. Original-source quotation, memory routing and HTML safety guidance remain unchanged."
 description: >
-  Use when: 在当前 Chat 交付可看、可听或可操作产物（语音、图片、截图、HTML/demo、卡片、清单、diff、交互选择），或保存、继续修改 HTML 图解/小工具，无需用户说“富文本”。
-  Not for: 纯文字、仅讨论 HTML 原理或修改仓库源码；复杂 localhost 应用用 browser-preview。
+  Use when: 找原话并带可点击出处，或在当前 Chat 交付可看、可听或可操作产物（语音、图片、截图、HTML/demo、卡片、清单、diff、交互选择），或保存、继续修改 HTML 图解/小工具，无需用户说“富文本”。
+  Not for: 不附来源或媒体的普通文字回复、仅讨论 HTML 原理或修改仓库源码；复杂 localhost 应用用 browser-preview。
   Output: 消息内富块，或按用途保存 HTML 作品并把固定版本卡发回当前 Chat；续改保留同一作品的历史。
 triggers:
   - "发语音"
+  - "找原话"
+  - "带出处"
   - "说一句"
   - "录一段"
   - "用语音说"
@@ -48,6 +50,8 @@ triggers:
 
 **不只是对话**：定时任务唤醒你后，你依然拥有全部 rich block 能力——发图、发语音、发 HTML 面板、发交互选择，都可以。
 
+记忆来源的完整 `readRef` 交给 `cat_cafe_read_memory({ref:readRef})`；`sources` 与 `nextRef` 原样递回。已知消息/文件坐标可直接构造 ref。普通读取不发卡；归纳、当前画像及文档版本不授予原消息引用资格，仍须明确选句。
+
 ## 首次使用
 
 **每个 session 首次发 rich block 前，先调 `get_rich_block_rules` 获取完整字段规格。**
@@ -56,6 +60,10 @@ triggers:
 ## 默认触发：Chat 内可见交付
 
 统一判断不是用户有没有说“富文本”，而是：**用户是否要在当前 Clowder AI Chat 里直接看到、听到或操作结果。** 命中时，生成一个本地文件或贴源码路径都不算完成；产物必须通过富块、作品卡或 Browser panel 进入当前消费面。不要求用户说出“富文本”这个实现词。
+
+**找原话带出处也属于交付。** 用简短回答加核过原句的 `sources` 卡，让主人直接回到原消息。
+这项能力在常用回复入口里；旧独立制备工具退役，不代表出处卡不可用。先核当前入口，
+不要只凭旧工具名消失就报“做不了”。确实发布失败时保留已核原文与可点击链接，并说明卡未交付。
 
 | 用户真正要的交付 | 默认执行面 |
 |---|---|
@@ -172,12 +180,58 @@ DOMPurify 静默剥掉所有 `on*` 属性——widget 照常渲染，点击不�
 <script>document.getElementById('btn').addEventListener('click', e => e.target.textContent = '点了')</script>
 ```
 
+#### 跟 `document`、`<form>` 自带属性同名的 `id`、`name` 也会被剥掉
+
+DOMPurify 默认防 DOM clobbering：`id` 或 `name` 的值只要是 `document` 或 `<form>` 元素已有的属性名（如 `timeline`、`title`、`body`、`images`、`links`、`forms`、`fonts`、`domain`、`cookie`、`location`、`reset`、`submit`、`action`、`method`、`elements`），整个属性会被删掉。`getElementById` 拿到 `null`，脚本在那一行报错停住，页面只剩静态外壳。本地直接打开 HTML 或用普通 `srcdoc` 都正常，只有进了聊天卡片、作品卡才坏。11-13 一个按钮 id、11-16 一张小猫一日串联卡的 `id="timeline"` 都踩过，后者 You 打开就看不到猫。
+
+id 加前缀，比如 `seam-timeline`。发卡前在浏览器控制台查一遍：
+
+```js
+[...document.querySelectorAll('[id],[name]')].flatMap(e => [e.id, e.getAttribute('name')]).filter(v => v && (v in document || v in document.createElement('form')))
+```
+
+结果不是空数组，就先改名。
+
+#### 卡片可能在 0×0 的框里就开始运行
+
+卡片面板还没展开、被收起，或者在后台标签页里时，卡片里的页面已经开始跑脚本，这时取到的房间宽高是 0。如果拿宽高去算位置并存下来（比如 `x = 宽 / 比例`），会得到「不是数字」，之后再也算不回来。11-16 一张小猫追纸团的互动卡第 3 版就是这样：You 打开只看到纸团，看不到猫（纸团在按鼠标时会重新放回指针处，所以能恢复）。
+
+宽高为 0 时不排版；第一次拿到正常宽高时，再放置各个角色；每帧检查一次位置是不是正常数字；用 `ResizeObserver` 监听尺寸变化，不只靠窗口的 `resize` 事件。发卡前补一个测试：把框设成 `display:none` 再加载页面，然后显示出来，看角色在不在。
+
+#### 卡片里引用 `/uploads/...` 图片，要写 api 域名的完整地址
+
+You 平时从 `https://cafe.clowder-ai.com` 打开 Hub，这个域名前面有 Cloudflare 登录。卡片在沙盒里运行，取图时不带他的登录 Cookie，相对地址 `/uploads/...` 会被 302 转到登录页，图片载不出来，也不报错。本机 `localhost:3003` 打开时没有这层登录，所以本机测试是好的。11-16 一张小猫眼睛跟着鼠标的互动卡第 1 版就是这样，You 打开后看不到猫。
+
+`cat_cafe_publish_image` 返回 `/uploads/...` 后，在 HTML 里依次尝试两个地址：先用 `https://api.clowder-ai.com/uploads/...`（Hub 自己显示图片也走这里，不需要登录），失败或 4 秒没载入，再退回相对地址（给本机打开 Hub 的人用）。页面上写明「正在载入」和「载入失败」，别让失败变成一块空白。
+
+发卡前，在 `https://cafe.clowder-ai.com` 下复现一遍：父页面用 Playwright 拦截一个空白页，图片走真实网络，看沙盒里的图是否载入。
+
 轻交互用 `<details><summary>` 或 CSS `:hover`，不用 JS。
+
+## 会话里发现值得跟踪的问题
+
+当分析已有稳定症状、明确影响和证据、可能属于项目且尚未跟踪时，在结论后最多给一次可忽略的“整理 Issue 草稿”建议。根因未明也能建单调查，正文要区分事实与假设；不要重跑分析、扫描情绪/关键词或对每次异常弹卡。用户已拒绝、明确只分析、正在紧急恢复或已有对应 Issue 时不重复提示。
+
+- 用户已授权提单：沿项目 canonical `gh` 查重并执行，不强制安装或经过反馈插件。已有 Issue 时先说明拟补充的内容，不能把新建授权当作任意外部追加授权。
+- 需要用户审阅、尚未授权外发：使用既有 `card`，`meta.kind="community_issue_draft"`，以稳定 block id 预填公开标题/正文和已确认目标。正文只放用户拟公开的结论/证据，别塞完整私聊、凭据或日志。Host 会准备脱敏报告，创建插件草稿后还有单独的预览/提交确认。
+- 只建议一次，用户无意提交就继续原任务；不要为了出卡再问一次阻塞问题。只有收到真实 Issue URL/编号才说“已提交”；保存草稿、复制报告或打开网页都算尚未提交。
+- 发布插件不可用时，同一卡仍可审阅复制报告；只有已配置的目标才提供手工网页入口。普通用户无需安装 `gh`。截图/多目标可选择现有反馈工作台，本卡不会自动带入该插件。
+
+```json
+{"id":"issue-draft-source-message-1","kind":"card","v":1,"title":"建议跟踪这个问题","meta":{"kind":"community_issue_draft","proposedTitle":"工具调用失败后缺少可见说明","proposedBody":"## 现象与影响\n用户看不到失败原因。\n\n## 证据\n附可公开的复现步骤。\n\n## 待调查\n根因尚未确认。","proposedRepo":"已确认的owner/repo"}}
+```
+
+已有草稿只复用真实返回的 `meta.draftId`；没有 ID 就保留同一消息/block 来源，服务端以它恢复同一草稿。不要猜 ID、修改 block id 重建或把已取消草稿自动替换成新稿。该流程不启用停用插件、不恢复 F222 已退休的关键词/重发检测。
 
 ## 发送方式
 
 用 MCP 工具 `cat_cafe_create_rich_block`，参数 `block` 传 JSON 字符串。
 发 block 前**先写 1-2 句自然语言摘要**，再发 block。
+
+**找原话带出处**：全文读取已给 `contentRevision` 和 `sourceParts`，猫选原句与理由，
+用 `kind:"sources"` 随普通回复交卡；显式发消息用 `post_message` 的 `searchAnswer={query,selections}`。
+完整字段、agent-key 和旧操作重试见 [sources 约定](../.cat-cafe-shared-refs/rich-blocks.md#sources-原话与出处)。
+Host 核出处，理由仍是猫的判断；prepared 不等于已发布，普通搜索不自动发卡。
 
 如果图片来源是本地文件（例如 Codex CLI / 本地脚本刚生成的 PNG）：
 

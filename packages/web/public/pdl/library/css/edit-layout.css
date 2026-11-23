@@ -1,0 +1,84 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 编辑布局 */
+/* ───────── 编辑布局（只作用于导航结构：入口、分组标题；页面内容没有这些样式）───────── */
+.edit-bar { display: flex; align-items: center; gap: var(--sp-m); padding: var(--sp-xs) var(--sp-xs) var(--sp-xs) var(--sp-m); border-radius: var(--r-full); background: var(--surf-float); }
+
+/* 列表行的嵌套层级（界面树这类按层级列出的行）：缩进一档 */
+/* 组件目录（catalog.js） */
+.cat-entry { padding: var(--sp-m) 0; }
+.cat-entry:last-child { border-bottom: 0; }
+.cat-demo { --jump-scale: 1; --jump-anim: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-s); padding: var(--sp-m); border-radius: var(--r-m); background: var(--bg-page); }
+.cat-demo > * { max-width: 100%; }
+.cat-row { flex: 1 1 100%; min-width: 0; }   /* 块的示例占一整行，控件并排 */
+.cat-state > .mono { flex: none; }
+.cat-flow > .cells { flex: 1 1 100%; }
+.cat-row > .cafe-mini { position: relative; inset: auto; height: var(--av-xl); }   /* 消息导航在目录里就地画（平时贴在对话页右边） */
+.cat-row > .composer > .lanes { position: static; }   /* 输入框上沿那一行在目录里就地画（平时浮在输入框上面） */
+.cat-flow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-s); }
+.cat-meta { display: grid; grid-template-columns: auto 1fr; gap: var(--sp-xs) var(--sp-m); margin: var(--sp-s) 0 0; font-size: var(--fs-m); color: var(--fg-muted); }
+.cat-meta dt { color: var(--fg-faint); }
+.cat-meta dd { margin: 0; }
+.cat-props summary { cursor: pointer; margin-top: var(--sp-xs); }
+.cat-table { border-collapse: collapse; font-size: var(--fs-s); margin-top: var(--sp-xs); }
+.cat-table td, .cat-table th { padding: var(--sp-hair) var(--sp-m) var(--sp-hair) 0; text-align: left; vertical-align: top; }
+.cat-st { display: inline-flex; flex-direction: column; align-items: center; gap: var(--sp-xs); font-size: var(--fs-xs); }
+.cat-icons { display: flex; flex-wrap: wrap; gap: var(--sp-l); }
+.cat-rules { margin-top: var(--sp-s); }
+.toast.cat-static { position: static; transform: none; }
+.cat-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-s); margin-bottom: var(--sp-s); }
+.cat-use { margin-left: auto; }
+.cat-use.none { color: var(--fg-faint); }
+
+.cat-states { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-m); margin-top: var(--sp-s); font-size: var(--fs-s); }
+.cat-state { display: inline-flex; align-items: center; gap: var(--sp-s); }
+.cat-stream { flex: 1 1 100%; min-width: 0; }
+.cat-rh { position: relative; width: var(--av-xl); height: var(--av-xl); border-radius: var(--r-m); background: var(--bg-group); }
+.cat-scroll { max-height: calc(var(--ctl-m) * 3.5); width: 100%; }
+.cat-scroll p { margin: 0; line-height: var(--ctl-m); }
+.cat-scroll-x { width: 100%; }
+.cat-pop { width: 100%; }
+.cat-note { margin: 0 0 var(--sp-m); }
+.cat-mx { border-collapse: separate; border-spacing: var(--sp-s); width: 100%; table-layout: fixed; }
+.cat-mx th { text-align: left; vertical-align: top; white-space: normal; overflow-wrap: anywhere; }   /* 行名一列是固定宽：名字、组件键、用了几处在格子里换行，不伸到示例那一列 */
+.cat-mx-h { display: flex; flex-direction: column; gap: var(--sp-xs); }
+.cat-mx tr > :first-child { width: 9em; }
+.cat-mx-h .cat-use { margin-left: 0; }
+.cat-mx td { vertical-align: top; }
+.cat-mx .cat-demo { padding: var(--sp-s); }
+.cat-mx .cat-demo > .notice, .cat-mx .cat-demo > .stream-list { flex: 1; min-width: 0; }
+.cat-mx .notice .grow { min-width: 0; }
+/* 格子容器（page.js 的 cellsHtml）：项按格子号排，空格是可压缩的空位，两端之间一个弹性空位。窗口变小时先压中间、再压空位 */
+.cells { display: flex; min-width: 0; min-height: 0; }
+/* 格子容器沿主轴的内边距只来自 --cells-pad：落点提示（cell-drop）从同一个值起算，格号 × 格宽在内边距之内，不量坐标 */
+.cells-col { flex-direction: column; align-items: center; flex: 1; padding-block: var(--cells-pad); }
+.cells-row { flex-direction: row; align-items: center; --cell: var(--cell-bar); padding-inline: var(--cells-pad); }
+.rail .cells { --cell: var(--cell-rail); width: 100%; }
+.citem { display: contents; }
+.cells-col > .citem { display: grid; place-items: center; min-height: var(--cell); width: 100%; flex: none; }
+.cell-gap { flex: 0 1 calc(var(--u-n) * var(--cell)); min-width: 0; min-height: 0; }
+.cells-flex { flex: 1 1 0; min-width: 0; min-height: 0; }
+.cells:has(> .cell-drop) { position: relative; }
+.cell-drop { position: absolute; border-radius: var(--r-m); background: var(--bg-selected); pointer-events: none; z-index: var(--z-drag); --u-at: calc(var(--u-cell) * var(--cell)); --u-len: calc(var(--u-n) * var(--cell)); }   /* 编辑布局的落点：在格子容器里按格号摆（从起始端或结束端数） */
+.cells-row > .cell-drop { top: 0; bottom: 0; width: var(--u-len); } .cells-row > .cell-drop.start { inset-inline-start: calc(var(--cells-pad) + var(--u-at)); } .cells-row > .cell-drop.end { inset-inline-end: calc(var(--cells-pad) + var(--u-at)); }
+.cells-col > .cell-drop { left: 0; right: 0; height: var(--u-len); } .cells-col > .cell-drop.start { top: calc(var(--cells-pad) + var(--u-at)); } .cells-col > .cell-drop.end { bottom: calc(var(--cells-pad) + var(--u-at)); }
+/* ───────── 编辑布局：可编辑的节点像 iOS 主屏一样轻轻晃（“正在编辑”的信号，不是状态信号）；固定的不晃 ─────────
+   边缘出现移动光标、按住拖（和弹窗同一个手势，见 core.js 的 EDGE_DRAG）；点节点本身不做任何事。系统要求减少动态效果时改成静止的轻微浮起 */
+@keyframes jiggle { 0%, 50%, 100% { rotate: calc(-1 * var(--u-jig, var(--jig))); } 25%, 75% { rotate: var(--u-jig, var(--jig)); } }
+body.edit-layout [data-edit] { animation: jiggle var(--loop) ease-in-out infinite; transform-origin: 50% 50%; }
+/* 编辑布局时元素在抖：抖动会让光标下的行反复进出悬停，悬停露出的操作不做延迟淡出（不然一直在重新开始过渡，页面停不下来） */
+body.edit-layout :is(.cafe-acts, .lr-acts, .cafe-hov, .nav-pin) { transition: none; }
+body.edit-layout [data-edit]:nth-child(3n+1) { animation-delay: calc(var(--beat) * -.13); }
+body.edit-layout [data-edit]:nth-child(3n+2) { animation-delay: calc(var(--beat) * -.31); }
+body.edit-layout .nav-row[data-edit], body.edit-layout .lr-section-label[data-edit], body.edit-layout .composer-wrap[data-edit], body.edit-layout .lr[data-edit] { --u-jig: var(--jig-row); }
+body.edit-layout [data-edit="region"] { animation: none; box-shadow: inset 0 0 0 var(--sp-hair) var(--bg-selected); }
+body.edit-layout .citem[data-edit] { display: inline-flex; }
+:root[data-motion="reduce"] body.edit-layout [data-edit]:not([data-edit="region"]) { animation: none; box-shadow: var(--shadow-low); scale: 1.03; }
+/* 编辑布局是只读的：输入框不接输入（点下去落到可拖的节点上）；可移动的节点有一层轻轻的浮起，固定的没有 */
+body.edit-layout .app :is(input, textarea, select, [contenteditable]) { pointer-events: none; }
+body.edit-layout [data-edit]:not([data-locked]):not([data-edit="region"]) { box-shadow: var(--shadow-low); border-radius: var(--r-m); }
+/* 拖动中：能放的容器画出来（入口 → 所有接收入口的容器；别的 → 只有它自己的容器），格子容器连格子一起画 */
+body.pdl-dragging .edit-home { outline: var(--sp-hair) dashed var(--accent); outline-offset: var(--sp-hair); border-radius: var(--r-m); }
+body.pdl-dragging .cells.edit-home { background-image: repeating-linear-gradient(to right, var(--bg-selected) 0 calc(var(--cell) - var(--sp-hair)), transparent calc(var(--cell) - var(--sp-hair)) var(--cell)); background-origin: content-box; }
+body.pdl-dragging .cells-col.edit-home { background-image: repeating-linear-gradient(to bottom, var(--bg-selected) 0 calc(var(--cell) - var(--sp-hair)), transparent calc(var(--cell) - var(--sp-hair)) var(--cell)); }
+body.edit-layout .edit-drag { animation: none; position: relative; z-index: var(--z-drag); box-shadow: var(--shadow-raised); opacity: var(--op-wash); }
+body.edit-layout .cafe-m:hover .cafe-acts { visibility: visible; opacity: 1; }

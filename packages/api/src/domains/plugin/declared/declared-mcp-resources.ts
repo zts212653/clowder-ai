@@ -118,6 +118,7 @@ async function stablePackageRoot(
       packageDigest: admission.packageRecord.packageDigest,
       packageName,
       sourceKind: provenance.kind,
+      // a locally admitted package that ships its node_modules uses them, as the runtime start does
       ...(provenance.dependencyClosure === undefined ? {} : { dependencyClosure: provenance.dependencyClosure }),
     });
     try {

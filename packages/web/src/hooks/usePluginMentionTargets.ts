@@ -1,61 +1,37 @@
 'use client';
 
 import type { PluginMentionTarget } from '@cat-cafe/shared';
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
-type Projection = { targets: PluginMentionTarget[]; knownTargets: PluginMentionTarget[] };
-const empty: Projection = { targets: [], knownTargets: [] };
-let snapshot = empty;
-let pending: Promise<void> | undefined;
-const listeners = new Set<() => void>();
+export interface PluginTargets {
+  /** Enabled instances that can be addressed now (@alias). */
+  targets: PluginMentionTarget[];
+  /** Every instance that has an address, for receipts and replies of earlier messages. */
+  knownTargets: PluginMentionTarget[];
+}
 
-export function refreshPluginMentionTargets(): Promise<void> {
-  if (pending) return pending;
-  pending = (async () => {
-    let next = empty;
-    try {
+/** Addressed plugin instances, read while a view shows them; re-read when a plugin operation or address changes. */
+export function usePluginTargets(needed: unknown): PluginTargets | undefined {
+  const [targets, setTargets] = useState<PluginTargets>();
+  useEffect(() => {
+    if (!needed) return;
+    let live = true;
+    const read = async () => {
       const response = await apiFetch('/api/plugin-manager/addressed-targets');
-      if (response.ok) {
-        const data = await response.json();
-        next = { targets: data.targets ?? [], knownTargets: data.knownTargets ?? data.targets ?? [] };
-      }
-    } catch {
-      /* Failed discovery must not offer a stale delivery target. */
-    }
-    if (JSON.stringify(next) !== JSON.stringify(snapshot)) {
-      snapshot = next;
-      listeners.forEach((notify) => notify());
-      window.dispatchEvent(new Event('plugin-addresses-refreshed'));
-    }
-  })().finally(() => {
-    pending = undefined;
-  });
-  return pending;
-}
-function subscribe(notify: () => void) {
-  listeners.add(notify);
-  if (listeners.size === 1) {
-    void refreshPluginMentionTargets();
-    window.addEventListener('focus', refreshPluginMentionTargets);
-    window.addEventListener('plugin-targets-changed', refreshPluginMentionTargets);
-  }
-  return () => {
-    listeners.delete(notify);
-    if (!listeners.size) {
-      window.removeEventListener('focus', refreshPluginMentionTargets);
-      window.removeEventListener('plugin-targets-changed', refreshPluginMentionTargets);
-    }
-  };
-}
-/** Shared inventory projection for composer, receipts and queue; never CatData. */
-export function usePluginTargets() {
-  return useSyncExternalStore(
-    subscribe,
-    () => snapshot,
-    () => empty,
-  );
-}
-export function usePluginMentionTargets() {
-  return usePluginTargets().targets;
+      if (!response.ok || !live) return;
+      const body = (await response.json()) as Partial<PluginTargets>;
+      if (live) setTargets({ targets: body.targets ?? [], knownTargets: body.knownTargets ?? body.targets ?? [] });
+    };
+    const reread = () => void read().catch(() => undefined);
+    reread();
+    window.addEventListener('cat-cafe:plugin-operation-changed', reread);
+    window.addEventListener('plugin-targets-changed', reread);
+    return () => {
+      live = false;
+      window.removeEventListener('cat-cafe:plugin-operation-changed', reread);
+      window.removeEventListener('plugin-targets-changed', reread);
+    };
+  }, [needed]);
+  return targets;
 }

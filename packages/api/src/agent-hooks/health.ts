@@ -1,11 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
+import { resolveInvokeCapabilityRoot } from '../config/capabilities/invoke-capability-root.js';
 import { checkMcpProject, type McpDriftResult, type McpIssue } from '../mcp/mcp-drift-detector.js';
 import { syncMcpDrift } from '../mcp/mcp-drift-resolver.js';
 import { computeSkillDrift } from '../routes/skills-drift.js';
 import { syncDrift } from '../skills/drift-resolver.js';
-import { resolveStartupProjectRoot } from '../utils/startup-root.js';
+import { type CapabilityTruth, resolveCapabilityTruth } from './capability-truth.js';
 import { claudeSettingsHealth, syncClaudeSettings } from './claude-settings.js';
 import { measureHookPhase } from './diagnostics.js';
 import {
@@ -33,19 +34,6 @@ export type {
   AgentHookStatusResponse,
   HealthResult,
 } from './health-contract.js';
-
-interface CapabilityTruth {
-  root: string;
-  skillsSource?: string;
-}
-
-function resolveCapabilityTruth(projectRoot: string): CapabilityTruth {
-  const projectSkillsSource = join(projectRoot, 'cat-cafe-skills');
-  if (existsSync(join(projectSkillsSource, 'manifest.yaml'))) {
-    return { root: projectRoot, skillsSource: projectSkillsSource };
-  }
-  return { root: resolveStartupProjectRoot() };
-}
 
 type JsonObject = Record<string, unknown>;
 
@@ -222,8 +210,8 @@ async function checkMcpHealth(projectRoot: string, truth: CapabilityTruth): Prom
     if (!existsSync(join(projectRoot, '.cat-cafe', 'capabilities.json'))) {
       return { name: 'mcp', drifted: false, status: 'configured', targetPath: '', reason: 'no project capabilities' };
     }
-    const globalConfig = await readCapabilitiesConfig(truth.root);
-    const drift = await checkMcpProject(projectRoot, truth.root, globalConfig);
+    const globalConfig = await readCapabilitiesConfig(truth.mcpRoot);
+    const drift = await checkMcpProject(projectRoot, truth.mcpRoot, globalConfig);
     const actionableIssues = filterOrphanIssues(drift, globalConfig !== null);
     if (actionableIssues.length === 0) {
       return { name: 'mcp', drifted: false, status: 'configured', targetPath: '', reason: 'configured' };
@@ -258,12 +246,12 @@ async function syncMcpDriftIfNeeded(
   truth: CapabilityTruth,
   globalConfig: Awaited<ReturnType<typeof readCapabilitiesConfig>>,
 ): Promise<void> {
-  const drift = await checkMcpProject(capRoot, truth.root, globalConfig);
+  const drift = await checkMcpProject(capRoot, truth.mcpRoot, globalConfig);
   const nonDestructiveIssues = filterOrphanIssues(drift, globalConfig !== null);
   if (nonDestructiveIssues.length === 0) return;
 
   const safeDrift = { ...drift, issues: nonDestructiveIssues };
-  await syncMcpDrift(capRoot, truth.root, safeDrift, undefined, 'keep-project');
+  await syncMcpDrift(capRoot, truth.mcpRoot, safeDrift, undefined, 'keep-project');
 }
 
 async function syncCapabilityDrift(capRoot: string, truth: CapabilityTruth): Promise<void> {
@@ -278,7 +266,7 @@ async function syncCapabilityDrift(capRoot: string, truth: CapabilityTruth): Pro
   }
 
   try {
-    await syncMcpDriftIfNeeded(capRoot, truth, globalConfig);
+    await syncMcpDriftIfNeeded(capRoot, truth, await readCapabilitiesConfig(truth.mcpRoot));
   } catch {
     /* MCP sync failure should not block hook sync result */
   }
@@ -296,8 +284,8 @@ export async function getAgentHookStatus(options: AgentHookOptions): Promise<Age
   // #1049 Step 3: unified health check — hooks + skills + MCPs
   // capabilityProjectRoot targets the thread's project; projectRoot stays
   // the install repo for hook templates.
-  const capRoot = options.capabilityProjectRoot ?? options.projectRoot;
-  const truth = resolveCapabilityTruth(capRoot);
+  const capRoot = options.capabilityProjectRoot ?? (await resolveInvokeCapabilityRoot(options.projectRoot));
+  const truth = await resolveCapabilityTruth(options.capabilityProjectRoot ?? options.projectRoot);
   const [skillHealth, mcpHealth] = await Promise.all([
     measureHookPhase(options.diagnostics, 'skills-health', () => checkSkillHealth(capRoot, truth)),
     measureHookPhase(options.diagnostics, 'mcp-health', () => checkMcpHealth(capRoot, truth)),
@@ -327,8 +315,8 @@ export async function syncAgentHooks(options: AgentHookOptions): Promise<AgentHo
   //      could cause skill/MCP sync to treat the project as empty and wipe entries.
   // capabilityProjectRoot targets the thread's project for skill/MCP sync;
   // projectRoot stays the install repo for hook templates.
-  const capRoot = options.capabilityProjectRoot ?? options.projectRoot;
-  const truth = resolveCapabilityTruth(capRoot);
+  const capRoot = options.capabilityProjectRoot ?? (await resolveInvokeCapabilityRoot(options.projectRoot));
+  const truth = await resolveCapabilityTruth(options.capabilityProjectRoot ?? options.projectRoot);
   const projectConfig = await measureHookPhase(options.diagnostics, 'capability-owner-check', async () =>
     options.ownerAuthorized === true ? await readCapabilitiesConfig(capRoot) : null,
   );

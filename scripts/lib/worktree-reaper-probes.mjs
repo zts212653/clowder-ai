@@ -16,12 +16,13 @@ export const WALK_CAP = 5000;
 /** Run git; returns { ok, code, out }. Never throws. `env` adds variables for this call only. */
 export function git(cwd, args, env = {}) {
   try {
-    const out = execFileSync('git', ['-C', cwd, ...args], {
+    const out = execFileSync('git', ['-c', 'core.fsmonitor=false', '-C', cwd, ...args], {
       encoding: 'utf8',
       maxBuffer: MAX_BUFFER,
       stdio: ['ignore', 'pipe', 'pipe'],
       // Read-only probing: without this `git status` refreshes (rewrites) the index, which both
       // mutates the directory being judged and fakes "recent activity" for the next run.
+      // The per-command config also prevents status from starting a daemon in that directory.
       env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', ...env },
     });
     return { ok: true, code: 0, out };

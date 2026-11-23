@@ -56,10 +56,13 @@ function fakeSpawn(launches, conversationId, model = 'gemini-3.8-flash-high') {
     launches.push(options);
     const agent = options.args[options.args.indexOf('--agent') + 1];
     const cwd = options.cwd;
+    const permissionMode = options.args.includes('--dangerously-skip-permissions')
+      ? 'always-proceed'
+      : 'request-review';
     yield {
       event: 'init',
       conversation_id: conversationId,
-      init: { agent, cwd, model, permission_mode: 'request-review', tools: [] },
+      init: { agent, cwd, model, permission_mode: permissionMode, tools: [] },
     };
     yield {
       event: 'result',
@@ -69,7 +72,55 @@ function fakeSpawn(launches, conversationId, model = 'gemini-3.8-flash-high') {
 }
 
 describe('F325 native AGY session binding', () => {
-  test('resumes only with the verified binding; missing binding or identity drift requires router rebuilding', async () => {
+  test('migrates legacy hashed bindings and resumes across guidance, nickname and governance edits without sealing', async () => {
+    const f = fixture();
+    try {
+      const body =
+        '# Identity\nFixed identity.\n\n## 7. MCP 工具 quick index\nTOOLS-OLD\n\n## 8. 家里能力唤醒指南\nCAPABILITY-OLD\n\n## 9. 代码哲学\nRule v1.\n';
+      f.setNativeBody(body);
+      const launches = [];
+      const prepared = [];
+      const run = (binding) =>
+        collect(
+          f.service.invoke('current turn', {
+            workingDirectory: f.workspace,
+            beforeProviderLaunch: async (req) => {
+              prepared.push(req);
+            },
+            ...(binding ? { sessionId: binding.cliSessionId, nativeSessionBinding: binding } : {}),
+            spawnCliOverride: fakeSpawn(launches, 'session-guidance'),
+          }),
+        );
+      const first = await run();
+      const firstBinding = first.find((event) => event.type === 'session_init').nativeSessionBinding;
+      const oldHash = createHash('sha256').update(body.trim()).digest('hex');
+      const legacy = {
+        ...firstBinding,
+        l0Hash: oldHash,
+        agentName: `cat-cafe-gemini38-${oldHash.slice(0, 16)}`,
+      };
+      const migrated = await run(legacy);
+      assert.equal(migrated.at(-1).errorCode, undefined);
+      const binding = migrated.find((event) => event.type === 'session_init').nativeSessionBinding;
+      assert.equal(binding.agentName, 'cat-cafe-host-gemini38');
+
+      f.setNativeBody(body.replaceAll('-OLD', '-NEW').replace('Rule v1.', 'Rule v2.'));
+      const resumed = await run(binding);
+      assert.equal(resumed.at(-1).errorCode, undefined);
+      assert.deepEqual(launches[2].args.slice(-2), ['--conversation', 'session-guidance']);
+      assert.equal(JSON.parse(launches[2].stdinInput).message.content[0].text, 'current turn');
+      assert.match(prepared.at(-1).nativeInstructions[0].body, /TOOLS-NEW[\s\S]*CAPABILITY-NEW[\s\S]*Rule v2\./);
+
+      // Foreign cat binding MUST still be rejected before spawning
+      const foreign = await run({ ...binding, agentName: 'cat-cafe-other-cat-0123456789abcdef' });
+      assert.equal(foreign.at(-1).errorCode, 'AGY_NATIVE_RESUME_MISMATCH');
+      assert.equal(launches.length, 3, 'foreign-cat mismatches must not launch the provider');
+    } finally {
+      f.cleanup();
+    }
+  });
+
+  test('resumes with verified binding across L0 updates and read_only policy while rejecting missing bindings', async () => {
     const f = fixture();
     try {
       const launches = [];
@@ -107,6 +158,7 @@ describe('F325 native AGY session binding', () => {
         }),
       );
       assert.equal(missing.at(-1).errorCode, 'AGY_NATIVE_RESUME_MISMATCH');
+      assert.equal(launches.length, 2, 'missing binding must not launch the provider');
 
       f.setNativeBody('# Identity\nL0-v2\n');
       const third = await collect(
@@ -114,23 +166,22 @@ describe('F325 native AGY session binding', () => {
           workingDirectory: f.workspace,
           sessionId: 'session-one',
           nativeSessionBinding: init.nativeSessionBinding,
-          systemPrompt: '# Identity\nL0-v2\n',
-          spawnCliOverride: fakeSpawn(launches, 'session-three'),
+          spawnCliOverride: fakeSpawn(launches, 'session-one'),
         }),
       );
-      assert.equal(third.at(-1).errorCode, 'AGY_NATIVE_RESUME_MISMATCH');
-      f.setNativeBody('# Identity\nL0-v1\n');
-      const permissionChange = await collect(
+      assert.equal(third.at(-1).errorCode, undefined);
+
+      const readOnlyTurn = await collect(
         f.service.invoke('read only', {
           workingDirectory: f.workspace,
           sessionId: init.sessionId,
-          nativeSessionBinding: init.nativeSessionBinding,
+          nativeSessionBinding: third.find((e) => e.type === 'session_init').nativeSessionBinding,
           toolExecutionPolicy: { mode: 'read_only' },
-          spawnCliOverride: fakeSpawn(launches, 'must-not-launch'),
+          spawnCliOverride: fakeSpawn(launches, 'session-one'),
         }),
       );
-      assert.equal(permissionChange.at(-1).errorCode, 'AGY_NATIVE_RESUME_MISMATCH');
-      assert.equal(launches.length, 2, 'service never silently replaces a mismatched session');
+      assert.equal(readOnlyTurn.at(-1).errorCode, undefined);
+      assert.equal(launches.length, 4);
     } finally {
       f.cleanup();
     }
@@ -157,7 +208,7 @@ describe('F325 native AGY session binding', () => {
     }
   });
 
-  test('resumes across teammate roster and owner capsule updates (including legacy full-hash bindings) while rejecting own restriction drift', async () => {
+  test('resumes across teammate roster, owner capsule, nickname and restriction updates while keeping user prompt and auth continuation clean', async () => {
     const f = fixture();
     try {
       const launches = [];
@@ -198,23 +249,18 @@ describe('F325 native AGY session binding', () => {
       const init1 = first.find((event) => event.type === 'session_init');
       assert.ok(init1?.nativeSessionBinding);
       const turn1StdinText = JSON.parse(launches[0].stdinInput).message.content[0].text;
-      assert.match(turn1StdinText, /默认中文。/);
-      assert.match(turn1StdinText, /@dot/);
-      assert.match(turn1StdinText, /turn 1$/);
-      assert.equal(preparedRequests[0].message.body, turn1StdinText);
-      assert.ok(!preparedRequests[0].nativeInstructions[0].body.includes('@dot'));
+      assert.equal(turn1StdinText, 'turn 1');
+      assert.equal(preparedRequests[0].message.body, 'turn 1');
+      assert.match(preparedRequests[0].nativeInstructions[0].body, /默认中文。/);
+      assert.match(preparedRequests[0].nativeInstructions[0].body, /@dot/);
 
-      // Simulate legacy pre-fix SessionRecord whose l0Hash/agentName hashed the full L0 string
       const legacyFullHash = createHash('sha256').update(l0V1).digest('hex');
-      const agentPrefix = 'cat-cafe-gemini38-';
-      const agentSuffix = init1.nativeSessionBinding.agentName.slice(agentPrefix.length + 16);
       const legacyBinding = {
         ...init1.nativeSessionBinding,
         l0Hash: legacyFullHash,
-        agentName: `${agentPrefix}${legacyFullHash.slice(0, 16)}${agentSuffix}`,
+        agentName: `cat-cafe-gemini38-${legacyFullHash.slice(0, 16)}-auto`,
       };
 
-      // First turn after upgrade with matching full L0 migrates legacy binding to canonical l0Hash without sealing
       const secondFromLegacy = await collect(
         f.service.invoke('turn 2 from legacy binding', {
           workingDirectory: f.workspace,
@@ -226,16 +272,18 @@ describe('F325 native AGY session binding', () => {
       assert.equal(secondFromLegacy.at(-1).errorCode, undefined);
       assert.deepEqual(launches[1].args.slice(-2), ['--conversation', 'session-roster-1']);
       const migratedInit = secondFromLegacy.find((event) => event.type === 'session_init');
-      assert.equal(migratedInit.nativeSessionBinding.l0Hash, init1.nativeSessionBinding.l0Hash);
+      assert.equal(migratedInit.nativeSessionBinding.agentName, 'cat-cafe-host-gemini38');
 
-      // Teammate @dot removed + owner capsule edited -> MUST resume session-roster-1 hot AND deliver NEW values!
-      const l0V2RosterAndCapsuleChanged = l0V1
+      // Update nickname, unlock restriction, edit capsule & roster -> resumes hot with fresh nativeInstructions!
+      const l0V2Updated = l0V1
+        .replace('你是 暹罗猫/烁烁。', '你是 暹罗猫/碳碳·烁烁。')
+        .replace('**硬限制**：禁止写代码。\n', '')
         .replace('默认中文。', '默认中文；最近在给新猫开工位。')
         .replace('| 布偶猫 Dot | @dot · claude-opus-5-5-high | — |', '| 缅因猫 Sol | @codex61-sol · gpt-6.1-sol | — |');
-      f.setNativeBody(l0V2RosterAndCapsuleChanged);
+      f.setNativeBody(l0V2Updated);
 
       const thirdHot = await collect(
-        f.service.invoke('turn 3 hot after roster and capsule update', {
+        f.service.invoke('turn 3 hot after full config update', {
           workingDirectory: f.workspace,
           sessionId: 'session-roster-1',
           nativeSessionBinding: migratedInit.nativeSessionBinding,
@@ -247,12 +295,12 @@ describe('F325 native AGY session binding', () => {
       );
       assert.equal(thirdHot.at(-1).errorCode, undefined);
       assert.deepEqual(launches[2].args.slice(-2), ['--conversation', 'session-roster-1']);
-      const turn3StdinText = JSON.parse(launches[2].stdinInput).message.content[0].text;
-      assert.match(turn3StdinText, /默认中文；最近在给新猫开工位。/);
-      assert.match(turn3StdinText, /@codex61-sol/);
-      assert.ok(!turn3StdinText.includes('@dot'));
-      assert.match(turn3StdinText, /turn 3 hot after roster and capsule update$/);
-      assert.equal(preparedRequests[1].message.body, turn3StdinText);
+      assert.equal(JSON.parse(launches[2].stdinInput).message.content[0].text, 'turn 3 hot after full config update');
+      assert.match(preparedRequests[1].nativeInstructions[0].body, /碳碳·烁烁/);
+      assert.match(preparedRequests[1].nativeInstructions[0].body, /默认中文；最近在给新猫开工位。/);
+      assert.match(preparedRequests[1].nativeInstructions[0].body, /@codex61-sol/);
+      assert.ok(!preparedRequests[1].nativeInstructions[0].body.includes('@dot'));
+      assert.ok(!preparedRequests[1].nativeInstructions[0].body.includes('禁止写代码'));
 
       // In-invocation OAuth continuation prompt MUST preserve exact NATIVE_AUTH_CONTINUATION_PROMPT body
       let authContinuationPrepared;
@@ -269,27 +317,13 @@ describe('F325 native AGY session binding', () => {
       );
       assert.equal(authContEvents.at(-1).errorCode, undefined);
       assert.equal(authContinuationPrepared.message.body, NATIVE_AUTH_CONTINUATION_PROMPT);
-
-      // Removing own restriction (**硬限制**：禁止写代码。) MUST trigger AGY_NATIVE_RESUME_MISMATCH
-      const l0V3RestrictionUnlocked = l0V2RosterAndCapsuleChanged.replace('**硬限制**：禁止写代码。\n', '');
-      f.setNativeBody(l0V3RestrictionUnlocked);
-      const fourthMismatch = await collect(
-        f.service.invoke('turn 4 after unlocking code restriction', {
-          workingDirectory: f.workspace,
-          sessionId: 'session-roster-1',
-          nativeSessionBinding: migratedInit.nativeSessionBinding,
-          spawnCliOverride: fakeSpawn(launches, 'must-not-launch'),
-        }),
-      );
-      assert.equal(fourthMismatch.at(-1).errorCode, 'AGY_NATIVE_RESUME_MISMATCH');
-      assert.equal(launches.length, 4);
     } finally {
       f.cleanup();
     }
   });
 
   test(
-    'real agy CLI loopback wire: delivers updated USER_CAPSULE and TEAMMATE_ROSTER on --conversation hot resume in Markdown and frozenL0Input paths',
+    'real agy CLI loopback wire: refreshes identity, nickname, capsule, roster and guidance natively in systemInstruction on --conversation hot resume',
     { timeout: 60_000, skip: !resolveCliCommand('agy') },
     async () => {
       const agyBinary = resolveCliCommand('agy');
@@ -325,17 +359,17 @@ describe('F325 native AGY session binding', () => {
       server.listen(0, '127.0.0.1');
       await once(server, 'listening');
 
-      const buildFrozen = (capsule, roster) =>
+      const buildFrozen = (nickname, capsule, roster, guidanceRevision) =>
         freezeL0Input({
           schemaVersion: 1,
           compilerVersion: L0_COMPILER_VERSION,
           catId: 'gemini38',
           projection: 'owner',
           template:
-            '## 1. 身份与伙伴声明\n\n{{IDENTITY_BLOCK}}\n{{USER_CAPSULE}}\n\n{{TEAMMATE_ROSTER}}\n\n---\n\n{{GOVERNANCE_L0}}\n',
-          sections: {},
+            '## 1. 身份与伙伴声明\n\n{{IDENTITY_BLOCK}}\n{{USER_CAPSULE}}\n\n{{TEAMMATE_ROSTER}}\n\n---\n\n{{GOVERNANCE_L0}}\n\n## 7. MCP 工具 quick index（cat-cafe-* 工具家族）\n\n{{L5_CONTENT}}\n\n---\n\n## 8. Clowder AI 家里独有能力唤醒指南（场景→skill 触发反射）\n\n{{L6_CONTENT}}\n\n---\n\n## 9. 代码哲学\nRetain binding rules.\n',
+          sections: { L5_CONTENT: `TOOLS-${guidanceRevision}`, L6_CONTENT: `CAPABILITY-${guidanceRevision}` },
           variables: {
-            IDENTITY_BLOCK: '你是 暹罗猫/烁烁。\n**硬限制**：禁止触碰 6399。',
+            IDENTITY_BLOCK: `你是 暹罗猫/${nickname}。\n**硬限制**：禁止触碰 6399。`,
             USER_CAPSULE: `## 主人画像\n\n${capsule}`,
             TEAMMATE_ROSTER: [
               '## 队友名册',
@@ -349,7 +383,7 @@ describe('F325 native AGY session binding', () => {
 
       try {
         for (const mode of ['markdown', 'frozen']) {
-          let currentFrozen = buildFrozen('CAPSULE-OLD', 'ROSTER-OLD');
+          let currentFrozen = buildFrozen('NICK-OLD', 'CAPSULE-OLD', 'ROSTER-OLD', 'OLD');
           const homeRoot = join(root, `profiles-${mode}`);
           const service = new AgyNativeAgentService({
             catId: 'gemini38',
@@ -379,7 +413,11 @@ describe('F325 native AGY session binding', () => {
                   ? { sessionId: binding.cliSessionId, nativeSessionBinding: binding, requireExactResume: true }
                   : {}),
                 spawnCliOverride: async function* (launch) {
-                  const settingsFile = join(launch.env.HOME, '.gemini/antigravity-cli/settings.json');
+                  const settingsIdx = launch.args.indexOf('--settings');
+                  const settingsFile =
+                    settingsIdx >= 0
+                      ? launch.args[settingsIdx + 1]
+                      : join(launch.env.HOME, '.gemini/antigravity-cli/settings.json');
                   const original = readFileSync(settingsFile, 'utf8');
                   writeFileSync(
                     settingsFile,
@@ -392,6 +430,7 @@ describe('F325 native AGY session binding', () => {
                       timeoutMs: 30_000,
                       env: {
                         ...launch.env,
+                        AGY_CLI_DISABLE_AUTO_UPDATE: 'true',
                         GEMINI_API_KEY: `fake-${mode}`,
                         GOOGLE_GEMINI_BASE_URL: `http://127.0.0.1:${server.address().port}`,
                         HTTP_PROXY: 'http://127.0.0.1:9',
@@ -421,23 +460,14 @@ describe('F325 native AGY session binding', () => {
           assert.ok(bindingTurn1?.cliSessionId);
           const turn1Main = wireRequests.find((r) => r.phase === `${mode}-turn1` && r.main);
           assert.ok(turn1Main, `${mode} turn1 must hit synthetic Gemini upstream`);
-          assert.match(turn1Main.systemText, /禁止触碰 6399/);
-          assert.ok(
-            !turn1Main.systemText.includes('CAPSULE-OLD'),
-            `${mode} systemInstruction must not freeze CAPSULE-OLD`,
-          );
-          assert.ok(
-            !turn1Main.systemText.includes('ROSTER-OLD'),
-            `${mode} systemInstruction must not freeze ROSTER-OLD`,
-          );
-          const turn1UserEntry = JSON.stringify(
-            turn1Main.contents.find((entry) => JSON.stringify(entry).includes('CURRENT-TURN-1')) ?? {},
-          );
-          assert.match(turn1UserEntry, /CAPSULE-OLD/);
-          assert.match(turn1UserEntry, /ROSTER-OLD/);
-          assert.match(turn1UserEntry, /CURRENT-TURN-1/);
+          assert.match(turn1Main.systemText, /NICK-OLD/);
+          assert.match(turn1Main.systemText, /CAPSULE-OLD/);
+          assert.match(turn1Main.systemText, /ROSTER-OLD/);
+          assert.match(turn1Main.systemText, /TOOLS-OLD/);
+          assert.match(turn1Main.systemText, /CAPABILITY-OLD/);
+          assert.ok(!turn1Main.contentsText.includes('CAPSULE-OLD'), 'user message stays clean without L0');
 
-          currentFrozen = buildFrozen('CAPSULE-NEW', 'ROSTER-NEW');
+          currentFrozen = buildFrozen('NICK-NEW', 'CAPSULE-NEW', 'ROSTER-NEW', 'NEW');
           const bindingTurn2 = await runWireTurn(
             'turn2',
             'CURRENT-TURN-2',
@@ -445,25 +475,16 @@ describe('F325 native AGY session binding', () => {
             mode === 'frozen' ? currentFrozen : undefined,
           );
           assert.equal(bindingTurn2.cliSessionId, bindingTurn1.cliSessionId, `${mode} must keep same conversationId`);
-          assert.equal(bindingTurn2.l0Hash, bindingTurn1.l0Hash, `${mode} must keep same canonical l0Hash`);
 
           const turn2Main = wireRequests.find((r) => r.phase === `${mode}-turn2` && r.main);
           assert.ok(turn2Main, `${mode} turn2 must hit synthetic Gemini upstream`);
-          assert.ok(
-            !turn2Main.systemText.includes('CAPSULE-OLD'),
-            `${mode} turn2 systemInstruction has no CAPSULE-OLD`,
-          );
-          assert.ok(!turn2Main.systemText.includes('ROSTER-OLD'), `${mode} turn2 systemInstruction has no ROSTER-OLD`);
-          assert.match(turn2Main.contentsText, /CAPSULE-NEW/, `${mode} turn2 wire request must contain CAPSULE-NEW`);
-          assert.match(turn2Main.contentsText, /ROSTER-NEW/, `${mode} turn2 wire request must contain ROSTER-NEW`);
-          const turn2UserEntry = JSON.stringify(
-            turn2Main.contents.find((entry) => JSON.stringify(entry).includes('CURRENT-TURN-2')) ?? {},
-          );
-          assert.match(turn2UserEntry, /CAPSULE-NEW/, `${mode} turn2 user message must deliver CAPSULE-NEW to model`);
-          assert.match(turn2UserEntry, /ROSTER-NEW/, `${mode} turn2 user message must deliver ROSTER-NEW to model`);
-          assert.match(turn2UserEntry, /CURRENT-TURN-2/);
-          assert.ok(!turn2UserEntry.includes('CAPSULE-OLD'));
-          assert.ok(!turn2UserEntry.includes('ROSTER-OLD'));
+          assert.match(turn2Main.systemText, /NICK-NEW/);
+          assert.match(turn2Main.systemText, /CAPSULE-NEW/);
+          assert.match(turn2Main.systemText, /ROSTER-NEW/);
+          assert.match(turn2Main.systemText, /TOOLS-NEW/);
+          assert.match(turn2Main.systemText, /CAPABILITY-NEW/);
+          assert.doesNotMatch(turn2Main.systemText, /NICK-OLD|CAPSULE-OLD|ROSTER-OLD|TOOLS-OLD|CAPABILITY-OLD/);
+          assert.doesNotMatch(turn2Main.contentsText, /NICK-NEW|CAPSULE-NEW|ROSTER-NEW|TOOLS-NEW|CAPABILITY-NEW/);
         }
       } finally {
         server.closeAllConnections?.();

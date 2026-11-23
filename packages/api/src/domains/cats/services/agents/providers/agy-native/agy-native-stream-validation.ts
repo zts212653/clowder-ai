@@ -16,6 +16,12 @@ export function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
+export function extractUnrecognizedInitTools(record: Record<string, unknown>): readonly string[] {
+  const init = asRecord(record.init);
+  if (!Array.isArray(init?.tools)) return [];
+  return init.tools.filter((tool): tool is string => typeof tool === 'string' && !AGY_NATIVE_PROTOCOL_TOOLS.has(tool));
+}
+
 export function verifiedInitSessionId(
   record: Record<string, unknown>,
   expected: ExpectedNativeInit,
@@ -40,10 +46,9 @@ export function verifiedInitSessionId(
   }
   if (
     init.tools !== undefined &&
-    (!Array.isArray(init.tools) ||
-      init.tools.some((tool) => typeof tool !== 'string' || !AGY_NATIVE_PROTOCOL_TOOLS.has(tool)))
+    (!Array.isArray(init.tools) || init.tools.some((tool) => typeof tool !== 'string' || !tool.trim()))
   ) {
-    throw new Error('AGY native init advertised an unqualified tool vocabulary');
+    throw new Error('AGY native init advertised a malformed tool list');
   }
   return sessionId;
 }

@@ -26,18 +26,19 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
     globalThis.fetch = originalFetch;
   });
 
-  test('no_match (zero results) emits navigation nudge with graph_resolve + list_recent', async () => {
+  test('no_match (zero results) emits navigation nudge with an exact-anchor and recent-browse next step', async () => {
     const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
     globalThis.fetch = async () => ({
       ok: true,
       json: async () => ({ degraded: false, results: [] }),
     });
-    const result = await handleSearchEvidence({ query: 'nonsense gibberish' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'nonsense gibberish' });
     const text = result.content[0].text;
     assert.ok(text.includes('No results found for: nonsense gibberish'));
     assert.ok(text.includes('Memory navigation'));
-    assert.ok(text.includes('cat_cafe_graph_resolve'), 'nudge mentions graph_resolve');
-    assert.ok(text.includes('cat_cafe_list_recent'), 'nudge mentions list_recent');
+    assert.ok(text.includes('exact anchor'), 'nudge offers an exact anchor (graph relations)');
+    assert.ok(text.includes('browse recent'), 'nudge offers recent browsing without a query');
+    assert.doesNotMatch(text, /cat_cafe_graph_resolve|cat_cafe_list_recent/); // mcp-cutover-negative-reference: absence
     // F256 Phase A AC-A3: nudge should link to search best practices skill
     assert.ok(text.includes('memory-search-best-practices'), 'no_match nudge links to search skill');
   });
@@ -54,10 +55,10 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
         ],
       }),
     });
-    const result = await handleSearchEvidence({ query: 'F186' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'F186' });
     const text = result.content[0].text;
     assert.ok(text.includes('Memory navigation'), 'low-hit must emit nudge');
-    assert.ok(text.includes('graph_resolve'));
+    assert.ok(text.includes('exact anchor'));
     // F256 Phase A AC-A3: nudge should link to search best practices skill
     assert.ok(text.includes('memory-search-best-practices'), 'low_hit nudge links to search skill');
   });
@@ -80,7 +81,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
         ],
       }),
     });
-    const result = await handleSearchEvidence({ query: 'F102' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'F102' });
     const text = result.content[0].text;
     assert.ok(!text.includes('Memory navigation —'), 'high match-rank hit must NOT emit nudge');
     // But the existing "有文本匹配依据的候选" Read-reminder hook should still appear
@@ -105,7 +106,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
         ],
       }),
     });
-    const result = await handleSearchEvidence({ query: 'Memory System Overview' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'Memory System Overview' });
     const text = result.content[0].text;
     assert.ok(!text.includes('Memory navigation —'), 'architecture docs are document hits, not low-hit noise');
     assert.ok(text.includes('有文本匹配依据的候选'), 'architecture docs should trigger the Read reminder');
@@ -130,7 +131,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: '哪些 thread 和 md 提过 AUDHD' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: '哪些 thread 和 md 提过 AUDHD' });
     const text = result.content[0].text;
 
     assert.ok(text.includes('Coverage task'), 'coverage intent should emit a coverage-specific nudge');
@@ -156,7 +157,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'which ADR defines memory routing' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'which ADR defines memory routing' });
     const text = result.content[0].text;
 
     assert.ok(!text.includes('Coverage task'), 'single-answer English which query should not emit coverage nudge');
@@ -180,7 +181,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'which threads mention AUDHD' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'which threads mention AUDHD' });
     const text = result.content[0].text;
 
     assert.ok(text.includes('Coverage task'), 'which + threads should emit coverage nudge');
@@ -204,7 +205,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'mention AUDHD in docs' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'mention AUDHD in docs' });
     const text = result.content[0].text;
 
     assert.ok(text.includes('Coverage task'), 'mention should emit coverage nudge');
@@ -228,7 +229,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
         ],
       }),
     });
-    const result = await handleSearchEvidence({ query: 'ADR-019' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'ADR-019' });
     const text = result.content[0].text;
     assert.ok(!text.includes('Memory navigation —'), 'mid match-rank doc hit must NOT emit nudge');
   });
@@ -245,7 +246,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
         ],
       }),
     });
-    const result = await handleSearchEvidence({ query: 'whatever' });
+    const result = await handleSearchEvidence({ resultUnit: 'document', query: 'whatever' });
     const text = result.content[0].text;
     assert.ok(text.includes('Memory navigation'), 'no DOC sourceType in high/mid → nudge fires');
   });

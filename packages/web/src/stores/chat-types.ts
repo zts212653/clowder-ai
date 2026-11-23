@@ -115,6 +115,7 @@ export interface ToolEvent {
   executionRef?: string;
   type: 'tool_use' | 'tool_result';
   label: string;
+  toolName?: string;
   detail?: string;
   /** Terminal input for the same native tool call, separate from its output detail. */
   inputDetail?: string;
@@ -122,7 +123,8 @@ export interface ToolEvent {
   /** Native provider pair key; Hub UI event ids may differ between use/result rows. */
   toolUseId?: string;
   /** Persisted tool result status; replay adapter maps error status to failed tool UI. */
-  status?: 'completed' | 'error';
+  /** Stored native outcome, or the existing replay adapter's completed projection. */
+  status?: 'ok' | 'error' | 'unknown' | 'completed';
   timestamp: number;
 }
 
@@ -769,42 +771,17 @@ export interface QueueEntry {
   };
 }
 
-/** #706: Typed composer draft for recall-edit and cross-feature insert.
- *  Carries all state needed to restore the composer to a previous message's state.
- *  Consumed by ChatInput — when pendingChatInsert is set, the composer restores
- *  text, images, and (after #833) the quoted reply context. */
+/** Words, images, places and a quoted message handed to a conversation's input from elsewhere; the input adds them. */
 export interface ComposerDraftInsert {
   threadId: string;
   text: string;
   imageUrls?: string[];
+  /** Server-owned non-image blocks, including recoverable file descriptors. */
+  preservedBlocks?: MessageContent[];
   contextAttachments?: ContextAttachment[];
-  /** Draft-only edit operation; never enters the durable message contract. */
+  /** Places to take out of the input (or replace in place by an incoming one with the same id). */
   removeContextAttachmentIds?: string[];
-  /** Server ACK owns the complete editor text; do not append it to a stale local snapshot. */
-  authoritative?: boolean;
-  /** Unsent text requests must wait for the target owner's durable draft read. */
-  waitForDraft?: boolean;
-  /** Keep the existing draft's selection and focus when appending unsent text. */
-  preserveSelection?: boolean;
-  draftReadFailure?: { title: string; message: string };
-  /** Newly transferred source range in authoritative text; ChatInput focuses and selects it after hydration. */
-  selectionRange?: { start: number; end: number };
-  /** Durable owner+thread draft revision acknowledged by the server. */
-  serverRevision?: number;
-  /** Local editor snapshot captured immediately before the recall mutation. */
-  clientSnapshot?: {
-    text: string;
-    imageUrls?: string[];
-    contextAttachments: ContextAttachment[];
-    replyToId?: string;
-  };
-  /** Message ID of the quoted parent — maps to messagePreview.replyTo from queue enrichment.
-   *  After #833 merge: ChatInput consumes this to restore quote composing state. */
   replyToId?: string;
-  /** Pre-resolved reply preview — avoids an extra hydrate when restoring quote UI.
-   *  Populated from backend-enriched messagePreview (visibility-filtered by
-   *  resolveVisibleReplyParent on the server side). */
-  replyToPreview?: ReplyPreview;
 }
 
 export interface OwnerComposerDraft {
@@ -828,7 +805,6 @@ export interface TrueRecallResponse {
   draft: OwnerComposerDraft | null;
   insertedRange: { start: number; end: number } | null;
   queue: QueueEntry[];
-  clientSnapshot?: ComposerDraftInsert['clientSnapshot'];
 }
 
 export type TeamWorkspaceSubject = { type: 'cat'; id: string } | { type: 'provider'; id: string };

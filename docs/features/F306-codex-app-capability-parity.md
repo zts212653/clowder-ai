@@ -4,11 +4,12 @@ related_features: [F143, F146, F173, F183, F195, F197, F223, F246, F254, F281, F
 topics: [codex, app-server, capability-parity, runtime, approvals, workspace, marketplace, semantic-events, bubble-pipeline]
 doc_kind: spec
 created: 2026-08-25
+updated: 2026-11-17
 description: "让 Clowder AI 持续消费 Codex App 的高价值原生能力，同时把状态、权限与用户入口收敛到家里已有的跨 provider 产品边界。"
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-09-06T21:26:54-07:00
-tips_exempt: "Renewed 2026-09-14: retiring the blocking MCP question entry adds no user action; its compatibility response teaches the existing conversation/decision route. Subexecution isolation likewise adds no user action; F307 owns its visible presentation. Realtime and provider-native consent rollout retain their separate activation boundaries."
+tips_exempt: "Renewed 2026-11-17: daily doc guard records PR #6729 (blocking native Codex collaboration.spawn_agent delegation for restricted plugin/scoped-member launches) and PR #6751 (intake clowder-ai#1822 native shell authentication admission guard for codex login/logout). Earlier renewals (2026-09-14 / 2026-11-15 / 2026-11-16) remain in force; these internal launch and shell-guard boundaries add no new user-invoked Hub action or configuration step."
 cvo_signoff: "2026-08-25 — sourceMessageId private-source-id：把‘Clowder AI 的 Codex 体验持续对齐 Codex App’确立为正式产品承诺；立一个很薄的 Codex App Capability Parity Feature，并统一复用 Codex App 与 Clowder AI 已有概念。"
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F306-codex-app-capability-parity.md"
@@ -70,13 +71,17 @@ operator experience：
 
 ## Current State / 现状基线
 
+当前非 D 护栏续修：#7117 已在 boot92 实际加载，原 Task3168 g14 匹配；100输入、6个审合模块与实际 wrapper 新语法/最终委派链已核。原三条完整输入及查询/保护反例在6入口156次纯判定均符合预期；历史拒绝与自然使用未全证边界保留，详见下文加载证据。
+
 ### 非 D native guard 误拦修复（2026-11-09）
 
 PR [#6899](https://github.com/zts212653/clowder-ai/pull/6899)（`0f473c7f36`）已合入：普通 `cp` 从 runtime 向外导出、Git fetch 的引用方向、环境变量与程序路径、受管 `gh`、SQLite/HTTP/日志输出及 help/status 的目标归属得到修正；拒绝账本补充脱敏 cwd、触发子句与截断标记。保护目标、敏感程序环境、未知执行和 owner 依赖的停机边界继续拒绝。
 
 ### 非 D 自然查询续修（2026-11-11）
 
-**本次加载与续办**：`main=landed:d270a8529e`，`live=dormant:boot84`；当前 boot84 仍为旧版 `605bd477d3`。原 Task3168 已登记 runtime 等待 **g12**，要求包含本次合入提交且 API ready，再由新 invocation 核实际 Codex 配置、stage、私有 hook 与原输入纯策略判定；未执行原 SQL/HTTP/SSH 载荷，不主动重启。上述 boot81 为 #6899 的历史验收，不能代签 #6988 已加载或自然使用已恢复。旧 executionRef 与 blocked 记账保留；D/6263/OpenCode 继续暂停，Feature 与原 Task 不关闭。
+### 非 D AGY profile 消费者续修（2026-11-12）
+
+### 非 D gh 自然查询续修（2026-11-15）
 
 ### Codex root/subexecution isolation（2026-09-14）
 

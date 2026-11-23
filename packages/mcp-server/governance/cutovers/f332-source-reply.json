@@ -1,0 +1,50 @@
+{
+  "resource": { "kind": "family", "resourceFamily": "evidence-navigation" },
+  "retiredNames": ["cat_cafe_prepare_message_search_answer"],
+  "canonicalNames": [],
+  "expectedProfiles": {},
+  "rollbackRevision": "1b11ebd80a1aa9b8253e8bf6a4eb775c0fb990c3",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/tools/evidence-tools.ts",
+        "packages/mcp-server/src/tools/callback-tools.ts",
+        "packages/mcp-server/src/tools/source-reply.ts",
+        "packages/mcp-server/src/agent-key-collaboration-contract.ts"
+      ]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": ["packages/mcp-server/governance/mcp-surface-baseline.json"]
+    },
+    "prompt-l0": {
+      "status": "covered",
+      "consumers": ["packages/api/src/domains/cats/services/context/rich-block-rules.ts"]
+    },
+    "skill-convention": {
+      "status": "covered",
+      "consumers": ["cat-cafe-skills/rich-messaging/SKILL.md", "cat-cafe-skills/refs/rich-blocks.md"]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/source-reply-tools.test.js",
+        "packages/mcp-server/test/tool-registration.test.js",
+        "packages/api/test/message-source-reply-flow.test.js",
+        "packages/api/test/message-search-answer-callback.test.js",
+        "packages/api/test/message-search-answer-routing.test.js"
+      ]
+    },
+    "eval": {
+      "status": "not-applicable",
+      "rationale": "No shipped eval consumes the retired tool. The private three-family question remains a task-local acceptance run, not an installed tool consumer.",
+      "absenceEvidence": ["cat_cafe_prepare_message_search_answer"]
+    },
+    "observability": {
+      "status": "not-applicable",
+      "rationale": "Existing source verification/publication routes and telemetry remain intact; the fixed-root scan covers the retired tool name.",
+      "absenceEvidence": ["cat_cafe_prepare_message_search_answer"]
+    }
+  }
+}

@@ -202,6 +202,22 @@ describe('L0 Staging Protocol PR-B-impl (ADR-038)', () => {
       assert.ok(!loadStagingManifest().items.some((item) => item.id === 'four-quadrants-magic-word'));
     });
 
+    sourceOnlyTest('every family is told the shared notebook exists; what to write stays the cat’s own call', () => {
+      // F332: the "what goes where" checklist named profile and taste but not matters, so no cat thought of writing one.
+      // The row says what the notebook is for and leaves the judgment to the cat (no fixed "when/which" rule).
+      const row =
+        '**全家共用的记事本**：画像、品味之外，以后还用得上的事（比如刚定下的决定、分工、边界）→ 你觉得该记，就用 `cat_cafe_remember` 选 `matter` 记一句，连回这条对话。';
+      for (const catId of ['opus-47', 'codex', 'gemini25', 'sonnet', 'gpt52', 'opus']) {
+        assert.equal(buildStagingPrepend(catId).split(row).length - 1, 1, `${catId}: notebook row must appear once`);
+      }
+      const item = loadStagingManifest().items.find((entry) => entry.id === 'shared-notebook-matter');
+      assert.ok(item, 'manifest must declare the notebook row');
+      assert.ok(
+        Math.abs(item.estimated_tokens - tok(row)) <= 5,
+        `declared ${item.estimated_tokens} vs measured ${tok(row)}`,
+      );
+    });
+
     sourceOnlyTest('F302 renders one portable workspace reflex with runtime ports and repo truth', () => {
       const originalFrontendPort = process.env.FRONTEND_PORT;
       const originalApiPort = process.env.API_SERVER_PORT;
@@ -266,20 +282,23 @@ describe('L0 Staging Protocol PR-B-impl (ADR-038)', () => {
       assert.ok(!out.includes('source-audit'), 'F218 source-audit reflex must NOT be in staging body');
     });
 
-    sourceOnlyTest(
-      'Cloud R1 P2 #2239: 摩擦检测反射 trigger phrases rendered (positive coverage for demoted reflex)',
-      () => {
-        // Same hole-plugging: ensure co-creator重复不满 → code-as-harness reflex
-        // is actually injected, not just declared in manifest.
-        const out = buildStagingPrepend('opus-47');
-        assert.ok(
-          out.includes('co-creator重复不满'),
-          '摩擦检测反射 trigger "co-creator重复不满" must be rendered (demoted from L0 §2)',
-        );
-        assert.ok(out.includes('code-as-harness'), '摩擦检测反射 action "code-as-harness" must be rendered');
-        assert.ok(out.includes('搜证据确认'), '摩擦检测反射 procedure "搜证据确认" must be rendered');
-      },
-    );
+    sourceOnlyTest('#7097: 摩擦检测反射 renders evidence-first repeated-correction boundaries', () => {
+      // Preserve #2239's positive injection coverage using #7097's accepted
+      // trigger: confirm prior knowledge before loading the correction skill.
+      const out = buildStagingPrepend('opus-47');
+      assert.ok(out.includes('co-creator重说或纠正'), '摩擦检测反射 must cover repeated statements and corrections');
+      assert.ok(
+        out.includes('同一件事之前发生过或家里已有答案'),
+        '摩擦检测反射 must require evidence of a prior occurrence or existing answer',
+      );
+      assert.ok(out.includes('没有就是新知识，正常处理'), 'first-time knowledge must stay on the normal path');
+      assert.ok(
+        out.includes('没让他重说的工具故障只留爪感差'),
+        'tool failures without a repeated owner request must stay on the paw-feel path',
+      );
+      assert.ok(out.includes('code-as-harness'), '摩擦检测反射 action "code-as-harness" must be rendered');
+      assert.ok(out.includes('搜证据确认'), '摩擦检测反射 procedure "搜证据确认" must be rendered');
+    });
 
     sourceOnlyTest('LL-095 v2: 机制选择反射 rendered (discriminator, not slogan)', () => {
       // History: born unconditional in PR #2005 (c3f6812ad, "harness 改动按

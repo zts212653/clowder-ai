@@ -27,7 +27,7 @@ export interface TaskRunnerV2Options {
   logger: { info: (msg: string) => void; error: (msg: string, err?: unknown) => void };
   ledger: RunLedger;
   /** Phase 1b: optional actor resolver — maps role + costTier to catId */
-  actorResolver?: (role: ActorRole, costTier: CostTier) => string | null;
+  actorResolver?: (role: ActorRole, costTier: CostTier, isEligible?: (catId: string) => boolean) => string | null;
   /** Phase 3B (AC-D1): governance store for global pause + task overrides */
   globalControlStore?: import('./GlobalControlStore.js').GlobalControlStore;
   /** Phase 3B (AC-D2): emission store for self-echo suppression */

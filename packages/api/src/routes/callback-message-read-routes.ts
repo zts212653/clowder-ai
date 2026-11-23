@@ -1,4 +1,6 @@
 /** Exact message drill facet; canonical QueueProcessor owns adoption, not this read surface. */
+
+import { type MemoryMessageSelection, memoryMessageSelectionSchema } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
@@ -17,21 +19,22 @@ import type {
 import { isReadableSchedulerWork } from '../domains/cats/services/stores/readable-scheduler-work.js';
 import {
   canViewMessage,
-  getTimelineOrderTime,
   isAgentReadableManagedHoldMessage,
   isInternalNonQuotableParent,
   isSystemUserMessage,
   isTimelinePublished,
   type Viewer,
 } from '../domains/cats/services/stores/visibility.js';
+import { matchesMatterSourceSelection } from '../domains/memory/matters/matter-source.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { recordAnchorDrillEvent, recordAnchorPreviewEvent } from './anchor-event-log.js';
 import { recordAnchorFullDrill } from './anchor-telemetry.js';
-import { truncateHead } from './callback-anchor-helpers.js';
+import { projectRichBlocksSummary, truncateHead } from './callback-anchor-helpers.js';
 import { requireCallbackPrincipal } from './callback-auth-prehandler.js';
-import { projectCallbackMessageBody } from './callback-message-body.js';
+import { projectCallbackMessageBody, projectCallbackMessageCitation } from './callback-message-body.js';
 import { coverPublishedMessageReads } from './callback-published-wake-coverage.js';
 import { isReadableApprovalDecisionReceipt } from './callback-readable-approval-receipt.js';
+import { mergeCallbackMessageWindow, readCallbackMessageWindow } from './callback-visible-history.js';
 import { guardLiveCarrierRead, isWatcherRead } from './live-carrier-read-guard.js';
 
 export interface CallbackMessageReadDeps {
@@ -54,6 +57,8 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
     contextCount: z.coerce.number().int().min(0).max(10).optional(),
     // F236 AC-B1: drill terminal is bounded — default preview, mode=full returns complete content.
     mode: z.enum(['preview', 'full']).optional(),
+    memoryRead: z.enum(['true']).optional(),
+    sourceSelection: z.string().max(4000).optional(),
   });
 
   app.get(
@@ -70,6 +75,16 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
 
       const { messageId, contextCount } = parsed.data;
       const isFullDrill = (parsed.data.mode ?? 'preview') === 'full';
+      const isMemoryRead = parsed.data.memoryRead === 'true';
+      let sourceSelection: MemoryMessageSelection | undefined;
+      if (parsed.data.sourceSelection) {
+        try {
+          if (!isMemoryRead) throw new Error('Source selections require memoryRead');
+          sourceSelection = memoryMessageSelectionSchema.parse(JSON.parse(parsed.data.sourceSelection));
+        } catch {
+          return reply.status(400).send({ error: 'invalid_source_selection' });
+        }
+      }
       const message = await messageStore.getById(messageId);
       if (!message || message.deletedAt) {
         reply.status(404);
@@ -105,6 +120,7 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
       const expectedParentInvocationId =
         principal.kind === 'invocation' ? (principal.parentInvocationId ?? principal.invocationId) : undefined;
       const queuedDrillEntry =
+        !isMemoryRead &&
         !isWatcherRead(request) &&
         isFullDrill &&
         principal.kind === 'invocation' &&
@@ -133,6 +149,8 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
         reply.status(404);
         return { error: 'Message not found' };
       }
+      if (sourceSelection && !matchesMatterSourceSelection(message, sourceSelection))
+        return reply.status(409).send({ error: 'source_revision_changed' });
       // A preview is not delivery evidence. Only this exact requested full body may
       // claim an ordinary pending target; typed wait/action/domain owners stay out.
       if (queuedDrillEntry && principal.kind === 'invocation') {
@@ -187,15 +205,18 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
         const imagePaths = await extractTrustedImagePaths(m.contentBlocks, uploadDir, opts.resolveTrustedImagePath);
         const imageUrls = extractImageUrls(m.contentBlocks);
         const body = projectCallbackMessageBody(m);
-        const { preview, truncated } = isFullDrill
+        const richSummary = isFullDrill ? {} : projectRichBlocksSummary(body.richBlocks);
+        const { preview, truncated: textTruncated } = isFullDrill
           ? { preview: body.content, truncated: false }
           : truncateHead(body.content);
+        const truncated = richSummary.richBlocksSummary !== undefined ? true : textTruncated;
         return {
           id: m.id,
           userId: m.userId,
           catId: m.catId,
           content: preview,
           contentLength: body.contentLength,
+          ...(isFullDrill ? projectCallbackMessageCitation(m) : {}),
           truncated,
           ...(localReviewFact ? { localReviewFact } : {}),
           // F236 R1 / 云端 Codex P2: preview-mode truncation carries a one-hop drill pointer to the
@@ -214,6 +235,8 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
               }
             : {}),
           ...(isFullDrill && m.contentBlocks ? { contentBlocks: m.contentBlocks } : {}),
+          ...(isFullDrill && body.richBlocks ? { richBlocks: body.richBlocks } : {}),
+          ...richSummary,
           ...(imagePaths.length > 0 ? { imagePaths } : {}),
           ...(imageUrls.length > 0 ? { imageUrls } : {}),
           ...(m.replyTo ? { replyTo: m.replyTo } : {}),
@@ -234,44 +257,35 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
       const effectiveContextCount = contextCount ?? 0;
       if (effectiveContextCount > 0 && message.threadId) {
         const principalUserId = principal.userId;
-        const exposureAwareThreadRead = {
-          includeQueuedCatMessages: true,
-        } as const;
-        const before = await messageStore.getByThreadBefore(
-          message.threadId,
-          getTimelineOrderTime(message),
-          effectiveContextCount,
-          message.id,
-          principalUserId,
-          exposureAwareThreadRead,
-        );
-        const after = await messageStore.getByThreadAfter(
-          message.threadId,
-          message.id,
-          effectiveContextCount,
-          principalUserId,
-          exposureAwareThreadRead,
-        );
         // #699 P1-1b: Apply same visibility predicate to context items as target
-        const contextMsgs = [...before, ...after]
-          .filter((m) => {
-            if (m.id === messageId) return false;
-            if (m.deletedAt) return false;
-            // Apply the same narrow read exception; system reply-parent eligibility stays unchanged.
-            const isReadableManagedHoldNeighbor = isAgentReadableManagedHoldMessage(m) && m.userId === principalUserId;
-            if (
-              isInternalNonQuotableParent(m) &&
-              !isReadableManagedHoldNeighbor &&
-              !isReadableApprovalDecisionReceipt(m, principalUserId, thread) &&
-              !isReadableSchedulerWork(m, principalUserId, thread)
-            )
-              return false;
-            if (!isReadableManagedHoldNeighbor && !isTimelinePublished(m)) return false;
-            if (m.userId !== principalUserId && !isSystemUserMessage(m)) return false;
-            if (!isReadableManagedHoldNeighbor && !canViewMessage(m, viewer)) return false;
-            return true;
-          })
-          .sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
+        const include = (m: typeof message): boolean => {
+          if (m.id === messageId) return false;
+          if (m.deletedAt) return false;
+          // Apply the same narrow read exception; system reply-parent eligibility stays unchanged.
+          const isReadableManagedHoldNeighbor = isAgentReadableManagedHoldMessage(m) && m.userId === principalUserId;
+          if (
+            isInternalNonQuotableParent(m) &&
+            !isReadableManagedHoldNeighbor &&
+            !isReadableApprovalDecisionReceipt(m, principalUserId, thread) &&
+            !isReadableSchedulerWork(m, principalUserId, thread)
+          )
+            return false;
+          if (!isReadableManagedHoldNeighbor && !isTimelinePublished(m)) return false;
+          if (m.userId !== principalUserId && !isSystemUserMessage(m)) return false;
+          if (!isReadableManagedHoldNeighbor && !canViewMessage(m, viewer)) return false;
+          return true;
+        };
+        const window = {
+          store: messageStore,
+          threadId: message.threadId,
+          userId: principalUserId,
+          anchor: message,
+          include,
+          count: effectiveContextCount,
+        };
+        const before = await readCallbackMessageWindow({ ...window, direction: 'before' });
+        const after = await readCallbackMessageWindow({ ...window, direction: 'after' });
+        const contextMsgs = mergeCallbackMessageWindow({ before, anchor: message, after, includeAnchor: false });
         result.context = await Promise.all(contextMsgs.map(projectMsg));
       }
 
@@ -279,6 +293,7 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
 
       if (
         !isWatcherRead(request) &&
+        !isMemoryRead &&
         isFullDrill &&
         principal.kind === 'invocation' &&
         message.threadId === principal.threadId

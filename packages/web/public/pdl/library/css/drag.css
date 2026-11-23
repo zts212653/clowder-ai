@@ -1,0 +1,23 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 页面描述的拖动 */
+/* ── 页面描述：拖动 ── */
+.pdl-slot { display: flex; flex-direction: column; gap: inherit; min-height: 8px; }
+.app.layout-two:not(.no-nav) > [data-entry][draggable="true"] { -webkit-user-drag: element; }
+body.pdl-dragging .pdl-slot { outline: 1.5px dashed var(--accent-ring); outline-offset: 2px; border-radius: var(--r-m); min-height: var(--ctl-m); }
+body.pdl-dragging .drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
+body.pdl-dragging .drop-after { box-shadow: 0 2px 0 0 var(--accent); }
+.rail .drop-before, .app.layout-two .rail .drop-before { box-shadow: 0 -3px 0 -1px var(--accent); }
+.pdl-slot.drop-end { box-shadow: inset 0 -2px 0 0 var(--accent); }
+.pdl-over { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pdl-bin { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: var(--z-drag); display: inline-flex; align-items: center; gap: var(--sp-s); height: var(--row-h-1); padding: 0 var(--sp-l); border-radius: var(--r-full); background: var(--bg-raised); box-shadow: var(--shadow-raised); color: var(--fg-strong); font-size: var(--fs-m); }
+.pdl-bin.pdl-over { background: var(--danger-soft); color: var(--danger); outline: none; }
+.pdl-moved { color: var(--fg-faint); }
+.pdl-moved .trail { margin-left: auto; }
+.pdl-json { max-height: calc(10 * var(--row-h-1)); background: var(--bg-group); border-radius: var(--r-m); padding: var(--sp-s) var(--sp-m); font-size: var(--fs-s); margin: 0; white-space: pre; }
+.dialog.dialog-wide, .dialog:has(.field) { width: var(--span-9); }   /* 带字段的对话框也用这一档：字段的名字和输入框放得下一行（字段自己的规则，放不下才换行） */   /* 宽的对话框只有一档（对话区的模态窗也是它） */
+.dialog.dialog-viewport { width: min(calc(1.5 * var(--span-9)), 100cqw); height: round(down, min(14 * var(--row-h-1), 100dvh - 2 * var(--sp-l)), var(--row-h-1)); min-width: 0; max-width: 100%; }
+.dialog-fill { width: var(--span-12); height: 100%; min-height: 0; margin-inline: auto; }
+.dialog.dialog-full { width: 100%; min-width: 0; max-width: 100%; }
+.dialog:is(.dialog-viewport, .dialog-fill) > .dialog-body { flex: 1 1 auto; max-height: none; }
+.pdl-inpanel .page { padding: 0; max-width: none; }
+.pdl-inpanel .page-head .nav-toggle { display: none; }

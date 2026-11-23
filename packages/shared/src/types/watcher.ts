@@ -2,12 +2,45 @@ import { z } from 'zod';
 
 const watcherScopeSchema = z.enum(['all', 'selected']);
 
+/** F335 experiment: several watchers judge the same settled turn with ordinary context. Absent = off. */
+export const watcherPanelMemberSchema = z
+  .object({
+    catId: z.string().min(1).max(100),
+    /** Execution-local account choice so watcher load stays off the member's main account. */
+    accountRef: z.string().min(1).max(200).optional(),
+  })
+  .strict();
+
+export const watcherPanelConfigSchema = z
+  .object({
+    enabled: z.boolean(),
+    members: z
+      .array(watcherPanelMemberSchema)
+      .min(1)
+      .max(5)
+      .refine((members) => new Set(members.map((member) => member.catId)).size === members.length, {
+        message: 'watcher panel members must be distinct',
+      }),
+    /** Member runs across all threads; the rest wait in order. */
+    maxConcurrentRuns: z.number().int().min(1).max(12),
+  })
+  .strict();
+
+export type WatcherPanelConfig = z.infer<typeof watcherPanelConfigSchema>;
+
+export const WATCHER_PANEL_DEFAULTS: Readonly<WatcherPanelConfig> = Object.freeze({
+  enabled: false,
+  members: [{ catId: 'codex61-terra' }, { catId: 'codex61-sol' }, { catId: 'codex-astra' }],
+  maxConcurrentRuns: 6,
+});
+
 export const watcherConfigPatchSchema = z
   .object({
     enabled: z.boolean().optional(),
     scope: watcherScopeSchema.optional(),
     memberCatId: z.string().min(1).max(100).optional(),
     doNotDisturbLabelIds: z.array(z.string().min(1).max(100)).max(100).optional(),
+    panel: watcherPanelConfigSchema.optional(),
   })
   .strict();
 
@@ -209,6 +242,7 @@ export const watcherUsageSchema = z
     cacheReadTokens: z.number().int().nonnegative().optional(),
     cacheCreationTokens: z.number().int().nonnegative().optional(),
     rewrittenTokens: z.number().int().nonnegative().optional(),
+    // Request budget upper bound (estimated input + reserved output), not measured context usage.
     workingContextTokens: z.number().int().nonnegative().optional(),
   })
   .strict();

@@ -37,8 +37,42 @@ test('owner session is required and all malformed filters fail closed', async ()
       assert.equal((await f.app.inject({ url: path, headers: { 'x-cat-cafe-user': 'owner' } })).statusCode, 401);
       assert.equal((await f.app.inject({ url: path, headers: { 'x-test-session': 'other-owner' } })).statusCode, 403);
     }
-    for (const query of ['days=8', 'source=other', 'limit=0', 'limit=101', 'catId=', 'threadId=own', 'cursor=garbage'])
+    for (const query of ['days=8', 'source=other', 'limit=0', 'limit=101', 'catId=', 'threadId=', 'cursor=garbage'])
       assert.equal((await f.get(`?${query}`)).statusCode, 400, query);
+  } finally {
+    await f.close();
+  }
+});
+
+test('thread event pagination reads the complete time range and binds its cursor to the selected thread', async () => {
+  const f = await recallFixture();
+  try {
+    f.indexed.push('system', 'other', 'deleted');
+    f.recall('new');
+    for (const id of ['old-a', 'old-b']) f.recall(id, { timestamp: f.now - 100 * 86400000 });
+    f.recall('other-thread', { thread: 'system' });
+    f.recall('foreign', { thread: 'other' });
+    f.recall('deleted', { thread: 'deleted' });
+    const first = (await f.get('?days=0&threadId=own&limit=1')).json();
+    assert.equal(first.from, 0);
+    assert.equal(first.days, 0);
+    assert.equal(first.records[0].event.id, 'new');
+    const second = (await f.get(`?days=0&threadId=own&limit=1&cursor=${encodeURIComponent(first.nextCursor)}`)).json();
+    assert.equal(second.records[0].event.id, 'old-b');
+    const third = (await f.get(`?days=0&threadId=own&limit=1&cursor=${encodeURIComponent(second.nextCursor)}`)).json();
+    assert.equal(third.records[0].event.id, 'old-a');
+    assert.equal(third.nextCursor, null);
+    assert.equal(
+      (await f.get(`?days=0&threadId=system&limit=1&cursor=${encodeURIComponent(first.nextCursor)}`)).statusCode,
+      400,
+    );
+    assert.equal((await f.get('?days=0&threadId=other')).json().records.length, 0);
+    assert.equal((await f.get('?days=0&threadId=deleted')).json().records.length, 0);
+    assert.equal(
+      (await f.app.inject({ url: '/api/memory/recall/stats?days=0', headers: { 'x-test-session': 'owner' } }))
+        .statusCode,
+      400,
+    );
   } finally {
     await f.close();
   }

@@ -2,10 +2,10 @@
 
 import type { DeploymentWaitListResponse } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DeploymentWaitHydration } from '@/components/workspace/WorkspaceDeploymentWaits';
 import { apiFetch } from '@/utils/api-client';
 
 const REFRESH_MS = 4_000;
+export type DeploymentWaitHydration = 'idle' | 'loading' | 'ready' | 'error';
 
 export interface DeploymentWaitProjectionView {
   readonly projection: DeploymentWaitListResponse | null;
@@ -35,6 +35,7 @@ function resource(projectPath: string): string {
 export function useDeploymentWaitProjection(
   projectPath: string | null,
   scope: 'project' | 'all' = 'project',
+  needed: boolean | number = true,
 ): DeploymentWaitProjectionView {
   const selection = scope === 'all' ? 'all' : projectPath;
   const [state, setState] = useState<ProjectionState>(INITIAL_STATE);
@@ -75,13 +76,16 @@ export function useDeploymentWaitProjection(
   );
 
   useEffect(() => {
+    if (!needed) return; // Periodic while the held wait source is needed.
     if (!selection) {
       requestVersion.current += 1;
       setState(INITIAL_STATE);
       return;
     }
     const controller = new AbortController();
-    const update = () => void refresh(controller.signal);
+    const update = () => {
+      if (!document.hidden) void refresh(controller.signal);
+    };
     update();
     const interval = window.setInterval(update, REFRESH_MS);
     const updateWhenVisible = () => {
@@ -95,7 +99,7 @@ export function useDeploymentWaitProjection(
       window.removeEventListener('online', update);
       document.removeEventListener('visibilitychange', updateWhenVisible);
     };
-  }, [selection, refresh]);
+  }, [needed, selection, refresh]);
 
   return {
     projection: state.projectPath === selection ? state.projection : null,

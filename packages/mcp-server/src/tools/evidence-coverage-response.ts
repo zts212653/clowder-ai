@@ -1,4 +1,4 @@
-import { formatRecallMeta, type RecallMatchType } from '@cat-cafe/shared';
+import { formatRecallMeta, type ReadRef, type RecallMatchType, readRefFromDrillDown } from '@cat-cafe/shared';
 import type { ToolResult } from './file-tools.js';
 import { successResult } from './file-tools.js';
 
@@ -39,6 +39,7 @@ export interface CoverageToolData {
 }
 
 interface CoverageToolItem {
+  readRef?: ReadRef;
   anchor: string;
   title: string;
   kind: string;
@@ -57,11 +58,30 @@ export function renderCoverageToolResponse(
   data: CoverageToolData,
   input: CoverageToolInput,
   queryLabel: string,
+  charBudget = COVERAGE_TOOL_RESPONSE_CHAR_BUDGET,
 ): ToolResult {
   const minimumRenderedItems = data.matrix.length === 0 ? 0 : 1;
+  // Rows the docs-only page returns at the original budget.
+  let pageRows = -1;
   for (let renderedItems = data.matrix.length; renderedItems >= minimumRenderedItems; renderedItems--) {
-    const text = renderCoverageCandidate(data, input, queryLabel, renderedItems);
-    if (text.length <= COVERAGE_TOOL_RESPONSE_CHAR_BUDGET) return successResult(text);
+    if (
+      renderCoverageCandidate(data, input, queryLabel, renderedItems, 'rows').length <=
+      COVERAGE_TOOL_RESPONSE_CHAR_BUDGET
+    ) {
+      pageRows = renderedItems;
+      break;
+    }
+  }
+  if (pageRows < 0) throw new Error('Coverage MCP response cannot fit one bounded item and its continuation footer');
+  // Beside other find groups the budget is smaller: the same rows switch to compact rows (field names once, the
+  // same values) before any row moves to the continuation. The docs-only budget renders exactly as before.
+  const layouts =
+    charBudget < COVERAGE_TOOL_RESPONSE_CHAR_BUDGET ? (['rows', 'compact'] as const) : (['rows'] as const);
+  for (let renderedItems = pageRows; renderedItems >= minimumRenderedItems; renderedItems--) {
+    for (const layout of layouts) {
+      const text = renderCoverageCandidate(data, input, queryLabel, renderedItems, layout);
+      if (text.length <= charBudget) return successResult(text);
+    }
   }
   throw new Error('Coverage MCP response cannot fit one bounded item and its continuation footer');
 }
@@ -71,15 +91,20 @@ function renderCoverageCandidate(
   input: CoverageToolInput,
   queryLabel: string,
   renderedItems: number,
+  layout: 'rows' | 'compact',
 ): string {
   const lines = [
     `Evidence search results: Found ${data.totalHits} result(s) for ${boundField(queryLabel)} [intent=coverage]:`,
-    '📊 Coverage Search',
+    layout === 'rows'
+      ? '📊 Coverage Search'
+      : '📊 Coverage Search · compact rows (same items and values as the docs-only page)',
     '',
     ...Object.entries(data.bySource).map(([source, info]) => `  ${source}: ${info.count}/${info.cap}`),
     '',
   ];
-  for (const item of data.matrix.slice(0, renderedItems)) lines.push(...renderItem(item));
+  const items = data.matrix.slice(0, renderedItems);
+  if (layout === 'rows') for (const item of items) lines.push(...renderItem(item));
+  else lines.push(...renderCompactItems(items));
 
   appendDegraded(lines, data.degraded);
   appendContract(lines, data, input, renderedItems);
@@ -115,8 +140,64 @@ function renderItem(item: CoverageToolItem): string[] {
     ...(item.sourcePath ? [`  sourcePath: ${boundField(item.sourcePath)}`] : []),
     ...(item.representation ? [`  representation: ${item.representation}`] : []),
     ...(item.identityDigest ? [`  identityDigest: ${boundField(item.identityDigest, 80)}`] : []),
-    ...(item.drillDown ? [`  drillDown: ${formatItemDrill(item.drillDown)}`] : []),
+    ...(item.readRef || (item.drillDown && readRefFromDrillDown(item.drillDown))
+      ? [`  readRef: ${JSON.stringify(item.readRef ?? readRefFromDrillDown(item.drillDown!))}`]
+      : item.drillDown
+        ? [`  drillDown: ${formatItemDrill(item.drillDown)}`]
+        : []),
     ...(item.drillUnavailable ? [`  drillUnavailable: ${boundField(item.drillUnavailable.code, 120)}`] : []),
+    '',
+  ];
+}
+
+/** Display values of one row, exactly as renderItem shows them. */
+function itemValues(item: CoverageToolItem): Record<string, unknown> {
+  const anchor = boundField(item.anchor);
+  const readRef = item.readRef ?? (item.drillDown ? readRefFromDrillDown(item.drillDown) : undefined);
+  return {
+    title: boundField(item.title),
+    source: item.source,
+    ...(item.retrievalScore != null ? { retrievalScore: item.retrievalScore } : {}),
+    ...(item.expansionProvenance
+      ? {
+          provenance: `${item.expansionProvenance.source} via ${boundField(item.expansionProvenance.via)} | edgeStrength: ${item.expansionProvenance.edgeStrength}`,
+        }
+      : {}),
+    ...(item.sourcePath
+      ? { sourcePath: boundField(item.sourcePath) === anchor ? '=' : boundField(item.sourcePath) }
+      : {}),
+    ...(item.representation ? { representation: item.representation } : {}),
+    ...(item.identityDigest ? { identityDigest: boundField(item.identityDigest, 80) } : {}),
+    ...(readRef ? { read: readRef } : item.drillDown ? { read: `drillDown: ${formatItemDrill(item.drillDown)}` } : {}),
+    ...(item.drillUnavailable ? { drillUnavailable: boundField(item.drillUnavailable.code, 120) } : {}),
+  };
+}
+
+const COMPACT_FIELD_ORDER = [
+  'title',
+  'source',
+  'retrievalScore',
+  'provenance',
+  'sourcePath',
+  'representation',
+  'identityDigest',
+  'read',
+  'drillUnavailable',
+] as const;
+
+/**
+ * Field names once, then one line per row: its anchor (the line prefix recall telemetry reads), its match type tag,
+ * and its remaining display values in field order.
+ */
+function renderCompactItems(items: readonly CoverageToolItem[]): string[] {
+  const values = items.map(itemValues);
+  const fields = COMPACT_FIELD_ORDER.filter((field) => values.some((row) => field in row));
+  return [
+    `rows: anchor [matchType] [${fields.join(', ')}]${fields.includes('sourcePath') ? '; sourcePath "=" is the same as anchor' : ''}`,
+    ...items.map(
+      (item, index) =>
+        `  anchor: ${boundField(item.anchor)} [matchType:${item.matchType}] ${JSON.stringify(fields.map((field) => values[index]?.[field] ?? null))}`,
+    ),
     '',
   ];
 }

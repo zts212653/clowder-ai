@@ -99,7 +99,7 @@ describe('F325 agy-native-progress', () => {
           stepIndex: 1,
           state: 'ACTIVE',
           toolName: 'call_mcp_tool',
-          toolParameters: { ServerName: 'cat-cafe-memory', ToolName: 'cat_cafe_list_recent', Arguments: {} },
+          toolParameters: { ServerName: 'cat-cafe-memory', ToolName: 'cat_cafe_search_evidence', Arguments: {} },
         }),
       );
       assert.equal(mcpMessages[0]?.toolSource, 'mcp');

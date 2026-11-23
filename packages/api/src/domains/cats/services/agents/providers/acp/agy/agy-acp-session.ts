@@ -4,7 +4,13 @@ import { isAbsolute, relative } from 'node:path';
 import type { AgyProfileConfig, NativeSessionBinding } from '@cat-cafe/shared';
 import type { AgentServiceOptions } from '../../../../types.js';
 import { preflightAgyNativeWorkspace } from '../../agy-native/agy-native-policy.js';
+import { assertSafeAgyAccountEnv } from '../../agy-native/launch/agy-native-launch-env.js';
+import {
+  canResumeAgyWorkspaceScope,
+  matchesCatAgyAgentName,
+} from '../../agy-native/launch/agy-session-compatibility.js';
 import { compileL0ViaSubprocess } from '../../l0-compiler.js';
+import { AcpSessionBindingError } from '../active-session-cache.js';
 import type { AcpInitializeResult, AcpNewSessionResult } from '../types.js';
 
 export async function selectAgyAcpModel(
@@ -53,18 +59,34 @@ export async function prepareAgyAcpSession(input: {
     throw new Error('AGY ACP requires advertised native systemPrompt.append (1.4 or newer)');
   if (!profile.enabled || profile.carrier !== 'acp' || profile.model !== input.model)
     throw new Error('AGY ACP requires an enabled matching personal subscription profile');
-  if (options?.cliConfigArgs?.length || Object.keys(options?.accountEnv ?? {}).length)
-    throw new Error('AGY ACP refuses CLI/account environment overrides');
+  if (options?.cliConfigArgs?.length) throw new Error('AGY ACP refuses CLI configuration overrides');
+  const accountEnv = assertSafeAgyAccountEnv(options?.accountEnv);
+  if (Object.keys(accountEnv).length)
+    throw new Error('AGY ACP account environment overrides are unsupported by its profile-scoped process');
+  const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
+  if (options?.toolExecutionPolicy && !readOnly) throw new Error('AGY ACP cannot enforce this tool execution policy');
   const workspaceRoot = realpathSync(input.cwd);
   const home = realpathSync(profileHome);
   if (contains(home, workspaceRoot) || contains(workspaceRoot, home))
     throw new Error('AGY ACP profile overlaps its model-readable workspace');
-  const preflight = preflightAgyNativeWorkspace(workspaceRoot);
+  const agentName = `cat-cafe-${input.catId}`;
+  const preflight = preflightAgyNativeWorkspace(workspaceRoot, {
+    hostAgentName: agentName,
+    allowWorkspaceExecutableConfig: !readOnly && profile.allowWorkspaceExecutableConfig === true,
+  });
   if (!preflight.ok) throw new Error(`AGY ACP workspace customization refused: ${preflight.path}`);
-  const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
-  if (options?.toolExecutionPolicy && !readOnly) throw new Error('AGY ACP cannot enforce this tool execution policy');
-  if (!profile.autoApprove && !profile.trustedWorkspaces?.some((path) => realpathSync(path) === workspaceRoot))
+  if (
+    !profile.autoApprove &&
+    !profile.trustedWorkspaces?.some((path) => {
+      try {
+        return realpathSync(path) === workspaceRoot;
+      } catch {
+        return false;
+      }
+    })
+  ) {
     throw new Error('AGY ACP workspace requires operator admission');
+  }
   const body = await l0CompilerFn({
     frozenInput: options?.frozenL0Input,
     requireFrozenInput: true,
@@ -81,18 +103,30 @@ export async function prepareAgyAcpSession(input: {
     profileHome: home,
     model: input.model,
     permissionMode: profile.autoApprove && !readOnly ? 'always-proceed' : 'request-review',
-    agentName: `cat-cafe-${input.catId}`,
+    agentName,
   };
   const previous = options?.nativeSessionBinding;
-  if (
-    options?.sessionId &&
-    (!previous ||
-      previous.cliSessionId !== options.sessionId ||
-      Object.entries(binding).some(([key, value]) => previous[key as keyof NativeSessionBinding] !== value))
-  ) {
-    throw new Error(
-      'AGY ACP session binding differs or belongs to another carrier; start a new session explicitly (history is retained)',
-    );
+  if (options?.sessionId) {
+    const agentMatch = previous ? matchesCatAgyAgentName(previous.agentName, input.catId) : null;
+    const compatible =
+      previous?.v === 1 &&
+      previous.carrier === 'agy_acp' &&
+      previous.cliSessionId === options.sessionId &&
+      previous.profileHome === home &&
+      agentMatch?.matches === true &&
+      !(agentMatch.bornReadOnly && !readOnly) &&
+      canResumeAgyWorkspaceScope({
+        priorWorkspaceRoot: previous.workspaceRoot,
+        nextWorkspaceRoot: workspaceRoot,
+        profileHome: home,
+        autoApprove: profile.autoApprove === true,
+        trustedWorkspaces: profile.trustedWorkspaces,
+      });
+    if (!compatible) {
+      throw new AcpSessionBindingError(
+        'AGY ACP session binding is missing, belongs to another carrier/member/profile, or crosses an unrelated workspace boundary; start a new session explicitly (history is retained)',
+      );
+    }
   }
   return {
     body,

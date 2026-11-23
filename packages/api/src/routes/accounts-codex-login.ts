@@ -5,13 +5,14 @@ import { CodexLoginManager } from '../config/codex-login-manager.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { resolveAccountProjectRoot } from './accounts-project-root.js';
-import { accountToView } from './accounts-view.js';
+import { accountToViewAsync } from './accounts-view.js';
 
 const bodySchema = z
   .object({
     projectPath: z.string().optional(),
     attemptId: z.string().uuid().optional(),
     displayName: z.string().max(200).optional(),
+    terminal: z.boolean().optional(),
   })
   .strict();
 /** Same identity/project boundary as account management. No callback endpoint accepts browser tokens. */
@@ -26,7 +27,7 @@ export function registerCodexLoginRoutes(app: FastifyInstance, manager: CodexLog
       const { profileId } = request.params as { profileId: string };
       try {
         let resultRef = profileId;
-        if (action === 'start') manager.start(root, profileId);
+        if (action === 'start') manager.start(root, profileId, parsed.data.terminal);
         else {
           if (!parsed.data.attemptId) return reply.code(400).send({ error: 'Login attempt required' });
           if (action === 'create-new')
@@ -41,12 +42,12 @@ export function registerCodexLoginRoutes(app: FastifyInstance, manager: CodexLog
           changeSetId: createChangeSetId(),
           timestamp: Date.now(),
         });
-        const profiles = [accountToView(profileId, manager.read(root, profileId), false, root)];
+        const profiles = [await accountToViewAsync(profileId, manager.read(root, profileId), false, root)];
         if (resultRef !== profileId) {
           const target = readAccountStoreSnapshot(root).resolve(resultRef);
           if (target.account)
             profiles.push(
-              accountToView(
+              await accountToViewAsync(
                 resultRef,
                 target.account.codex ? manager.read(root, resultRef) : target.account,
                 !!target.credential,

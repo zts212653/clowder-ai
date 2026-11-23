@@ -28,7 +28,7 @@
 | `co-creation-docs` | 共创型 docs-only 落盘：按冲突/治理/可逆性选择 direct push 或 PR | — |
 | `worktree` | 创建隔离开发环境 | ① impl |
 | `tdd` | 写测试+实现（红绿重构） | ① impl |
-| `code-as-harness` | 重复摩擦/陌生任务→搜证据→诊断→代码修/建 harness | — |
+| `code-as-harness` | 家里本来有答案、You 不得不重说→入错题本、找断点、修到不用重说；爪感差修复线程也从这里进入 | — |
 | `paw-feel-daily` | 每天把昨天的爪感差按该谁修分类、合并成问题，挑 0–3 个派修 | — |
 | `debugging` | 遇到 bug（系统化定位） | — |
 | `quality-gate` | 开发完了自检（愿景+spec+验证） | ② |
@@ -45,7 +45,6 @@
 | `ttfund-skills` | 天天基金官方 Skills 网关：基金搜索/净值/持仓/经理/指数/黄金/债市/活期宝事实数据 | — |
 | `convention-graph-discovery` | 进入陌生 repo / F242 约定图工作：定义 domain、extractor、gap/freshness/provenance 报告 | — |
 | `knowledge-engineering` | 外部项目文档重构/冷启动知识注入 | — |
-| `memory-navigation` | 项目记忆三入口路由（graph / recent / search） | — |
 | `proactive-memory-judgment` | 单次 continuity-valued 人物线索的 F276 即时提案 / known-person defer / calibrated-abstention 判断 | — |
 | `memory-search-best-practices` | 记忆系统多刀检索 + recall coverage 策略（8 类题型 recipe） | — |
 | `writing-skills` | 写新 skill | — |
@@ -56,7 +55,6 @@
 | `incident-response` | 闯祸了/不可挽回/人很难过 | — |
 | `image-generation` | 生成图片/画头像/AI 画图 | — |
 | `capability-evolution` | “我们来进化 X”/“能进化什么”及直接命令式能力目标的 F311 产品入口；信息问题只解释，具体目标创建 canonical Program 并同轮交出首轮准备 | — |
-| `self-evolution` | 复盘已发生的工作：scope 守护/重复流程改进/知识沉淀；不接能力进化产品入口 | — |
 | `vision-rescue` | 任务绝境/反复摆动/投降修辞/放弃愿景 | — |
 | `bootcamp-guide` | operator 新手训练营引导 | — |
 | `cross-thread-sync` | 跨 thread 协同/通知/争用协调 | — |

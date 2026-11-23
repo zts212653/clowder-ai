@@ -201,7 +201,7 @@ test(
       assert.equal(episodes.listByInvocation('owner', thread.id, auth.invocationId).length, 0);
       steps.push({ event: 'video_preparation_received', at: video.observedAt, opportunityId: video.opportunityId });
       const videoSource = parseTool(
-        await handleDrillMemoryCue({ handle: video.pointers[0].read.handle, clientRequestId: 'video-read' }),
+        await handleDrillMemoryCue({ handle: video.pointers[0].readRef.handle, clientRequestId: 'video-read' }),
       );
       assert.equal(videoSource.payload.message.content, videoRule.content);
       steps.push({ event: 'video_source_read', at: Date.now(), sourceRevision: video.pointers[0].source.revision });
@@ -234,7 +234,7 @@ test(
       assert.equal(html.pointers[0].application, 'not_supported');
       steps.push({ event: 'html_preparation_received', at: html.observedAt });
       const htmlSource = parseTool(
-        await handleDrillMemoryCue({ handle: html.pointers[0].read.handle, clientRequestId: 'html-read' }),
+        await handleDrillMemoryCue({ handle: html.pointers[0].readRef.handle, clientRequestId: 'html-read' }),
       );
       assert.equal(htmlSource.payload.entries[0].quote, htmlRule.content);
       steps.push({ event: 'html_rule_read', at: Date.now(), sourceRevision: html.pointers[0].source.revision });
@@ -248,7 +248,7 @@ test(
         assert.equal(
           (
             await handleRecordMemoryCueOutcome({
-              handle: html.pointers[0].read.handle,
+              handle: html.pointers[0].readRef.handle,
               outcome,
               clientRequestId: outcome,
             })

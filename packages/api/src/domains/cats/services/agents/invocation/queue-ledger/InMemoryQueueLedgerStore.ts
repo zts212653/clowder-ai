@@ -34,6 +34,44 @@ export class InMemoryQueueLedgerStore implements QueueLedgerStore {
   }
 
   enqueueNow(entries: readonly QueueLedgerEntry[], maxQueuedUserEntries?: number): QueueLedgerEnqueueResult {
+    if (entries.some((entry) => entry.threadId !== entries[0]?.threadId))
+      throw new Error('queue ledger enqueue must be one thread');
+    return this.enqueueAcrossThreadsNow(entries, maxQueuedUserEntries);
+  }
+
+  /** Preflight every thread before the first synchronous write of a failed-result transaction. */
+  enqueueAcrossThreadsNow(
+    entries: readonly QueueLedgerEntry[],
+    maxQueuedUserEntries?: number,
+  ): QueueLedgerEnqueueResult {
+    if (entries.length === 0) throw new Error('queue ledger enqueue requires at least one row');
+    const groups = new Map<string, QueueLedgerEntry[]>();
+    for (const entry of entries) {
+      const group = groups.get(entry.threadId) ?? [];
+      group.push(entry);
+      groups.set(entry.threadId, group);
+    }
+    const plans = [...groups.values()].map((group) => this.prepareEnqueueNow(group, maxQueuedUserEntries));
+    const refused = plans.find((plan) => plan.outcome === 'conflict' || plan.outcome === 'full');
+    if (refused) return refused;
+    for (const plan of plans) {
+      if (plan.outcome !== 'enqueued') continue;
+      const threadId = plan.entries[0]!.threadId;
+      const inserted = plan.entries.map(cloneQueueLedgerEntry);
+      this.rows.set(threadId, [...(this.rows.get(threadId) ?? []), ...inserted]);
+      this.messageIndex.index(threadId, inserted);
+      this.privateAdmissions.remember(threadId, inserted);
+    }
+    return {
+      outcome: plans.some((plan) => plan.outcome === 'enqueued') ? 'enqueued' : 'replayed',
+      entries: plans.flatMap((plan) => plan.entries),
+    };
+  }
+
+  private prepareEnqueueNow(
+    entries: readonly QueueLedgerEntry[],
+    maxQueuedUserEntries?: number,
+  ): QueueLedgerEnqueueResult {
     if (entries.length === 0) throw new Error('queue ledger enqueue requires at least one row');
     for (const entry of entries) assertQueueLedgerEntry(entry);
     const threadId = entries[0]?.threadId;
@@ -86,12 +124,7 @@ export class InMemoryQueueLedgerStore implements QueueLedgerStore {
         return { outcome: 'full', entries: [] };
       }
     }
-    const inserted = entries.map(cloneQueueLedgerEntry);
-    current.push(...inserted);
-    this.rows.set(threadId, current);
-    this.messageIndex.index(threadId, inserted);
-    this.privateAdmissions.remember(threadId, inserted);
-    return { outcome: 'enqueued', entries: inserted.map(cloneQueueLedgerEntry) };
+    return { outcome: 'enqueued', entries: entries.map(cloneQueueLedgerEntry) };
   }
 
   async enqueue(

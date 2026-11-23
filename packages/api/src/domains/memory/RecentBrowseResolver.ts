@@ -17,6 +17,7 @@ import type { IEvidenceStore } from './interfaces.js';
 import { isGenericRecallEligibleAnchor, SUNSET_GLOBAL_DISTILLATION_PREFIX } from './recall-delivery-eligibility.js';
 
 export interface RecentItem {
+  readRef?: import('@cat-cafe/shared').ReadRef;
   anchor: string;
   title: string;
   kind: string;
@@ -58,7 +59,14 @@ const SCOPE_KIND_MAP: Record<string, readonly string[] | null> = {
   all: null, // no filter
 };
 
-type StoreWithDb = IEvidenceStore & { getDb?: () => Database.Database };
+type StoreWithDb = IEvidenceStore & {
+  getDb?: () => Database.Database;
+  readRefForEvidence?: (item: {
+    anchor: string;
+    sourcePath?: string;
+    sourceHash?: string;
+  }) => import('@cat-cafe/shared').ReadRef | undefined;
+};
 
 interface CatalogLike {
   list(): Array<{ id: string; sensitivity: CollectionSensitivity; kind: string; status?: string }>;
@@ -127,10 +135,10 @@ export class RecentBrowseResolver {
       }
       const placeholders = effectiveKinds && effectiveKinds.length > 0 ? effectiveKinds.map(() => '?').join(',') : null;
       const sql = placeholders
-        ? `SELECT anchor, title, kind, updated_at AS updatedAt FROM evidence_docs
+        ? `SELECT anchor, title, kind, updated_at AS updatedAt, source_path AS sourcePath, source_hash AS sourceHash FROM evidence_docs
            WHERE updated_at >= ? AND anchor NOT LIKE ? AND kind IN (${placeholders})
            ORDER BY updated_at DESC LIMIT ?`
-        : `SELECT anchor, title, kind, updated_at AS updatedAt FROM evidence_docs
+        : `SELECT anchor, title, kind, updated_at AS updatedAt, source_path AS sourcePath, source_hash AS sourceHash FROM evidence_docs
            WHERE updated_at >= ? AND anchor NOT LIKE ?
            ORDER BY updated_at DESC LIMIT ?`;
 
@@ -143,11 +151,21 @@ export class RecentBrowseResolver {
         title: string;
         kind: string;
         updatedAt: string;
+        sourcePath?: string;
+        sourceHash?: string;
       }>;
 
       for (const r of rows) {
         if (!isGenericRecallEligibleAnchor(r.anchor)) continue;
-        results.push({ anchor: r.anchor, title: r.title, kind: r.kind, updatedAt: r.updatedAt, source: id });
+        const readRef = (store as StoreWithDb).readRefForEvidence?.(r);
+        results.push({
+          anchor: r.anchor,
+          title: r.title,
+          kind: r.kind,
+          updatedAt: r.updatedAt,
+          source: id,
+          ...(readRef ? { readRef } : {}),
+        });
       }
     }
 

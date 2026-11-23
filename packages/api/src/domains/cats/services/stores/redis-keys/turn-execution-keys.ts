@@ -12,4 +12,13 @@ export const TurnExecutionKeys = {
   settledUser: (userId: string) => `turnexec:settled:user:${encodeURIComponent(userId)}`,
   settledThread: (userId: string, threadId: string) =>
     `turnexec:settled:thread:${encodeURIComponent(userId)}:${encodeURIComponent(threadId)}`,
+  /** F337: non-watcher turns of one member in one thread, scored by startedAt (written at create). */
+  memberStarted: (userId: string, threadId: string, catId: string) =>
+    `turnexec:member-started:${encodeURIComponent(userId)}:${encodeURIComponent(threadId)}:${encodeURIComponent(catId)}`,
+  /**
+   * F337: host_sleep / restart_shutdown turns whose continuation is still owed (written at terminal).
+   * The physical name predates restart cuts and is kept: a release being stopped writes its sleep debts
+   * here, and the release that starts next must find them.
+   */
+  continuationOwed: 'turnexec:sleep-continuation-owed',
 } as const;

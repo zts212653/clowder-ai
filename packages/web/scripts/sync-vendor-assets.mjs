@@ -73,11 +73,7 @@ function copyEsbuildWasm() {
 }
 
 function copyStylesheets() {
-  const xtermCssPath = resolve(resolvePackageDir('@xterm/xterm'), 'css', 'xterm.css');
-  if (!existsSync(xtermCssPath)) {
-    throw new Error(`Missing xterm CSS: ${xtermCssPath}`);
-  }
-  syncStylesheets(webRoot, xtermCssPath);
+  syncStylesheets(webRoot);
 }
 
 function appGlobalCssPaths(file) {

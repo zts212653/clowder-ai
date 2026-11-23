@@ -18,21 +18,37 @@ const selection = (message) => ({
   end: message.content.length,
   quote: message.content,
 });
-const payload = (text) => JSON.parse(text.split('\n').find((line) => line.startsWith('{')));
+const payload = (text) => {
+  const body = JSON.parse(text.split('\n').find((line) => line.startsWith('{')));
+  return { ...body, items: body.groups.flatMap((group) => group.items) };
+};
 
 describe('F332 contextual directory and the same-version interpretation', () => {
-  let directory, evidence, service, messages, sequence;
+  let directory, evidence, service, messages, sequence, readDelayMs;
   beforeEach(async () => {
     directory = mkdtempSync(join(tmpdir(), 'f332-context-'));
     evidence = new SqliteEvidenceStore(join(directory, 'memory.sqlite'));
     await evidence.initialize();
     messages = new Map();
     sequence = 0;
+    readDelayMs = 0;
     service = new MatterMemoryService({
       db: evidence.getDb(),
       runWrite: (operation) => evidence.runExclusive(operation),
-      messageStore: { getById: (id) => messages.get(id) ?? null },
-      threadStore: { get: (id) => ({ id, createdBy: 'owner' }), list: () => [] },
+      messageStore: {
+        getById: async (id) => {
+          if (readDelayMs) await new Promise((resolve) => setTimeout(resolve, readDelayMs));
+          return messages.get(id) ?? null;
+        },
+      },
+      threadStore: {
+        get: async (id) => {
+          // RedisThreadStore.get awaits HGETALL and SMEMBERS before returning.
+          if (readDelayMs) await new Promise((resolve) => setTimeout(resolve, 2 * readDelayMs));
+          return { id, createdBy: 'owner' };
+        },
+        list: () => [],
+      },
     });
   });
   afterEach(async () => {
@@ -71,6 +87,135 @@ describe('F332 contextual directory and the same-version interpretation', () => 
     });
     return { ...receipt.matter, message, description };
   };
+
+  it('distinguishes provenance from relevance and gives a scoped path to read each kind of item', async () => {
+    const local = await create('here', '仅在本社区现场适用；工程线程可继续施工。', 'Community boundary');
+    const recent = await create('elsewhere', '花生只是举例，并非本人过敏。', 'Cross-thread example');
+    const text = await matterOpeningDirectory(service, 'owner', 'codex61-sol', 'here');
+    const body = payload(text);
+    assert.deepEqual(
+      body.groups.map(({ label, count }) => [label, count]),
+      [
+        ['含本线程出处的事情', 1],
+        ['其他线程最近更新的事情', 1],
+      ],
+    );
+    const localItem = body.groups[0].items[0];
+    const recentItem = body.groups[1].items[0];
+    assert.equal(localItem.matterId, local.matterId);
+    assert.equal(localItem.contextHint, local.description);
+    assert.match(localItem.contextHintLabel, /猫的归纳.*r1/);
+    assert.equal(recentItem.matterId, recent.matterId);
+    assert.equal(recentItem.contextHint, undefined);
+    assert.match(recentItem.readHint, /归纳未附.*按.*ID.*读/);
+    // The opening says what the notebook is for and where to write, then gives the two addresses a cat cannot guess.
+    const opening = text.split('\n').slice(1, -2);
+    assert.equal(opening.length, 2);
+    assert.match(opening[0], /^这是全家共用的记事本：接手时先看相关的页/);
+    assert.match(opening[0], /记一句并连回这条对话（cat_cafe_remember 选 matter）/);
+    assert.match(opening[0], /标题和归纳是路标，不授执行权；用前打开原页，核原话、适用范围和版本。$/);
+    assert.match(opening[1], /readRef 交给 cat_cafe_read_memory/);
+    assert.match(opening[1], /没列出的页.*cat_cafe_search_evidence/);
+    assert.match(opening[1], /不带 query 是本目录.*nextCursor 原样作 matterCursor/);
+    assert.doesNotMatch(text, /cat_cafe_list_memory_matters/); // mcp-cutover-negative-reference: absence
+    assert.ok(estimateTokens(text) <= 3072);
+  });
+
+  it('keeps empty groups honest and a failed directory recoverable', async () => {
+    const empty = payload(await matterOpeningDirectory(service, 'owner', 'codex61-sol', 'here'));
+    assert.deepEqual(
+      empty.groups.map(({ count, items }) => [count, items]),
+      [
+        [0, []],
+        [0, []],
+      ],
+    );
+    const unavailable = await matterOpeningDirectory(
+      {
+        catalog: async () => {
+          throw new Error('unavailable');
+        },
+      },
+      'owner',
+      'codex61-sol',
+      'here',
+    );
+    assert.match(unavailable, /当前目录不可用/);
+    assert.match(unavailable, /cat_cafe_search_evidence（不带 query）重读/);
+    assert.doesNotMatch(unavailable, /cat_cafe_list_memory_matters/); // mcp-cutover-negative-reference: absence
+    assert.doesNotMatch(unavailable, /"count":0/);
+  });
+
+  it('records the actual rejection and invocation coordinates when a directory is unavailable', async () => {
+    const warnings = [];
+    const err = new Error('source reader disconnected');
+    await matterOpeningDirectory(
+      {
+        catalog: async () => {
+          throw err;
+        },
+      },
+      'owner',
+      'codex61-sol',
+      'here',
+      { invocationId: 'opening-rejected', logger: { warn: (fields) => warnings.push(fields) } },
+    );
+    assert.equal(warnings.length, 1, 'an unavailable directory must leave a diagnostic');
+    assert.equal(warnings[0].err, err);
+    assert.equal(warnings[0].stopReason, 'reader_rejected');
+    assert.equal(warnings[0].invocationId, 'opening-rejected');
+    assert.equal(warnings[0].threadId, 'here');
+    assert.equal(warnings[0].catId, 'codex61-sol');
+    assert.ok(warnings[0].elapsedMs >= 0);
+    assert.ok(warnings[0].eventLoop.utilization >= 0 && warnings[0].eventLoop.utilization <= 1);
+    assert.ok(warnings[0].eventLoop.active >= 0 && warnings[0].eventLoop.idle >= 0);
+  });
+
+  it('distinguishes the real work-budget timer from reader rejection', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const warnings = [];
+    let signal;
+    const pending = matterOpeningDirectory(
+      {
+        catalog: async (_actor, options) => {
+          signal = options.signal;
+          return new Promise(() => {});
+        },
+      },
+      'owner',
+      'codex61-sol',
+      'here',
+      { invocationId: 'opening-timeout', logger: { warn: (fields) => warnings.push(fields) } },
+    );
+    await Promise.resolve();
+    t.mock.timers.tick(1500);
+    const unavailable = await pending;
+    assert.equal(signal.aborted, true);
+    assert.match(unavailable, /当前目录不可用/);
+    assert.equal(warnings.length, 1);
+    assert.equal(warnings[0].stopReason, 'source_work_budget');
+    assert.equal(warnings[0].invocationId, 'opening-timeout');
+  });
+
+  it('keeps the eleven-page, fifty-three-source directory available with modest store latency', async () => {
+    // Runtime's read-only 2026-11-16 census: 11 pages / 53 sources. No production data is copied.
+    const pageSizes = [14, 9, 7, 7, 5, 4, 3, 1, 1, 1, 1];
+    for (const [index, count] of pageSizes.entries()) {
+      const matter = await create(`thread-${index}`, 'Shared context', `Matter ${index}`);
+      if (count > 1)
+        await service.write(writer, {
+          operation: 'append',
+          requestId: `fill-${index}`,
+          matterId: matter.matterId,
+          expectedRevision: 1,
+          sources: Array.from({ length: count - 1 }, () => selection(source(`thread-${index}`))),
+        });
+    }
+    readDelayMs = 6;
+    const text = await matterOpeningDirectory(service, 'owner', 'codex61-sol', 'here');
+    assert.doesNotMatch(text, /当前目录不可用/, 'ordinary source latency must not erase the whole directory');
+    assert.equal(payload(text).items.length, pageSizes.length);
+  });
 
   it('finds a current-thread page beyond the old first twelve, then pages all readable items in stable time/ID order', async () => {
     const pages = [];

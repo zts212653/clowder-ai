@@ -1,4 +1,5 @@
 import type { SettingsReturnDiagnostic } from '@cat-cafe/shared';
+import { createBrowserUuid } from '@/utils/browser-uuid';
 import { readChatReadingRef, releaseChatReadingRef } from '@/utils/chat-scroll-memory';
 import { connectionDiagnosticId, recordConnectionDiagnostic } from '@/utils/connection-diagnostics';
 import { readingDiagnosticId } from '@/utils/reading-restore-diagnostics';
@@ -179,7 +180,7 @@ export class SettingsReadingBridge {
     const started = point.persisted
       ? startSettingsReadingSession(origin, this.scope)
       : {
-          session: { id: crypto.randomUUID(), ...origin },
+          session: { id: createBrowserUuid(), ...origin },
           persisted: false,
         };
     this.associationStored = started.persisted;
@@ -264,6 +265,12 @@ export class SettingsReadingBridge {
       receipt = { status: 'unavailable' };
     }
     if (!this.current(operation) || this.reader?.port !== port) return;
+    if (receipt.status === 'interrupted' && receipt.reason === 'user-input') {
+      // The user owns the new reading position. Keep the source retryable without
+      // presenting normal takeover as a failed restoration or claiming success.
+      this.cancel(null, 'restore');
+      return;
+    }
     if (receipt.status !== 'settled' || !receipt.exact) {
       this.cancel(receipt.status === 'interrupted' ? 'interrupted' : 'unavailable', 'restore');
       return;

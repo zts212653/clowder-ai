@@ -1,5 +1,8 @@
 import { catRegistry, type SessionRecord, type TurnExecutionRecord } from '@cat-cafe/shared';
-import { freezeExecutionAccountBinding } from '../../cats/services/agents/invocation/execution-account-binding.js';
+import {
+  type ExecutionAccountSelection,
+  freezeExecutionAccountBinding,
+} from '../../cats/services/agents/invocation/execution-account-binding.js';
 import { freezeExecutionWorkspace } from '../../cats/services/agents/invocation/execution-workspace.js';
 import { extractUserEnvTemplates, resolveEnvMap } from '../../cats/services/agents/providers/env-map.js';
 import type { ISessionChainStore } from '../../cats/services/stores/ports/SessionChainStore.js';
@@ -86,6 +89,7 @@ export async function watcherProviderLaunch(
   source: TurnExecutionRecord,
   scopeEnv: Record<string, string>,
   signal: AbortSignal,
+  accountSelection?: ExecutionAccountSelection,
 ) {
   const workspace = await freezeExecutionWorkspace({
     threadStore: threads,
@@ -98,6 +102,7 @@ export async function watcherProviderLaunch(
     catId: catId,
     catConfig: catRegistry.tryGet(catId)?.config,
     workspace,
+    ...(accountSelection ? { accountSelection } : {}),
   });
   const account = binding.resolvedAccount;
   const providerEnv =

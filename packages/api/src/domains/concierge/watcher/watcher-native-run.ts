@@ -5,7 +5,11 @@ import type { createRequestGenerationRecorder } from '../../cats/services/agents
 import type { BoundedWatcherRunPort } from '../../cats/services/agents/providers/BoundedWatcherRunPort.js';
 import { asCodexAppServerRecord } from '../../cats/services/agents/providers/CodexAppServerEventMapper.js';
 import { boundedWatcherResult } from './context/watcher-context-budget.js';
-import { compactWatcherDirectory, watcherDirectoryReader } from './context/watcher-directory-read.js';
+import {
+  compactWatcherDirectory,
+  WATCHER_DIRECTORY_TOOL,
+  watcherDirectoryReader,
+} from './context/watcher-directory-read.js';
 import { commitWatcherCheckpoint, recoverWatcherAttempt, saveWatcherState } from './watcher-checkpoint.js';
 import type { WatcherInvocationOwners, WatcherRunState } from './watcher-invocation-contract.js';
 import { watcherProviderOverrides } from './watcher-provider-config.js';
@@ -47,6 +51,20 @@ export function watcherNativePort(input: {
       run.boundary = await createWatcherRequestBoundary(upstream, {
         signal,
         transportEnv,
+        rejected: async (row) => {
+          await accepted;
+          await owners.transcript.appendDurableEvent(
+            {
+              sessionId: run.session.id,
+              threadId: run.session.threadId,
+              catId: run.session.catId,
+              seq: run.session.seq,
+              cliSessionId: run.session.cliSessionId,
+            },
+            { type: 'watcher_request_budget_rejected', ...row },
+            run.state.attempt!.invocationId,
+          );
+        },
         observed: async (row) => {
           await accepted;
           await owners.transcript.appendDurableEvent(
@@ -130,7 +148,7 @@ export function watcherNativePort(input: {
         throw new Error('watcher_tool_budget_exhausted: 请直接输出最终 checkpoint');
       }
       const result =
-        params.tool === 'cat_cafe_list_memory_matters'
+        params.tool === WATCHER_DIRECTORY_TOOL
           ? await directoryRead(params.arguments, `native:${params.callId}`, signal)
           : await bridge.call(params.tool, params.arguments, `native:${params.callId}`, signal);
       await owners.transcript.appendDurableEvent(
@@ -155,7 +173,7 @@ export function watcherNativePort(input: {
           {
             type: 'inputText',
             text: boundedWatcherResult(
-              params.tool === 'cat_cafe_list_memory_matters' ? compactWatcherDirectory(result) : result,
+              params.tool === WATCHER_DIRECTORY_TOOL ? compactWatcherDirectory(result) : result,
               String(params.callId),
             ),
           },

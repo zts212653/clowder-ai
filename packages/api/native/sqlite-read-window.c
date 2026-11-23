@@ -6,10 +6,13 @@ SQLITE_EXTENSION_INIT1
 #include <errno.h>
 #include <stdint.h>
 #include <string.h>
+#include <limits.h>
+#include <stdio.h>
 
 #define READ_WINDOW_BYTES 65536
 #define READ_WINDOW_MAP_LIMIT 32768
 #define AUDITED_SQLITE_VERSION 3051003
+#define READ_WINDOW_CLIENT_KEY "cat-cafe.read-window.close.v1"
 _Static_assert(sizeof(off_t) >= 8, "read windows require 64-bit file offsets");
 
 /* One serial, killable read worker owns the scope. Never loaded into the API
@@ -30,6 +33,12 @@ typedef struct {
 static ReadWindow window = {.fd = -1, .mapping = MAP_FAILED};
 static ssize_t (*original_pread)(int, void *, size_t, off_t);
 static int installed;
+static sqlite3 *snapshot_db, *last_begin_db;
+static int last_begin_reason;
+static struct {
+  unsigned mapped_reads, main_preads, non_main_preads;
+  int first_fallback;
+} counters;
 
 #ifdef MEMORY_READ_WINDOW_TEST
 #include "sqlite-read-window-test.h"
@@ -44,6 +53,16 @@ static int installed;
 #define test_finished() ((void)0)
 #endif
 
+#include "sqlite-read-preload.h"
+
+/* The existing test probe observes backing calls independently of the window
+ * classifier. In the shipped artifact the comma's first operand is a no-op. */
+#define BACKING_READ(fd, buffer, count, offset) \
+  (test_probe_read(fd), original_pread(fd, buffer, count, offset))
+
+static void count_read(unsigned *value) { if (*value < INT_MAX) (*value)++; }
+static void fallback(int reason) { if (!counters.first_fallback) counters.first_fallback = reason; }
+
 static int unmap_window(void) {
   if (window.mapping != MAP_FAILED &&
       (TEST_UNMAP_FAIL || munmap(window.mapping, window.length) != 0)) return 0;
@@ -53,6 +72,7 @@ static int unmap_window(void) {
 }
 
 static int finish_window(void) {
+  finish_preload();
   int released = unmap_window();
   window.owner = NULL;
   window.enabled = 0;
@@ -67,30 +87,47 @@ static ssize_t read_original(int fd, void *buffer, size_t count, off_t offset) {
     errno = EIO;
     return -1;
   }
-  return original_pread(fd, buffer, count, offset);
+  count_read(&counters.main_preads);
+  return BACKING_READ(fd, buffer, count, offset);
 }
 
 static ssize_t read_with_window(int fd, void *buffer, size_t count, off_t offset) {
-  test_probe_read(fd);
-  if (!window.owner || !window.enabled) return original_pread(fd, buffer, count, offset);
+  if (!window.owner) return BACKING_READ(fd, buffer, count, offset);
+  if (!window.enabled) {
+    if (window.fd >= 0 && fd == window.fd) count_read(&counters.main_preads);
+    else count_read(&counters.non_main_preads);
+    return BACKING_READ(fd, buffer, count, offset);
+  }
   /* Resolve just the main database descriptor. WAL and every other file keep
    * SQLite's original path; after binding, never retarget another connection. */
   if (window.fd < 0) {
     struct stat st;
-    if (fstat(fd, &st) != 0 || st.st_dev != window.device || st.st_ino != window.inode)
-      return original_pread(fd, buffer, count, offset);
+    if (fstat(fd, &st) != 0 || st.st_dev != window.device || st.st_ino != window.inode) {
+      count_read(&counters.non_main_preads);
+      return BACKING_READ(fd, buffer, count, offset);
+    }
     window.fd = fd;
   }
-  if (fd != window.fd) return original_pread(fd, buffer, count, offset);
+  if (fd != window.fd) {
+    count_read(&counters.non_main_preads);
+    return BACKING_READ(fd, buffer, count, offset);
+  }
   if (offset < 0 || count == 0 || count > 4096 || (uint64_t)count > (uint64_t)window.size ||
-      offset > window.size - (off_t)count) return read_original(fd, buffer, count, offset);
+      offset > window.size - (off_t)count) {
+    fallback(1);
+    return read_original(fd, buffer, count, offset);
+  }
 
   int saved_errno = errno;
   if (window.mapping == MAP_FAILED || offset < window.offset ||
       (uint64_t)(offset - window.offset) + count > window.length) {
-    if (window.maps >= TEST_MAP_LIMIT) return read_original(fd, buffer, count, offset);
+    if (window.maps >= TEST_MAP_LIMIT) {
+      fallback(2);
+      return read_original(fd, buffer, count, offset);
+    }
     if (!unmap_window()) {
       window.enabled = 0;
+      fallback(3);
       errno = saved_errno;
       return read_original(fd, buffer, count, offset);
     }
@@ -103,15 +140,19 @@ static ssize_t read_with_window(int fd, void *buffer, size_t count, off_t offset
     if (window.mapping == MAP_FAILED) {
       TEST_COUNT(map_failures);
       window.enabled = 0; /* One failure disables this optimization for this SELECT. */
+      fallback(4);
       errno = saved_errno;
       return read_original(fd, buffer, count, offset);
     }
     window.offset = start;
     window.length = length;
+    preload.checked = 0;
   }
+  maybe_start_preload(fd, (size_t)(offset - window.offset), count);
   test_before_copy();
   memcpy(buffer, (unsigned char *)window.mapping + (offset - window.offset), count);
   TEST_COUNT(mapped_reads);
+  count_read(&counters.mapped_reads);
   errno = saved_errno;
   return (ssize_t)count;
 }
@@ -123,11 +164,18 @@ static void begin_window(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
   const char *path = sqlite3_db_filename(db, "main");
   struct stat st;
   int moved = 0;
-  if (window.owner || !unmap_window() || sqlite3_db_readonly(db, "main") != 1 ||
-      sqlite3_txn_state(db, "main") != SQLITE_TXN_READ || !path ||
-      sqlite3_uri_boolean(path, "immutable", 0) || sqlite3_uri_boolean(path, "nolock", 0) ||
-      sqlite3_file_control(db, "main", SQLITE_FCNTL_HAS_MOVED, &moved) != SQLITE_OK || moved ||
-      stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
+  /* Same short-circuit order and syscalls as admission before diagnostics. */
+  last_begin_db = db;
+  last_begin_reason = 0;
+  if (window.owner) last_begin_reason = 1;
+  else if (!unmap_window()) last_begin_reason = 2;
+  else if (sqlite3_db_readonly(db, "main") != 1) last_begin_reason = 3;
+  else if (sqlite3_txn_state(db, "main") != SQLITE_TXN_READ) last_begin_reason = 4;
+  else if (!path) last_begin_reason = 5;
+  else if (sqlite3_uri_boolean(path, "immutable", 0) || sqlite3_uri_boolean(path, "nolock", 0)) last_begin_reason = 6;
+  else if (sqlite3_file_control(db, "main", SQLITE_FCNTL_HAS_MOVED, &moved) != SQLITE_OK || moved) last_begin_reason = 7;
+  else if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) last_begin_reason = 8;
+  if (last_begin_reason) {
     sqlite3_result_int(ctx, 0);
     return;
   }
@@ -138,6 +186,9 @@ static void begin_window(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
   window.fd = -1;
   window.maps = 0;
   window.enabled = 1;
+  begin_preload();
+  snapshot_db = db;
+  memset(&counters, 0, sizeof(counters));
 #ifdef MEMORY_READ_WINDOW_TEST
   memset(&test_stats, 0, sizeof(test_stats));
   test_paused = 0;
@@ -148,12 +199,37 @@ static void begin_window(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
 static void end_window(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
   (void)argc;
   (void)argv;
-  int released = window.owner != sqlite3_context_db_handle(ctx) || finish_window();
+  sqlite3 *db = sqlite3_context_db_handle(ctx);
+  if (window.owner == db) { last_begin_db = db; last_begin_reason = 0; }
+  int released = window.owner != db || finish_window();
   sqlite3_result_int(ctx, released);
 }
 
 static void connection_closed(void *db) {
-  if (window.owner == db) finish_window();
+  /* Also registered as client data: in the pinned SQLite source this runs in
+   * sqlite3Close before rollback/BtreeClose/OsClose, unlike functionDestroy.
+   * The independent close/lock test must remain green when changing this pin. */
+  if (window.owner == db) { preload_test_closing(); finish_window(); }
+  if (snapshot_db == db) snapshot_db = NULL;
+  if (last_begin_db == db) last_begin_db = NULL;
+}
+
+/* Invoked only in the existing begin/end statements. It neither samples I/O
+ * nor reads a path/body; a different connection cannot consume these counts. */
+static void snapshot_window(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
+  (void)argc; (void)argv;
+  sqlite3 *db = sqlite3_context_db_handle(ctx);
+  char out[512], preload_snapshot[192];
+  if (last_begin_db == db && last_begin_reason) {
+    snprintf(out, sizeof(out), "{\"reason\":%d}", last_begin_reason);
+  } else if (snapshot_db == db) {
+    snapshot_preload(preload_snapshot, sizeof(preload_snapshot));
+    snprintf(out, sizeof(out),
+      "{\"reason\":0,\"maps\":%u,\"mapped\":%u,\"main\":%u,\"nonMain\":%u,\"fallback\":%d,\"preload\":%s}",
+      window.maps, counters.mapped_reads, counters.main_preads, counters.non_main_preads,
+      counters.first_fallback, preload_snapshot);
+  } else { sqlite3_result_null(ctx); return; }
+  sqlite3_result_text(ctx, out, -1, SQLITE_TRANSIENT);
 }
 
 /* xSetSystemCall is version-sensitive and optional. This backend is deliberately
@@ -165,9 +241,13 @@ int sqlite3_extension_init(sqlite3 *db, char **error, const sqlite3_api_routines
   SQLITE_EXTENSION_INIT2(api);
   sqlite3_vfs *vfs = sqlite3_vfs_find(NULL);
   if (SQLITE_VERSION_NUMBER != AUDITED_SQLITE_VERSION ||
-      sqlite3_libversion_number() != AUDITED_SQLITE_VERSION || !vfs ||
+      sqlite3_libversion_number() != AUDITED_SQLITE_VERSION ||
+      strcmp(sqlite3_sourceid(), SQLITE_SOURCE_ID) != 0 || !vfs ||
       strcmp(vfs->zName, "unix") != 0 || vfs->iVersion < 3 ||
       !vfs->xGetSystemCall || !vfs->xSetSystemCall) return SQLITE_MISMATCH;
+  if (window.owner == db) return SQLITE_BUSY;
+  void *client = sqlite3_get_clientdata(db, READ_WINDOW_CLIENT_KEY);
+  if (client && client != db) return SQLITE_MISUSE;
   if (!installed) {
     original_pread = (ssize_t (*)(int, void *, size_t, off_t))vfs->xGetSystemCall(vfs, "pread");
     if (!original_pread) return SQLITE_NOTFOUND;
@@ -180,11 +260,21 @@ int sqlite3_extension_init(sqlite3 *db, char **error, const sqlite3_api_routines
   if (rc != SQLITE_OK) return rc;
   rc = sqlite3_create_function_v2(db, "memory_read_window_end", 0, flags, db,
                                 end_window, NULL, NULL, connection_closed);
+  if (rc == SQLITE_OK)
+    rc = sqlite3_create_function_v2(db, "memory_read_window_snapshot", 0, flags, db,
+                                  snapshot_window, NULL, NULL, NULL);
+  int registered_client = 0;
+  if (rc == SQLITE_OK && !client) {
+    rc = sqlite3_set_clientdata(db, READ_WINDOW_CLIENT_KEY, db, connection_closed);
+    registered_client = rc == SQLITE_OK;
+  }
   if (rc == SQLITE_OK && !installed)
     rc = vfs->xSetSystemCall(vfs, "pread", (sqlite3_syscall_ptr)read_with_window);
   if (rc != SQLITE_OK) {
+    if (registered_client) sqlite3_set_clientdata(db, READ_WINDOW_CLIENT_KEY, NULL, NULL);
     sqlite3_create_function(db, "memory_read_window_begin", 0, flags, NULL, NULL, NULL, NULL);
     sqlite3_create_function(db, "memory_read_window_end", 0, flags, NULL, NULL, NULL, NULL);
+    sqlite3_create_function(db, "memory_read_window_snapshot", 0, flags, NULL, NULL, NULL, NULL);
     return rc;
   }
   installed = 1;

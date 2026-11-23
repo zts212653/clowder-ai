@@ -13,6 +13,7 @@ import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { estimateCostFromTokens } from '../../../../../config/model-pricing.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { buildCliNotFoundDiagnostic } from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
@@ -252,7 +253,7 @@ export class KimiAgentService implements AgentService {
         type: 'error' as const,
         catId: this.catId,
         error: formatCliNotFoundError('kimi'),
-        metadata,
+        metadata: { ...metadata, cliDiagnostics: buildCliNotFoundDiagnostic('kimi') },
         timestamp: Date.now(),
       };
       yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };

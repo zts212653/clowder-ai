@@ -1,9 +1,11 @@
+import type { SessionCacheWarmth } from '@cat-cafe/shared';
 import { getCoCreatorConfig } from '../../../../../config/cat-config-loader.js';
 import { getCoCreatorDisplay } from '../../../../../config/co-creator-display.js';
 import { getSenderName } from '../../context/ContextAssembler.js';
 import { renderSegment } from '../../context/prompt-template-loader.js';
 import { formatPromptTime } from '../../format-time.js';
-import type { ThreadExecutionSituation } from '../invocation/thread-execution-situation.js';
+import { describeStopReason } from '../invocation/stop-reason-wording.js';
+import type { ThreadExecutionSituation, ThreadRecentStop } from '../invocation/thread-execution-situation.js';
 import type { InvocationSource } from './navigation-sources.js';
 
 export interface TaskSummary {
@@ -45,6 +47,7 @@ export interface NavigationContext {
   sources?: readonly InvocationSource[];
   tasks: TaskSummary[];
   executionSituation?: ThreadExecutionSituation;
+  sessionCache?: readonly { catId: string; warmth: SessionCacheWarmth }[];
   artifacts?: NavigationArtifact[];
   truthSource?: TruthSourceInfo | null;
   /** Explicit original roadmap pointer; never a directive or custody grant. */
@@ -85,7 +88,7 @@ function buildNavigationInner(ctx: NavigationContext, options?: NavigationFormat
   }
 
   if (ctx.sources?.length) {
-    lines.push('本轮输入来源（触发事实，不表示接责或新增授权）:');
+    lines.push('本轮输入来源:');
     for (const source of ctx.sources) lines.push(`  - ${formatInvocationSource(source)}`);
   }
 
@@ -118,6 +121,24 @@ function buildNavigationInner(ctx: NavigationContext, options?: NavigationFormat
     }
   }
 
+  lines.push(...recentStopLines(ctx, coCreatorTimeZone));
+  if (ctx.sessionCache) {
+    lines.push('本线程会话缓存（按时间窗口估计；依据目录默认模型，未校验前缀变化）:');
+    for (const { catId, warmth } of ctx.sessionCache) {
+      if (warmth.status === 'unknown') continue;
+      const state =
+        warmth.status === 'warm' && warmth.expiresAt !== undefined
+          ? `预计缓存保留至 ${formatPromptTime(warmth.expiresAt, { timeZone: coCreatorTimeZone })}`
+          : warmth.status === 'expired'
+            ? '缓存保留窗口已过'
+            : '冷热未知';
+      const size =
+        warmth.contextTokens !== undefined ? `，约 ${warmth.contextTokens.toLocaleString('en-US')} token` : '';
+      lines.push(`  - @${catId}: ${state}${size}`);
+    }
+    lines.push('  未列出的成员：冷热未知；没有记录不等于已经凉了。');
+  }
+
   if (ctx.artifacts && ctx.artifacts.length > 0) {
     lines.push('最近产物:');
     for (const a of ctx.artifacts) {
@@ -132,6 +153,28 @@ function buildNavigationInner(ctx: NavigationContext, options?: NavigationFormat
 
   if (ctx.roadmapPointer) lines.push(ctx.roadmapPointer);
   return lines.join('\n');
+}
+
+function recentStopLines(ctx: NavigationContext, timeZone: string | undefined): string[] {
+  const recentStops = (ctx.executionSituation?.recentStops ?? []).filter((stop) => stop.catId !== ctx.currentCatId);
+  const coverageGap =
+    ctx.executionSituation?.recentStopsComplete === false
+      ? ['  （本线程最近结束的轮次很多，只核对了最新的一页，更早的停止可能没列出）']
+      : [];
+  if (recentStops.length === 0) return coverageGap.length > 0 ? ['最近停下的成员:', ...coverageGap] : [];
+  return [
+    '最近停下的成员（本线程 30 分钟内，最近一次）:',
+    ...coverageGap,
+    ...recentStops.map(
+      (stop) =>
+        `  - ${getSenderName(stop.catId)} (${stop.catId}) · ${formatPromptTime(stop.endedAt, { timeZone })} · ${describeRecentStop(stop)}`,
+    ),
+  ];
+}
+
+/** F337: what the stop means for whoever is about to call this member. */
+export function describeRecentStop(stop: ThreadRecentStop): string {
+  return describeStopReason(stop.status, stop.terminalReason);
 }
 
 export function formatInvocationSource(source: InvocationSource): string {

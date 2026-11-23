@@ -165,10 +165,11 @@ fresh outcome。keep/tune/rollback/sunset/no_change 依当前证据与有权 con
 
 ## 把有效判断带给下一次任务
 
-通过 [self-evolution](../../self-evolution/SKILL.md) 与
-[writing-skills](../../writing-skills/SKILL.md) 保留：当时的竞争解释、改变决定的证据、
-方法修订、适用条件及反例。已有方法就修现有入口或 ref；先看
-[方法出处](method-evidence.md)，避免把同一经验重复注册成多个 skill。
+在原任务或现有方法入口保留：当时的竞争解释、改变决定的证据、方法修订、适用条件
+及反例。已有方法就修现有入口或 ref；同类新活做到第二次、想沉淀成技能时用
+[writing-skills](../../writing-skills/SKILL.md)。先看[方法出处](method-evidence.md)，
+避免把同一经验重复注册成多个 skill。家里已有答案却让 You 重说时，另按
+[code-as-harness](../../code-as-harness/SKILL.md) 入错题本、查断点，不把所有方法总结都当错题。
 
 新的对象重新核目标、GT、权限和条件；不迁移旧阈值、项目数据或批准。方法写下、
 在新上下文被实际使用、后续结果支持其净效用是三个证据层次。仅有前两层就按

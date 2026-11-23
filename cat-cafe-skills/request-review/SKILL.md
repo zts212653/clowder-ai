@@ -36,7 +36,7 @@ Reviewer 回读原 issue / 讨论 / 已接受决定，再看计划与实际结�
 | 安全 / 鉴权 / 生产数据 / 外部契约，或需要 context-blind 代码扫描 | cloud；不再同时把同一问题默认发 local |
 | 用户可见 feature 的终态是否符合愿景 | 愿景守护在 feature close 触发；本次交付的约定结果仍由已选 reviewer 判断，不给每个 PR 加第三棒 |
 
-默认只找一只 reviewer：测试能兜住的实现正确性找常规 reviewer（非作者Maine Coon、Sonnet、kimi 或 gemini-argon，同族不同个体也行）；gemini-argon 只审不写代码。在这几只里按派活时各家粮的实际情况和现行有效安排挑，已撤销或已过期的暂停、稀缺标签不作排除依据。方向和形状请创作位一次给完；安全、鉴权、生产数据、外部契约优先 cloud，cloud 不可用时只换成一只本地 reviewer，不拆成两路。
+默认只找一只 reviewer：测试能兜住的实现正确性找常规 reviewer（非作者Maine Coon、Sonnet、kimi、gemini-argon 或 gemini-carbon，同族不同个体也行）；gemini-argon 只审不写代码。在这几只里按派活时各家粮的实际情况和现行有效安排挑，已撤销或已过期的暂停、稀缺标签不作排除依据。方向和形状请创作位一次给完；安全、鉴权、生产数据、外部契约优先 cloud，cloud 不可用时只换成一只本地 reviewer，不拆成两路。
 
 只有两个风险面确实需要不同的人时才加第二只，并写明各自理由。迭代修复只请改动所在那一面的 reviewer 复审；稀缺席位不进迭代循环。F320 #5195 两路复审 6 轮，安全面的两个 P1 都是语义 reviewer 抓到的，是机械拆两路的反例（见 `docs/SOP.md`「Reviewer 配对规则」）。
 
@@ -94,7 +94,7 @@ Ask: <本次约定的结果是否成立，以及需重点检查的风险> verdic
 ```
 
 Feature 以 canonical `docs/features/F*.md` + 该文件最后一次内容变更的完整 40/64 位 Git OID 为 anchor；消息 source 以
-`threadId#messageId` 自身为 revision。普通 local review 按这份 packet 请求，reviewer 一次发出 typed verdict，author 直接读取原消息的 `localReviewFact`；只传引用，不复制 source 正文。
+`Accepted-Source-Ref` 使用完整 `threadId#messageId`，`Accepted-Revision` 只填裸 `messageId`（例如 `private-source-id`）。普通 local review 按这份 packet 请求，reviewer 一次发出 typed verdict，author 直接读取原消息的 `localReviewFact`；只传引用，不复制 source 正文。
 
 只有 F100/F311 已指定要证明 `request-review` **某个 skill 版本在这次 review 中实际沿用**，才在发送请求前 prepare，并在 packet 追加 `Request-Review-Consumption-Handle`；具名 reviewer 可 bind，发出同一条 typed verdict 后 record。prepare/bind/record 是独立的使用测量，不能作为 verdict 送达、作者消费或 merge 的前置条件。handle 缺失、过期、bind/record 失败或结果 `unconfirmed` 时如实保留测量缺口；不得为补回执新建 handle、重发结论、重新唤醒 reviewer 或虚报 `applied`。不适用的已绑定实验可 dismiss；既有历史回执保持原样。
 

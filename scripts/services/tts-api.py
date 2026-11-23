@@ -29,12 +29,14 @@ import argparse
 import asyncio
 import base64
 import gc
+import hashlib
 import io
 import json
 import logging
 import os
 import shutil
 import signal
+import stat
 import sys
 import tempfile
 import threading
@@ -44,6 +46,7 @@ import wave
 from abc import ABC, abstractmethod
 from array import array
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -56,10 +59,106 @@ from pydantic import BaseModel, Field
 MAX_INPUT_CHARS = 5000
 MIN_MLX_AUDIO_VERSION = (0, 4, 7)
 TTS_API_CAPABILITIES = ["speech", "speech-stream-route-v1"]
+MAX_REFERENCE_BYTES = 10 * 1024 * 1024
 
 log = logging.getLogger("tts-api")
 
 app = FastAPI(title="Clowder AI TTS Server")
+
+
+class CapturedReference:
+    def __init__(self, data: bytes | None, suffix: str = '.wav'):
+        self.data = data
+        self.suffix = suffix if suffix in {'.wav', '.mp3', '.flac', '.ogg', '.m4a'} else '.wav'
+        self.sha256 = hashlib.sha256(data).hexdigest() if data is not None else None
+
+    def headers(self) -> dict[str, str]:
+        return {'X-TTS-Reference-Status': 'used' if self.data is not None else 'unavailable',
+                **({'X-TTS-Reference-Sha256': self.sha256} if self.sha256 else {})}
+
+
+def capture_reference(path: str | None, encoded: str | None = None, expected: str | None = None):
+    if not path and encoded is None:
+        return None
+    try:
+        if encoded is None:
+            with open(path, 'rb') as source:
+                data = source.read(MAX_REFERENCE_BYTES + 1)
+        else:
+            if len(encoded) > ((MAX_REFERENCE_BYTES + 2) // 3) * 4:
+                raise HTTPException(413, detail='Reference audio exceeds 10 MiB')
+            data = base64.b64decode(encoded, validate=True)
+        if len(data) > MAX_REFERENCE_BYTES:
+            raise HTTPException(413, detail='Reference audio exceeds 10 MiB')
+        captured = CapturedReference(data if data else None, Path(path or 'reference.wav').suffix.lower())
+        if not data:
+            return captured
+        if expected is not None and captured.sha256 != expected:
+            raise HTTPException(409, detail='Reference audio digest differs from the supplied content')
+        return captured
+    except OSError:
+        return CapturedReference(None)
+    except ValueError as error:
+        raise HTTPException(400, detail='Invalid reference audio content') from error
+
+
+def reference_workspace() -> Path:
+    root = Path(tempfile.gettempdir(), f'cat-cafe-tts-reference-v1-{os.getuid()}')
+    root.mkdir(mode=0o700, exist_ok=True)
+    info = root.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise RuntimeError('Reference workspace must be private and owned by the reader')
+    return root
+
+
+@contextmanager
+def reference_lock(path: Path, blocking: bool = True):
+    import fcntl
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+        yield
+    finally:
+        os.close(descriptor)
+
+
+def reap_reference_jobs() -> dict[str, int]:
+    root = reference_workspace()
+    counts = {'removed': 0, 'active': 0}
+    with reference_lock(root / '.registry'):
+        for job in root.glob('job-*'):
+            if job.is_symlink() or not job.is_dir():
+                continue
+            try:
+                with reference_lock(job / '.lease', blocking=False):
+                    shutil.rmtree(job)
+                    counts['removed'] += 1
+            except BlockingIOError:
+                counts['active'] += 1
+    return counts
+
+
+@contextmanager
+def reference_file(reference):
+    if reference is None or reference.data is None:
+        yield None
+        return
+    root = reference_workspace()
+    with reference_lock(root / '.registry'):
+        job = Path(tempfile.mkdtemp(prefix='job-', dir=root))
+        lease = reference_lock(job / '.lease')
+        lease.__enter__()
+    try:
+        target = job / f'reference{reference.suffix}'
+        with os.fdopen(os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600), 'wb') as output:
+            output.write(reference.data)
+        yield str(target)
+    finally:
+        with reference_lock(root / '.registry'):
+            try:
+                shutil.rmtree(job)
+            finally:
+                lease.__exit__(None, None, None)
 
 
 def require_mlx_audio_runtime() -> None:
@@ -104,6 +203,8 @@ def resolve_cat_cafe_home() -> Path:
 @app.on_event("startup")
 async def _emit_ready_marker():
     """Push-based ready signal — see embed-api.py + service-logs.ts."""
+    if os.name == 'posix':
+        reap_reference_jobs()
     print("__CATCAFE_SIDECAR_READY__", flush=True)
 
 
@@ -404,6 +505,7 @@ class Qwen3CloneAdapter(TtsAdapter):
         self._lock = threading.Lock()
         self._loaded_model = None
         self._mlx = None
+        self._reference_cache_sha256 = None
         self._inference_executor = ThreadPoolExecutor(
             max_workers=1,
             thread_name_prefix="cat-cafe-qwen-tts",
@@ -430,9 +532,9 @@ class Qwen3CloneAdapter(TtsAdapter):
         instruct: str | None = None,
         temperature: float = 0.3,
     ) -> tuple[bytes, str]:
-        if ref_audio and not Path(ref_audio).exists():
-            log.warning("Reference audio not found: %s — using Base generation without a reference", ref_audio)
-            ref_audio = None
+        if isinstance(ref_audio, str):
+            ref_audio = capture_reference(ref_audio)
+        if ref_audio is not None and ref_audio.data is None:
             ref_text = None
             instruct = None
 
@@ -510,11 +612,25 @@ class Qwen3CloneAdapter(TtsAdapter):
         lang_code: str,
         speed: float,
         audio_format: str,
-        ref_audio: str | None,
+        ref_audio: CapturedReference | None,
         ref_text: str | None,
         instruct: str | None,
         temperature: float,
     ) -> tuple[bytes, str]:
+        with reference_file(ref_audio) as reference_path:
+            return self._synthesize_path_sync(text, lang_code, speed, audio_format, reference_path, ref_text, instruct, temperature,
+                reference_sha256=ref_audio.sha256 if ref_audio is not None else None)
+
+    def _prepare_reference_cache(self, model, sha256):
+        # Qwen's reference-code key uses transcript/size/sum, which is not a
+        # content identity. Keep same-reference reuse, invalidate on real change.
+        if sha256 != self._reference_cache_sha256:
+            cache = getattr(model, '_icl_cache', None)
+            if isinstance(cache, dict):
+                cache.clear()
+            self._reference_cache_sha256 = sha256
+
+    def _synthesize_path_sync(self, text, lang_code, speed, audio_format, ref_audio, ref_text, instruct, temperature, reference_sha256=None):
         from mlx_audio.tts.generate import generate_audio as tts_generate
 
         output_dir = Path(tempfile.mkdtemp(prefix="cat-cafe-tts-clone-"))
@@ -522,6 +638,7 @@ class Qwen3CloneAdapter(TtsAdapter):
             with self._lock:
                 try:
                     model = self._ensure_model()
+                    self._prepare_reference_cache(model, reference_sha256)
                     kwargs: dict = {
                         "text": text,
                         "model": model,
@@ -562,6 +679,17 @@ class Qwen3CloneAdapter(TtsAdapter):
         temperature: float = 0.3,
         streaming_interval: float = 0.5,
     ):
+        captured = capture_reference(ref_audio) if isinstance(ref_audio, str) else ref_audio
+        def generate_captured():
+            with reference_file(captured) as path:
+                if path is None:
+                    raise RuntimeError('Reference audio unavailable')
+                yield from self._synthesize_stream_path(text=text, lang_code=lang_code, ref_audio=path, ref_text=ref_text,
+                    instruct=instruct, temperature=temperature, streaming_interval=streaming_interval,
+                    reference_sha256=captured.sha256)
+        return generate_captured()
+
+    def _synthesize_stream_path(self, *, text, lang_code, ref_audio, ref_text, instruct, temperature, streaming_interval, reference_sha256=None):
         """Yield independently playable WAV chunks, then one complete cache WAV."""
         if not Path(ref_audio).exists():
             raise RuntimeError(f"Reference audio not found: {ref_audio}")
@@ -572,6 +700,7 @@ class Qwen3CloneAdapter(TtsAdapter):
         model = None
         try:
             model = self._ensure_model()
+            self._prepare_reference_cache(model, reference_sha256)
             pcm_chunks: list[bytes] = []
             sample_rate: int | None = None
             generation = model.generate(
@@ -681,6 +810,8 @@ class SpeechRequest(BaseModel):
     lang_code: str = Field(default="z")
     # F066: Qwen3-TTS Base clone mode fields
     ref_audio: str | None = Field(default=None)
+    ref_audio_base64: str | None = Field(default=None, max_length=((MAX_REFERENCE_BYTES + 2) // 3) * 4)
+    ref_audio_sha256: str | None = Field(default=None, min_length=64, max_length=64)
     ref_text: str | None = Field(default=None)
     instruct: str | None = Field(default=None)
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
@@ -716,6 +847,9 @@ async def synthesize_endpoint(req: SpeechRequest):
     verify_requested_model(req.model, req.generation_profile)
 
     try:
+        reference = capture_reference(req.ref_audio, req.ref_audio_base64, req.ref_audio_sha256) if isinstance(adapter, Qwen3CloneAdapter) else None
+        if reference is not None and (not req.ref_text or not req.ref_text.strip()):
+            reference = CapturedReference(None)
         # Build base kwargs for all adapters
         synth_kwargs: dict = {
             "text": req.input,
@@ -726,7 +860,7 @@ async def synthesize_endpoint(req: SpeechRequest):
         }
         # Pass clone params if adapter supports them (Qwen3CloneAdapter)
         if isinstance(adapter, Qwen3CloneAdapter):
-            synth_kwargs["ref_audio"] = req.ref_audio
+            synth_kwargs["ref_audio"] = reference
             synth_kwargs["ref_text"] = req.ref_text
             synth_kwargs["instruct"] = req.instruct
             synth_kwargs["temperature"] = req.temperature
@@ -749,6 +883,7 @@ async def synthesize_endpoint(req: SpeechRequest):
                 "Content-Disposition": f'inline; filename="speech.{actual_format}"',
                 "X-Audio-Format": actual_format,
                 **({"X-TTS-Generation-Profile": adapter.generation_profile} if getattr(adapter, "generation_profile", None) else {}),
+                **(reference.headers() if reference is not None else {}),
             },
         )
     except HTTPException:
@@ -766,13 +901,17 @@ async def synthesize_stream_endpoint(request: Request, req: SpeechRequest):
     verify_requested_model(req.model, req.generation_profile)
     if not isinstance(adapter, Qwen3CloneAdapter):
         raise HTTPException(409, detail="Native clone streaming requires the qwen3-clone provider")
-    if not req.ref_audio or not req.ref_text:
+    if not req.ref_audio or not req.ref_text or not req.ref_text.strip():
         raise HTTPException(400, detail="ref_audio and ref_text are required for clone streaming")
+
+    reference = capture_reference(req.ref_audio, req.ref_audio_base64, req.ref_audio_sha256)
+    if reference is None or reference.data is None:
+        raise HTTPException(422, detail='Reference audio unavailable')
 
     stream = adapter.synthesize_stream(
         text=req.input,
         lang_code=req.lang_code,
-        ref_audio=req.ref_audio,
+        ref_audio=reference,
         ref_text=req.ref_text,
         instruct=req.instruct,
         temperature=req.temperature,
@@ -822,7 +961,7 @@ async def synthesize_stream_endpoint(request: Request, req: SpeechRequest):
 
     return StreamingResponse(
         generate_events(), media_type="application/x-ndjson",
-        headers={"X-TTS-Generation-Profile": adapter.generation_profile} if adapter.generation_profile else {},
+        headers={**({"X-TTS-Generation-Profile": adapter.generation_profile} if adapter.generation_profile else {}), **reference.headers()},
     )
 
 
@@ -833,7 +972,7 @@ async def health():
         "model": adapter.model_name if adapter else "none",
         "backend": adapter.name if adapter else "none",
         **({"generation_profile": adapter.generation_profile} if getattr(adapter, "generation_profile", None) else {}),
-        "capabilities": TTS_API_CAPABILITIES,
+        "capabilities": TTS_API_CAPABILITIES + (["reference-audio-content-v1"] if isinstance(adapter, Qwen3CloneAdapter) and os.name == 'posix' else []),
     }
 
 
@@ -867,7 +1006,7 @@ async def health_deep():
             "model": adapter.model_name,
             "backend": adapter.name,
             **({"generation_profile": adapter.generation_profile} if getattr(adapter, "generation_profile", None) else {}),
-            "capabilities": TTS_API_CAPABILITIES,
+            "capabilities": TTS_API_CAPABILITIES + (["reference-audio-content-v1"] if isinstance(adapter, Qwen3CloneAdapter) and os.name == 'posix' else []),
         }
     except Exception as exc:
         log.warning("Deep health probe failed: %s", exc)

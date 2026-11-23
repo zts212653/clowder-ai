@@ -11,9 +11,12 @@
  * page calls resolvePendingTeleport() with its loaded message ids after render.
  */
 
+import type { SourceActionRequest } from './entrusted-message-source';
+
 export interface PendingTeleport {
   threadId: string;
   messageId: string;
+  sourceAction?: SourceActionRequest;
 }
 
 // Module-level (not React state): a /thread/A → /thread/B route change remounts
@@ -65,16 +68,18 @@ export function planTeleport(params: {
   threadId: string;
   messageId: string;
   currentThreadId: string | null;
+  sourceAction?: SourceActionRequest;
 }): TeleportPlan {
-  const { threadId, messageId, currentThreadId } = params;
+  const { threadId, messageId, currentThreadId, sourceAction } = params;
+  const target = { threadId, messageId, ...(sourceAction ? { sourceAction } : {}) };
   if (currentThreadId === threadId) {
     // P1 (砚砚 R1): record pending even on the same thread so useChatHistory's
     // older-page resolver can reach a target OUTSIDE the loaded window. scrollNow
     // still handles the common in-window case immediately.
-    setPendingTeleport({ threadId, messageId });
+    setPendingTeleport(target);
     return { scrollNow: messageId, navigateTo: null };
   }
-  setPendingTeleport({ threadId, messageId });
+  setPendingTeleport(target);
   return { scrollNow: null, navigateTo: threadId };
 }
 

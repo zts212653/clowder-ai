@@ -12,6 +12,9 @@ export interface MessageScrollAnchor {
   blockIndex?: number;
   blockFingerprint?: string;
   blockViewportOffsetPx?: number;
+  /** Explicit source card; independent of the first visible text paragraph. */
+  richBlockId?: string;
+  richBlockViewportOffsetPx?: number;
   /** Existing timeline-owner score bounds history lookup without retaining a body. */
   timelineOrderAt?: number;
 }
@@ -102,6 +105,25 @@ export function captureMessageScrollAnchorForElement(
     : visible;
 }
 
+/** The source locator must follow its card when content earlier in the same message reflows. */
+export function captureMessageScrollAnchorForRichBlock(
+  container: HTMLElement,
+  element: HTMLElement,
+): MessageScrollAnchor | undefined {
+  if (!container.contains(element)) return;
+  const boundary = element.closest<HTMLElement>('[data-message-viewport-id]');
+  const messageId = boundary?.dataset.messageViewportId;
+  const richBlockId = element.dataset.richBlockId;
+  if (!boundary || !messageId || !richBlockId) return;
+  const viewportTop = container.getBoundingClientRect().top;
+  return {
+    messageId,
+    viewportOffsetPx: boundary.getBoundingClientRect().top - viewportTop,
+    richBlockId,
+    richBlockViewportOffsetPx: element.getBoundingClientRect().top - viewportTop,
+  };
+}
+
 /** Capture one explicit navigation target without substituting another visible row. */
 export function captureMessageScrollAnchorForMessage(
   container: HTMLElement,
@@ -156,6 +178,13 @@ export function matchesMessageScrollAnchor(container: HTMLElement, anchor: Messa
 function resolveReadingAnchor(container: HTMLElement, anchor: MessageScrollAnchor) {
   const target = resolveMessageElements([anchor.messageId], container)[0];
   if (!target) return;
+  if (anchor.richBlockId !== undefined) {
+    const node = [...target.querySelectorAll<HTMLElement>('[data-rich-block-id]')].find(
+      (candidate) => candidate.dataset.richBlockId === anchor.richBlockId,
+    );
+    if (!node || node.getBoundingClientRect().height <= 0 || anchor.richBlockViewportOffsetPx === undefined) return;
+    return { node, offset: anchor.richBlockViewportOffsetPx };
+  }
   const boundary = target.closest<HTMLElement>('[data-message-viewport-id]') ?? target;
   const block = resolveReadingBlock(boundary, anchor);
   return {

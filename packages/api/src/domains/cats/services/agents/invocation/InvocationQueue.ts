@@ -54,6 +54,11 @@ import {
   type StoredMessage,
 } from '../../stores/ports/MessageStore.js';
 import type { ToolExecutionPolicy } from '../../types.js';
+import {
+  crossThreadFailureReturnInput,
+  crossThreadFailureReturnSourceId,
+  isCrossThreadSource,
+} from './cross-thread-failure-return.js';
 import { compareLifecycleQueueEntries } from './message-lifecycle-queue-order.js';
 import type { OwnerAuthProvenance } from './owner-auth-provenance.js';
 import { InMemoryQueueLedgerStore } from './queue-ledger/InMemoryQueueLedgerStore.js';
@@ -100,6 +105,7 @@ export interface QueueEnqueueInput {
   ownerAuthProvenance: OwnerAuthProvenance;
   executionScope?: QueueLedgerEntry['execution']['executionScope'];
   idempotencyKey?: string;
+  clientMessageId?: string;
   content: string;
   messageId?: string | null;
   from: MessageFrom;
@@ -505,6 +511,7 @@ export class InvocationQueue {
           };
     return createQueueLedgerAdmission({
       sourceId,
+      ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
       threadId: input.threadId,
       owner: queueOwner(input),
       kind: input.kind,
@@ -663,10 +670,17 @@ export class InvocationQueue {
 
   /** Restore the local projection of already committed control edges after a lost acknowledgement. */
   async reprojectFailureWakes(source: StoredMessage, targetIds: readonly string[]): Promise<void> {
+    const originThreadId = isCrossThreadSource(source) ? source.extra?.crossPost?.sourceThreadId : undefined;
     for (const ref of source.lifecycle?.dispatchRefs ?? []) {
       if (ref.phase !== 'settled' || !targetIds.includes(ref.targetId)) continue;
-      const wake = await this.ledgerStore.get(source.threadId, queueEntryId(ref.statusMessageId));
-      if (wake?.kind === 'private_input' && wake.sourceCategory === 'a2a_failure') this.cacheLedgerEntries([wake]);
+      const sourceId = originThreadId
+        ? crossThreadFailureReturnSourceId(source.id, ref.statusMessageId)
+        : ref.statusMessageId;
+      const wake = await this.ledgerStore.get(originThreadId ?? source.threadId, queueEntryId(sourceId));
+      if (wake?.kind === 'private_input' && wake.sourceCategory === 'a2a_failure') {
+        const entries = this.cacheLedgerEntries([wake]);
+        if (originThreadId) await this.notifyAdmission(wake.threadId, entries);
+      }
     }
   }
 
@@ -989,7 +1003,12 @@ export class InvocationQueue {
         const admissionInput =
           committed || replaySource ? input : this.resolveAdmissionInput({ ...input, exactTargets: true }, targetKinds);
         return this.createLedgerRows(
-          replay ? { ...admissionInput, intent: replay.execution.intent } : admissionInput,
+          {
+            ...(replay ? { ...admissionInput, intent: replay.execution.intent } : admissionInput),
+            ...(message.from.kind === 'user' && message.idempotencyKey
+              ? { clientMessageId: message.idempotencyKey }
+              : {}),
+          },
           messageId,
           enqueuedAt,
           messageId,
@@ -1032,10 +1051,11 @@ export class InvocationQueue {
       throw new Error('pre-admission failure requires its Queue claim or retired prestart attempt');
     const requestedTargets = typeof targetId === 'string' ? [targetId] : [...targetId].sort();
     const caller = queueEntryCallerCatId(entry);
+    const crossThread = isCrossThreadSource(source);
     const returnToCaller =
       entry.sourceCategory === 'a2a' &&
       caller &&
-      !requestedTargets.includes(caller) &&
+      (crossThread || !requestedTargets.includes(caller)) &&
       source.from?.kind === 'agent' &&
       source.from.catId === caller &&
       source.userId === queueEntryOwnerId(entry) &&
@@ -1048,24 +1068,39 @@ export class InvocationQueue {
       source.threadId,
       preAdmissionFailureIdempotencyKey(entry.id, requestedTargets),
     );
+    const failureContent =
+      content ??
+      (reason === 'invalid_explicit_target'
+        ? `唤起 ${requestedTargets.join('、')} 失败：指定的接收对象当前无效。`
+        : `唤起 ${requestedTargets.join('、')} 失败：成员的执行绑定无法通过准入。`);
     const failure = await messageStore.commitLifecyclePreAdmissionFailure({
       sourceMessageId: source.id,
       expectedEntryId: entry.id,
       requestedTargets,
       reason,
-      content:
-        content ??
-        (reason === 'invalid_explicit_target'
-          ? `唤起 ${requestedTargets.join('、')} 失败：指定的接收对象当前无效。`
-          : `唤起 ${requestedTargets.join('、')} 失败：成员的执行绑定无法通过准入。`),
+      content: failureContent,
       failedAt: committed?.timestamp ?? Math.max(Date.now(), source.timestamp),
       claim: {
         ...(entry.claimId ? { id: entry.claimId } : {}),
         ledger: this.ledgerStore,
         ...(returnToCaller
           ? {
-              makeWake: (failureId: string) =>
-                createQueueLedgerAdmission({
+              makeWake: (failureId: string) => {
+                if (crossThread) {
+                  const input = crossThreadFailureReturnInput(
+                    source,
+                    failureId,
+                    requestedTargets,
+                    entry.execution.ownerAuthProvenance,
+                  );
+                  return createQueueLedgerAdmission({
+                    ...input,
+                    targetCatIds: input.targetCats,
+                    owner: entry.owner,
+                    enqueuedAt: this.nextEnqueuedAt(),
+                  })[0]!;
+                }
+                return createQueueLedgerAdmission({
                   kind: 'private_input',
                   from: { kind: 'system', service: 'message_delivery' },
                   threadId: entry.threadId,
@@ -1080,59 +1115,91 @@ export class InvocationQueue {
                   a2aTriggerMessageId: failureId,
                   a2aParentInvocationId: entry.execution.a2aParentInvocationId,
                   enqueuedAt: this.nextEnqueuedAt(),
-                })[0]!,
+                })[0]!;
+              },
             }
           : {}),
       },
     });
     if (failure.kind !== 'applied' && failure.kind !== 'replayed') return failure;
     if (returnToCaller) {
-      const wake = await this.ledgerStore.get(entry.threadId, queueEntryId(failure.failureMessage.id));
-      if (wake) this.cacheLedgerEntries([wake]);
+      const returned = crossThread
+        ? crossThreadFailureReturnInput(
+            source,
+            failure.failureMessage.id,
+            requestedTargets,
+            entry.execution.ownerAuthProvenance,
+          )
+        : undefined;
+      const wake = await this.ledgerStore.get(
+        returned?.threadId ?? entry.threadId,
+        queueEntryId(returned?.sourceId ?? failure.failureMessage.id),
+      );
+      if (wake) {
+        const entries = this.cacheLedgerEntries([wake]);
+        if (crossThread) await this.notifyAdmission(wake.threadId, entries);
+      }
     }
     return failure;
   }
 
-  /** One storage transaction for a terminal response bubble and its outbound A2A fan-out. */
+  /** One storage transaction for a response, local fan-out and exact cross-thread failure returns. */
   async terminalizeResponseAndEnqueueDurable(
     messageStore: IMessageStore,
     responseMessageId: string,
     terminalPatch: LifecycleResponseTerminalPatch,
-    input: QueueEnqueueInput,
+    input: QueueEnqueueInput | undefined,
+    failureReturns: readonly QueueEnqueueInput[] = [],
   ): Promise<EnqueueMessageResult> {
     const source = await messageStore.getById(responseMessageId);
     if (
       !source ||
-      source.threadId !== input.threadId ||
-      source.userId !== input.userId ||
-      source.content === undefined ||
-      JSON.stringify(source.from) !== JSON.stringify(input.from)
-    ) {
+      (input &&
+        (source.threadId !== input.threadId ||
+          source.userId !== input.userId ||
+          JSON.stringify(source.from) !== JSON.stringify(input.from)))
+    )
       throw new Error('lifecycle Queue source does not match its execution work item');
+    const rows: QueueLedgerEntry[] = [];
+    if (input) {
+      const existing = await this.ledgerStore.get(input.threadId, queueEntryId(responseMessageId));
+      rows.push(
+        ...this.createLedgerRows(
+          { ...input, sourceId: responseMessageId, messageId: responseMessageId },
+          responseMessageId,
+          source.timestamp,
+          responseMessageId,
+          existing ? [existing] : undefined,
+          false,
+          undefined,
+          true,
+          existing ? undefined : await this.admissionPolicy.resolveTargetKinds?.(input.targetCats),
+        ),
+      );
     }
-    const canonicalInput: QueueEnqueueInput = {
-      ...input,
-      sourceId: responseMessageId,
-      messageId: responseMessageId,
-    };
-    const existing = await this.ledgerStore.get(input.threadId, queueEntryId(responseMessageId));
-    const rows = this.createLedgerRows(
-      canonicalInput,
-      responseMessageId,
-      source.timestamp,
-      responseMessageId,
-      existing ? [existing] : undefined,
-      false,
-      undefined,
-      true,
-      existing ? undefined : await this.admissionPolicy.resolveTargetKinds?.(input.targetCats),
-    );
+    for (const failureReturn of failureReturns) {
+      if (!failureReturn.sourceId) throw new Error('failure return requires an exact source identity');
+      // This exact caller was already admitted. Preserve it even if temporarily unavailable;
+      // the normal private-input execution boundary decides its deliverability.
+      rows.push(
+        ...this.createLedgerRows(
+          failureReturn,
+          failureReturn.sourceId,
+          source.timestamp,
+          undefined,
+          undefined,
+          false,
+          undefined,
+          false,
+        ),
+      );
+    }
     const result = await messageStore.commitLifecycleResponseTerminalWithQueueLedgerAdmission(
       responseMessageId,
       terminalPatch,
       rows,
       this.ledgerStore,
-      input.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined,
+      input?.from.kind === 'user' ? MAX_QUEUE_DEPTH : undefined,
     );
     if (result.kind === 'full') return { outcome: 'full' };
     if (result.kind === 'conflict' && result.reason === 'inputs_changed')
@@ -1143,7 +1210,15 @@ export class InvocationQueue {
       );
     }
     const projected = this.cacheLedgerEntries(result.entries);
-    await this.notifyAdmission(input.threadId, projected, result.message, input.onQueueEntriesAdmitted);
+    for (const threadId of new Set(projected.map((entry) => entry.threadId))) {
+      const sameThread = threadId === source.threadId;
+      await this.notifyAdmission(
+        threadId,
+        projected.filter((entry) => entry.threadId === threadId),
+        sameThread ? result.message : undefined,
+        sameThread ? input?.onQueueEntriesAdmitted : undefined,
+      );
+    }
     const primary = projected[0];
     return {
       outcome: 'enqueued',
@@ -2186,9 +2261,9 @@ export class InvocationQueue {
     return { outcome: 'retired', rowStatus: reconciled.entry ? 'queued' : 'absent' };
   }
 
-  async rollbackProcessingDurable(threadId: string, entryId: string): Promise<boolean> {
+  async rollbackProcessingDurable(threadId: string, entryId: string, expectedClaimId?: string): Promise<boolean> {
     const claimId = this.ledgerClaimIds.get(entryId);
-    if (!claimId) return false;
+    if (!claimId || (expectedClaimId !== undefined && claimId !== expectedClaimId)) return false;
     const restored = await this.ledgerStore.restore(threadId, entryId, claimId);
     if (restored.outcome !== 'updated') return false;
     this.ledgerClaimIds.delete(entryId);

@@ -48,6 +48,10 @@ const EXCLUDED_REASON_CODES = new Set([
   // and operator fatigue. F212 cliDiagnostics already surfaces the rephrase hint
   // to the user, and the underlying decision is upstream policy (not our layer).
   'upstream_policy_reject',
+  // A missing local CLI is user-environment state with a documented install command,
+  // not a defect in our runtime. The existing F212 panel carries the next step;
+  // auto-filing against ourselves would only add noise (issue #1463 S3).
+  'cli_not_found',
 ]);
 
 /** Minimum permission denials in CANCEL_WINDOW_MS to trigger cancel_burst. */

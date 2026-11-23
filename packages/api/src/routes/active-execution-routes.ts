@@ -33,6 +33,7 @@ export interface LiveExecutionCandidate {
   readonly controlSource?: 'tracker' | 'process_owner' | 'unavailable';
   /** Exact request-owned input capability, projected from the live dispatcher. */
   readonly inputCapabilities?: LifecycleInputCapabilities;
+  readonly executionKind?: ActiveExecutionProjection['executionKind'];
 }
 
 interface ActiveExecutionTracker {
@@ -197,6 +198,7 @@ function projectLiveExecution(
     threadTitle: thread.title,
     catId: candidate.catId,
     kind: 'live_invocation',
+    ...(canControl && candidate.executionKind ? { executionKind: candidate.executionKind } : {}),
     startedAt: candidate.startedAt,
     cancelability: canControl
       ? {
@@ -371,7 +373,27 @@ async function buildActiveExecutionList(
   const liveGroups = await Promise.all(
     scanTargets.map(async (thread) => {
       try {
-        return { thread, candidates: await deps.resolveLiveExecutions(thread.id, userId, request), unavailable: false };
+        const live = await deps.resolveLiveExecutions(thread.id, userId, request);
+        const candidates = await Promise.all(
+          live.map(async (candidate) => {
+            const turn =
+              candidate.invocationId && canControlLiveExecution(thread, userId, candidate)
+                ? await deps.turnExecutions?.get(candidate.invocationId)
+                : undefined;
+            // The candidate's label is not authority for its role; use the exact owned child.
+            return {
+              ...candidate,
+              executionKind:
+                turn?.invocationId === candidate.invocationId &&
+                turn?.threadId === thread.id &&
+                turn?.userId === userId &&
+                turn?.catId === candidate.catId
+                  ? turn.executionKind
+                  : undefined,
+            };
+          }),
+        );
+        return { thread, candidates, unavailable: false };
       } catch (error) {
         if (projectPath !== null) throw error;
         request.log.warn({ err: error, threadId: thread.id }, 'Global execution project read unavailable');

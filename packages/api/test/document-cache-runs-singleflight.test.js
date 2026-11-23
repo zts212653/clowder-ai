@@ -36,47 +36,51 @@ describe('F279 server-owned full-document cache runs — singleflight and schedu
     });
     harnesses.push(harness);
 
-    const first = { projectPath: '/repo', relativePath: 'first.md', contentDigest: 'digest' };
-    const second = { projectPath: '/repo', relativePath: 'second.md', contentDigest: 'digest' };
-    await saveDocument(harness.app, 'operator', first, ['first-anchor']);
-    await saveDocument(harness.app, 'other-user', second, ['second-anchor']);
+    try {
+      const first = { projectPath: '/repo', relativePath: 'first.md', contentDigest: 'digest' };
+      const second = { projectPath: '/repo', relativePath: 'second.md', contentDigest: 'digest' };
+      await saveDocument(harness.app, 'operator', first, ['first-anchor']);
+      await saveDocument(harness.app, 'other-user', second, ['second-anchor']);
 
-    const cacheRequest = (userId, identity, anchor) =>
-      harness.app.inject({
-        method: 'POST',
-        url: '/api/tts/listen/document/cache',
-        headers: headers(userId),
-        payload: { identity, sentences: [{ anchor, text: '共享的一句正文。' }] },
+      const cacheRequest = (userId, identity, anchor) =>
+        harness.app.inject({
+          method: 'POST',
+          url: '/api/tts/listen/document/cache',
+          headers: headers(userId),
+          payload: { identity, sentences: [{ anchor, text: '共享的一句正文。' }] },
+        });
+
+      const [firstStart, duplicateStart, secondStart] = await Promise.all([
+        cacheRequest('operator', first, 'first-anchor'),
+        cacheRequest('operator', first, 'first-anchor'),
+        cacheRequest('other-user', second, 'second-anchor'),
+      ]);
+      for (const response of [firstStart, duplicateStart, secondStart]) {
+        assert.equal(response.statusCode, 200, response.body);
+        assert.equal(response.json().cacheRun.active, true);
+      }
+
+      await started.wait('shared cache producer did not start');
+      assert.equal(streamCalls, 1, 'same asset hash must synthesize only once');
+      gate.resolve();
+
+      await waitFor(async () => {
+        const state = await loadDocument(harness.app, 'operator', first);
+        assert.equal(state.cache.cachedSentences, 1);
+      });
+      await waitFor(async () => {
+        const state = await loadDocument(harness.app, 'other-user', second);
+        assert.equal(state.cache.cachedSentences, 1);
       });
 
-    const [firstStart, duplicateStart, secondStart] = await Promise.all([
-      cacheRequest('operator', first, 'first-anchor'),
-      cacheRequest('operator', first, 'first-anchor'),
-      cacheRequest('other-user', second, 'second-anchor'),
-    ]);
-    for (const response of [firstStart, duplicateStart, secondStart]) {
-      assert.equal(response.statusCode, 200, response.body);
-      assert.equal(response.json().cacheRun.active, true);
+      const firstState = await loadDocument(harness.app, 'operator', first);
+      const secondState = await loadDocument(harness.app, 'other-user', second);
+      assert.equal(firstState.sentences[0].assetId, secondState.sentences[0].assetId);
+      assert.equal(firstState.cacheRun.active, false);
+      assert.equal(secondState.cacheRun.active, false);
+    } finally {
+      gate.resolve();
     }
-
-    await started.promise;
-    assert.equal(streamCalls, 1, 'same asset hash must synthesize only once');
-    gate.resolve();
-
-    await waitFor(async () => {
-      const state = await loadDocument(harness.app, 'operator', first);
-      assert.equal(state.cache.cachedSentences, 1);
-    });
-    await waitFor(async () => {
-      const state = await loadDocument(harness.app, 'other-user', second);
-      assert.equal(state.cache.cachedSentences, 1);
-    });
-
-    const firstState = await loadDocument(harness.app, 'operator', first);
-    const secondState = await loadDocument(harness.app, 'other-user', second);
-    assert.equal(firstState.sentences[0].assetId, secondState.sentences[0].assetId);
-    assert.equal(firstState.cacheRun.active, false);
-    assert.equal(secondState.cacheRun.active, false);
   });
 
   it('singleflights one sentence when cache and foreground listen reach the shared asset together', async () => {
@@ -90,33 +94,37 @@ describe('F279 server-owned full-document cache runs — singleflight and schedu
       yield { type: 'final', result: { audio: Buffer.from('complete-audio'), format: 'wav', durationSec: 1 } };
     });
     harnesses.push(harness);
-    const identity = { projectPath: '/repo', relativePath: 'shared-entry.md', contentDigest: 'digest' };
-    await saveDocument(harness.app, 'operator', identity, ['shared-anchor']);
+    try {
+      const identity = { projectPath: '/repo', relativePath: 'shared-entry.md', contentDigest: 'digest' };
+      await saveDocument(harness.app, 'operator', identity, ['shared-anchor']);
 
-    const cacheStart = await harness.app.inject({
-      method: 'POST',
-      url: '/api/tts/listen/document/cache',
-      headers: headers('operator'),
-      payload: { identity, sentences: [{ anchor: 'shared-anchor', text: '缓存与播放共用的一句。' }] },
-    });
-    assert.equal(cacheStart.statusCode, 200, cacheStart.body);
-    await started.promise;
+      const cacheStart = await harness.app.inject({
+        method: 'POST',
+        url: '/api/tts/listen/document/cache',
+        headers: headers('operator'),
+        payload: { identity, sentences: [{ anchor: 'shared-anchor', text: '缓存与播放共用的一句。' }] },
+      });
+      assert.equal(cacheStart.statusCode, 200, cacheStart.body);
+      await started.wait('shared cache producer did not start');
 
-    const playback = harness.app.inject({
-      method: 'POST',
-      url: '/api/tts/listen/stream',
-      headers: headers('operator'),
-      payload: { text: '缓存与播放共用的一句。' },
-    });
-    gate.resolve();
-    const playbackResponse = await playback;
+      const playback = harness.app.inject({
+        method: 'POST',
+        url: '/api/tts/listen/stream',
+        headers: headers('operator'),
+        payload: { text: '缓存与播放共用的一句。' },
+      });
+      gate.resolve();
+      const playbackResponse = await playback;
 
-    assert.equal(playbackResponse.statusCode, 200, playbackResponse.body);
-    assert.equal(streamCalls, 1, 'cache and playback must share the in-flight asset synthesis');
-    await waitFor(async () => {
-      const state = await loadDocument(harness.app, 'operator', identity);
-      assert.equal(state.cache.cachedSentences, 1);
-    });
+      assert.equal(playbackResponse.statusCode, 200, playbackResponse.body);
+      assert.equal(streamCalls, 1, 'cache and playback must share the in-flight asset synthesis');
+      await waitFor(async () => {
+        const state = await loadDocument(harness.app, 'operator', identity);
+        assert.equal(state.cache.cachedSentences, 1);
+      });
+    } finally {
+      gate.resolve();
+    }
   });
 
   it('rejects ephemeral sentence input that no longer matches the saved manifest', async () => {
@@ -152,33 +160,37 @@ describe('F279 server-owned full-document cache runs — singleflight and schedu
       yield { type: 'final', result: { audio: Buffer.from(request.text), format: 'wav', durationSec: 1 } };
     });
     harnesses.push(harness);
-    const identity = { projectPath: '/repo', relativePath: 'priority.md', contentDigest: 'digest' };
-    await saveDocument(harness.app, 'operator', identity, ['background-first', 'background-second']);
+    try {
+      const identity = { projectPath: '/repo', relativePath: 'priority.md', contentDigest: 'digest' };
+      await saveDocument(harness.app, 'operator', identity, ['background-first', 'background-second']);
 
-    const started = await harness.app.inject({
-      method: 'POST',
-      url: '/api/tts/listen/document/cache',
-      headers: headers('operator'),
-      payload: {
-        identity,
-        sentences: [
-          { anchor: 'background-first', text: '后台第一句。' },
-          { anchor: 'background-second', text: '后台第二句。' },
-        ],
-      },
-    });
-    assert.equal(started.statusCode, 200, started.body);
-    await firstStarted.promise;
+      const started = await harness.app.inject({
+        method: 'POST',
+        url: '/api/tts/listen/document/cache',
+        headers: headers('operator'),
+        payload: {
+          identity,
+          sentences: [
+            { anchor: 'background-first', text: '后台第一句。' },
+            { anchor: 'background-second', text: '后台第二句。' },
+          ],
+        },
+      });
+      assert.equal(started.statusCode, 200, started.body);
+      await firstStarted.wait('first background cache sentence did not start');
 
-    releaseFirst.resolve();
-    const playback = await harness.app.inject({
-      method: 'POST',
-      url: '/api/tts/listen/stream',
-      headers: headers('operator'),
-      payload: { text: '播放缺失句。' },
-    });
-    assert.equal(playback.statusCode, 200, playback.body);
-    await waitFor(() => assert.equal(order.length, 3));
-    assert.deepEqual(order, ['后台第一句。', '播放缺失句。', '后台第二句。']);
+      releaseFirst.resolve();
+      const playback = await harness.app.inject({
+        method: 'POST',
+        url: '/api/tts/listen/stream',
+        headers: headers('operator'),
+        payload: { text: '播放缺失句。' },
+      });
+      assert.equal(playback.statusCode, 200, playback.body);
+      await waitFor(() => assert.equal(order.length, 3));
+      assert.deepEqual(order, ['后台第一句。', '播放缺失句。', '后台第二句。']);
+    } finally {
+      releaseFirst.resolve();
+    }
   });
 });

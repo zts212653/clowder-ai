@@ -496,7 +496,6 @@ export {
   type AssetContextAttachment,
   type CliOutputQuoteSource,
   CONTEXT_ATTACHMENT_COMMENT_MAX_LENGTH,
-  CONTEXT_ATTACHMENT_MAX_COUNT,
   CONTEXT_ATTACHMENT_PROMPT_MAX_CHARS,
   CONTEXT_ATTACHMENT_QUOTE_MAX_LENGTH,
   CONTEXT_ATTACHMENT_VERSION,
@@ -508,6 +507,7 @@ export {
   type QuoteContextSource,
   serializeContextAttachmentsPrompt,
   type ThreadContextAttachment,
+  type WorkContextAttachment,
   type WorkspaceFileContextAttachment,
   type WorkspaceFileQuotePage,
   type WorkspaceFileQuoteReference,
@@ -546,7 +546,6 @@ export {
   DISTILLATION_SOURCE_EVENTS,
   isDistillationSourceEvent,
 } from './dossier-distillation.js';
-// Entity proposal types (F260 Phase A 实体治理)
 export type {
   EntityConflictContext,
   EntityConflictReason,
@@ -566,6 +565,8 @@ export {
   ENTITY_STANCES,
   ENTITY_VISIBILITY_SCOPES,
 } from './entity-proposal.js';
+// Entity proposal types (F260 Phase A 实体治理)
+export { type EntityProvenance, entityProvenanceSchema } from './entity-provenance.js';
 // F310 Phase B: source-owned custody, Task-owned entrusted work, and shared owner-read contracts.
 export {
   type CustodyAdmissionRequestV1,
@@ -1030,6 +1031,7 @@ export {
 export { type ContextSourceEvidenceV1, contextSourceEvidenceV1Schema } from './memory-cue-context.js';
 export * from './memory-owner-lifecycle.js';
 export * from './memory-owner-views.js';
+export * from './memory-read.js';
 export * from './memory-read-usage.js';
 export {
   ASR_PERSON_MEMORY_REFLEX_ENTRY_V1,
@@ -1349,6 +1351,7 @@ export type {
   PluginManagerListItem,
   PluginManagerListResponse,
   PluginManagerLiveState,
+  PluginManagerOperation,
   PluginManagerPackageSource,
   PluginManagerPublicOperation,
   PluginManagerSetEnabledRequest,
@@ -1407,6 +1410,7 @@ export {
 export type {
   CollectionSignalKind,
   ProfileUpdateApproveOverrides,
+  ProfileUpdateDiffSummary,
   ProfileUpdateProposal,
   ProfileUpdateProposalStatus,
   ProfileUpdateSignalProvenance,
@@ -1528,7 +1532,7 @@ export type {
   RememberResult,
   RememberRowResult,
 } from './remember.js';
-export { REMEMBER_TARGETS, rememberInputSchema, rememberItemSchema } from './remember.js';
+export { REMEMBER_QUIET_TARGETS, REMEMBER_TARGETS, rememberInputSchema, rememberItemSchema } from './remember.js';
 // F299 Phase D: transcript-owned provider request generations.
 export * from './request-generation-envelope.js';
 // Resolution types (F076 Phase 2 — 风险消解)
@@ -1602,6 +1606,8 @@ export type {
   SessionUsageSnapshot,
   StrategyAction,
 } from './session.js';
+export type { SessionCacheObservation, SessionCacheWarmth } from './session-cache.js';
+export { sessionCacheWarmthSchema } from './session-cache.js';
 // Session handoff proposal types (F225 Cat-Initiated Session Handoff)
 export type {
   CatHandoffNote,
@@ -1774,6 +1780,8 @@ export type {
 } from './thread-speed.js';
 // TTS types (F34 TTS Provider)
 export type {
+  CatVoiceOption,
+  CatVoiceResolution,
   ITtsProvider,
   TtsStreamEvent,
   TtsStreamRequest,
@@ -1781,6 +1789,7 @@ export type {
   TtsSynthesizeResult,
   TtsSynthesizeStreamEvent,
   TtsSynthesizeStreamOptions,
+  TtsVoiceSelection,
   VoiceChunkEvent,
   VoiceConfig,
   VoiceStreamEndEvent,
@@ -1835,6 +1844,7 @@ export {
   waitTerminationReasonSchema,
 } from './wait-termination.js';
 export * from './watcher.js';
+export * from './watcher-panel.js';
 export type {
   CheckStatus,
   ResumeCapsule,

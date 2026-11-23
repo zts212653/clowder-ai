@@ -4,7 +4,8 @@ related_features: [F178, F061, F174, F236, F237, F172, F202, F309, F310, F317, F
 topics: [cloud-cat, chatgpt-pro, mcp, multi-provider, custom-instructions, github-connector, chrome-extension, native-messaging]
 doc_kind: spec
 description: Productized cloud-cat platform for connecting ChatGPT Pro and future cloud LLM providers into Clowder AI as first-class collaborators.
-tips_exempt: "Renewed 2026-10-14: remove the rejected per-cat dot permission step; no new configuration or discovery action to teach. Existing plugin setup and lifecycle tips remain the entry; this change removes redundant work."
+updated: 2026-11-17
+tips_exempt: "Renewed 2026-11-17: daily doc guard records PR #6725 (cloud delivery wait collapse and V2 Pro/dot citation rendering), PR #6728 (Personal Chrome 0.1.0-alpha.10 setup archive pin), PR #6730 (post-merge isolation evidence) and PR #6768 (formal boot76 runtime read-only acceptance); existing plugin setup and lifecycle tips remain the entry with no new configuration step."
 description_source: model
 description_author: codex
 description_updated_at: 2026-07-06T11:45:00Z

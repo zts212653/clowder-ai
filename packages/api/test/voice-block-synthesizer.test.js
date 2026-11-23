@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { beforeEach, describe, it } from 'node:test';
+import { after, before, beforeEach, describe, it } from 'node:test';
 
 /** Clean up test temp directory to avoid stale cache hits between runs. */
 function cleanTmpDir(dirName) {
@@ -23,12 +23,32 @@ function cleanTmpDir(dirName) {
   }
 }
 
-import { getCatVoice } from '../dist/config/cat-voices.js';
+import { clearVoiceCache, getAllCatVoices, getCatVoice } from '../dist/config/cat-voices.js';
 import {
   getVoiceBlockSynthesizer,
   initVoiceBlockSynthesizer,
   VoiceBlockSynthesizer,
 } from '../dist/domains/cats/services/tts/VoiceBlockSynthesizer.js';
+
+// The production path now reports missing reference files. A clone-success fixture
+// needs real local reference files instead of assuming the user's voice library exists.
+const referenceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'voice-block-refs-'));
+const originalReferenceRoot = process.env.CHARACTER_VOICE_DIR;
+before(() => {
+  process.env.CHARACTER_VOICE_DIR = referenceRoot;
+  clearVoiceCache();
+  for (const voice of Object.values(getAllCatVoices())) {
+    if (!voice.refAudio) continue;
+    fs.mkdirSync(path.dirname(voice.refAudio), { recursive: true });
+    fs.writeFileSync(voice.refAudio, `reference fixture ${voice.refAudio}`);
+  }
+});
+after(() => {
+  if (originalReferenceRoot === undefined) delete process.env.CHARACTER_VOICE_DIR;
+  else process.env.CHARACTER_VOICE_DIR = originalReferenceRoot;
+  clearVoiceCache();
+  fs.rmSync(referenceRoot, { recursive: true, force: true });
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -39,6 +59,7 @@ function makeMockRegistry({ synthesize } = {}) {
   const provider = {
     id: 'mock',
     model: 'test',
+    referenceAudioSupport: true,
     synthesize:
       synthesize ??
       (async () => ({
@@ -58,10 +79,10 @@ function makeMockRegistry({ synthesize } = {}) {
  * with the actual voice config and the given text.
  * Mirrors the hash logic in VoiceBlockSynthesizer.synthesizeToFile.
  */
-function expectedCacheFilename(text) {
-  const v = getCatVoice('opus');
+function expectedCacheFilename(text, catId) {
+  const v = getCatVoice(catId);
   const hashParts = ['mock', 'test', v.voice, v.langCode, String(v.speed ?? 1), 'wav', text];
-  if (v.refAudio) hashParts.push(v.refAudio);
+  assert.equal(v.refAudio, undefined, 'this fixture intentionally covers reusable non-reference audio');
   if (v.refText) hashParts.push(v.refText);
   if (v.instruct) hashParts.push(v.instruct);
   if (v.temperature != null) hashParts.push(String(v.temperature));
@@ -281,7 +302,8 @@ describe('VoiceBlockSynthesizer.resolveVoiceBlocks — synthesis', () => {
     // F066: clone params should be passed through from getCatVoice('opus')
     const opusVoice = getCatVoice('opus');
     if (opusVoice.refAudio) {
-      assert.equal(receivedArgs.refAudio, opusVoice.refAudio, 'refAudio passed through');
+      assert.equal(receivedArgs.refAudio, opusVoice.refAudio, 'the configured path remains reader-visible');
+      assert.deepEqual(fs.readFileSync(receivedArgs.refAudio), fs.readFileSync(opusVoice.refAudio));
     }
     if (opusVoice.refText) {
       assert.equal(receivedArgs.refText, opusVoice.refText, 'refText passed through');
@@ -367,8 +389,8 @@ describe('VoiceBlockSynthesizer.resolveVoiceBlocks — synthesis', () => {
 
     // Verify clone params differ per speaker (if configured)
     if (opusVoice.refAudio && codexVoice.refAudio) {
-      assert.equal(receivedVoiceArgs[0].refAudio, opusVoice.refAudio);
-      assert.equal(receivedVoiceArgs[1].refAudio, codexVoice.refAudio);
+      assert.deepEqual(fs.readFileSync(receivedVoiceArgs[0].refAudio), fs.readFileSync(opusVoice.refAudio));
+      assert.deepEqual(fs.readFileSync(receivedVoiceArgs[1].refAudio), fs.readFileSync(codexVoice.refAudio));
     }
   });
 
@@ -516,7 +538,7 @@ describe('VoiceBlockSynthesizer — cache hit', () => {
     await mkdir(cacheDir, { recursive: true });
 
     const text = 'cached voice line';
-    const filename = expectedCacheFilename(text);
+    const filename = expectedCacheFilename(text, 'no-reference-cache-fixture');
     const filePath = path.join(cacheDir, filename);
 
     // Pre-create the file to simulate a cache hit
@@ -524,7 +546,7 @@ describe('VoiceBlockSynthesizer — cache hit', () => {
 
     const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
     const block = { id: 'a1', kind: 'audio', v: 1, text };
-    const result = await synthesizer.resolveVoiceBlocks([block], 'opus');
+    const result = await synthesizer.resolveVoiceBlocks([block], 'no-reference-cache-fixture');
 
     // Should NOT have called synthesize
     assert.equal(synthesizeCalls, 0, 'synthesis skipped on cache hit');
@@ -575,11 +597,14 @@ describe('VoiceBlockSynthesizer — cache hit', () => {
     const cacheDir = path.join(os.tmpdir(), 'vbs-test-stale-long-cache');
     await mkdir(cacheDir, { recursive: true });
     const text = `${'旧版静态合成会在模型上限处截断，这个缓存不能继续复用。'.repeat(20)}完整尾句`;
-    const staleFilename = expectedCacheFilename(text);
+    const staleFilename = expectedCacheFilename(text, 'no-reference-cache-fixture');
     await writeFile(path.join(cacheDir, staleFilename), makePcmWav([999]));
     const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
 
-    const [resolved] = await synthesizer.resolveVoiceBlocks([{ id: 'long-cache', kind: 'audio', v: 1, text }], 'opus');
+    const [resolved] = await synthesizer.resolveVoiceBlocks(
+      [{ id: 'long-cache', kind: 'audio', v: 1, text }],
+      'no-reference-cache-fixture',
+    );
 
     assert.ok(synthesizeCalls > 1, 'long text is synthesized through the chunked pipeline');
     assert.notEqual(path.basename(resolved.url), staleFilename, 'chunked output uses a versioned cache key');

@@ -11,6 +11,41 @@ import { createHash } from 'node:crypto';
 const DAY_MS = 86400000;
 const OVERLAP_MS = 3600000;
 
+// The ledger is committed on main and biome checks every JSON file (biome.json
+// lineWidth 120), so write it in biome's shape: objects expanded, arrays of scalars on
+// one line when the whole line fits, otherwise one element per line.
+const LINE_WIDTH = 120;
+
+function jsonValue(value, indent, used, tail) {
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '[]';
+    if (value.every((item) => item === null || typeof item !== 'object')) {
+      const inline = `[${value.map((item) => JSON.stringify(item)).join(', ')}]`;
+      if (used + inline.length + tail <= LINE_WIDTH) return inline;
+    }
+    const inner = `${indent}  `;
+    const items = value.map(
+      (item, i) => `${inner}${jsonValue(item, inner, inner.length, i < value.length - 1 ? 1 : 0)}`,
+    );
+    return `[\n${items.join(',\n')}\n${indent}]`;
+  }
+  if (value !== null && typeof value === 'object') {
+    const keys = Object.keys(value);
+    if (keys.length === 0) return '{}';
+    const inner = `${indent}  `;
+    const entries = keys.map((key, i) => {
+      const head = `${inner}${JSON.stringify(key)}: `;
+      return head + jsonValue(value[key], inner, head.length, i < keys.length - 1 ? 1 : 0);
+    });
+    return `{\n${entries.join(',\n')}\n${indent}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export function formatLedgerJson(ledger) {
+  return `${jsonValue(JSON.parse(JSON.stringify(ledger)), '', 0, 0)}\n`;
+}
+
 export function normalizeLedger(json) {
   const ledger = json && typeof json === 'object' ? json : {};
   return {
@@ -79,7 +114,8 @@ function laterDocHint(commits) {
 function prLine(item) {
   const how = `${item.source}${item.weak ? ', weak link' : ''}`;
   const carried = item.carried ? ` [open since ${item.firstSeenAt}]` : '';
-  return `- #${item.number} ${item.mergedAt} ${item.features.join(',')} (from ${how})${carried} ${item.title}${laterDocHint(item.otherDocCommits)}`;
+  const syncHint = item.docSyncHint ? ` -- ${item.docSyncHint}` : '';
+  return `- #${item.number} ${item.mergedAt} ${item.features.join(',')} (from ${how})${carried} ${item.title}${laterDocHint(item.otherDocCommits)}${syncHint}`;
 }
 
 function backlogLine(item) {
@@ -120,7 +156,7 @@ export function render(report) {
       '## Merged without any feature id, no Doc-Sync line (check if user-visible)',
       prs.unlinked,
       (item) =>
-        `- #${item.number} ${item.mergedAt}${item.carried ? ` [open since ${item.firstSeenAt}]` : ''} ${item.title}`,
+        `- #${item.number} ${item.mergedAt}${item.carried ? ` [open since ${item.firstSeenAt}]` : ''} ${item.title}${item.docSyncHint ? ` -- ${item.docSyncHint}` : ''}`,
     ),
   ].join('\n');
 }

@@ -179,15 +179,21 @@ for (const [name, corrupt] of forbidden) {
       timestamp: original.timestamp + 1,
     });
     // Legacy/corrupt read projections need not pass the current writer's input validation.
-    f.messages.getByThreadBefore = () => [stored];
+    let corruptWindowReads = 0;
+    f.messages.getByThreadBeforeBounded = () => {
+      corruptWindowReads++;
+      return { messages: [stored], scannedCount: 1, storageRoundTrips: 0, exhausted: true };
+    };
     f.messages.getByThreadAfter = () => [];
     for (const mode of ['preview', 'full']) {
+      const readsBefore = corruptWindowReads;
       const response = await f.app.inject({
         method: 'GET',
         url: `/api/callbacks/get-message?messageId=${target.id}&mode=${mode}&contextCount=1`,
         headers: f.headers,
       });
       assert.equal(response.statusCode, 200, response.body);
+      assert.equal(corruptWindowReads, readsBefore + 1, `context must consume corrupt projection: ${name}/${mode}`);
       assert.deepEqual(response.json().context, [], `context also rejects ${name}`);
     }
     assert.equal(f.adoptions(), 0);

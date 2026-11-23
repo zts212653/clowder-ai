@@ -1,4 +1,9 @@
-import type { RememberGroupRow, RememberItem, RememberRowResult } from '@cat-cafe/shared';
+import {
+  matterWriteRefSchema,
+  type RememberGroupRow,
+  type RememberItem,
+  type RememberRowResult,
+} from '@cat-cafe/shared';
 
 const paths = {
   profile: 'propose-profile-update',
@@ -28,7 +33,7 @@ export function originalRememberSubmission(item: RememberItem, groupId: string) 
   return { path: `/api/callbacks/${path}`, payload };
 }
 
-export function rememberGroupRow(row: RememberRowResult): RememberGroupRow {
+export function rememberGroupRow(row: RememberRowResult, item?: RememberItem): RememberGroupRow {
   const result =
     row.result && typeof row.result === 'object' && !Array.isArray(row.result)
       ? (row.result as Record<string, unknown>)
@@ -48,6 +53,15 @@ export function rememberGroupRow(row: RememberRowResult): RememberGroupRow {
     nestedId('matter', 'matterId') ??
     nestedId('claim', 'claimId') ??
     nestedId('event', 'eventId');
+  const personId =
+    row.target === 'person_revision' && row.statusCode < 400 && (status === 'applied' || status === 'replayed')
+      ? (nestedId('claim', 'personId') ??
+        (item?.target === 'person_revision' && typeof item.payload.personId === 'string'
+          ? item.payload.personId
+          : undefined))
+      : undefined;
+  const matterWriteRef =
+    row.target === 'matter' && row.statusCode < 400 ? matterWriteRefSchema.safeParse(result.writeRef) : undefined;
   return {
     itemId: row.itemId,
     target: row.target,
@@ -55,6 +69,8 @@ export function rememberGroupRow(row: RememberRowResult): RememberGroupRow {
     ...(proposalId ? { proposalId } : {}),
     ...(text('messageId') ? { messageId: text('messageId') } : {}),
     ...(resultRef ? { resultRef } : {}),
+    ...(matterWriteRef?.success ? { matterWriteRef: matterWriteRef.data } : {}),
+    ...(personId ? { personId } : {}),
     ...(status ? { status } : {}),
     ...(text('error') ? { error: text('error')?.slice(0, 500) } : {}),
   };

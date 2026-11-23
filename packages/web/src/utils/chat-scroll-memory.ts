@@ -1,5 +1,6 @@
 import type { ChatMessage } from '@/stores/chat-types';
 import { getMessageTimelineOrderTime } from '@/stores/message-timeline';
+import { createBrowserUuid } from './browser-uuid';
 import type { MessageScrollAnchor } from './scrollToMessage';
 
 export type SavedScrollState =
@@ -44,12 +45,26 @@ function parseState(state: unknown): SavedScrollState | undefined {
     !Number.isFinite(anchor.viewportOffsetPx)
   )
     return;
+  let richBlock: Pick<MessageScrollAnchor, 'richBlockId' | 'richBlockViewportOffsetPx'> = {};
+  if ('richBlockId' in anchor || 'richBlockViewportOffsetPx' in anchor) {
+    if (
+      !('richBlockId' in anchor) ||
+      typeof anchor.richBlockId !== 'string' ||
+      !anchor.richBlockId ||
+      !('richBlockViewportOffsetPx' in anchor) ||
+      typeof anchor.richBlockViewportOffsetPx !== 'number' ||
+      !Number.isFinite(anchor.richBlockViewportOffsetPx)
+    )
+      return;
+    richBlock = { richBlockId: anchor.richBlockId, richBlockViewportOffsetPx: anchor.richBlockViewportOffsetPx };
+  }
   return {
     top: state.top,
     anchor: 'offset',
     messageAnchor: {
       messageId: anchor.messageId,
       viewportOffsetPx: anchor.viewportOffsetPx,
+      ...richBlock,
       ...('blockIndex' in anchor &&
       typeof anchor.blockIndex === 'number' &&
       Number.isInteger(anchor.blockIndex) &&
@@ -115,7 +130,7 @@ export function captureChatReadingRef(snapshot: ChatReadingSnapshot): CapturedCh
   const position = parseState(snapshot.position);
   if (!snapshot.threadId.trim() || !position) return null;
   if (position.anchor === 'offset' && !position.messageAnchor) return null;
-  const id = crypto.randomUUID();
+  const id = createBrowserUuid();
   const persisted = savePosition(`${REF_PREFIX}${encodeURIComponent(snapshot.threadId)}:${id}`, position);
   return { ref: `chat-reading:${encodeURIComponent(snapshot.threadId)}:${id}`, persisted };
 }

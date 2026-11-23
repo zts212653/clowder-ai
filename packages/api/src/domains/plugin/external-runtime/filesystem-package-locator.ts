@@ -2,12 +2,10 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
-import { PLUGIN_ARCHIVE_BUDGET } from './archive-preflight.js';
 import type { PluginManifestValidator } from './package-staging.js';
 import { stageVerifiedPackageArchive } from './package-staging.js';
 import { readVerifiedPackageStaticFile } from './package-static-file.js';
 import {
-  ExternalPluginRuntimeError,
   type VerifiedPluginPackage,
   type VerifiedPluginPackageLocator,
   type VerifiedPluginStaticFile,
@@ -66,12 +64,6 @@ export class FilesystemVerifiedPluginPackageLocator implements VerifiedPluginPac
     bytes: Uint8Array,
     selectFile: (manifest: PluginManifest) => string,
   ): Promise<VerifiedPluginStaticFile> {
-    if (bytes.byteLength > PLUGIN_ARCHIVE_BUDGET.compressedBytes) {
-      throw new ExternalPluginRuntimeError(
-        'PACKAGE_AUTHORITY_MISMATCH',
-        'static archive compressed byte limit exceeded',
-      );
-    }
     await mkdir(this.packagesRoot, { recursive: true, mode: 0o700 });
     const candidate = await mkdtemp(resolve(this.packagesRoot, '.static-candidate-'));
     try {

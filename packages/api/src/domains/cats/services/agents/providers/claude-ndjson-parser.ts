@@ -5,6 +5,7 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
+import { claudeRateLimitMessage } from '../../../../../config/claude-quota-event.js';
 import type { AgentMessage, TokenUsage } from '../../types.js';
 import { extractClaudeMcpStatusSnapshot } from './claude-mcp-status.js';
 import { type ClaudeTextBoundaryState, withClaudeMessageBoundary } from './claude-text-boundaries.js';
@@ -242,17 +243,30 @@ export function transformClaudeEvent(
     }
 
     const messages: AgentMessage[] = [];
-    for (const block of content) {
+    for (const [blockIndex, block] of content.entries()) {
       if (typeof block !== 'object' || block === null) continue;
       const b = block as Record<string, unknown>;
 
-      if (b.type === 'text' && typeof b.text === 'string' && b.text.length > 0) {
-        if (skipFinalText) continue;
+      // Claude tags summaries of user-facing prose as thinking blocks. Only
+      // indexes in this frame's provider annotation are public narration;
+      // unlisted thinking and opaque signatures keep their existing treatment.
+      const text =
+        b.type === 'text'
+          ? b.text
+          : b.type === 'thinking' &&
+              Array.isArray(e.narration_block_indexes) &&
+              e.narration_block_indexes.includes(blockIndex)
+            ? b.thinking
+            : undefined;
+      if (typeof text === 'string' && text.length > 0) {
+        // Ordinary text deltas do not cover a separate narration block.
+        if (b.type === 'text' && skipFinalText) continue;
         streamState.textBoundaryState ??= {};
         messages.push({
           type: 'text',
           catId,
-          content: withClaudeMessageBoundary(b.text, messageId, streamState.textBoundaryState),
+          content: withClaudeMessageBoundary(text, messageId, streamState.textBoundaryState),
+          ...(b.type === 'thinking' ? { textSource: 'provider_summary' as const } : {}),
           timestamp: Date.now(),
         });
       } else if (b.type === 'tool_use' && typeof b.name === 'string') {
@@ -296,14 +310,12 @@ export function transformClaudeEvent(
     return messages.length > 0 ? messages : null;
   }
 
-  // F045: rate_limit_event → system_info
+  // Official CLI and SDK share this complete, model-scoped quota observation.
   if (e.type === 'rate_limit_event') {
-    const utilization = typeof e.utilization === 'number' ? e.utilization : undefined;
-    const resetsAt = typeof e.resets_at === 'string' ? e.resets_at : undefined;
     return {
       type: 'system_info',
       catId,
-      content: JSON.stringify({ type: 'rate_limit', catId, utilization, resetsAt }),
+      content: claudeRateLimitMessage(e, catId),
       timestamp: Date.now(),
     };
   }
@@ -363,6 +375,14 @@ export function extractClaudeUsage(e: Record<string, unknown>): TokenUsage {
   if (typeof usage.output_tokens === 'number') result.outputTokens = usage.output_tokens;
   if (cacheRead > 0) result.cacheReadTokens = cacheRead;
   if (cacheCreate > 0) result.cacheCreationTokens = cacheCreate;
+  const creation = usage.cache_creation as Record<string, unknown> | undefined;
+  for (const [raw, normalized] of [
+    ['ephemeral_5m_input_tokens', 'cacheCreation5mTokens'],
+    ['ephemeral_1h_input_tokens', 'cacheCreation1hTokens'],
+  ] as const) {
+    const value = creation?.[raw];
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) result[normalized] = value;
+  }
   if (typeof e.total_cost_usd === 'number') result.costUsd = e.total_cost_usd;
   if (typeof e.duration_ms === 'number') result.durationMs = e.duration_ms;
   if (typeof e.duration_api_ms === 'number') result.durationApiMs = e.duration_api_ms;

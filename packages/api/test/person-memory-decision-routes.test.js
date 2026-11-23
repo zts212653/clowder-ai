@@ -120,6 +120,23 @@ describe('F276 person-memory decision routes', { skip: redisIsolationSkipReason(
     assert.equal(JSON.parse(hydrated.body).decisionReceipt.decisionId, payload.decisionId);
   });
 
+  it('binds persisted approval history to server time and rejects caller backdating', async () => {
+    const input = await seed('person_candidate_server_history');
+    const endpoint = `/api/person-memory-proposals/${input.candidateId}/approve`;
+    const selection = { selectedDraftIds: ['person_draft_fact'], decisionId: 'decision_server_history' };
+    const forged = await inject('POST', endpoint, { ...selection, authorizedAt: Date.UTC(2026, 8, 24) });
+    assert.equal(forged.statusCode, 400);
+    const startedAt = Date.now();
+    const approved = await inject('POST', endpoint, selection);
+    assert.equal(approved.statusCode, 200);
+    const claims = await store.listClaims('owner-1', JSON.parse(approved.body).personId);
+    assert.equal(claims.length, 1);
+    assert.equal(claims[0].materializedBy.authorizedAt, claims[0].recordedAt);
+    assert(claims[0].recordedAt >= startedAt && claims[0].recordedAt <= Date.now());
+    const { hasHistoricalBodyApproval } = await import('../src/domains/memory/people/historical-body-source-proof.ts');
+    assert.equal(hasHistoricalBodyApproval(claims[0], 'owner-1'), false);
+  });
+
   it('undoes only the latest exact decision and returns an idempotent receipt', async () => {
     const input = await seed('person_candidate_undo_route');
     const approved = await inject('POST', `/api/person-memory-proposals/${input.candidateId}/approve`, {

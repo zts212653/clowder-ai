@@ -99,4 +99,23 @@ describe('SignalArticleQueryService', () => {
     assert.equal(items[0].id, 'id-200');
     assert.deepEqual(readCalls, ['id-200']);
   });
+  it('getArticleById says whether the full text was fetched (frontmatter enriched)', async () => {
+    const records = [
+      createRecord('full', '2026-02-23T12:00:00.000Z'),
+      createRecord('summary', '2026-02-22T12:00:00.000Z'),
+    ];
+    const service = new SignalArticleQueryService({
+      paths: TEST_PATHS,
+      deps: {
+        readInboxRecords: async () => records,
+        readArticleDocument: async (record) => ({
+          ...createParsedDocument(record),
+          frontmatter: record.id === 'full' ? { enriched: true } : {},
+        }),
+      },
+    });
+
+    assert.equal((await service.getArticleById('full')).enriched, true);
+    assert.equal((await service.getArticleById('summary')).enriched, false);
+  });
 });

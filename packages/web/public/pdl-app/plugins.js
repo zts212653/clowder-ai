@@ -1,0 +1,1353 @@
+/* Project-owned package declarations. Rendering stays in the existing PDL tables and page.plug. */
+'use strict';
+function bindPluginSpaces() {
+  let fragments = {},
+    loaded = false,
+    load = 'loading',
+    started = false;
+  // plugin id → the fragment it is registered with: install, update and uninstall re-register only what changed
+  const registered = {};
+  let companion = { load: 'loading' };
+  // The export view has no project data: no plugin identities to resolve.
+  const pluginRows = function () {
+    const settings = placementData();
+    return settings && settings.plugins ? settings.plugins.plugins : [];
+  };
+  const mutationErrors = {};
+  // Install / update / uninstall in flight, per plugin: the button itself shows it until the request settles.
+  const ops = {};
+  function pluginOp(id, op, request) {
+    ops[id] = op;
+    mutationErrors[id] = '';
+    render(true);
+    request
+      .catch(function (error) {
+        mutationErrors[id] = error.message;
+        return read();
+      })
+      .then(function () {
+        delete ops[id];
+        render(true);
+      });
+  }
+  // The plugin list is always read (entries follow it); a pushed operation change re-reads it.
+  api.on('cat-cafe:plugin-operation-changed', function () {
+    settleHold(read());
+  });
+  function opOf(plugin) {
+    return ops[plugin.pluginId] || plugin.operation;
+  }
+  // Only installed plugins are known senders: a plugin that isn't installed has no identity anywhere outside the
+  // plugin page, so its messages fall back to their source name / id like any unknown sender.
+  pdlReads('who').plugins = function () {
+    return Object.fromEntries(
+      pluginRows()
+        .filter(function (plugin) {
+          return plugin.artifact === 'installed';
+        })
+        .map(function (plugin) {
+          return [
+            plugin.pluginId,
+            { name: plugin.displayName, icon: plugin.icon, instanceId: plugin.pluginInstanceId },
+          ];
+        }),
+    );
+  };
+  // A detail that can't be read is just missing; its place says so (detailLoad) instead of loading forever.
+  const detailFailed = {};
+  async function readDetail(id) {
+    try {
+      await chatPort.action('settingsPluginDetailRead', { id: id });
+      delete detailFailed[id];
+    } catch {
+      detailFailed[id] = true;
+    }
+    await chatDataRender();
+  }
+  function ownerPluginId(id) {
+    return id === 'companion' ? 'official.companion' : id;
+  }
+  function choose(matches) {
+    const selected = ownerPluginId(S.route === 'extItem' ? S.param : S.extSel);
+    return (
+      matches.find(function (plugin) {
+        return plugin.pluginId === selected;
+      }) || matches[0]
+    );
+  }
+  A.companionRead = async function () {
+    try {
+      companion = Object.assign({ load: '' }, await api.get('/api/concierge/desktop'));
+    } catch {
+      companion = { load: 'error' };
+    }
+    await chatDataRender();
+  };
+  // A lost window, or a ball its owner hid: either can be shown again.
+  function companionState() {
+    return companion.desktopLost ? 'lost' : companion.presence && companion.presence.state === 'hidden' ? 'hidden' : '';
+  }
+  // A desktop window row shows whether the window is hidden or lost, and shows it again.
+  function companionDesk() {
+    if (projectionNeeded) projectionNeeded.add('companion');
+    const state = companionState();
+    return { lost: state === 'lost', hidden: state === 'hidden', canRestore: !!state, lossId: companion.lossId };
+  }
+  A.companionRestore = async function (d) {
+    const state = companionState();
+    if (!state || (state === 'lost' && d.lossId !== companion.lossId)) return;
+    try {
+      const receipt = await api.post('/api/concierge/desktop/show', {}, {});
+      if (!receipt.presence || receipt.presence.state !== 'visible' || receipt.presence.maxAgeMs <= 0) {
+        companion.load = 'error';
+        return;
+      }
+      companion = Object.assign({ load: '' }, receipt);
+    } catch {
+      companion.load = 'error';
+    } finally {
+      render(true);
+    }
+  };
+  api.on('sources:needed', function (diff) {
+    if (diff.added.indexOf('companion') >= 0) settleHold(A.companionRead());
+    diff.added.forEach(function (name) {
+      if (name.indexOf('pluginDetail:') === 0) settleHold(readDetail(name.slice(13)));
+      if (name.indexOf('pluginTools:') === 0) settleHold(chatAction('settingsPluginToolsRead', { id: name.slice(12) }));
+    });
+  });
+  // A plugin that isn't installed shows only its list row; only an installed plugin has a detail to read.
+  function config(plugin) {
+    if (plugin.artifact !== 'installed') return null;
+    if (projectionNeeded) projectionNeeded.add('pluginDetail:' + plugin.pluginId);
+    const detail = placementData().pluginDetails[plugin.pluginId],
+      inst = plugin.pluginId;
+    if (!detail) return null;
+    const fields = detail.configFields,
+      steps = (detail.steps || detail.setupSteps || []).map(function (step) {
+        return typeof step === 'string' ? { text: step } : step;
+      });
+    if (!fields.length && !steps.length && !detail.testable) return null;
+    return {
+      p: inst,
+      test: plugin.artifact === 'installed' && !!detail.testable,
+      tested: !!pcfState(inst).tested,
+      form: pcfModel(inst, {
+        plugin: inst,
+        clientLibraries: placementData().pluginLibraries[inst],
+        fields: fields,
+        steps: steps,
+        installed: plugin.artifact === 'installed',
+        refresh: function () {
+          return readDetail(inst);
+        },
+        save: async function (updates) {
+          // Each save restarts the plugin and moves its revision: write against the current one
+          // (only the revision is read here, so the page keeps showing the value being saved).
+          const current = await api.get('/api/plugin-manager/plugins/' + encodeURIComponent(inst));
+          const receipt = await api.post(
+            '/api/plugin-manager/plugins/' + encodeURIComponent(inst) + '/contributions/configuration',
+            {},
+            { expectedRevision: current.plugin.lifecycleRevision, updates: updates },
+          );
+          await read();
+          await readDetail(inst);
+          if (receipt.warning) toast(receipt.warning, null, 'warn');
+        },
+      }),
+      save: { dirty: pcfDirty(inst) },
+    };
+  }
+  S.plugins = {};
+  function receivePlugins(rows) {
+    S.plugins = {};
+    rows.forEach(function (plugin) {
+      S.plugins[plugin.pluginId] = { installed: plugin.artifact === 'installed', on: plugin.intent === 'enabled' };
+    });
+  }
+  async function read() {
+    if (chatPort.exportMids !== undefined) return; // the read-only export view has no plugin list
+    try {
+      await chatPort.action('settingsPluginsRead', {});
+      receivePlugins(placementData().plugins.plugins);
+      fragments = placementData().pluginFragments;
+      loaded = true;
+      load = '';
+      if (started && register()) render();
+    } catch {
+      fragments = {};
+      S.plugins = {};
+      loaded = false;
+      load = 'error';
+    }
+  }
+  onStart('data', read);
+  // A plugin's contributions that did not take effect in this theme (host key, missed insert)
+  function skipLines(id) {
+    const lines = (PDL_SLOT_REJECTS[id] || [])
+      .map(function (x) {
+        return { key: x.key, path: [x.slot], reason: x.reason || 'host' };
+      })
+      .concat(
+        (PDL_INSERT_SKIPS[id] || []).map(function (x) {
+          return { key: x.id, path: [x.anchor], reason: x.reason };
+        }),
+      );
+    return lines.length ? lines : null;
+  }
+  function register() {
+    let changed = false;
+    Object.keys(registered).forEach(function (id) {
+      if (registered[id] === JSON.stringify(fragments[id])) return;
+      pdlUnregister(id);
+      delete registered[id];
+      changed = true;
+    });
+    Object.keys(fragments).forEach(function (id) {
+      const plugin = pluginRows().find(function (item) {
+        return item.pluginId === id;
+      });
+      if (registered[id] || !plugin) return;
+      registered[id] = JSON.stringify(fragments[id]);
+      pdlRegister(JSON.parse(registered[id]), id, plugin); // registration tags what it reads: keep the read fragment as read
+      frames(id);
+      changed = true;
+    });
+    return changed;
+  }
+  onStart('pdl', function () {
+    started = true;
+    register();
+  });
+  // A registered plugin is its index; the engine reads its subtree the first time one of its nodes is projected.
+  ENGINE_PARTS.pluginLoad = function (id) {
+    return api.get('/api/plugin-manager/pdl/' + encodeURIComponent(id));
+  };
+  function frameNodes() {
+    return Object.keys(PDL_VIEWS).filter(function (key) {
+      return PDL_VIEWS[key].type === 'frame';
+    });
+  }
+  function frames(id) {
+    Object.keys(fragments[id].views || {}).forEach(function (key) {
+      const frame = PDL_VIEWS[key];
+      if (frame.type !== 'frame') return;
+      // Whether it opens as a tab is decided by the entry that opens it (pdlOpenOf); this only gives the content
+      PANELS[key] = function () {
+        return pdlView('page.plug');
+      };
+      if (!frame.route) return;
+      PAGES[frame.route] = function () {
+        S.plugKey = id;
+        return pdlView('page.plug');
+      };
+    });
+  }
+  VM.plug = function () {
+    if (projectionNeeded && S.route === 'companion') projectionNeeded.add('companion');
+    const tabFrame = frameNodes().find(function (key) {
+      return PV.tabKey === key;
+    });
+    const plugin = pluginRows().find(function (item) {
+      return item.pluginId === (tabFrame ? PDL_VIEWS[tabFrame].plugin : S.plugKey);
+    });
+    if (!plugin || !plugOn(plugin.pluginId)) return null;
+    const key = frameNodes().find(function (k) {
+        const value = PDL_VIEWS[k];
+        return value.plugin === plugin.pluginId && (tabFrame ? k === tabFrame : value.route === S.route);
+      }),
+      frame = key && PDL_VIEWS[key].src ? PDL_VIEWS[key] : null;
+    // The frame on screen is a source: a plugin whose frame address comes from its own request reads it then.
+    if (key && projectionNeeded) projectionNeeded.add('node:' + key);
+    return {
+      load: S.route === 'companion' ? companion.load : '',
+      frame:
+        S.route === 'companion'
+          ? {
+              lost: companionState() === 'lost',
+              hidden: companionState() === 'hidden',
+              canRestore: !!companionState(),
+              lossId: companion.lossId,
+            }
+          : null,
+      src: frame ? api.file(frame.src) : null,
+      name: plugin.displayName,
+      key: plugin.pluginId,
+      to: 'extItem-' + plugin.pluginId,
+    };
+  };
+  VM.ext = function () {
+    if (navArg('pluginId')) S.extSel = ownerPluginId(navArg('pluginId'));
+    if (!loaded) return { load: load, q: S.extQuery || '', scope: S.extScope || 'all', browserGroups: [] };
+    const query = S.extQuery || '';
+    const matches = pluginRows().filter(function (plugin) {
+      return (plugin.displayName + ' ' + plugin.pluginId).toLowerCase().indexOf(query.toLowerCase()) >= 0;
+    });
+    const chosen = choose(matches),
+      selected = chosen && row(chosen);
+    const scope = S.extScope || 'all',
+      catalog = pluginRows().map(row),
+      rows = matches.map(row);
+    const groups = [
+      { kind: 'attention', items: rows.filter((p) => p.attentionReason || p.hasUpdate) },
+      { kind: 'installed', items: rows.filter((p) => p.installed && !p.attentionReason && !p.hasUpdate) },
+      { kind: 'available', items: rows.filter((p) => p.artifact === 'absent') },
+    ];
+    const companionPlugin =
+      ownerPluginId(navArg('pluginId')) === 'official.companion'
+        ? pluginRows().find((p) => p.pluginId === 'official.companion')
+        : null;
+    const companionConfig = companionPlugin && config(companionPlugin);
+    const companionForm = companionConfig && companionConfig.form;
+    if (companionForm)
+      companionForm.partners = chatRead('memberSettings').cats.map((m) => ({
+        id: m.id,
+        name: m.nickname || m.displayName,
+        on: !m.roster || m.roster.available,
+      }));
+    return {
+      companion: companionForm,
+      load: load,
+      scope: scope,
+      counts: {
+        all: catalog.length,
+        attention: catalog.filter((p) => p.attentionReason || p.hasUpdate).length,
+        installed: catalog.filter((p) => p.installed).length,
+        available: catalog.filter((p) => p.artifact === 'absent').length,
+      },
+      browserGroups: groups.map((g) => ({ kind: g.kind, items: scope === 'all' || scope === g.kind ? g.items : [] })),
+      q: query,
+      picked: S.route === 'extItem',
+      groups: [
+        {
+          kind: 'installed',
+          items: matches
+            .filter(function (plugin) {
+              return plugin.artifact === 'installed';
+            })
+            .map(row),
+        },
+        {
+          kind: 'notInstalled',
+          items: matches
+            .filter(function (plugin) {
+              return plugin.artifact !== 'installed';
+            })
+            .map(row),
+        },
+      ],
+      sel: chosen
+        ? Object.assign({}, selected, {
+            key: chosen.pluginId,
+            detailLoad:
+              chosen.artifact !== 'installed' || placementData().pluginDetails[chosen.pluginId]
+                ? ''
+                : detailFailed[chosen.pluginId]
+                  ? 'error'
+                  : 'loading',
+            name: chosen.displayName,
+            icon: chosen.icon,
+            publisher: chosen.publisher,
+            repositoryName:
+              chosen.source.kind === 'git' && chosen.source.marketplace ? chosen.source.marketplace.sourceId : '',
+            trust: chosen.source.trust,
+            closure: chosen.source.dependencyClosure,
+            version: chosen.installedVersion || chosen.availableVersion,
+            pkg: chosen.source.packageName || '',
+            desc: description(chosen),
+            canRestart: !!chosen.actions.repair,
+            need: selected.need,
+            blocked: S.extBlocked === chosen.pluginId && chosen.config !== 'ready',
+            needs: chosen.actions.blockingReasons,
+            diag: chosen.diagnostic ? chosen.diagnostic.message : '',
+            installed: chosen.artifact === 'installed',
+            on: chosen.intent === 'enabled',
+            canInstall: selected.canInstall,
+            installing: selected.installing,
+            updating: selected.updating,
+            uninstalling: opOf(chosen) === 'uninstall',
+            config: config(chosen),
+            hasContrib: !!(
+              placementData().pluginDetails[chosen.pluginId] &&
+              placementData().pluginDetails[chosen.pluginId].contributions
+            ),
+            docs: pluginDocs(chosen),
+            skips: skipLines(chosen.pluginId),
+            connection: null,
+            mutationError: mutationErrors[chosen.pluginId] || '',
+            bindings: (placementData().pluginDetails[chosen.pluginId]?.bindings || []).map(function (b) {
+              return {
+                key: b.key,
+                title: b.threadTitle || b.threadId,
+                sub: b.key,
+                args: { pluginId: chosen.pluginId, key: b.key, threadId: b.threadId, createdAt: b.createdAt },
+              };
+            }),
+            address: addressVM(chosen),
+            permissions:
+              chosen.artifact === 'installed' && placementData().pluginDetails[chosen.pluginId]?.permissions
+                ? pluginPermissionsVM(chosen.pluginId, placementData().pluginDetails[chosen.pluginId].permissions.label)
+                : null,
+          })
+        : null,
+    };
+  };
+  // The instance's address (@alias and avatar): editable presentation of this host, not package configuration.
+  function addressVM(plugin) {
+    const detail = placementData().pluginDetails[plugin.pluginId],
+      address = detail && detail.address;
+    return address
+      ? {
+          alias: address.alias,
+          custom: !!address.icon,
+          who: { kind: 'plugin', id: plugin.pluginId, icon: address.icon ? api.file(address.icon) : undefined },
+          off: plugin.intent !== 'enabled',
+          args: { p: plugin.pluginId, inst: plugin.pluginInstanceId },
+        }
+      : null;
+  }
+  async function addressSave(d, patch) {
+    const address = placementData().pluginDetails[d.p].address;
+    try {
+      await api.post(
+        '/api/plugin-manager/instances/' + encodeURIComponent(d.inst) + '/address',
+        { method: 'PATCH' },
+        Object.assign({ alias: address.alias, icon: address.icon || null, expectedRevision: address.revision }, patch),
+      );
+    } catch (error) {
+      const code = error.status === 403 ? 'forbidden' : error.code;
+      const why = tcOf('ext.address.error', code);
+      toast(why === 'ext.address.error.' + code ? tc('ext.address.error.unknown') : why, null, 'danger');
+      return false;
+    }
+    window.dispatchEvent(new Event('plugin-targets-changed'));
+    await readDetail(d.p);
+    toast(tc('ext.address.saved', patch.alias || address.alias));
+    return true;
+  }
+  A.pluginAliasSave = function (d) {
+    const alias = (document.getElementById('plugin-alias').value || '').trim().replace(/^@/, '');
+    if (!alias) {
+      toast(tc('ext.address.error.empty'), null, 'danger');
+      return false;
+    }
+    return addressSave(d, { alias: alias });
+  };
+  A.pluginIconReset = function (d) {
+    return addressSave(d, { icon: null });
+  };
+  // A new avatar: the same uploadable avatar as the member form; choosing a picture saves it.
+  CHANGES.pluginIcon = async function (e) {
+    const target = e.target;
+    if (!target.files || !target.files[0]) return;
+    try {
+      const url = await chatPort.action('avatarUpload', {}, target);
+      await addressSave({ p: target.dataset.p, inst: target.dataset.inst }, { icon: url });
+    } catch (error) {
+      toast(error.message, null, 'danger');
+    }
+  };
+  function description(plugin) {
+    return plugin.description === undefined ? '' : plugin.description;
+  }
+  function pluginDocs(plugin) {
+    const owner = placementData(),
+      detail = owner.pluginDetails[plugin.pluginId];
+    if (!detail) return null;
+    const active = plugin.intent === 'enabled' && (plugin.live === 'running' || plugin.live === 'degraded');
+    const items = detail.contributions || detail.capabilities,
+      kinds = {
+        skill: 'skills',
+        mcp: 'mcps',
+        schedule: 'scheduler',
+        'content-editor-provider': 'editor',
+        'desktop-window': 'desktop',
+      };
+    // Webhooks and event subscriptions are the plugin's own plumbing (routes it receives on), not something to use.
+    const plumbing = ['webhook', 'events'];
+    const groups = new Map();
+    items.forEach(function (capability) {
+      if (plumbing.includes(capability.kind)) return;
+      if (active && projectionNeeded) projectionNeeded.add('pluginTools:' + plugin.pluginId);
+      const kind = kinds[capability.kind] || capability.kind;
+      if (!groups.has(kind)) groups.set(kind, { kind: kind, scheduler: kind === 'scheduler', items: [] });
+      const desk = kind === 'desktop' && active ? companionDesk() : null;
+      groups.get(kind).items.push(
+        Object.assign(
+          {
+            key: capability.id,
+            kind: kind,
+            is: { [kind]: true },
+            titleMode: 'plain',
+            title: capability.name,
+            sub: capability.description,
+            installed: plugin.artifact === 'installed',
+            tools: (active ? owner.pluginTools[plugin.pluginId] || [] : [])
+              .filter(function (tool) {
+                return tool.contributionId === capability.id;
+              })
+              .map(function (tool) {
+                return tool.name;
+              }),
+          },
+          desk,
+        ),
+      );
+    });
+    return {
+      readme: owner.pluginDocumentation[plugin.pluginId]
+        ? owner.pluginDocumentation[plugin.pluginId].readmeMarkdown
+        : '',
+      docsUrl: detail.docsUrl,
+      capabilities: Array.from(groups.values()).filter((g) =>
+        ['skills', 'mcps', 'scheduler', 'limb', 'entries'].includes(g.kind),
+      ),
+      provides: groups.size ? Array.from(groups.values()) : null,
+    };
+  }
+  function row(plugin) {
+    const installed = plugin.artifact === 'installed',
+      need = !installed
+        ? ''
+        : plugin.actions.install
+          ? 'update'
+          : plugin.config === 'incomplete' || plugin.config === 'invalid'
+            ? 'config'
+            : ['disconnected', 'expired', 'error'].includes(plugin.auth)
+              ? 'auth'
+              : plugin.live === 'crashed' || plugin.live === 'degraded'
+                ? plugin.live
+                : '';
+    const attention =
+      plugin.artifact === 'absent'
+        ? ''
+        : plugin.artifact !== 'installed'
+          ? plugin.artifact
+          : plugin.actions.blockingReasons?.includes('package-incompatible')
+            ? 'incompatible'
+            : plugin.activationFailed
+              ? 'failed'
+              : plugin.config !== 'ready'
+                ? plugin.config
+                : plugin.auth === 'expired'
+                  ? 'expired'
+                  : plugin.auth === 'error'
+                    ? 'authError'
+                    : plugin.live === 'degraded'
+                      ? 'degraded'
+                      : plugin.live === 'crashed'
+                        ? 'failed'
+                        : plugin.intent !== 'enabled'
+                          ? ''
+                          : ['disconnected', 'pending'].includes(plugin.auth)
+                            ? plugin.auth
+                            : plugin.live === 'stopped'
+                              ? 'stopped'
+                              : '';
+    return {
+      canRestart: !!plugin.actions.repair,
+      canUninstall: !!plugin.actions.uninstall,
+      attentionReason: attention,
+      artifact: plugin.artifact,
+      availableVersion: plugin.availableVersion,
+      hasUpdate: installed && !!plugin.availableVersion && plugin.availableVersion !== plugin.installedVersion,
+      trust: plugin.source.trust,
+      need: need,
+      update: need === 'update',
+      needStatus: !!need && need !== 'update',
+      key: plugin.pluginId,
+      icon: plugin.icon,
+      name: plugin.displayName,
+      desc: description(plugin),
+      pub: plugin.publisher,
+      plugin: true,
+      installed: installed,
+      on: plugin.intent === 'enabled',
+      canInstall: !installed && plugin.actions.install,
+      installing: opOf(plugin) === 'install',
+      updating: opOf(plugin) === 'update',
+      selected: ownerPluginId(S.route === 'extItem' ? S.param : S.extSel) === plugin.pluginId,
+      to: 'extItem-' + plugin.pluginId,
+    };
+  }
+  PAGES.ext = PAGES.extItem = function () {
+    return pdlView('page.ext');
+  };
+
+  INPUTS.extQ = function (event) {
+    S.extQuery = event.target.value;
+    render(true);
+  };
+  A.pcfTest = function (data) {
+    pcfState(data.p).tested = '';
+    return chatAction('pluginTest', { id: data.p }).then(function (result) {
+      if (result !== false) {
+        pcfState(data.p).tested = result.message;
+        render(true);
+      }
+    });
+  };
+  A.capRestart = async function (d) {
+    try {
+      await chatPort.action('settingsPluginRestart', { id: d.k });
+      receivePlugins(placementData().plugins.plugins);
+      detailReads[d.k] = placementData().pluginDetails[d.k].lifecycleRevision;
+      mutationErrors[d.k] = '';
+      return true;
+    } catch (error) {
+      mutationErrors[d.k] = error.message;
+      return false;
+    } finally {
+      render(true);
+    }
+  };
+  A.pluginDisconnect = function (d) {
+    const dd = {
+      kind: 'pluginDisconnect',
+      args: { key: d.key },
+      on: async function () {
+        try {
+          await chatPort.action('settingsPluginDisconnect', {
+            id: d.pluginId,
+            key: d.key,
+            threadId: d.threadId,
+            createdAt: d.createdAt,
+          });
+          receivePlugins(placementData().plugins.plugins);
+          detailReads[d.pluginId] = placementData().pluginDetails[d.pluginId].lifecycleRevision;
+          render(true);
+        } catch (error) {
+          dd.error = error.message;
+          dialog(dd);
+          return false;
+        }
+      },
+    };
+    return dialog(dd);
+  };
+  // Update and install start on the click (no confirmation)
+  A.capUpdate = function (d) {
+    const plugin = pluginRows().find(function (p) {
+      return p.pluginId === d.k;
+    });
+    pluginOp(
+      d.k,
+      'update',
+      api
+        .post(
+          '/api/plugin-manager/plugins/' + encodeURIComponent(d.k) + '/update',
+          {},
+          { expectedVersion: plugin.availableVersion, expectedRevision: plugin.lifecycleRevision },
+        )
+        .then(read),
+    );
+  };
+  A.install = function (d) {
+    const plugin = pluginRows().find(function (p) {
+      return p.pluginId === d.k;
+    });
+    if (plugin.artifact === 'installed') return A.capUpdate(d);
+    const input =
+      plugin.source.kind === 'git'
+        ? { source: { kind: 'git', url: plugin.source.url, marketplace: plugin.source.marketplace } }
+        : {
+            source: { kind: 'catalog', catalogId: plugin.source.catalogId },
+            expectedVersion: plugin.availableVersion,
+            expectedDigest: plugin.packageDigest,
+          };
+    pluginOp(
+      d.k,
+      'install',
+      chatPort.action('settingsPluginInstall', { value: JSON.stringify(input) }).then(function () {
+        receivePlugins(chatDataSnapshot.project.settings.plugins.plugins);
+      }),
+    );
+  };
+  A.installFile = function () {
+    let input = null;
+    CHANGES.capFile = function (e) {
+      input = e.target;
+    };
+    return dialog({
+      kind: 'pluginFile',
+      on: async function () {
+        await chatPort.action('pluginArchive', {}, input);
+        await read();
+      },
+    });
+  };
+
+  A.togglePlugin = async function (data) {
+    const plugin = pluginRows().find(function (item) {
+      return item.pluginId === data.k;
+    });
+    if (!plugin || !plugin.actions.setEnabled) return;
+    await api.post(
+      '/api/plugin-manager/plugins/' + encodeURIComponent(data.k) + '/set-enabled',
+      {},
+      {
+        enabled: plugin.intent !== 'enabled',
+        expectedRevision: plugin.lifecycleRevision,
+      },
+    );
+    await read();
+    if (!plugOn(data.k)) {
+      pluginPopsClose(data.k);
+      frameNodes().forEach(function (key) {
+        if (PDL_VIEWS[key].plugin === data.k) nodeClose(key);
+      });
+    }
+    pdlThemeSync();
+    render(true);
+  };
+  const market = {
+    q: '',
+    kind: 'all',
+    eco: 'all',
+    trust: 'all',
+    results: [],
+    sources: [],
+    load: '',
+    error: '',
+    selected: '',
+    plan: null,
+    read: false,
+  };
+  const marketKinds = ['mcp_server', 'skill', 'plugin', 'app', 'bundle', 'pack'];
+  async function marketRead() {
+    market.read = true;
+    market.load = 'loading';
+    market.error = '';
+    market.plan = null;
+    chatDataRender();
+    const params = { q: market.q };
+    if (market.kind !== 'all') params.artifactKinds = market.kind;
+    const ecos = Object.keys(S.mkEcos || {}),
+      trusts = Object.keys(S.mkTrusts || {});
+    if (ecos.length) params.ecosystems = ecos.join(',');
+    else if (market.eco !== 'all') params.ecosystems = market.eco;
+    if (trusts.length) params.trustLevels = trusts.join(',');
+    else if (market.trust !== 'all') params.trustLevels = market.trust;
+    try {
+      const result = await api.get('/api/marketplace/search', params);
+      market.results = result.results;
+      market.sources = result.sources;
+      market.load = '';
+    } catch (error) {
+      market.results = [];
+      market.load = 'error';
+      market.error = error.message;
+    }
+    await chatDataRender();
+  }
+  const marketKey = function (r) {
+    return JSON.stringify([r.ecosystem, r.artifactId]);
+  };
+  async function marketSelect(key) {
+    market.selected = key;
+    market.plan = null;
+    const result = market.results.find(function (r) {
+      return marketKey(r) === key;
+    });
+    if (!result) return;
+    try {
+      market.plan = (
+        await api.post(
+          '/api/marketplace/install/plan',
+          {},
+          { ecosystem: result.ecosystem, artifactId: result.artifactId },
+        )
+      ).plan;
+      market.error = '';
+    } catch (error) {
+      market.error = error.message;
+    }
+    await chatDataRender();
+  }
+  api.on('sources:needed', function (diff) {
+    if (diff.added.indexOf('market') >= 0) settleHold(marketRead());
+    diff.added.forEach(function (name) {
+      if (name.indexOf('marketItem:') === 0) settleHold(marketSelect(name.slice(11)));
+    });
+  });
+  PAGES.market = PAGES.marketItem = function () {
+    return pdlView('page.market');
+  };
+  INPUTS.mkQ = function (e) {
+    market.q = e.target.value;
+    return marketRead();
+  };
+  ['Kind', 'Eco', 'Trust'].forEach(function (name) {
+    CHANGES['mk' + name] = function (e) {
+      market[name.toLowerCase()] = e.target.value;
+      return marketRead();
+    };
+  });
+  A.mkRefresh = async function () {
+    await api.post('/api/plugin-manager/marketplaces/refresh', {}, {});
+    await read();
+    return marketRead();
+  };
+
+  A.mkCopy = function () {
+    const p = market.plan;
+    return copyText(p.mode === 'delegated_cli' ? p.delegatedCommand : JSON.stringify(p.mcpEntry, null, 2));
+  };
+  ['s.mkEcos', 's.mkTrusts'].forEach((path) => {
+    SET_AFTER[path] = marketRead;
+  });
+  function marketRow(r) {
+    return {
+      market: true,
+      key: marketKey(r),
+      name: r.displayName,
+      kind: r.artifactKind,
+      kindIs: { [r.artifactKind]: true },
+      trust: r.trustLevel,
+      trustIs: { [r.trustLevel]: true },
+      desc: r.componentSummary,
+      eco: r.ecosystem,
+      pub: r.publisherIdentity,
+      loc: r.sourceLocator,
+      selected: market.selected === marketKey(r),
+      to: 'marketItem-' + marketKey(r),
+    };
+  }
+  VM.market = function () {
+    if (projectionNeeded) {
+      projectionNeeded.add('market');
+      if (S.route === 'marketItem') projectionNeeded.add('marketItem:' + S.param);
+    }
+    const result = market.results.find(function (r) {
+        return marketKey(r) === market.selected;
+      }),
+      p = market.plan;
+    return {
+      readState: market.load,
+      ecoFilters: Object.keys(S.mkEcos || {}),
+      trustFilters: Object.keys(S.mkTrusts || {}),
+      items: market.results.map(marketRow),
+      error: market.error,
+      q: market.q,
+      kind: market.kind,
+      eco: market.eco,
+      trust: market.trust,
+      picked: S.route === 'marketItem',
+      listLoad: market.load,
+      kinds: marketKinds.map(function (v) {
+        return { v: v };
+      }),
+      ecos: ['claude', 'codex', 'openclaw', 'antigravity'].map(function (v) {
+        return { v: v };
+      }),
+      trusts: ['official', 'verified', 'community'].map(function (v) {
+        return { v: v };
+      }),
+      sources: market.sources
+        .filter(function (s) {
+          return s.availability !== 'live' && (market.eco === 'all' || s.ecosystem === market.eco);
+        })
+        .map(function (s) {
+          return { availability: s.availability, eco: s.ecosystem, issues: s.issues };
+        }),
+      groups: [true, false].map(function (installed) {
+        return {
+          kind: installed ? 'installed' : 'available',
+          items: market.results
+            .filter(function (r) {
+              return !!(r.lifecycle && r.lifecycle.installed) === installed;
+            })
+            .map(marketRow),
+        };
+      }),
+      sel: result
+        ? {
+            key: marketKey(result),
+            name: result.displayName,
+            desc: result.componentSummary,
+            kind: result.artifactKind,
+            eco: result.ecosystem,
+            availability: market.sources.find(function (source) {
+              return source.ecosystem === result.ecosystem;
+            }).availability,
+            installed: !!(result.lifecycle && result.lifecycle.installed),
+            trust: result.trustLevel,
+            pub: result.publisherIdentity,
+            version: result.versionRef,
+            mode: p && p.mode,
+            modeIs: p ? { [p.mode]: true } : {},
+            canInstall: !!p,
+            where: null,
+            loc: result.sourceLocator,
+            // The owner's MCP entry as the item shows it: transport, address, command line (command + args).
+            mcp:
+              p && p.mcpEntry
+                ? {
+                    t: p.mcpEntry.url ? 'http' : 'stdio',
+                    http: !!p.mcpEntry.url,
+                    url: p.mcpEntry.url,
+                    command: p.mcpEntry.command ? [p.mcpEntry.command].concat(p.mcpEntry.args || []) : [],
+                  }
+                : null,
+            planText: p && p.delegatedCommand,
+            url: result.docsUrl,
+            showSource: true,
+            steps: p && p.manualSteps,
+          }
+        : null,
+    };
+  };
+  // Uninstall uses the same entity confirmation/promise protocol as every other owner.
+  ENT.plugin = {
+    get: function (id) {
+      return pluginRows().find(function (item) {
+        return item.pluginId === id;
+      });
+    },
+    name: 'displayName',
+    confirm: function (plugin) {
+      const caps = plugin.capabilitySummary.some(function (c) {
+          return c.kind === 'skill' || c.kind === 'mcp';
+        }),
+        entry = ((fragments[plugin.pluginId] || {}).inserts || [])
+          .map(function (x) {
+            return pdlEntry('plugin:' + plugin.pluginId + '/' + x.id);
+          })
+          .find(function (e) {
+            const o = e && pdlOpenOf(e.id);
+            return o && o.target === ctPages();
+          });
+      return {
+        kind: 'pluginUninstall',
+        args: {
+          name: plugin.displayName,
+          effect: caps ? (entry ? 'caps_entry' : 'caps') : entry ? 'entry' : 'none',
+          entryLabel: entry ? entry.title : '',
+        },
+      };
+    },
+    remove: function (plugin) {
+      if (!plugin.actions.uninstall) return false;
+      pluginOp(
+        plugin.pluginId,
+        'uninstall',
+        api
+          .post(
+            '/api/plugin-manager/plugins/' + encodeURIComponent(plugin.pluginId) + '/uninstall',
+            {},
+            { expectedRevision: plugin.lifecycleRevision },
+          )
+          .then(read)
+          .then(function () {
+            pluginPopsClose(plugin.pluginId);
+            frameNodes().forEach(function (key) {
+              if (PDL_VIEWS[key].plugin === plugin.pluginId) nodeClose(key);
+            });
+            pdlThemeSync();
+          }),
+      );
+    },
+  };
+}
+/*
+ * Plugin consoles are declarations only: a plugin's PDL names its requests (paths inside the plugin, forwarded by the
+ * host), the sources a node reads, and the generic acts that write. Reads follow the projection like every host read.
+ */
+function bindPluginRequests() {
+  const PLUGIN_PUBLIC = {
+    acts: [
+      'thread',
+      'go',
+      'insert',
+      'toast',
+      'copy',
+      'open',
+      'close',
+      'plugin',
+      'plugSet',
+      'bindRetry',
+      'openUrl',
+      'dialog',
+    ],
+    data: ['members', 'threads', 'currentThread', 'composer'],
+  };
+  // The host data a plugin may read are existing view models (already in component shape).
+  // composer: the current input's text (a plugin may save it, e.g. as a quick phrase)
+  const HOST_DATA = {
+    members: 'members',
+    threads: 'navThreads',
+    currentThread: 'chatHeader',
+    composer: 'composerText',
+  };
+  VM.composerText = function () {
+    return { text: (CS.draft && CS.draft['chat-input']) || '' };
+  };
+  const CSP =
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'";
+  ENGINE_PARTS.pluginPublic = PLUGIN_PUBLIC;
+  S.plug = {};
+  const held = {},
+    pending = {};
+  let projected = new Set();
+  function request(pk, name) {
+    const r = (PDL_PLUGIN_REQ[pk] || {})[name];
+    if (!r) throw new Error('plugin request ' + pk + ':' + name);
+    return r;
+  }
+  function value(pk, v, input) {
+    if (typeof v !== 'string') return v;
+    if (v.indexOf('state.') === 0) return (S.plug[pk] || {})[v.slice(6)];
+    if (v === 'host.origin') return location.origin;
+    // a host source the plugin may read (host:currentThread.id): the read follows it like any other source
+    if (v.indexOf('host:') === 0) {
+      const path = v.slice(5).split('.');
+      return path.slice(1).reduce(function (o, k) {
+        return o == null ? o : o[k];
+      }, vmRead(HOST_DATA[path[0]]));
+    }
+    if (v[0] === '@')
+      return v
+        .slice(1)
+        .split('.')
+        .reduce(function (o, k) {
+          return o == null ? o : o[k];
+        }, input);
+    return v;
+  }
+  function values(pk, q, input) {
+    const out = {};
+    // A value not set yet (state never chosen) is left out, not sent as the string "undefined".
+    Object.keys(q || {}).forEach(function (k) {
+      const v = value(pk, q[k], input);
+      if (v !== undefined && v !== null) out[k] = v;
+    });
+    return out;
+  }
+  function call(pk, name, input) {
+    const r = request(pk, name),
+      path = '/api/plugins/' + encodeURIComponent(pk) + '/' + r.path,
+      q = values(pk, r.query, input);
+    if (r.method && r.method !== 'GET')
+      return api.post(path, Object.assign({}, q, { method: r.method }), r.body ? values(pk, r.body, input) : input);
+    return api.get(path, q);
+  }
+  // A full snapshot merges by id: unchanged items keep their identity.
+  function merge(old, next) {
+    if (old === next) return old;
+    if (Array.isArray(old) !== Array.isArray(next)) return next;
+    if (!old || !next || typeof old !== 'object' || typeof next !== 'object') return next;
+    const out = Array.isArray(next)
+      ? next.map(function (x, i) {
+          return merge(
+            x && x.id != null
+              ? old.find(function (y) {
+                  return y && y.id === x.id;
+                })
+              : old[i],
+            x,
+          );
+        })
+      : Object.keys(next).reduce(function (o, k) {
+          o[k] = merge(old[k], next[k]);
+          return o;
+        }, {});
+    const keys = Object.keys(out);
+    return keys.length === Object.keys(old).length &&
+      keys.every(function (k) {
+        return out[k] === old[k];
+      })
+      ? old
+      : out;
+  }
+  function read(key) {
+    const s = held[key],
+      cur = projectData(key);
+    // a source that already has a value keeps drawing it while it is read again; only a first read is loading
+    if (!cur || cur.value === undefined) pushProjectData({ [key]: Object.assign({}, cur, { load: 'loading' }) });
+    return call(s.plugin, s.request, s.input).then(
+      function (v) {
+        const before = projectData(key) || {};
+        pushProjectData({ [key]: { load: '', value: merge(before.value, v) } });
+      },
+      function () {
+        pushProjectData({ [key]: { load: 'error' } });
+      },
+    );
+  }
+  function reread(pk) {
+    return Promise.all(
+      Array.from(projected)
+        .filter(function (k) {
+          return held[k] && held[k].plugin === pk;
+        })
+        .map(read),
+    );
+  }
+  api.on('sources:needed', function (diff) {
+    diff.removed.forEach(function (k) {
+      projected.delete(k);
+    });
+    diff.added.forEach(function (k) {
+      if (k.indexOf('plugin:') !== 0 || !held[k]) return;
+      projected.add(k);
+      settleHold(read(k));
+    });
+  });
+  // The last value read for each source (plugin / source name).
+  const last = {};
+  VM.plugin = function (pk, sources, input) {
+    const out = { state: S.plug[pk] || {}, load: '', pending: !!pending[pk] };
+    Object.keys(sources).forEach(function (k) {
+      const name = sources[k];
+      if (name.indexOf('host:') === 0) {
+        out[k] = vmRead(HOST_DATA[name.slice(5)]);
+        return;
+      }
+      const r = request(pk, name),
+        row = {};
+      // Every parameter whose value is looked up (@input, host:source, state.) is part of the key:
+      // when the value changes the key changes, and the new key is read.
+      Object.values(Object.assign({}, r.query, r.body)).forEach(function (v) {
+        const x = value(pk, v, input);
+        if (x !== v) row[v] = x;
+      });
+      const key = 'plugin:' + pk + '/' + k + (Object.keys(row).length ? '|' + JSON.stringify(row) : '');
+      if (!held[key]) held[key] = { plugin: pk, request: name, input: input };
+      if (projectionNeeded) projectionNeeded.add(key);
+      const s = projectData(key),
+        src = pk + '/' + k;
+      if (s && s.value !== undefined) last[src] = s.value;
+      // A source whose parameters changed (a new key) is read again: it keeps drawing its last value until the new
+      // read returns, so the view is not swapped for its loading state; only a source never read is loading.
+      out[k] = s && s.value !== undefined ? s.value : last[src];
+      if ((s && s.load === 'error') || ((!s || s.load) && last[src] === undefined)) out.load = s ? s.load : 'loading';
+    });
+    return out;
+  };
+  async function write(pk, name, input) {
+    const r = request(pk, name);
+    let res;
+    pending[pk] = (pending[pk] || 0) + 1;
+    render(true);
+    try {
+      res = await call(pk, name, input);
+    } catch (error) {
+      toast(error.message, null, 'danger');
+      throw error;
+    } finally {
+      pending[pk]--;
+      render(true);
+    }
+    if (res && res.error) toast(res.error, null, 'danger');
+    else if (res && res.message) toast(res.message);
+    // A write may hand back public host actions (act / args, or a list in acts: open the new thread and the panel).
+    if (res && !res.error)
+      (res.act ? [{ act: res.act, args: res.args }] : []).concat(res.acts || []).forEach(function (a) {
+        if (PLUGIN_PUBLIC.acts.indexOf(a.act) >= 0) actFn(a.act)(a.args || {});
+      });
+    if (r.method && r.method !== 'GET') await reread(pk);
+    return res;
+  }
+  A.plugin = function (d) {
+    return write(d.plugin, d.request, d);
+  };
+  // also: other keys set in the same step (a project change resets the pick; locate also picks the tab)
+  A.plugSet = function (d) {
+    Object.assign((S.plug[d.plugin] = S.plug[d.plugin] || {}), { [d.k]: d.v }, d.also);
+    render(true);
+    return reread(d.plugin);
+  };
+  A.go = function (d) {
+    go(d.page);
+  };
+  CHANGES.plugSet = INPUTS.plugSet = function (e) {
+    return A.plugSet(Object.assign({}, actionArgs(e.target), { v: e.target.value }));
+  };
+  CHANGES.plugin = function (e) {
+    return A.plugin(Object.assign({}, actionArgs(e.target), { v: e.target.value }));
+  };
+  /*
+   * The bridge plugin pages already use (clowder-plugin-ui/v1): the frame's window.name is the node's nonce; http goes
+   * to the plugin's own routes, clipboard to the platform, close closes the node; close.guard makes the host send
+   * before-close when leaving and wait for close (go on) or close.cancel (stay).
+   */
+  const CHANNEL = 'clowder-plugin-ui/v1',
+    nonces = {},
+    guards = {};
+  VM.pluginFrame = function (pk, decl, input, node) {
+    const data = VM.plugin(pk, { frame: decl.request }, input),
+      raw = data.frame,
+      v = typeof raw === 'string' ? { html: raw } : raw;
+    if (!v) return { load: data.load };
+    nonces[node] = nonces[node] || PLATFORM.uuid();
+    return v.html != null
+      ? {
+          name: nonces[node],
+          html:
+            '<meta http-equiv="Content-Security-Policy" content="' +
+            CSP +
+            '"><meta name="referrer" content="no-referrer">' +
+            v.html,
+        }
+      : { name: nonces[node], src: v.src };
+  };
+  function http(pk, req) {
+    const path = '/api/plugins/' + encodeURIComponent(pk) + '/' + String(req.path || '').replace(/^\//, ''),
+      method = (req.method || 'GET').toUpperCase();
+    return (method === 'GET' ? api.get(path, {}) : api.post(path, { method: method }, req.body)).then(
+      function (body) {
+        return { status: 200, body: body };
+      },
+      function (error) {
+        return { status: error.status || 500, body: { error: error.message } };
+      },
+    );
+  }
+
+  function frameCloseShow() {
+    if (S.dialog && S.dialog.kind === 'pluginFrameClose') {
+      if (guards[S.dialog.args.node].wait) {
+        render(true);
+        return;
+      }
+      S.dialog = null;
+    }
+    const node = Object.keys(guards).find(function (k) {
+      return guards[k].wait && (guards[k].phase === 'slow' || guards[k].phase === 'failed');
+    });
+    if (node && !S.dialog) {
+      guards[node].shown = true;
+      dialog({ kind: 'pluginFrameClose', args: { node: node } });
+    } else render(true);
+  }
+  function frameCloseFinish(node, leave) {
+    const g = guards[node],
+      wait = g.wait;
+    clearTimeout(g.timer);
+    g.wait = null;
+    g.phase = 'idle';
+    g.discard = false;
+    g.shown = false;
+    if (leave) g.on = false;
+    frameCloseShow();
+    (leave ? wait.resolve : wait.reject)();
+  }
+  function frameCloseWait(node) {
+    const g = guards[node];
+    if (g.wait) return g.wait.promise;
+    const wait = {};
+    wait.promise = new Promise(function (resolve, reject) {
+      wait.resolve = resolve;
+      wait.reject = reject;
+    });
+    g.wait = wait;
+    g.phase = 'saving';
+    g.discard = false;
+    g.timer = setTimeout(function () {
+      g.phase = 'slow';
+      frameCloseShow();
+    }, 200);
+    ENGINE_PARTS.framePost(node, { channel: CHANNEL, nonce: nonces[node], type: 'before-close' });
+    return wait.promise;
+  }
+  VM.pluginFrameClose = function () {
+    if (!S.dialog || S.dialog.kind !== 'pluginFrameClose') return null;
+    const node = S.dialog.args.node,
+      g = guards[node];
+    return { node: node, phase: g.phase, discard: g.discard };
+  };
+  A.pluginFrameDiscard = function (d) {
+    guards[d.node].discard = true;
+    render(true);
+  };
+  A.pluginFrameContinue = function (d) {
+    guards[d.node].discard = false;
+    render(true);
+  };
+  A.pluginFrameForce = function (d) {
+    frameCloseFinish(d.node, true);
+  };
+  A.pluginFrameStay = function () {
+    Object.keys(guards)
+      .filter(function (k) {
+        return guards[k].wait;
+      })
+      .forEach(function (k) {
+        frameCloseFinish(k, false);
+      });
+  };
+  A.pluginFrameDialogChanged = function (value) {
+    if (value) return;
+    const node = Object.keys(guards).find(function (k) {
+      return guards[k].wait && guards[k].shown;
+    });
+    if (!node) return;
+    if (guards[node].discard) {
+      guards[node].discard = false;
+      dialog({ kind: 'pluginFrameClose', args: { node: node } });
+    } else A.pluginFrameStay({ node: node });
+  };
+  LEAVE_ASK.push(function (els) {
+    const nodes = Object.keys(guards).filter(function (k) {
+      return (
+        guards[k].on &&
+        els.some(function (e) {
+          return e.querySelector('iframe[data-frame-key="' + k + '"]');
+        })
+      );
+    });
+    if (!nodes.length) return null;
+    return Promise.all(nodes.map(frameCloseWait));
+  });
+  A.pluginFrameMessage = function (m, el) {
+    const node = el.dataset.frameKey,
+      pk = PDL_VIEWS[node].plugin;
+    if (!m || m.channel !== CHANNEL || m.nonce !== nonces[node]) return;
+    const reply = function (r) {
+      ENGINE_PARTS.framePost(node, Object.assign({ channel: CHANNEL, nonce: m.nonce, requestId: m.requestId }, r));
+    };
+    const g = (guards[node] = guards[node] || {});
+    if (m.type === 'close.guard') {
+      g.on = !!m.value;
+      reply({ result: true });
+      return;
+    }
+    if (m.type === 'close' || m.type === 'close.cancel') {
+      if (g.wait) {
+        if (m.type === 'close') frameCloseFinish(node, true);
+        else {
+          clearTimeout(g.timer);
+          g.phase = 'failed';
+          g.discard = false;
+          frameCloseShow();
+        }
+      } else if (m.type === 'close') {
+        g.on = false;
+        actFn('close')({ node: node });
+      }
+      reply({ result: true });
+      return;
+    }
+    Promise.resolve()
+      .then(function () {
+        if (m.type === 'http') return http(pk, m.request);
+        if (m.type === 'clipboard.text') {
+          PLATFORM.clipboard(m.value);
+          return true;
+        }
+        if (m.type === 'clipboard.image')
+          return PLATFORM.clipboardImage(m.value).then(function () {
+            return true;
+          });
+        throw new Error('plugin frame message ' + m.type);
+      })
+      .then(
+        function (result) {
+          reply({ result: result });
+        },
+        function (error) {
+          reply({ error: error.message });
+        },
+      );
+  };
+}

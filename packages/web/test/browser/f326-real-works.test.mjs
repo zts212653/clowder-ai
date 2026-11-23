@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { chromium } from 'playwright';
@@ -22,10 +23,11 @@ test(
   'a real delivered film enters the original Works, seeks a sourced paragraph and queues an original-composer mark',
   { timeout: 300000 },
   async (t) => {
+    if (!process.env.F326_C_REAL_FILM_MANIFEST) return t.skip('dedicated F326 film manifest required');
     assert.equal(process.env.F326_C_BROWSER_ALLOW_MUTATIONS, 'isolated-feature');
     const manifest = JSON.parse(await readFile(process.env.F326_C_REAL_FILM_MANIFEST, 'utf8'));
     assert.equal(await digestFile(manifest.film), manifest.digest);
-    const evidence = await mkdtemp('/tmp/f326-c-real-works-');
+    const evidence = await mkdtemp(path.join(tmpdir(), 'f326-c-real-works-'));
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await context.newPage();
@@ -44,7 +46,7 @@ test(
         path.join(evidence, 'composer-draft.json'),
         JSON.stringify(
           await page.evaluate(() => ({
-            drafts: JSON.parse(sessionStorage.getItem('cat-cafe:thread-context-attachment-drafts') || '[]'),
+            drafts: JSON.parse(localStorage.getItem('cat-cafe:thread-context-attachment-drafts') || '[]'),
             notices: [...document.querySelectorAll('[role="alert"], [data-testid="workspace-content-review-surface"]')]
               .filter((node) => node.getClientRects().length)
               .map((node) => node.textContent),
@@ -149,8 +151,6 @@ test(
       const paragraph = indexed.context.story[2];
       const cleanOptions = {
         page,
-        context,
-        api,
         threadId: thread.id,
         reference: saved.reference,
         allowedAnchors: [
@@ -169,13 +169,8 @@ test(
         ],
       };
       await context.addInitScript(() => localStorage.setItem('cat-cafe:shell-presentation', 'v2'));
-      const hydrated = page.waitForResponse(
-        (response) =>
-          response.url().endsWith(`/api/threads/${thread.id}/composer-draft`) && response.request().method() === 'GET',
-      );
       await page.goto(`${web}/thread/${thread.id}`, { waitUntil: 'domcontentloaded' });
       await ensureWorkspaceOpen(page, { readinessTimeoutMs: 90000 });
-      await hydrated;
       cleanOwnDraft = () => cleanAuthorDraft(cleanOptions);
       await writeFile(
         path.join(evidence, 'initial-author-cleanup.json'),

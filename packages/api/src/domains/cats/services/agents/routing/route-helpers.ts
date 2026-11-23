@@ -12,12 +12,13 @@ import type {
   RichBlockBase,
   RoutingPreflightDecisionV1,
 } from '@cat-cafe/shared';
-import { catRegistry, isCrossThreadProvenance } from '@cat-cafe/shared';
+import { catRegistry, extractAppendedRecallMetaBlock, isCrossThreadProvenance } from '@cat-cafe/shared';
 import { resolveUnboundHistoryContextTokenCeiling } from '../../../../../config/context-capacity.js';
 import { DEFAULT_HIERARCHICAL_CONTEXT } from '../../../../../config/hierarchical-context-config.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import { visibilityCursorDeferredBoundaryRejected } from '../../../../../infrastructure/telemetry/instruments.js';
+import { SessionCacheReadService } from '../../session/cache/SessionCacheReadService.js';
 import { isHomeSession } from '../../session/session-scope.js';
 import {
   assertCanonicalVisibilityCursor,
@@ -38,6 +39,7 @@ import { sliceUnicodeSafe } from '../../../../../utils/unicode-safe-slice.js';
 import { matchExplicitApprovedTasteTrigger } from '../../../../memory/cue/ExplicitApprovedTasteTriggerCatalog.js';
 import type { MemoryCueOpportunitySeed } from '../../../../memory/cue/MemoryCueInvocationPromptService.js';
 import type { NudgeProcessResult } from '../../../../memory/EntityNudgeService.js';
+import { personMemoryProposalCardPointer } from '../../../../memory/people/person-memory-proposal-card-pointer.js';
 import { formatRoadmapPointer, readNavigationRoadmap } from '../../../../workspace/thread-roadmap-source.js';
 import type { CloudDispatchProvenance } from '../../cloud-bridge/types.js';
 import { buildMessageMap, formatMessage } from '../../context/ContextAssembler.js';
@@ -1019,11 +1021,13 @@ export function toStoredToolEvent(
   if (msg.type === 'tool_result') {
     const raw = (msg.content ?? '').trimEnd();
     const detail = raw.length > 0 ? truncateDetail(raw, 1500) : '(no output)';
+    const resultMeta = msg.content === undefined ? undefined : extractAppendedRecallMetaBlock(msg.content);
     return {
       ...instance,
       type: 'tool_result',
       label: `${msg.catId as string} ← result`,
       detail,
+      ...(resultMeta ? { resultMeta } : {}),
       ...(inputDetail !== undefined ? { inputDetail } : {}),
       timestamp: msg.timestamp,
       ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
@@ -1312,8 +1316,10 @@ export function routeContentBlocksForCat(
  */
 function digestRichBlock(b: RichBlock): string {
   switch (b.kind) {
-    case 'card':
-      return `[卡片: ${b.title ?? '无标题'}]`;
+    case 'card': {
+      const proposalPointer = personMemoryProposalCardPointer(b);
+      return `[卡片: ${b.title ?? '无标题'}${proposalPointer ? `｜${proposalPointer}` : ''}]`;
+    }
     case 'diff':
       return `[代码 diff: ${b.filePath ?? '未知文件'}]`;
     case 'checklist':
@@ -2019,7 +2025,7 @@ async function assembleIncrementalContextInternal(
   let executionSituation: import('../invocation/thread-execution-situation.js').ThreadExecutionSituation | undefined;
   if (deps.threadExecutionSituationSource) {
     try {
-      executionSituation = await deps.threadExecutionSituationSource.resolve(threadId);
+      executionSituation = await deps.threadExecutionSituationSource.resolve(threadId, userId);
     } catch {
       executionSituation = {
         kind: 'thread_execution_situation.v1',
@@ -2032,6 +2038,15 @@ async function assembleIncrementalContextInternal(
     threadStore && options?.contextProjection?.contextMode !== 'hot'
       ? await readNavigationRoadmap(threadStore, userId, threadId)
       : undefined;
+  const cacheReader = deps.invocationDeps.sessionChainStore
+    ? new SessionCacheReadService(deps.invocationDeps.sessionChainStore, 100, (id) => catRegistry.getAllConfigs()[id])
+    : undefined;
+  const cacheRows = await cacheReader?.read({
+    ownerId: userId,
+    threadId,
+    catIds: Object.keys(deps.services),
+    observedAt: options?.nowMs ?? Date.now(),
+  });
   const navigationContext: NavigationContext = {
     threadId,
     currentCatId: catId,
@@ -2039,6 +2054,7 @@ async function assembleIncrementalContextInternal(
     sources,
     tasks: activeTasks,
     ...(executionSituation ? { executionSituation } : {}),
+    ...(cacheRows ? { sessionCache: cacheRows.filter((row) => row.exists) } : {}),
     // Work materials describe existing work; their absence is not a recovery gap.
     artifacts: options?.contextProjection || activeTasks.length === 0 ? [] : recentArtifacts,
     truthSource:

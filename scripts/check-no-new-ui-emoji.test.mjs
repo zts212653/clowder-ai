@@ -11,6 +11,107 @@ import { findAddedUiPictographs, runGit } from './check-no-new-ui-emoji.mjs';
 const SCRIPT_PATH = fileURLToPath(new URL('./check-no-new-ui-emoji.mjs', import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
+test('backend message source icons require a registered SVG, including module-constant connector IDs', () => {
+  const file = 'packages/api/src/routes/source.ts';
+  const source =
+    "const SOURCE = 'watcher-unregistered';\nconst source = {\n  connector: SOURCE,\n  label: '守望猫',\n  icon: '👀',\n};\n";
+  const diff = `+++ b/${file}\n@@ -0,0 +1,6 @@\n${source
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => `+${line}`)
+    .join('\n')}\n`;
+  const options = { readSource: () => source, registeredSvgs: new Map() };
+  assert.equal(findAddedUiPictographs(diff, options).length, 1);
+  assert.equal(
+    findAddedUiPictographs(diff, { ...options, registeredSvgs: new Map([['watcher-unregistered', 'watcher']]) }).length,
+    0,
+  );
+});
+
+test('backend copy, comments and unrelated icon properties are not message-source icon debt', () => {
+  const file = 'packages/api/src/routes/source.ts';
+  const source = "// icon: '👀'\nconst content = '👀';\nconst other = { icon: '👀' };\n";
+  const diff = `+++ b/${file}\n@@ -0,0 +1,3 @@\n${source
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => `+${line}`)
+    .join('\n')}\n`;
+  assert.equal(findAddedUiPictographs(diff, { readSource: () => source, registeredSvgs: new Map() }).length, 0);
+});
+
+test('backend source icon constants and conditional constant branches are checked', () => {
+  const file = 'packages/api/src/routes/source.ts';
+  for (const icon of ['ICON', "condition ? ICON : 'watcher'"]) {
+    const source = `const ICON = '👀';\nconst source = { connector: 'unregistered', icon: ${icon} };\n`;
+    const diff = `+++ b/${file}\n@@ -0,0 +1,2 @@\n+${source.trim().replaceAll('\n', '\n+')}\n`;
+    assert.equal(findAddedUiPictographs(diff, { readSource: () => source, registeredSvgs: new Map() }).length, 1);
+  }
+});
+
+test('changing only a referenced source or icon declaration cannot evade the diff guard', () => {
+  const file = 'packages/api/src/routes/source.ts';
+  const source =
+    "const SOURCE = 'unregistered';\nconst ICON = '👀';\nconst source = { connector: SOURCE, icon: ICON };\n";
+  for (const line of [1, 2]) {
+    const added = source.split('\n')[line - 1];
+    const diff = `+++ b/${file}\n@@ -${line} +${line} @@\n-old declaration\n+${added}\n`;
+    assert.equal(findAddedUiPictographs(diff, { readSource: () => source, registeredSvgs: new Map() }).length, 1);
+  }
+});
+
+test('an inner shadow cannot make an unregistered message source look registered', () => {
+  const file = 'packages/api/src/routes/source.ts';
+  const source =
+    "const SOURCE = 'unregistered';\nfunction unrelated() { const SOURCE = 'hold-ball'; }\nconst source = { connector: SOURCE, icon: '👀' };\n";
+  const diff = `+++ b/${file}\n@@ -0,0 +1,3 @@\n${source
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => `+${line}`)
+    .join('\n')}\n`;
+  assert.equal(
+    findAddedUiPictographs(diff, { readSource: () => source, registeredSvgs: new Map([['hold-ball', 'hold-ball']]) })
+      .length,
+    1,
+  );
+});
+
+test('unrelated parameter and local names do not hide a module icon binding at its use site', () => {
+  const file = 'packages/api/src/routes/source.ts';
+  for (const unrelated of [
+    'function unrelated(icon: string) { return icon; }',
+    'function unrelated({icon}: {icon: string}) { return icon; }',
+    "function unrelated() { const icon = 'watcher'; return icon; }",
+  ]) {
+    const source = `const icon = '👀';\n${unrelated}\nconst source = { connector: 'unregistered', icon: icon };\n`;
+    const diff = `+++ b/${file}\n@@ -0,0 +1,3 @@\n+${source.trim().replaceAll('\n', '\n+')}\n`;
+    assert.equal(findAddedUiPictographs(diff, { readSource: () => source, registeredSvgs: new Map() }).length, 1);
+  }
+});
+
+test('connector shadows are resolved where a message source is built, including shorthand properties', () => {
+  const file = 'packages/api/src/routes/source.ts';
+  const source =
+    "const connector='hold-ball'; const icon='👀'; function build(connector: string) { return {connector, icon}; }";
+  const diff = `+++ b/${file}\n@@ -0,0 +1 @@\n+${source}\n`;
+  assert.equal(
+    findAddedUiPictographs(diff, { readSource: () => source, registeredSvgs: new Map([['hold-ball', 'hold-ball']]) })
+      .length,
+    1,
+  );
+});
+
+test('an unrelated connector parameter does not reject a registered module-level source', () => {
+  const file = 'packages/api/src/routes/source.ts';
+  const source =
+    "const connector='hold-ball'; const icon='👀'; function unrelated(connector: string) {} const source={connector, icon};";
+  const diff = `+++ b/${file}\n@@ -0,0 +1 @@\n+${source}\n`;
+  assert.equal(
+    findAddedUiPictographs(diff, { readSource: () => source, registeredSvgs: new Map([['hold-ball', 'hold-ball']]) })
+      .length,
+    0,
+  );
+});
+
 test('flags raw pictographs added to production web UI with new-file line numbers', () => {
   const diff = `diff --git a/packages/web/src/components/memory/RecallLedger.tsx b/packages/web/src/components/memory/RecallLedger.tsx
 --- a/packages/web/src/components/memory/RecallLedger.tsx
@@ -48,6 +149,55 @@ diff --git a/packages/web/src/components/__tests__/fixture.test.tsx b/packages/w
 +++ b/packages/web/src/components/__tests__/fixture.test.tsx
 @@ -0,0 +1 @@
 +expect(text).toContain('📊');
+`;
+
+  assert.deepEqual(findAddedUiPictographs(diff), []);
+});
+
+test('flags raw pictographs added to theme YAML, copy JSON and component JS under public/pdl', () => {
+  const diff = `diff --git a/packages/web/public/pdl/themes/default/theme.yaml b/packages/web/public/pdl/themes/default/theme.yaml
+--- a/packages/web/public/pdl/themes/default/theme.yaml
++++ b/packages/web/public/pdl/themes/default/theme.yaml
+@@ -640,0 +641 @@
++          title: 📊 消费账本
+diff --git a/packages/web/public/pdl/themes/default/i18n/zh/chat.json b/packages/web/public/pdl/themes/default/i18n/zh/chat.json
+--- a/packages/web/public/pdl/themes/default/i18n/zh/chat.json
++++ b/packages/web/public/pdl/themes/default/i18n/zh/chat.json
+@@ -12,0 +13 @@
++  "ledger": "👁 注意力成本",
+diff --git a/packages/web/public/pdl/library/rows.js b/packages/web/public/pdl/library/rows.js
+--- a/packages/web/public/pdl/library/rows.js
++++ b/packages/web/public/pdl/library/rows.js
+@@ -30,0 +31 @@
++  return '<span>🔒</span>' + h(title);
+`;
+
+  assert.deepEqual(
+    findAddedUiPictographs(diff).map(({ file, line, pictographs }) => ({ file, line, pictographs })),
+    [
+      { file: 'packages/web/public/pdl/themes/default/theme.yaml', line: 641, pictographs: ['📊'] },
+      { file: 'packages/web/public/pdl/themes/default/i18n/zh/chat.json', line: 13, pictographs: ['👁'] },
+      { file: 'packages/web/public/pdl/library/rows.js', line: 31, pictographs: ['🔒'] },
+    ],
+  );
+});
+
+test('ignores public/pdl tests and license text, and the app layer beside public/pdl', () => {
+  const diff = `diff --git a/packages/web/public/pdl/library/rows.test.js b/packages/web/public/pdl/library/rows.test.js
+--- a/packages/web/public/pdl/library/rows.test.js
++++ b/packages/web/public/pdl/library/rows.test.js
+@@ -0,0 +1 @@
++expect(html).toContain('📊');
+diff --git a/packages/web/public/pdl/themes/default/licenses/OFL-Inter.txt b/packages/web/public/pdl/themes/default/licenses/OFL-Inter.txt
+--- a/packages/web/public/pdl/themes/default/licenses/OFL-Inter.txt
++++ b/packages/web/public/pdl/themes/default/licenses/OFL-Inter.txt
+@@ -0,0 +1 @@
++Copyright © 2020 The Inter Project Authors
+diff --git a/packages/web/public/pdl-app/sidebar.js b/packages/web/public/pdl-app/sidebar.js
+--- a/packages/web/public/pdl-app/sidebar.js
++++ b/packages/web/public/pdl-app/sidebar.js
+@@ -0,0 +1 @@
++const cleaned = title.replace(/^📥 /u, '');
 `;
 
   assert.deepEqual(findAddedUiPictographs(diff), []);

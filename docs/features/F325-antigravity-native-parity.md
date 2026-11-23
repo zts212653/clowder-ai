@@ -15,6 +15,10 @@ description_updated_at: 2026-09-29T06:01:16Z
 
 > **Status**: in-progress | **Owner**: 小星星·Maine Coon (@codex-astra, gpt-6-astra) | **Priority**: P1
 
+**品牌回归已交付 main**：[PR #7148](https://github.com/zts212653/clowder-ai/pull/7148) 经 Terra 独立审查、非作者合入 `6777994701841d6f1b0126c46ed517219fa46560`；具名 Alpha `f325-brand-7148-sol` 的组合主线构建、品牌 10/10、AGY 21/21 零跳过通过，两处落地 blob 与已审 HEAD 一致。[合后回执](https://github.com/zts212653/clowder-ai/pull/7148#issuecomment-6915548081) 明确未启动服务、未重启正式 runtime。原生工位收尾因无法证明旧 fsmonitor IPC 生命周期而拒绝释放，作者与 Alpha 两处均已具名 retained、同源 check 通过，截止 `2026-11-17T12:00:00Z`，仍由 Sol 核清并收尾；不冒称 removed。最后步骤告警已由下方 #7154 交付，原 Slice 2 继续施工；本项仍为 `in-progress`。
+
+**2026-11-16 最后步骤告警合入与 Alpha 记录（现已通过上文 boot92 加载后验）**：[PR #7154](https://github.com/zts212653/clowder-ai/pull/7154) 经 Terra 对 `94057cc2540c1464726607c3e6070027b21e7dab` 独立 R2 approved、非作者合入 `0eee2c2441fb073e8110a57615e0eeaa9d638898`。告警载荷和结构化日志保留最后观察到的原生步骤；只在最新原生事件确为 `step_update` 时补空事件类型，后续 `result` 或其他事件不会被历史步骤覆盖，输入关闭与 F118 等待/取消策略不变。具名 Alpha `f325-stall-7154-sol` 冻结该合入提交，两个落地 blob 与已审版一致，Shared/MCP/API 构建、AGY **61/61** 和品牌 **10/10** 零跳过通过；仅验构建与协议，未启动 Alpha 服务。Alpha 已原生 `released/storageDisposition=removed` 并同源 check，通过后的作者工位继续承接原 Slice 2，具名保留至 `2026-11-17T12:00:00Z`。当时 `home_state_self` 于 12:18 UTC 核正式 runtime 仍为 `fba26caec91d1d968edc3a477267cab542cbc586`、API PID `32366`，未加载本改动；原 Task2347/总 owner Astra 持有加载后验收，不创建镜像 Task 或自行重启。Sol 已将原 WIP 保全至 *(internal reference removed)*，接入上述主线后的工作提交为 `9431ca1d253bdf00bcc6450477bf83a69a66e914`；审批桥启动异常清理与原平权剩余项继续处理，整个 Slice 2 未宣称完成。
+
 **2026-10-23 部署等待核对：`deploymentWait=unavailable`**：沿墨墨 source `private-source-id`，Sol 独立核实 #6041 已合入 `7761176c829af36d89a7ea3975cb4e8c744f3199`，正式 runtime 仍运行 `f16399d26482ece3341137c11f64c6189f3f726c`。原 Task `private-source-id` 的 canonical owner read 为 revision 17、`done` / `satisfied`、owner=`codex61-sol`；运行版本的 `registrationTaskError` 明确对终态 Task 返回 409 `Terminal Task cannot register a deployment wait`。据此未提交终态登记请求，本修复没有新建的自动部署回调；不复活 Task1529、不建镜像 Task、不重启 runtime。加载后核验仍待沿本线程续办：先确认冻结 merge 的实际包含关系与 API/Web ready，再按 source1329 的原分工安排便宜模型自然连续 A/B/C 验收，核对同进程、逐条完成回执、Queue 退休和正文；是否实际触发 recovered 支路须如实记录。Task1529 的已完成快照与整体 F325/Task2347 的未验边界保持原状。
 
 **2026-10-20 验收安排更新（覆盖下文这三项的专门验收安排）**：You 在本线程 source1157（`[thread-id]#private-source-id`）说明这几天正常使用没有遇到问题，要求认证中断恢复、上下文快满时自动接续、持久后台任务随日常使用验收，不消耗Siamese或其他猫的额外 token 专门验收。三项沿平时真实任务自然观察，复用已有证据；不为凑验收安排额外模型调用、长任务/故障探针、周期核验或反复审计旧材料。日常出现具体故障再针对该现场定位、修复与必要验证。未触发的场景如实保留证据边界，不以“近期没出问题”冒称全部通过，也不继续以缺少专门验收为由要求重复演示。原 Task2347 与 Astra 的交付责任保留，本次不关闭 Feature。
@@ -166,6 +170,11 @@ ACP 原生 L0 缺口已证；You 已选择保留个人 OAuth 与原生 L0，继�
 
 - 状态：open，由 Astra 原 Task2347 持有。Carbon 原071已将媒体摘要错误与启动前 HTTP EOF 分开；Task088/#6953 的已完成会话连续性、Task133/#6964 的启动前有限重试均不覆盖本问题。内部清空机制、媒体预算与恢复性仍待合法原件核验，不能以“图片撑满”或“1M窗口正常”替代诊断。
 - Carbon 已回原888脱敏摘录：init后终态ERROR、最后工具为`.mp4`读取、无独立清空事件；六图后继在同一conversation完成。持久轨迹被清空、下一请求绝未发出均不能由错误文字/用量合计证明。下一步沿旧现场区分摘要输入、媒体预算及宿主安全恢复缺口；精确事发CLI版本仍未固定。不新增模型、多图或重启探针，不重开已done子Task或另建writer。
+
+#### Open issue：CLI 内部完成而宿主输出缺尾 {#native-completed-reply-unobserved}
+
+- 宿主独立核到 child `246862a3`、parent `9bd80bad`，直到用户取消才在次日00:32结算；原726只有启动诊断，没有终态判定。正式 boot84/605bd477 包含 #6329；无事发 Host 重启证据，19:39仍有协议记录，不能推三小时整点截断。
+- 状态：open，由 Astra 原 Task2347 持有。#6329处理已到达的完整回复，不覆盖本次未观察到终态；不把它先登记为同根回归。观察归档不是 OS stdout 抓取，尚不能唯一判为CLI写端缺失或宿主读取/消费链停滞；没有显式exit回执。沿原Task核区分证据和安全取回，媒体摘要问题独立保留，不新增Task/writer，不重跑已完成业务或擅加自动重试。
 
 #### 工作单元：Native CLI 同进程续轮（Claude SDK 档）{#native-same-process-followup}
 

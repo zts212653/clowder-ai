@@ -480,6 +480,9 @@ export interface AgentRouterOptions {
   routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
   /** F293: durable dispatch terminal observer over the same routing signal graph. */
   routingDispatchSignalObserver?: import('../../../../routing-context/RoutingDispatchSignalContract.js').RoutingDispatchTerminalObserver;
+  /** F337: machine-sleep interruption evidence and the after-wake continuation. */
+  hostSleep?: import('../invocation/invoke-single-cat.js').InvocationDeps['hostSleep'];
+  isRuntimeShuttingDown?: () => boolean | Promise<boolean>;
   /** F276: terminal disposition authority for person-memory write opportunities. */
   writeOpportunityTerminalLedger?: import('../invocation/invoke-single-cat.js').InvocationDeps['writeOpportunityTerminalLedger'];
   /** F276: reservation and delivery authority for person-memory write opportunities. */
@@ -538,8 +541,8 @@ export interface AgentRouterOptions {
   turnCustodyProjectionService?: import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyProjectionService;
   /** F222: Frustration auto-issue store */
   frustrationIssueStore?: import('../../stores/ports/FrustrationIssueStore.js').IFrustrationIssueStore;
-  /** F229: Concierge config store for duty-cat岗位 prompt injection */
-  conciergeConfigStore?: import('../../../../concierge/ConciergeConfigStore.js').IConciergeConfigStore;
+  /** F229: 猫猫球 settings for duty-cat岗位 prompt injection */
+  companionSettings?: import('../../../../concierge/companion-settings.js').ReadCompanionSettings;
   /** F229 Phase B: TriagePlan store for triage-plan marker → confirm/cancel card actions */
   conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
   /** F247 AC-B1c-3 PR-C: Cloud invoke bridge for @gpt-pro → ChatGPT dispatch */
@@ -598,6 +601,8 @@ export class AgentRouter {
   private routingContextPromptProjection?: import('../../../../routing-context/RoutingContextPromptProjector.js').RoutingContextPromptProjectionPort;
   private routingDispatchPreflight?: import('../../../../routing-context/RoutingDispatchPreflightPort.js').RoutingDispatchPreflightPort;
   private routingDispatchSignalObserver?: import('../../../../routing-context/RoutingDispatchSignalContract.js').RoutingDispatchTerminalObserver;
+  private hostSleep?: import('../invocation/invoke-single-cat.js').InvocationDeps['hostSleep'];
+  private isRuntimeShuttingDown?: () => boolean | Promise<boolean>;
   private writeOpportunityTerminalLedger?: import('../invocation/invoke-single-cat.js').InvocationDeps['writeOpportunityTerminalLedger'];
   private writeOpportunityDeliveryStore?: import('../invocation/invoke-single-cat.js').InvocationDeps['writeOpportunityDeliveryStore'];
   private runtimeSessionStore: IRuntimeSessionStore | undefined;
@@ -642,7 +647,7 @@ export class AgentRouter {
   /** F222 */
   private frustrationIssueStore?: import('../../stores/ports/FrustrationIssueStore.js').IFrustrationIssueStore;
   /** F229 */
-  private conciergeConfigStore?: import('../../../../concierge/ConciergeConfigStore.js').IConciergeConfigStore;
+  private companionSettings?: import('../../../../concierge/companion-settings.js').ReadCompanionSettings;
   /** F229 Phase B */
   private conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
   /** F247 AC-B1c-3 PR-C */
@@ -715,6 +720,8 @@ export class AgentRouter {
     this.routingContextPromptProjection = options.routingContextPromptProjection;
     this.routingDispatchPreflight = options.routingDispatchPreflight;
     this.routingDispatchSignalObserver = options.routingDispatchSignalObserver;
+    this.hostSleep = options.hostSleep;
+    this.isRuntimeShuttingDown = options.isRuntimeShuttingDown;
     this.writeOpportunityTerminalLedger = options.writeOpportunityTerminalLedger;
     this.writeOpportunityDeliveryStore = options.writeOpportunityDeliveryStore;
     this.runtimeSessionStore = options.runtimeSessionStore;
@@ -747,7 +754,7 @@ export class AgentRouter {
     this.ballCustody = options.ballCustody;
     this.turnCustodyProjectionService = options.turnCustodyProjectionService;
     this.frustrationIssueStore = options.frustrationIssueStore;
-    this.conciergeConfigStore = options.conciergeConfigStore;
+    this.companionSettings = options.companionSettings;
     this.conciergeTriagePlanStore = options.conciergeTriagePlanStore;
     this.cloudInvokeBridge = options.cloudInvokeBridge;
     this.cloudReturnGrantStore = options.cloudReturnGrantStore;
@@ -1470,6 +1477,8 @@ export class AgentRouter {
         ...(this.routingDispatchSignalObserver
           ? { routingDispatchSignalObserver: this.routingDispatchSignalObserver }
           : {}),
+        ...(this.hostSleep ? { hostSleep: this.hostSleep } : {}),
+        ...(this.isRuntimeShuttingDown ? { isRuntimeShuttingDown: this.isRuntimeShuttingDown } : {}),
         ...(this.writeOpportunityTerminalLedger
           ? { writeOpportunityTerminalLedger: this.writeOpportunityTerminalLedger }
           : {}),
@@ -1488,7 +1497,7 @@ export class AgentRouter {
         ...(this.agentPaneRegistry ? { agentPaneRegistry: this.agentPaneRegistry } : {}),
         ...(this.guideSessionStore ? { guideSessionStore: this.guideSessionStore } : {}),
         ...(this.dismissTracker ? { dismissTracker: this.dismissTracker } : {}),
-        ...(this.conciergeConfigStore ? { conciergeConfigStore: this.conciergeConfigStore } : {}),
+        ...(this.companionSettings ? { companionSettings: this.companionSettings } : {}),
         ...(this.conciergeTriagePlanStore ? { conciergeTriagePlanStore: this.conciergeTriagePlanStore } : {}),
         ...(this.cloudInvokeBridge ? { cloudInvokeBridge: this.cloudInvokeBridge } : {}),
         ...(this.cloudReturnGrantStore ? { cloudReturnGrantStore: this.cloudReturnGrantStore } : {}),

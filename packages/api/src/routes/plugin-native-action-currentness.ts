@@ -7,6 +7,11 @@ import { NativePluginActionError } from '../domains/plugin/declared/native-plugi
 import { getDeletedCallbackThreadGuard } from './callback-scope-helpers.js';
 import type { PluginNativeActionRouteOptions } from './plugin-native-action-routes.js';
 
+/** Why a call's fence closed early. Without it a plugin's next check after the Host gave up reads as an
+ * authority change ("Invocation is no longer current"), which sent the 11-16 GitHub registration
+ * diagnosis down the permissions path. */
+export type NativeCallbackCloseReason = 'deadline' | 'cancelled';
+
 /** Pins presence as well as contents before source capture; public identity never comes from the source. */
 export function captureNativeCallbackCurrentness(
   record: InvocationRecord,
@@ -34,10 +39,20 @@ export function captureNativeCallbackCurrentness(
     ...(toolExecutionPolicy === undefined ? {} : { toolExecutionPolicy }),
   });
   const lifetime = new AbortController();
+  let closedBy: NativeCallbackCloseReason | undefined;
+  const closed = () =>
+    closedBy === 'deadline'
+      ? new NativePluginActionError(504, 'Plugin action exceeded the Host time limit; result may be unknown')
+      : closedBy === 'cancelled'
+        ? new NativePluginActionError(409, 'Plugin action was cancelled by its caller; result may be unknown')
+        : expired();
   const assertLive = () => {
-    if (lifetime.signal.aborted) throw expired();
+    if (lifetime.signal.aborted) throw closed();
   };
-  const close = () => lifetime.abort();
+  const close = (reason?: NativeCallbackCloseReason) => {
+    if (!lifetime.signal.aborted) closedBy = reason;
+    lifetime.abort();
+  };
   const assertIdentityCurrent = (latest: InvocationRecord) => {
     const keys = ['userId', 'threadId', 'catId', 'invocationId', 'originTriggerMessageId'] as const;
     if (keys.some((key) => latest[key] !== identity[key])) throw expired();

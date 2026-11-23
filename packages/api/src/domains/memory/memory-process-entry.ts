@@ -3,7 +3,7 @@ import * as sqliteVec from 'sqlite-vec';
 import { createSqliteReadDiagnostics } from '../../infrastructure/sqlite-read-diagnostics.js';
 import { CatCafeScanner } from './CatCafeScanner.js';
 import { checkpointMemoryDatabase } from './checkpoint-memory-database.js';
-import { prepareFileVectorReadWindow } from './file-vector-read-window.js';
+import { type FileVectorReadWindowSnapshot, prepareFileVectorReadWindow } from './file-vector-read-window.js';
 import { GenericRepoScanner } from './GenericRepoScanner.js';
 import type { EmbedModelInfo, IEmbeddingService } from './interfaces.js';
 import { memoryProcessStderrBoundary } from './memory-process-diagnostics.js';
@@ -24,6 +24,7 @@ import { lookupShadowRanking, SqliteEvidenceStore } from './SqliteEvidenceStore.
 import { readTastePullRecallRows } from './taste/taste-pull-recall-rows.js';
 import { readPendingVectorSources } from './vector-generation-pending.js';
 import { inspectVectorGeneration } from './vector-generation-readiness.js';
+import { describeVectorSearchFailure } from './vector-search-degrade-report.js';
 
 let rpcSequence = 0;
 const pending = new Map<number, { resolve(value: Extract<ParentMessage, { type: 'embedding-result' }>): void }>();
@@ -58,15 +59,21 @@ function embeddingProxy(snapshot: EmbeddingSnapshot): IEmbeddingService {
   };
 }
 
-function prepareVectorReadQuery(job: MemoryProcessJob, db: Database.Database) {
+function prepareVectorReadQuery(
+  job: MemoryProcessJob,
+  db: Database.Database,
+  observe: (snapshot: FileVectorReadWindowSnapshot) => void,
+) {
   if (job.kind !== 'search' && job.kind !== 'message-search') return;
-  return job.embedding?.passages ? prepareFileVectorReadWindow(db) : undefined;
+  return job.embedding?.passages ? prepareFileVectorReadWindow(db, undefined, observe) : undefined;
 }
 
 async function execute(
   job: MemoryProcessJob,
   started: () => void,
   report: (event: MemoryReadDiagnostic) => void,
+  observeWindow: (snapshot: FileVectorReadWindowSnapshot) => void,
+  vectorStarted: () => Promise<void>,
 ): Promise<unknown> {
   if (job.kind === 'scan') {
     started();
@@ -98,6 +105,10 @@ async function execute(
   if (readJob) report({ phase: 'database-initialization' });
   const store = new SqliteEvidenceStore(job.dbPath, undefined, {
     workerMode: 'read',
+    onVectorSearchDegrade: (degrade) => report({ phase: 'vector-degrade', degrade }),
+    ...(job.kind === 'message-search' && (job.options.mode ?? 'hybrid') === 'hybrid'
+      ? { onMessageVectorStart: vectorStarted }
+      : {}),
     ...(job.kind === 'search' ? { sourceRoot: job.sourceRoot, sourceRef: job.sourceRef } : {}),
   });
   await store.initialize();
@@ -105,7 +116,21 @@ async function execute(
   try {
     const db = store.getDb();
     // Only a killable read-pool child may map file-backed vector reads.
-    const readVectorQuery = prepareVectorReadQuery(job, db);
+    let readWindow: FileVectorReadWindowSnapshot | undefined;
+    const recordWindow = (snapshot: FileVectorReadWindowSnapshot) => {
+      readWindow = snapshot;
+      observeWindow(snapshot);
+    };
+    if (job.kind === 'search' || job.kind === 'message-search')
+      recordWindow({
+        prepared: false,
+        active: null,
+        reason: 'not_configured',
+        cleanup: null,
+        counters: null,
+        preload: null,
+      });
+    const readVectorQuery = prepareVectorReadQuery(job, db, recordWindow);
     // Register existing vec0 tables; this does not create/migrate or mutate them.
     try {
       sqliteVec.load(db);
@@ -117,7 +142,8 @@ async function execute(
         onSlowRead() {},
         maxReports: 20,
         describeNativeRead: describePassageVectorRead,
-        onReadStarted: (sql) => report({ phase: 'sql-start', sql }),
+        onReadStarted: (sql) =>
+          report({ phase: 'sql-start', sql, ...(sql.native && readWindow ? { readWindow } : {}) }),
         onReadFinished: (sql) => report({ phase: 'sql-finish', sql }),
       })(db);
     started();
@@ -143,8 +169,15 @@ async function execute(
               vectorStore: backend.vectorStore,
               ...(job.embedding.passages ? { passageVectorStore: backend.passageVectorStore } : {}),
             });
-          } catch {
+          } catch (error) {
             // An absent, unknown or retired accelerator cannot suppress the canonical lexical read.
+            // A search that asked for vectors still gets to know why it did not get them.
+            const requested = job.options?.mode ?? (job.kind === 'message-search' ? 'hybrid' : 'lexical');
+            if (requested !== 'lexical')
+              report({
+                phase: 'vector-degrade',
+                degrade: describeVectorSearchFailure('vector_generation_open', error),
+              });
           }
         }
         if (job.kind === 'message-search')
@@ -184,13 +217,14 @@ process.on('message', (message: ParentMessage) => {
     return;
   }
   process.stderr.write(memoryProcessStderrBoundary(message.stderrToken, message.id, 'begin'));
+  let readWindow: FileVectorReadWindowSnapshot | undefined;
   const finish = (result: Extract<ChildMessage, { type: 'result' }>) => {
     process.stderr.write(memoryProcessStderrBoundary(message.stderrToken, message.id, 'end'));
-    send(result);
+    send({ ...result, ...(readWindow ? { readWindow } : {}) });
   };
   void execute(
     message.job,
-    () => send({ type: 'started', id: message.id, pid: process.pid }),
+    () => send({ type: 'started', id: message.id, pid: process.pid, ...(readWindow ? { readWindow } : {}) }),
     (diagnostic) => {
       try {
         send({ type: 'read-diagnostic', id: message.id, diagnostic });
@@ -198,6 +232,16 @@ process.on('message', (message: ParentMessage) => {
         /* Optional witness. */
       }
     },
+    (snapshot) => {
+      readWindow = snapshot;
+    },
+    () =>
+      new Promise<void>((resolve, reject) => {
+        if (!process.connected) return reject(new Error('Message vector control channel disconnected'));
+        process.send?.({ type: 'message-vectors-started', id: message.id } satisfies ChildMessage, (error) =>
+          error ? reject(error) : resolve(),
+        );
+      }),
   ).then(
     (value) => finish({ type: 'result', id: message.id, value }),
     (error) => finish({ type: 'result', id: message.id, error: encodeProcessError(error) }),

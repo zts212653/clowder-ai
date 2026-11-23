@@ -42,6 +42,9 @@ export interface TokenUsage {
   totalTokens?: number; // Gemini fallback (doesn't split in/out)
   cacheReadTokens?: number; // Subset of inputTokens from cache (Claude + Codex)
   cacheCreationTokens?: number; // Subset of inputTokens written to cache (Claude only)
+  /** Observed write-tier breakdown; absent means the provider did not report a TTL. */
+  cacheCreation5mTokens?: number;
+  cacheCreation1hTokens?: number;
   costUsd?: number; // Claude: exact from CLI; Codex: estimated from pricing table
   /** True when costUsd was calculated from a pricing table rather than reported by the CLI */
   costEstimated?: boolean;
@@ -90,6 +93,8 @@ export function mergeTokenUsage(existing: TokenUsage | undefined, incoming: Toke
     'totalTokens',
     'cacheReadTokens',
     'cacheCreationTokens',
+    'cacheCreation5mTokens',
+    'cacheCreation1hTokens',
     'costUsd',
     'durationMs',
     'durationApiMs',
@@ -121,6 +126,18 @@ export function mergeTokenUsage(existing: TokenUsage | undefined, incoming: Toke
 /**
  * Metadata about the provider/model behind an agent message
  */
+export interface ObservedContextWindow {
+  readonly provider: 'google';
+  readonly carrier: 'agy_stream_json';
+  readonly model: string;
+  readonly cliVersion: string;
+  /** Hash of the verified profile/account/model/executable identity; no credentials. */
+  readonly scopeId: string;
+  readonly windowTokens: number;
+  readonly observedAt: number;
+  readonly evidenceRef: string;
+}
+
 export interface MessageMetadata {
   executionAccount?: import('@cat-cafe/shared').ExecutionAccountSnapshot;
   provider: string;
@@ -134,6 +151,8 @@ export interface MessageMetadata {
    */
   resumeSessionId?: string;
   usage?: TokenUsage;
+  /** Host-derived operational ceiling, scoped to this verified native launch. */
+  contextWindowObservation?: ObservedContextWindow;
   /** F306: bounded provider-neutral child lifecycle for live/F5 Agent Run parity. */
   subexecutionEvents?: readonly ProviderSubexecutionSemanticEvent[];
   /** F061: false when provider cannot verify which model actually ran (e.g. CDP bridge) */
@@ -322,6 +341,8 @@ export interface AgentMessage {
   catId: CatId;
   /** Text content (for 'text' and 'tool_result' types) */
   content?: string;
+  /** Provider-written summary of prose, readable but not an authored command. */
+  textSource?: 'provider_summary';
   /** Durable content blocks projected with an explicit callback message. */
   contentBlocks?: readonly MessageContent[];
   /** Machine-readable A2A target cat for 'a2a_handoff' events. */
@@ -912,13 +933,14 @@ export interface AgentContextCapacity {
 
 /**
  * Concrete proof of the model/window attached to one carrier instance or
- * per-invocation native configuration. This is a pure runtime projection and
+ * per-invocation native configuration, or a scoped observed operational ceiling.
+ * An observed ceiling is never proof that a native window was configured. This is a pure runtime projection and
  * must never be persisted or inferred from capability flags alone.
  */
 export interface AgentContextBinding {
   readonly model?: string;
   readonly windowTokens?: number;
-  readonly source: 'service_spawn' | 'invocation_config';
+  readonly source: 'service_spawn' | 'invocation_config' | 'observed';
 }
 
 /** Provider-native identity for one exact, still-open Agent Client run. */
@@ -1015,6 +1037,11 @@ export type ToolExecutionPolicy =
     }
   | { readonly mode: 'callback_allowlist'; readonly allowedCallbackRoutes: readonly string[] }
   | {
+      /** F335 panel watcher: ordinary reads and memory proposals by route template; nothing that speaks or acts. */
+      readonly mode: 'watcher_panel';
+      readonly allowedCallbackRoutes: readonly string[];
+    }
+  | {
       readonly mode: 'plugin_native';
       readonly pluginInstanceId: string;
       readonly contributionId: string;
@@ -1086,6 +1113,11 @@ export interface AgentServiceOptions {
   /** Admission-owned MCP descriptors; callback credentials are materialized for the current turn. */
   frozenAcpMcpServers?: import('./agents/providers/acp/types.js').AcpMcpServer[];
   frozenAcpMcpIssues?: import('@cat-cafe/shared').PluginMcpToolIssue[];
+  /** Host-only activation fences; execution-local and never persisted or sent to ACP. */
+  frozenAcpMcpCurrentness?: readonly Pick<
+    import('../../../config/capabilities/invocation-plugin-mcp-view.js').InvocationPluginMcpEntry,
+    'capabilityId' | 'pluginId' | 'isCurrent'
+  >[];
   frozenNativeMcpConfig?: import('./agents/providers/provider-mcp-config.js').ProviderMcpConfigPlan;
   frozenKimiMcpConfig?: import('./agents/providers/kimi-mcp-surface.js').KimiMcpConfigPlan;
   frozenCodexMcpInput?: import('./agents/providers/codex-mcp-input.js').CodexMcpInputPlan;
@@ -1315,6 +1347,7 @@ export interface AgentService {
       AgentServiceOptions,
       | 'frozenAcpMcpServers'
       | 'frozenAcpMcpIssues'
+      | 'frozenAcpMcpCurrentness'
       | 'frozenNativeMcpConfig'
       | 'frozenKimiMcpConfig'
       | 'frozenCodexMcpInput'

@@ -5,6 +5,7 @@ import { PassageVectorStore, passageVectorKey } from '../../dist/domains/memory/
 import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceStore.js';
 import { ensurePassageVectorTable, ensureVectorTable } from '../../dist/domains/memory/schema.js';
 import { VectorStore } from '../../dist/domains/memory/VectorStore.js';
+import { onVectorSearchDegrade } from '../../dist/domains/memory/vector-search-degrade-report.js';
 
 describe('message-unit semantic admission', () => {
   let store;
@@ -23,9 +24,12 @@ describe('message-unit semantic admission', () => {
     ensureVectorTable(db, 3);
     ensurePassageVectorTable(db, 3);
     vectors = new PassageVectorStore(db, 3);
+    const model = { modelId: 'fixture', modelRev: '1', dim: 3 };
+    const vectorStore = new VectorStore(db, 3);
+    vectorStore.initMeta(model);
     store.setEmbedDeps({
       mode: 'on',
-      vectorStore: new VectorStore(db, 3),
+      vectorStore,
       passageVectorStore: vectors,
       embedding: {
         isReady: () => true,
@@ -38,7 +42,7 @@ describe('message-unit semantic admission', () => {
           if (fail) throw new Error('fixture provider unavailable');
           return [new Float32Array([1, 0, 0])];
         },
-        getModelInfo: () => ({ modelId: 'fixture', modelRev: '1', dim: 3 }),
+        getModelInfo: () => model,
       },
     });
     await store.upsert(
@@ -122,13 +126,24 @@ describe('message-unit semantic admission', () => {
 
   it('reports provider failure as lexical degradation instead of authoritative semantic emptiness', async () => {
     fail = true;
-    const result = await store.searchMessagePassages('导航', { ...options, mode: 'hybrid' });
+    const records = [];
+    const unsubscribe = onVectorSearchDegrade((record) => records.push(record));
+    let result;
+    try {
+      result = await store.searchMessagePassages('导航', { ...options, mode: 'hybrid' });
+    } finally {
+      unsubscribe();
+    }
     assert.deepEqual(
       result.passages.map((p) => p.messageId),
       ['old'],
     );
     assert.equal(result.meta.degradeReason, 'passage_vector_search_error');
     assert.equal(result.meta.effectiveMode, 'lexical');
+    assert.equal(records.length, 1, 'the swallowed failure leaves one record of why');
+    assert.equal(records[0].stage, 'message_passage_hybrid');
+    const line = JSON.stringify(records[0]);
+    assert.ok(!line.includes('fixture provider unavailable') && !line.includes('导航'), line);
   });
 
   it('does not resurrect a cached lexical hit when recall suppression starts during query embedding', async () => {

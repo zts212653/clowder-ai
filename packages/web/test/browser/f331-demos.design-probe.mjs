@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { chromium } from 'playwright';
 
 // Live author preview: real AppShell, real media and isolated API. No model invocation.
 test('F331 real waiting entry, continuous playback, closing and explicit draft', async () => {
   const browser = await chromium.launch({ headless: true });
-  const evidence = '/tmp/cat-cafe-evidence/f331-demos';
+  const evidence = join(tmpdir(), 'cat-cafe-evidence/f331-demos');
   await mkdir(evidence, { recursive: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -21,13 +23,10 @@ test('F331 real waiting entry, continuous playback, closing and explicit draft',
     assert.equal(companionResponse.ok(), true);
     const { threadId: companionId } = await companionResponse.json();
     await page.request.get(`http://localhost:5142/thread/${companionId}`);
-    const draftUrl = `http://localhost:5142/api/threads/${companionId}/composer-draft`;
-    const { revision } = await (await page.request.get(draftUrl)).json();
-    const saved = await page.request.put(draftUrl, {
-      headers,
-      data: { expectedRevision: revision, text: '伴随对话里原有的草稿。' },
-    });
-    assert.equal(saved.ok(), true);
+    await page.evaluate((id) => {
+      localStorage.setItem('cat-cafe:thread-drafts', JSON.stringify([[id, '伴随对话里原有的草稿。']]));
+    }, companionId);
+    await page.reload();
     const watch = page.getByRole('button', { name: '观看演示' });
     await page.screenshot({ path: `${evidence}/before-watch.png` });
     await watch.waitFor();

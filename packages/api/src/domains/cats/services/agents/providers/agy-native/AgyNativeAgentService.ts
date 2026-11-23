@@ -16,10 +16,12 @@ import type { RawArchiveSink } from '../codex-audit-hooks.js';
 import { compileL0ViaSubprocess } from '../l0-compiler.js';
 import { createAgyNativeContinuityInput } from './agy-native-continuity.js';
 import { AgyNativeResumeMismatchError, AgyNativeStartupError } from './agy-native-errors.js';
-import { prepareAgyNativeLaunch } from './agy-native-launch.js';
 import { assertAgyMemberAccount, captureAgyMemberOptions } from './agy-native-member.js';
 import { preflightAgyNativeWorkspace } from './agy-native-policy.js';
 import { AgyNativeProfileBusyError } from './agy-native-profile-turn.js';
+import { assertSafeAgyAccountEnv } from './launch/agy-native-launch-env.js';
+import { prepareAgyNativeLaunchWithProgress } from './launch/agy-native-launch-progress.js';
+import { hostAgyNativeAgentName } from './launch/agy-session-compatibility.js';
 import { runAgyNativeInvocation } from './run/agy-native-invocation.js';
 
 export interface AgyNativeAgentServiceConfig {
@@ -42,8 +44,7 @@ function hasUnsupportedNativeOverrides(
     Boolean(options?.cliConfigArgs?.length) ||
     (options?.toolExecutionPolicy !== undefined &&
       options.toolExecutionPolicy.mode !== 'read_only' &&
-      !(options.toolExecutionPolicy.mode === 'plugin_native' && options.pluginNativeLaunch)) ||
-    Object.keys(options?.accountEnv ?? {}).length > 0
+      !(options.toolExecutionPolicy.mode === 'plugin_native' && options.pluginNativeLaunch))
   );
 }
 
@@ -188,11 +189,21 @@ export class AgyNativeAgentService implements AgentService {
       options = member ?? options;
       await member?.pluginNativeLaunch?.assertCurrent();
       if (hasUnsupportedNativeOverrides(this.model, this.profile, options)) {
-        throw new Error('AGY native requires an explicit profile/model and refuses CLI or account env overrides');
+        throw new Error('AGY native requires an explicit profile/model and refuses CLI overrides');
       }
+      assertSafeAgyAccountEnv(options?.accountEnv);
       if (!options?.workingDirectory) throw new Error('AGY native requires an explicit workingDirectory');
       const workspace = resolve(options.workingDirectory);
-      const workspacePreflight = preflightAgyNativeWorkspace(workspace);
+      const expectedAgentMode = member
+        ? 'member'
+        : options.toolExecutionPolicy?.mode === 'read_only'
+          ? 'readonly'
+          : 'normal';
+      const workspacePreflight = preflightAgyNativeWorkspace(workspace, {
+        hostAgentName: hostAgyNativeAgentName(this.catId, expectedAgentMode),
+        allowWorkspaceExecutableConfig:
+          expectedAgentMode === 'normal' && this.profile.allowWorkspaceExecutableConfig === true,
+      });
       if (!workspacePreflight.ok) {
         yield* failure(
           'AGY_WORKSPACE_CUSTOMIZATION',
@@ -209,18 +220,22 @@ export class AgyNativeAgentService implements AgentService {
         ...(member ? { runtimeModel: this.model } : {}),
       });
       await member?.pluginNativeLaunch?.assertCurrent();
-      const launch = await prepareAgyNativeLaunch({
-        catId: this.catId,
-        model: this.model,
-        profileConfig: this.profile,
-        workspace,
-        prompt,
-        body,
-        ...(compactionControl ? { controlOperation: 'compact' as const } : {}),
-        ...(this.command ? { command: this.command } : {}),
-        ...(options ? { options } : {}),
-      });
+      const launch = yield* prepareAgyNativeLaunchWithProgress(
+        {
+          catId: this.catId,
+          model: this.model,
+          profileConfig: this.profile,
+          workspace,
+          prompt,
+          body,
+          ...(compactionControl ? { controlOperation: 'compact' as const } : {}),
+          ...(this.command ? { command: this.command } : {}),
+          ...(options ? { options } : {}),
+        },
+        metadata,
+      );
       disposeCredentials = launch.disposeCredentials;
+      metadata.model = launch.effectiveModel;
       const rawArchivePath = options?.invocationId ? this.rawArchive.getPath?.(options.invocationId) : undefined;
       if (rawArchivePath) metadata.diagnostics = { agyNative: { rawArchivePath } };
       const continuityInput = preflight ? createAgyNativeContinuityInput(launch, preflight, options) : undefined;
@@ -228,7 +243,7 @@ export class AgyNativeAgentService implements AgentService {
       await member?.pluginNativeLaunch?.assertCurrent();
       yield* runAgyNativeInvocation({
         catId: this.catId,
-        model: this.model,
+        model: launch.effectiveModel,
         prompt,
         launch,
         metadata,

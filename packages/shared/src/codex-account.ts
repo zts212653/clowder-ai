@@ -85,5 +85,7 @@ export interface ExecutionAccountSnapshot {
   readonly displayName: string;
   readonly authType: 'oauth' | 'api_key';
   readonly accountRevision: string;
+  /** Nonsecret fingerprint of the exact Claude credential captured for this launch. */
+  readonly credentialVersion?: string;
   readonly identity?: CodexAccountIdentity;
 }

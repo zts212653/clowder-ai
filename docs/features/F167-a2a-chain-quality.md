@@ -4,8 +4,12 @@ related_features: [F064, F027, F055, F122, F168, F246, F280]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
-updated: 2026-10-27
-tips_exempt: "Renewed 2026-10-27: ordinary Task handoff and parented-callback corrections continue through the existing task, routing and tool surfaces. Task remains the responsibility source; these internal custody changes add no end-user action or new approval step. Usage is described by the existing entrusted-work and development-return tool surfaces; there are currently no corresponding capability tips, and this delta adds no end-user action."
+updated: 2026-11-17
+description: "A2A 串行协作链质量护栏：乒乓球熔断、虚空传球拦截、命令托管持球、跨线程真核验与 Task 责任交接。"
+description_source: human
+description_author: gemini-argon
+description_updated_at: 2026-11-14T14:22:00Z
+tips_exempt: "Renewed 2026-11-17: daily doc guard records PR #6765 (approved generic Task continuation across _invalidRaw recovery envelopes) and PR #6849 (approved cross-project Task child handoff authority). Task remains the responsibility source; these internal custody and continuation repairs add no end-user action or new approval step."
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F167-a2a-chain-quality.md"

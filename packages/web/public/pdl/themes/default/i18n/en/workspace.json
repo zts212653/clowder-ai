@@ -1,0 +1,106 @@
+{
+ "memory": {
+  "flagRerank": "Auto re-rank memory search results"
+ },
+ "wsPreview": {
+  "discovered": "Discovered services"
+ },
+ "execDetail": {
+  "feedback": "Also tell the cat why it ended",
+  "forceReset": {
+   "title": "Stop the whole conversation",
+      "body": "Stops every member running in this conversation; nothing resumes automatically."
+  }
+ },
+ "workspaceOwners": {
+  "projectSetup": {
+   "initialize": "Initialize Git",
+   "clone": "Clone from URL",
+   "prepare": "Start preparation",
+   "later": "Later"
+  }
+ },
+ "voiceReview": {
+  "advisory": {
+   "dnd": "Do not disturb",
+   "mode": "Advisory mode",
+   "passive": "Passive",
+   "active": "Active"
+  },
+  "pageAction": {
+   "title": "Current page",
+   "inspect": "Inspect"
+  }
+ },
+ "workbench": {
+  "file": {
+   "outsideWorkspace": "This file's folder is not registered as a workspace",
+   "needsConnection": "Connect the file's folder first to open it",
+   "unreadable": "This file cannot be opened right now"
+  },
+  "pageActionResult": {
+   "applied": "Applied",
+   "no_effect": "No effect",
+   "denied": "Denied"
+  },
+  "pageActionState": {
+   "ready": "Ready to inspect",
+   "inspecting": "Inspecting",
+   "awaiting_consent": "Awaiting consent"
+  },
+  "pageActionField": {
+   "operation": "Action",
+   "expires": "Expires",
+   "result": "Result"
+  }
+ },
+ "wsRecall": {
+  "partial": "Partly read: some records or their replies cannot be read right now.",
+  "reread": "Read again",
+  "result": {
+   "error": "Search failed",
+   "timeout": "Search timed out",
+   "cancelled": "Search cancelled",
+   "parser_miss": "Unable to read search results",
+   "no_results": "No matches",
+   "unrecorded": "Results were not recorded",
+   "read": "Read",
+   "presented_unreported": "Delivered · unreported",
+   "drilled": "Opened",
+   "applied": "Applied",
+   "dismissed": "Dismissed",
+   "invalidated": "Delivery invalidated",
+   "hits": "{0} matches · {1}",
+   "afterRead": "{0} read later",
+   "noRead": "No later reads recorded"
+  },
+  "emptyReason": {
+   "error": "Tool call failed",
+   "timeout": "Tool call timed out",
+   "cancelled": "Search cancelled before results returned",
+   "parser_miss": "The tool returned results that could not be parsed",
+   "result_unmerged": "Results from this search have not been recorded yet",
+   "unrecorded": "Match details were not recorded"
+  }
+ },
+ "wsEval": {
+  "previousCadence": "Previous cadence: {0}",
+  "automaticRetiredDetail": "Automatic evaluation retired; history and on-demand access remain"
+ },
+ "wsEvolution": {
+  "automaticRetired": "Automatic evaluation retired; start one on demand"
+ },
+  "wsGit": {
+    "worktreeRequired": "This is a bare Git repository; this view requires a worktree",
+    "unavailable": "Git repository unavailable",
+    "readFailed": "Could not read Git"
+  },
+  "recovery": {
+    "paused": "Automatic recovery paused",
+    "pending": "Recovery pending",
+    "needsAttention": "Needs attention",
+    "parked": "Parked",
+    "interrupted": "Interrupted",
+    "recheck": "Recheck"
+  }
+}

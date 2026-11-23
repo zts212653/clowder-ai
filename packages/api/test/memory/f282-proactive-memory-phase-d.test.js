@@ -288,3 +288,105 @@ describe('F282 Phase D opportunity evaluator', () => {
     });
   });
 });
+
+// 2026-11-13: cats submit person proposals, defers and abstentions only through cat_cafe_remember.
+describe('F282 evaluator reads remember items', () => {
+  test('a remember result yields per-item outcomes; rejected rows are not counted', async () => {
+    const { deriveResultSummary } = await import(
+      '../../dist/domains/cats/services/tool-usage/derive-result-summary.js'
+    );
+    const text = JSON.stringify({
+      groupId: 'remember_x',
+      messageId: 'card-1',
+      results: [
+        {
+          itemId: 'p',
+          target: 'person',
+          statusCode: 200,
+          result: { candidateId: 'cand-1', messageId: 'msg-1', status: 'pending_approval', deduped: false },
+        },
+        {
+          itemId: 'd',
+          target: 'person_defer',
+          statusCode: 200,
+          result: { receiptId: 'r-1', status: 'active', deduped: false },
+        },
+        { itemId: 'a', target: 'person_abstain', statusCode: 200, result: { status: 'recorded' } },
+        { itemId: 'x', target: 'person', statusCode: 422, result: { error: 'source_not_eligible' } },
+        { itemId: 't', target: 'taste', statusCode: 200, result: { proposalId: 'taste-1', status: 'pending' } },
+      ],
+    });
+    assert.deepEqual(deriveResultSummary('remember', text), {
+      proactiveMemoryOutcomes: [
+        { itemId: 'p', outcome: 'proposal_submitted' },
+        { itemId: 'd', outcome: 'deferred_receipt_recorded' },
+        { itemId: 'a', outcome: 'abstention_recorded' },
+      ],
+    });
+    assert.deepEqual(deriveResultSummary('remember', JSON.stringify({ status: 'stale_ignored' })), {});
+  });
+
+  test('remember proposals and abstentions count as informed, with the abstention reason from the item payload', async () => {
+    const { deriveProactiveMemoryOpportunityRef } = await import(
+      '../../dist/domains/memory/proactive-memory-opportunity-ref.js'
+    );
+    const { evaluateProactiveMemoryColdStart } = await import(
+      '../../dist/domains/memory/ProactiveMemoryOpportunityEvaluator.js'
+    );
+    const rememberEvent = (invocationId, items, proactiveMemoryOutcomes) => ({
+      invocationId,
+      sessionId: invocationId,
+      threadId: 'thread-f282-phase-d',
+      catId: 'codex-sol',
+      toolName: 'remember',
+      timestamp: NOW,
+      turnIndex: 0,
+      status: 'success',
+      summary: { clientRequestId: invocationId, items, proactiveMemoryOutcomes, _resultMerged: true },
+    });
+    const exposure = (invocationId, expectedDisposition) => ({
+      opportunityRef: deriveProactiveMemoryOpportunityRef(invocationId),
+      workspaceWeekBucket: `workspace-${invocationId}:2026-W31`,
+      expectedDisposition,
+      ...(expectedDisposition === 'proposal_ready' ? { proposalAdjudication: 'relevant' } : {}),
+    });
+    const result = evaluateProactiveMemoryColdStart({
+      exposures: [
+        exposure('remember-propose', 'proposal_ready'),
+        exposure('remember-abstain', 'abstention_expected'),
+        exposure('remember-rejected', 'proposal_ready'),
+      ],
+      toolEvents: [
+        rememberEvent(
+          'remember-propose',
+          [{ itemId: 'p', target: 'person', payload: {} }],
+          [{ itemId: 'p', outcome: 'proposal_submitted' }],
+        ),
+        rememberEvent(
+          'remember-abstain',
+          [{ itemId: 'a', target: 'person_abstain', payload: { reasonCode: 'bad_timing' } }],
+          [{ itemId: 'a', outcome: 'abstention_recorded' }],
+        ),
+        rememberEvent('remember-rejected', [{ itemId: 'x', target: 'person', payload: {} }], []),
+      ],
+      now: NOW,
+    });
+    const byRef = new Map(result.episodes.map((episode) => [episode.opportunityRef, episode]));
+    assert.equal(byRef.get(deriveProactiveMemoryOpportunityRef('remember-propose'))?.disposition, 'propose');
+    const abstained = byRef.get(deriveProactiveMemoryOpportunityRef('remember-abstain'));
+    assert.equal(abstained?.disposition, 'abstain');
+    assert.equal(abstained?.reasonCode, 'bad_timing');
+    assert.ok(
+      result.failures.some(
+        (failure) =>
+          failure.opportunityRef === deriveProactiveMemoryOpportunityRef('remember-rejected') &&
+          failure.code === 'uninformed_silence',
+      ),
+    );
+  });
+});
+
+test('a failed remember callback stays a tool error', async () => {
+  const { deriveResultSummary } = await import('../../dist/domains/cats/services/tool-usage/derive-result-summary.js');
+  assert.equal(deriveResultSummary('remember', 'Callback failed (401): unauthorized').isError, true);
+});

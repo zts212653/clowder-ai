@@ -134,7 +134,16 @@ export async function watcherNativeFixture(w, fixtureOptions = {}) {
             status: 'completed',
             model: body.model,
             output,
-            usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12, input_tokens_details: { cached_tokens: 3 } },
+            ...(state.reportUsage === false
+              ? {}
+              : {
+                  usage: {
+                    input_tokens: 10,
+                    output_tokens: 2,
+                    total_tokens: 12,
+                    input_tokens_details: { cached_tokens: 3 },
+                  },
+                }),
           },
         },
       ],

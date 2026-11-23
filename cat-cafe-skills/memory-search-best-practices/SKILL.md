@@ -1,11 +1,6 @@
 ---
 name: memory-search-best-practices
-description: >
-  按问题与证据缺口选择记忆检索范围（8 类题型参考）。
-  Use when: 任务是 "哪些地方提过 X" / "X 的来源 / source map" / "有没有提过 Y / absence check" / "上次到现在变了什么 / delta" / 冷启动 onboard 复杂主题 / 任何召回任务搜了一刀觉得不够。
-  Not for: 只是选哪个入口走第一刀（用 memory-navigation）/ 已知精确 anchor 单 Read（直接 Read）/ 代码符号查（Grep/LSP）/ 新功能开发（不是 recall 任务）。
-  Output: 单一 owner 汇总原始证据、实际覆盖与未验证边界，一次交付。
-  GOTCHA: memory-navigation 选择入口；本 skill 处理证据缺口与覆盖边界，不按模型家族或固定轮次决定停止。
+description: "按问题与证据缺口选记忆检索范围。Use when: 哪些地方提过 X、来源、有没有提过、上次以来的变化、冷启动，或搜一刀不够。Not for: 一刀能答的查找、已知坐标单读、代码符号。Output: 原始证据、实际覆盖与未验证边界。"
 triggers:
   - "哪些 thread"
   - "哪些 md"
@@ -25,6 +20,8 @@ triggers:
 ---
 
 # Memory Search Best Practices（按问题检索与收敛）
+
+记忆来源的完整 `readRef` 交给 `cat_cafe_read_memory({ref:readRef})`；`sources` 与 `nextRef` 原样递回。已知消息/文件坐标可直接构造 ref。普通读取不发卡；归纳、当前画像及文档版本不授予原消息引用资格，仍须明确选句。
 
 ## 价值门禁
 
@@ -52,14 +49,14 @@ triggers:
 
 | 题型 | 例子 | 可用路径 | 收敛依据 |
 |------|------|----------|----------|
-| 是什么 | F200 是什么 | 精确 anchor 用 graph_resolve；模糊概念用 search_evidence(scope=docs, mode=hybrid)，读相关原文 | 原文足以回答当前问题 |
-| 周边关系 | F200 关联什么 | graph_resolve(anchor, depth=1)，按需限定 relations | 相关关系与本题的联系已明确 |
+| 是什么 | F200 是什么 | search_evidence 交编号或原句（编号同时得图谱关系）；要结论加 scope=docs、mode=hybrid，读相关原文 | 原文足以回答当前问题 |
+| 周边关系 | F200 关联什么 | search_evidence(query=编号) 看图谱组；graphDepth 先 1，按需 graphRelations | 相关关系与本题的联系已明确 |
 | 决策考古 | 为什么选 X | 找 ADR/spec，沿其中的 thread/message 坐标读当时原话 | 区分当时理由、后来解释和未确认处 |
 | 冷启动 | 接手 F200 要知道什么 | 读当前 spec/Task，按缺口补 graph、近期 thread 或会话摘要 | 能说清原目标、当前事实和下一动作 |
 | coverage | 哪些地方提过 X | 分别查 docs 与 threads，按实际线索扩展同义词、缩写、语言或关联概念；合并去重并读采用的原文 | 主要相关来源已覆盖，继续查询不再增加实质线索；报告实际边界 |
 | source-map | 这个想法源于哪里 | 从文档 provenance 追 source thread/message，必要时补早期候选 | 结论能回到原始来源；有限检索不冒充最早或完整来源 |
 | absence | 提过 Y 吗 | 核查询范围与索引状态，检查相关措辞及相反表述 | 只能说明已查范围未发现；零命中不证明全局不存在 |
-| delta | 上次以来变了什么 | 先确定旧状态与时间窗口，再用 list_recent、当前真相和相关 diff 比较 | 变化有前后依据，未覆盖部分明确 |
+| delta | 上次以来变了什么 | 先确定旧状态与时间窗口，再用 search_evidence 不带 query 看最近（since/scope/kinds）、当前真相和相关 diff 比较 | 变化有前后依据，未覆盖部分明确 |
 
 ## 复杂 coverage 的本地经验
 
@@ -67,6 +64,20 @@ triggers:
 据已经发现的内容选择扩展，例如 sensory gating、2e、RSD、PDA、hyperfocus；这只是该案例的线索，不是每题固定词表。
 文档与对话回答不同问题：文档便于定位当前结论，对话用于核原话、参与者与时间。
 输出可以用 item／source／谁提到／直接或间接／未知边界的简表；简单问题不需要矩阵。
+主人要“原话带出处”时，全文核读后选原句与理由，用[常用回复里的出处卡](../rich-messaging/SKILL.md#发送方式)交回。
+卡与实际回答同条、能回原消息才算交付；只读到预览或拿到 prepared 回执时不能声称已附卡。
+
+## search_evidence 参数取舍
+
+工具说明只留契约；这些取舍原先写在说明里，2026-11 找入口瘦身后归到这里。
+
+- **mode**：默认 lexical（BM25），F 号、专名、原词最准；拿不准用 hybrid（词面＋向量）；跨语言或同义改写用 semantic 补一刀。语义「最相似」只是排序，不等于确认相关。
+- **scope**：要结论查 docs（feature/ADR/架构/计划/教训），要过程查 threads；要全貌两边分开查——all 里文档词密度高，会把对话挤到后面。
+- **depth=raw**：先收窄范围再用，看具体段落；默认 summary。
+- **措辞盲区**：搜「记忆」会漏「失忆／压缩／丢失」，相反角度单独查。
+- **图谱组**：交精确编号才有关系子图。`graphDepth` 先用 1，≥2 且不限 `graphRelations` 时容易绕到超级枢纽（F102/F188）扇出上百；只看强关系 `["wikilink","doc_link"]`，只看 F 号引用 `["feature_ref"]`。候选 ≥5 个时先挑一个编号看一跳再深挖。
+- **最近浏览**（不带 query）：压缩恢复/"最近发生什么" `since="24h"` 或 `"7d"`；找一周前的讨论 `"7d"`；找最近合入 `scope="docs"` + `since="3d"`；完全没头绪 `scope="all"`。
+- **事情组**：不显式收窄时，同一句 query 也整句字面匹配事情页标题/说明（不拆词、不走语义，超过 200 字标 not_covered）；短线索如「守望猫」更容易命中。不带 query 是浏览事情目录；续页把返回的 `next.arguments` 原样传回（含 `matterCursor`）。threadId／时间条件下事情组标 not_covered，不代表没有相关页。
 
 ## F256 Related directions
 
@@ -86,11 +97,12 @@ triggers:
 | 只搜一种措辞就断言不存在 | 检查相关表述与索引边界，只声明已查范围未发现 |
 | 命中 canonical doc 就把转述当原话 | 沿来源坐标核对应的 thread/message |
 | 盲跟全部 Related directions | 只追能改变结论或补缺口的候选 |
-| 把 list_recent(scope=docs) 当全集 | 该入口曾有 timestamp/混合范围限制；结合所需来源，保留返回的范围限制 |
+| 把最近浏览（不带 query）当全集 | 它按时间窗与 limit 截取，docs/memory 时间是文件 mtime；结合所需来源，保留返回的 range |
+| 把某组 not_covered 当成查过没有 | not_covered 是这组没查（守不住收窄条件）；换掉那个条件或另查原入口，再下结论 |
 
 ## 和其他 Skill 的区别
 
-- `memory-navigation` 选择首次入口；本 skill 判断如何补缺口与收敛。
+- 普通查找直接用 `search_evidence`；本 skill 判断如何补缺口与收敛。
 - `debugging` 处理 bug 根因，不要求普通实现任务先做一次历史普查。
 - `cross-cat-handoff` 处理交接；检索本身不产生额外协作责任。
 

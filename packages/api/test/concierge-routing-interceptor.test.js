@@ -2,7 +2,7 @@
  * F229 P1 fix — ConciergeRoutingInterceptor unit tests
  *
  * Verifies prepareConciergeContext returns the right shape for concierge threads
- * and is a no-op for normal threads / missing store.
+ * and is a no-op for normal threads / a missing settings reader.
  */
 
 import assert from 'node:assert/strict';
@@ -20,57 +20,41 @@ const MOCK_CONFIG = {
   personaTone: '温暖、简短',
   dutyCatProfileId: 'gemini35',
   proactivePolicy: 'quiet-badge',
-  muted: false,
+  behaviorEnabled: true,
+  ballSize: 72,
 };
 
-const mockStore = {
-  get: async (_userId) => MOCK_CONFIG,
-  put: async () => {},
-};
+const readSettings = async () => MOCK_CONFIG;
 
 describe('prepareConciergeContext', () => {
   it('returns empty object when thread is null', async () => {
-    const result = await prepareConciergeContext(null, 'user-1', mockStore);
+    const result = await prepareConciergeContext(null, readSettings);
     assert.deepStrictEqual(result, {});
   });
 
   it('returns empty object when thread has no threadKind', async () => {
     const thread = { id: 'thread-1', userId: 'user-1' };
-    const result = await prepareConciergeContext(thread, 'user-1', mockStore);
+    const result = await prepareConciergeContext(thread, readSettings);
     assert.deepStrictEqual(result, {});
   });
 
   it('returns empty object when thread is a different kind', async () => {
     const thread = { id: 'thread-1', userId: 'user-1', threadKind: 'other' };
-    const result = await prepareConciergeContext(thread, 'user-1', mockStore);
+    const result = await prepareConciergeContext(thread, readSettings);
     assert.deepStrictEqual(result, {});
   });
 
-  it('returns empty object when store is undefined', async () => {
+  it('returns empty object when no settings reader is provided', async () => {
     const thread = { id: 'thread-1', userId: 'user-1', threadKind: 'concierge' };
-    const result = await prepareConciergeContext(thread, 'user-1', undefined);
+    const result = await prepareConciergeContext(thread, undefined);
     assert.deepStrictEqual(result, {});
   });
 
-  it('returns threadKind + conciergeConfig when thread.threadKind === concierge and store is provided', async () => {
+  it('returns threadKind + conciergeConfig when thread.threadKind === concierge and settings are readable', async () => {
     const thread = { id: 'thread-1', userId: 'user-1', threadKind: 'concierge' };
-    const result = await prepareConciergeContext(thread, 'user-1', mockStore);
+    const result = await prepareConciergeContext(thread, readSettings);
     assert.strictEqual(result.threadKind, 'concierge');
     assert.deepStrictEqual(result.conciergeConfig, MOCK_CONFIG);
-  });
-
-  it('calls store.get with the provided userId', async () => {
-    let capturedUserId = null;
-    const capturingStore = {
-      get: async (userId) => {
-        capturedUserId = userId;
-        return MOCK_CONFIG;
-      },
-      put: async () => {},
-    };
-    const thread = { id: 'thread-1', userId: 'user-1', threadKind: 'concierge' };
-    await prepareConciergeContext(thread, 'captured-user', capturingStore);
-    assert.strictEqual(capturedUserId, 'captured-user');
   });
 });
 

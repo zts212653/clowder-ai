@@ -1,3 +1,4 @@
+import { sessionCacheRuntimeKey } from '../../session/cache/session-cache-runtime.js';
 import { InvocationServiceScope } from '../invocation/invocation-service-scope.js';
 import { isRoutingOwnerAttempt } from './routing-owner-attempt.js';
 import { routingPreflightNotice } from './routing-preflight-notice.js';
@@ -26,7 +27,6 @@ import { createConciergeMessageSearch } from '../../../../concierge/concierge-me
 import {
   buildConciergeActions,
   extractTriagePlanIdsFromActions,
-  projectConciergeStoredContent,
   stripTriagePlanMarkers,
   type TriagePlanExtractionDeps,
 } from '../../../../concierge/concierge-reply-validator.js';
@@ -124,11 +124,12 @@ import { commitCompletedRouteResponse } from './commit-completed-response.js';
 import { type ContextEvalInput, extractContextEvalSignals } from './context-eval.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-origin.js';
-import { outputLayoutExtra, RoutingMessageOutputProjection } from './message-output-projection.js';
+import { draftOutputFields, outputLayoutExtra, RoutingMessageOutputProjection } from './message-output-projection.js';
 import { persistUserFacingSystemInfoNotices } from './persist-system-info-warnings.js';
 import { appendRemoteCancellationNotice, createRemoteCancellationObserver } from './remote-cancellation.js';
 import { recordStoppedRecallCalls, resolveResponseTerminal, stoppedByMemberTimeout } from './response-terminal.js';
-import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
+import { prepareResponseText } from './response-text.js';
+import { isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
   assembleIncrementalContext,
@@ -148,7 +149,6 @@ import {
   mergePersistedPromptMessages,
   operationalKnowledgeCueSeeds,
   routeContentBlocksForCat,
-  sanitizeInjectedContent,
   shouldPersistContextBriefing,
   storedMessageTimestamp,
   subjectSeenCueSeeds,
@@ -328,7 +328,16 @@ async function* routeParallelPrepared(
     const requestedTargetCats = [...targetCats];
     const routingPreflight = await preflightRoutingDispatch(deps.routingDispatchPreflight, {
       ownerId: userId,
+      threadId,
       targetCatIds: requestedTargetCats,
+      cacheExecutionBindings: requestedTargetCats.map((catId) => {
+        const binding = executionBindings.get(catId);
+        return {
+          catId,
+          runtime: sessionCacheRuntimeKey(binding?.hostExecutionBoundary) ?? '',
+          model: binding?.executionPreferences?.model ?? binding?.catConfig?.defaultModel ?? '',
+        };
+      }),
       executionBindings: requestedTargetCats.map((catId) => {
         const binding = executionBindings.get(catId);
         const accountRevision = binding?.executionAccount?.accountRevision;
@@ -336,6 +345,9 @@ async function* routeParallelPrepared(
           catId,
           providerId: binding?.catConfig?.provider?.trim() || binding?.catConfig?.clientId,
           ...(accountRevision ? { accountRevision } : {}),
+          ...(binding?.executionAccount?.credentialVersion
+            ? { credentialVersion: binding.executionAccount.credentialVersion }
+            : {}),
         };
       }),
       ...(isRoutingOwnerAttempt(options, targetCats.length === 1 ? targetCats[0] : undefined)
@@ -454,7 +466,7 @@ async function* routeParallelPrepared(
   });
 
   // F229: Concierge interceptor — load duty-cat 岗位 context for concierge threads
-  const conciergeCtx = await prepareConciergeContext(routeThread, userId, deps.invocationDeps.conciergeConfigStore);
+  const conciergeCtx = await prepareConciergeContext(routeThread, deps.invocationDeps.companionSettings);
 
   // F229 KD-23: Pre-fetch search context → per-invocation handle table + prompt context
   let conciergeSearchContextString = '';
@@ -487,14 +499,7 @@ async function* routeParallelPrepared(
   // P1-2 R2 fix: Use shared singletons from entity-nudge-state.ts.
   const cueOccurredAt = Date.now();
   const memoryCueOpportunitySeeds = [...(options.memoryCueOpportunitySeeds ?? [])];
-  const memoryCueLegacyFallbacks: Array<{
-    seed: MemoryCueOpportunitySeed;
-    promptContext: string;
-  }> = [];
   let entityNudgePresentation:
-    | { service: EntityNudgeService; candidates: EntityNudgeCandidateBatch; sourceMessageId: string }
-    | undefined;
-  let entityNudgeCuePresentation:
     | {
         service: EntityNudgeService;
         candidates: EntityNudgeCandidateBatch;
@@ -523,43 +528,16 @@ async function* routeParallelPrepared(
             })
           : [];
         memoryCueOpportunitySeeds.push(...subjectCueSeeds);
-        const subjectCueEntityIds = new Set(subjectCueSeeds.map((seed) => seed.payload.entityId));
-        const subjectCueCandidates: EntityNudgeCandidateBatch = {
-          ...nudgeResult,
-          nudges: nudgeResult.nudges.filter((nudge) => nudge.entityId && subjectCueEntityIds.has(nudge.entityId)),
-        };
-        if (currentUserMessageId && subjectCueCandidates.nudges.length > 0) {
-          entityNudgeCuePresentation = {
+        // One F260 consumer admission owns the combined cap and delivery receipt.
+        // Private person cues remain a separate projection of these admitted subjects.
+        if (currentUserMessageId && nudgeResult.nudges.length > 0) {
+          entityNudgePresentation = {
             service: nudgeService,
-            candidates: subjectCueCandidates,
+            candidates: nudgeResult,
             sourceMessageId: currentUserMessageId,
             seeds: subjectCueSeeds,
           };
-        }
-        for (const seed of subjectCueSeeds) {
-          const nudge = nudgeResult.nudges.find(
-            (candidate) =>
-              candidate.entityId === seed.payload.entityId && candidate.matchedAlias === seed.payload.matchedAlias,
-          );
-          if (nudge) {
-            memoryCueLegacyFallbacks.push({
-              seed,
-              promptContext: EntityNudgeService.formatForPrompt({ ...nudgeResult, nudges: [nudge] }),
-            });
-          }
-        }
-        const cueEntityIds = new Set(subjectCueSeeds.map((seed) => seed.payload.entityId));
-        const presentationCandidates: EntityNudgeCandidateBatch = {
-          ...nudgeResult,
-          nudges: nudgeResult.nudges.filter((nudge) => !nudge.entityId || !cueEntityIds.has(nudge.entityId)),
-        };
-        if (currentUserMessageId && presentationCandidates.nudges.length > 0) {
-          entityNudgePresentation = {
-            service: nudgeService,
-            candidates: presentationCandidates,
-            sourceMessageId: currentUserMessageId,
-          };
-          entityNudgePromptTokenEstimate = estimateTokens(EntityNudgeService.formatForPrompt(presentationCandidates));
+          entityNudgePromptTokenEstimate = estimateTokens(EntityNudgeService.formatForPrompt(nudgeResult));
         }
       }
     } catch (nudgeErr) {
@@ -1194,9 +1172,7 @@ async function* routeParallelPrepared(
         continuityCapsule,
         ...(memoryCueOpportunitySeeds.length > 0 ? { memoryCueOpportunitySeeds } : {}),
         ...(entityNudgePresentation ? { entityNudgePresentation } : {}),
-        ...(entityNudgeCuePresentation ? { entityNudgeCuePresentation } : {}),
         ...(options.asrPersonMemoryScenes?.length ? { asrPersonMemoryScenes: options.asrPersonMemoryScenes } : {}),
-        ...(memoryCueLegacyFallbacks.length > 0 ? { memoryCueLegacyFallbacks } : {}),
         ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
         executionKind: turnExecutionKind,
         ...(options.beforeOutputCommit ? { outputFenced: true } : {}),
@@ -1695,7 +1671,7 @@ async function* routeParallelPrepared(
               catId: effectiveMsg.catId as CatId,
               content: curText,
               ...(catMeta.get(effectiveMsg.catId) ? { metadata: catMeta.get(effectiveMsg.catId) } : {}),
-              extra: outputLayoutExtra(catOutputProjections.get(effectiveMsg.catId), curText),
+              ...draftOutputFields(catOutputProjections.get(effectiveMsg.catId), curText),
               ...(curTools && curToolLen > 0 ? { toolEvents: curTools } : {}),
               ...(curThinking && curThinking.length > 0 ? { thinking: renderThinkingChunks(curThinking) } : {}),
               updatedAt: now,
@@ -1722,7 +1698,7 @@ async function* routeParallelPrepared(
                 catId: effectiveMsg.catId as CatId,
                 content: curText,
                 ...(catMeta.get(effectiveMsg.catId) ? { metadata: catMeta.get(effectiveMsg.catId) } : {}),
-                extra: outputLayoutExtra(catOutputProjections.get(effectiveMsg.catId), curText),
+                ...draftOutputFields(catOutputProjections.get(effectiveMsg.catId), curText),
                 ...(curTools && curToolLen > 0 ? { toolEvents: curTools } : {}),
                 ...(curThinkingTool && curThinkingTool.length > 0
                   ? { thinking: renderThinkingChunks(curThinkingTool) }
@@ -1953,9 +1929,16 @@ async function* routeParallelPrepared(
       } else if (text) {
         catProducedOutput = true;
         const meta = catMeta.get(msg.catId);
-        const sanitized = sanitizeInjectedContent(text);
-        // F22: Extract cc_rich blocks from text + merge with buffered
-        let { cleanText: storedContent, blocks: textBlocks } = extractRichFromText(sanitized);
+        const preparedText = prepareResponseText(
+          text,
+          catOutputProjections.get(msg.catId),
+          Boolean(
+            'conciergeConfig' in conciergeCtx &&
+              conciergeContextForCat(conciergeCtx, msg.catId as string)?.conciergeConfig,
+          ),
+        );
+        const authoredContent = preparedText.authoredContent;
+        const { content: persistedContent, blocks: textBlocks, conciergeActionSourceContent } = preparedText;
         let allRichBlocks = [...bufferedBlocks, ...textBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
         // F34-b: synthesize text-only audio blocks (voice messages)
         // F111: skip synthesis in voiceMode — frontend streams via /api/tts/stream
@@ -1970,18 +1953,6 @@ async function* routeParallelPrepared(
           }
         }
         const catTools = catToolEvents.get(msg.catId);
-        const conciergeActionSourceContent =
-          'conciergeConfig' in conciergeCtx &&
-          conciergeContextForCat(conciergeCtx, msg.catId as string)?.conciergeConfig &&
-          storedContent
-            ? storedContent
-            : undefined;
-        if (conciergeActionSourceContent) {
-          storedContent = stripTriagePlanMarkers(storedContent);
-        }
-        const persistedContent = conciergeActionSourceContent
-          ? projectConciergeStoredContent(storedContent)
-          : storedContent;
         persistedDoneContent = persistedContent;
         // F167 L2 AC-A5: parallel mode has no routing semantics, so persist mentions=[]
         // to keep parallel @ mentions out of MessageStore.getMentionsFor() / pending-mentions flow.
@@ -1989,7 +1960,7 @@ async function* routeParallelPrepared(
 
         // F079 Phase 2: Vote interception for parallel routing.
         // @all / multi-cat requests route here, so [VOTE:xxx] must be handled too.
-        const votedOption = extractVoteFromText(storedContent);
+        const votedOption = extractVoteFromText(authoredContent);
         if (votedOption && deps.invocationDeps.threadStore) {
           try {
             const voteState = await deps.invocationDeps.threadStore.getVotingState(threadId);
@@ -2134,7 +2105,7 @@ async function* routeParallelPrepared(
           const streamMessageInput: AppendMessageInput = {
             from: { kind: 'agent', catId: msg.catId as CatId },
             userId,
-            content: terminalFailureContent ? `${storedContent}\n\n${terminalFailureContent}` : storedContent,
+            content: terminalFailureContent ? `${persistedContent}\n\n${terminalFailureContent}` : persistedContent,
             mentions: [],
             origin: 'stream',
             timestamp: invocationStartedAt,

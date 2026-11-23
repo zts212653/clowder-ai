@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const target = fileURLToPath(new URL('../../dist/domains/terminal/tmux-pane-creation-record.js', import.meta.url));
@@ -38,7 +40,7 @@ try {
       { encoding: 'utf8', timeout: 40000 },
     );
     const output = `${run.stdout ?? ''}\n${run.stderr ?? ''}`;
-    writeFileSync(`/tmp/f212-claim-mutant-${specimen.name}.log`, output, { mode: 0o600 });
+    writeFileSync(join(tmpdir(), `f212-claim-mutant-${specimen.name}.log`), output, { mode: 0o600 });
     assert.notEqual(run.status, 0, `${specimen.name}: must turn RED`);
     assert.match(output, specimen.expected, `${specimen.name}: must fail the intended contract`);
     writeFileSync(target, original);

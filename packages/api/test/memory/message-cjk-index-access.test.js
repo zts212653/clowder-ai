@@ -70,6 +70,66 @@ test('full membership survives unicode61 token truncation, NULs and false prefix
   assert.deepEqual(ids(read(db, `${needle}终 ${needle}后`)), ['msg-after-nul', 'msg-after-token-limit']);
 });
 
+test('repeated term occurrences use document membership rather than positional candidate expansion', async (t) => {
+  const { db, put } = await fixture(t);
+  put('msg-repeated', `前${needle}后 `.repeat(20000));
+  put('msg-once', needle);
+  const original = db.prepare;
+  let plan;
+  db.prepare = function (sql) {
+    const statement = original.call(this, sql);
+    if (!sql.includes('message_cjk_match')) return statement;
+    const all = statement.all;
+    statement.all = (...bindings) => {
+      plan = original.call(db, `EXPLAIN QUERY PLAN ${sql}`).all(...bindings);
+      return all.call(statement, ...bindings);
+    };
+    return statement;
+  };
+  try {
+    assert.deepEqual(
+      read(db).map((row) => row.passageId),
+      ['msg-once', 'msg-repeated'],
+    );
+  } finally {
+    db.prepare = original;
+  }
+  // FTS MATCH yields document membership once, independently of term offsets.
+  // A positional vocabulary cursor plus DISTINCT/UNION still enumerates every
+  // occurrence before discarding duplicates; it is the slow path, not a bound.
+  assert.ok(
+    plan.some((row) => /VIRTUAL TABLE INDEX \d+:M/.test(row.detail)),
+    JSON.stringify(plan),
+  );
+});
+
+test('indexed CJK recovery applies grants, dates and source exclusion before the result pool', async (t) => {
+  const { db, put } = await fixture(t);
+  put('msg-denied', needle, 'thread-denied');
+  put('msg-old', needle);
+  db.prepare("UPDATE evidence_passages SET created_at='2020-01-01' WHERE passage_id='msg-old'").run();
+  put('msg-question', needle);
+  put('msg-allowed', `前${needle}后`);
+  for (const sort of ['time', 'relevance']) {
+    const rows = lexicalMessagePassages(
+      db,
+      needle,
+      {
+        sort,
+        dateFrom: '2025-01-01',
+        dateTo: '2026-02-01',
+        excludeSource: { threadId: 'visible', messageId: 'question' },
+      },
+      new Set(['thread-visible']),
+      1,
+    );
+    assert.deepEqual(
+      rows.map((row) => row.passageId),
+      ['msg-allowed'],
+    );
+  }
+});
+
 test('missing FTS rows remain recoverable without losing full-query order', async (t) => {
   const { db, put } = await fixture(t);
   put('msg-indexed', `长前缀${needle}后`);

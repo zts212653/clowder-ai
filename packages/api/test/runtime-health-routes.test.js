@@ -20,7 +20,7 @@ describe('runtime health routes', () => {
     assert.match(src, /const context = await beginOwnedRuntimeDeployment\(/);
     assert.match(
       src,
-      /if \(context\) \{\s*runtimeDeploymentContext = context;\s*runtimeDeploymentRevision = context\.runningRevision;/,
+      /if \(context\) \{\s*runtimeDeploymentContext = context;\s*eventLoopTripwire\.setBootId\(context\.bootId\);\s*runtimeDeploymentRevision = context\.runningRevision;/,
     );
     assert.doesNotMatch(src, /resolveRuntimeDeploymentRevision\(/);
     assert.match(src, /deploymentRevision:\s*runtimeDeploymentRevision/);

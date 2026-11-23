@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { MessageSearchResponse } from './message-search.js';
 import { messageAnswerSelectionSchema, messageSourceSelectionSchema } from './message-search-selection.js';
+import { memoryReadRefSchema, type ReadRef } from './types/memory-read.js';
 
 const text = z.string().max(24000);
 const id = z.string().min(1).max(2048);
@@ -31,6 +32,7 @@ export const messageSearchResponseSchema = z.object({
     .array(
       z.object({
         threadId: id,
+        readRef: memoryReadRefSchema.optional(),
         messageId: id,
         threadTitle: text,
         speaker: id,
@@ -125,6 +127,7 @@ export const messageSearchAnswerAttachmentSchema = z.object({
 });
 export type MessageSearchAnswerAttachmentRequest = z.infer<typeof messageSearchAnswerAttachmentSchema>;
 export interface MessageSearchAnswerView {
+  readRefs?: ReadRef[];
   status: 'available' | 'unavailable';
   publicationRef?: string;
   response?: MessageSearchResponse;

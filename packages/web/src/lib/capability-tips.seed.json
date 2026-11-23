@@ -1,5 +1,61 @@
 [
   {
+    "id": "feature-f051-sidebar-quota-ring",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F051-real-quota-dashboard.md",
+      "anchor": "首页额度小圆环：自选账号、可钉可收的额度汇总"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/shell/QuotaRingButton.tsx",
+      "anchor": "QuotaRingButton"
+    },
+    "bodySource": {
+      "path": "docs/features/F051-real-quota-dashboard.md",
+      "anchor": "在左侧栏显示额度"
+    },
+    "contexts": ["concierge_open", "thinking"],
+    "audience": ["cvo"],
+    "body": "悬停左下角小信箱上方的四色额度竖条即可速览布偶、缅因、暹罗、梵花当前在用号余量，点开可按家查看在用与备用号余量及重置时间；支持手动刷新和收起图标，收起后可在「设置 → 账户与登录」重新打开。",
+    "action": {
+      "type": "open_source",
+      "label": "查看首页侧栏额度说明",
+      "sourceRef": {
+        "path": "docs/features/F051-real-quota-dashboard.md",
+        "anchor": "首页额度小圆环：自选账号、可钉可收的额度汇总"
+      }
+    },
+    "owner": "gemini-carbon"
+  },
+  {
+    "id": "feature-f235-conversation-issue",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F235-feedback-to-community-publisher.md",
+      "anchor": "会话里把问题整理成 Issue"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/rich/CommunityPublishFlow.tsx",
+      "anchor": "CommunityPublishFlow"
+    },
+    "bodySource": {
+      "path": "docs/features/F235-feedback-to-community-publisher.md",
+      "anchor": "会话里把问题整理成 Issue"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "发现项目问题时，可让猫把已有分析整理成会话 Issue 草稿。阅读报告并核对仓库，点「核对并继续」后可编辑，最后点「发布到 GitHub」才会外发；插件未配置时也能复制报告。出现真实 Issue 链接才算提交完成。",
+    "action": {
+      "type": "open_source",
+      "label": "查看会话提单用法",
+      "sourceRef": {
+        "path": "docs/features/F235-feedback-to-community-publisher.md",
+        "anchor": "会话里把问题整理成 Issue"
+      }
+    },
+    "owner": "codex"
+  },
+  {
     "id": "feature-f332-matter-recall",
     "kind": "feature",
     "sourceRef": {
@@ -921,23 +977,23 @@
     "owner": "codex"
   },
   {
-    "id": "capability-eval-verdict",
+    "id": "capability-eval-design",
     "kind": "capability",
     "sourceRef": {
-      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
-      "anchor": "F192 Eval Hub / Verdict Handoff"
+      "path": "cat-cafe-skills/eval-design/SKILL.md",
+      "anchor": "Eval Design"
     },
     "structureSource": {
-      "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
-      "anchor": "eval-verdict"
+      "path": "cat-cafe-skills/manifest.yaml",
+      "anchor": "eval-design"
     },
     "bodySource": {
-      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
-      "anchor": "Eval Hub"
+      "path": "cat-cafe-skills/eval-design/SKILL.md",
+      "anchor": "方法独立于平台"
     },
-    "contexts": ["review", "merge_gate"],
+    "contexts": ["thinking", "feature_dev"],
     "audience": ["developer", "maintainer"],
-    "body": "改 harness 后要有 verdict/eval 闭环，不能只说「修了」。",
+    "body": "想比较方案是否更有效？让猫猫用 eval-design 在原任务设计样本、对照、校准与独立验收，不必注册旧评估平台。",
     "action": {
       "type": "open_concierge_draft",
       "label": "了解更多"
@@ -1033,7 +1089,7 @@
     },
     "bodySource": {
       "path": "cat-cafe-skills/refs/memory-routing-partial.md",
-      "anchor": "graph_resolve"
+      "anchor": "cat_cafe_read_memory"
     },
     "contexts": ["thinking", "review"],
     "audience": ["all"],
@@ -1053,7 +1109,7 @@
     },
     "structureSource": {
       "path": "cat-cafe-skills/memory-search-best-practices/SKILL.md",
-      "anchor": "Output: 单一 owner"
+      "anchor": "## 单一 owner 闭环"
     },
     "bodySource": {
       "path": "cat-cafe-skills/memory-search-best-practices/SKILL.md",
@@ -1673,6 +1729,28 @@
       "draftPrompt": "请先帮我预览一只猫的私人时间作息和成本，等我确认后再写入；不要创建通用 Schedule 任务。"
     },
     "owner": "codex-sol"
+  },
+  {
+    "id": "feature-personal-voice-choice",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F103-per-cat-voice-identity.md", "anchor": "Architecture: 统一入口" },
+    "structureSource": {
+      "path": "packages/web/src/components/hub-cat-editor-voice.tsx",
+      "anchor": "VoiceConfigSection"
+    },
+    "bodySource": {
+      "path": "packages/web/src/components/members/MemberVoiceChoice.tsx",
+      "anchor": "MemberVoiceChoice"
+    },
+    "contexts": ["concierge_open", "feature_dev"],
+    "audience": ["all"],
+    "body": "新猫选自己的声线：在设置 → 猫猫团队 → 成员与运行时点开本人，在「语音」里选择并保存。配音仍用本人的 ID；合成结果会说明实际声音和降级原因，audioUrl 就是可取用的文件。",
+    "action": {
+      "type": "open_source",
+      "label": "查看语音设置来源",
+      "sourceRef": { "path": "packages/web/src/components/hub-cat-editor-voice.tsx", "anchor": "VoiceConfigSection" }
+    },
+    "owner": "codex61-sol"
   },
   {
     "id": "feature-voice-interaction",
@@ -2417,34 +2495,6 @@
     "owner": "codex"
   },
   {
-    "id": "feature-f245-friction-eval-rollup",
-    "kind": "feature",
-    "sourceRef": {
-      "path": "docs/features/F245-friction-signal-eval.md",
-      "anchor": "Friction Signal Eval"
-    },
-    "structureSource": {
-      "path": "docs/features/F245-friction-signal-eval.md",
-      "anchor": "Phase D"
-    },
-    "bodySource": {
-      "path": "docs/features/F245-friction-signal-eval.md",
-      "anchor": "Why"
-    },
-    "contexts": ["thinking", "feature_dev"],
-    "audience": ["cvo"],
-    "body": "觉得某个地方用着别扭？Eval Hub 会把爪感差、cancel、反馈汇成周期报告；标「建议修复」的是待判断线索，不会自动给猫派活。",
-    "action": {
-      "type": "open_source",
-      "label": "打开 spec",
-      "sourceRef": {
-        "path": "docs/features/F245-friction-signal-eval.md",
-        "anchor": "Friction Signal Eval"
-      }
-    },
-    "owner": "gpt52"
-  },
-  {
     "id": "feature-f260-entity-conflict-resolution",
     "kind": "feature",
     "sourceRef": {
@@ -3168,27 +3218,27 @@
     "owner": "codex-sol"
   },
   {
-    "id": "capability-self-evolution",
+    "id": "capability-code-as-harness",
     "kind": "capability",
     "sourceRef": {
-      "path": "docs/features/F100-self-evolution.md",
-      "anchor": "Primary Journey: 从一次真实协作中形成可见、可验证的改进"
+      "path": "cat-cafe-skills/code-as-harness/SKILL.md",
+      "anchor": "Code as Harness：同一件事，You 说了第二遍之后"
     },
     "structureSource": {
-      "path": "cat-cafe-skills/self-evolution/SKILL.md",
-      "anchor": "三个模式"
+      "path": "cat-cafe-skills/code-as-harness/SKILL.md",
+      "anchor": "第二问：该用上的东西，当时在不在眼前"
     },
     "bodySource": {
-      "path": "cat-cafe-skills/self-evolution/SKILL.md",
-      "anchor": "先排除 F311 产品意图"
+      "path": "cat-cafe-skills/code-as-harness/SKILL.md",
+      "anchor": "第一问：这件事，家里之前有没有"
     },
     "contexts": ["thinking", "feature_dev", "review", "long_running"],
     "audience": ["all"],
-    "body": "想把这次已经发生的偏差、重复踩坑或好方法沉淀下来，可以让猫猫复盘并改进对应规则、Skill 或 Harness；这是经验闭环，不会冒充“我们来进化 X”的 Evolution Program。",
+    "body": "家里本来已有答案，还是让你不得不重说时，猫猫会先把被纠正的事做完，再搜证据、入共享错题本，查清断在哪、按断点修；第一次提出的新要求直接做。",
     "action": {
       "type": "open_concierge_draft",
-      "label": "复盘并沉淀",
-      "draftPrompt": "请复盘这次已经发生的工作，把可复用的教训沉淀到正确机制；一次性问题不要过度进化。"
+      "label": "查看共享错题本",
+      "draftPrompt": "请查看家里的共享错题本，讲清最近记录了哪些我不得不重说的事、断在哪、改了什么、什么算好了。"
     },
     "owner": "codex-sol"
   },
@@ -3209,7 +3259,7 @@
     },
     "contexts": ["thinking", "feature_dev", "concierge_idle", "concierge_open"],
     "audience": ["all"],
-    "body": "想知道咱们能进化什么，直接问猫猫；只有说“我们来进化 X”并给出具体目标时，才会创建可追踪的 Evolution Program，普通复盘仍走 self-evolution。",
+    "body": "想知道咱们能进化什么，直接问猫猫；给出要改善的 Agent 或业务能力目标时，可以创建可追踪的 Evolution Program。既往方法总结留在原任务或对应文档；家里已有答案却让你重说的事记共享错题本。",
     "action": {
       "type": "open_concierge_draft",
       "label": "了解可进化对象",
@@ -3382,19 +3432,28 @@
   {
     "id": "feature-f309-gif-svg-originals",
     "kind": "feature",
-    "sourceRef": { "path": "docs/guides/gif-svg-works.md", "anchor": "## 帧定位与原件" },
+    "sourceRef": {
+      "path": "docs/guides/gif-svg-works.md",
+      "anchor": "## 帧定位与原件"
+    },
     "structureSource": {
       "path": "packages/web/src/components/content-review/GifFrameMedia.tsx",
       "anchor": "GifFrameControls"
     },
-    "bodySource": { "path": "docs/guides/gif-svg-works.md", "anchor": "意见会带上当前版本" },
+    "bodySource": {
+      "path": "docs/guides/gif-svg-works.md",
+      "anchor": "意见会带上当前版本"
+    },
     "contexts": ["concierge_open", "pet_waiting_for_user"],
     "audience": ["all"],
     "body": "改 GIF 时，先用帧控制条停到要改的画面，再圈选或画笔标记，伙伴就能读到对应版本和帧号。SVG 可以放大看细节；下载原件会保留向量源码或完整动画。",
     "action": {
       "type": "open_source",
       "label": "查看动图与矢量作品说明",
-      "sourceRef": { "path": "docs/guides/gif-svg-works.md", "anchor": "## 帧定位与原件" }
+      "sourceRef": {
+        "path": "docs/guides/gif-svg-works.md",
+        "anchor": "## 帧定位与原件"
+      }
     },
     "owner": "codex61-sol"
   },
@@ -3570,6 +3629,31 @@
       "type": "open_concierge_draft",
       "label": "配置共用平台 API Key 账号",
       "draftPrompt": "请带我到猫猫团队的账户与登录页，选择 Anthropic API、OpenAI Platform 或 Google API 添加平台账号；密钥由我自己填写，模型由使用方选择，并保留现有 Claude/Codex/Gemini 登录绑定。"
+    },
+    "owner": "codex61-sol"
+  },
+  {
+    "id": "capability-claude-account-quota-windows",
+    "kind": "capability",
+    "sourceRef": {
+      "path": "packages/web/src/components/accounts/ClaudeQuotaControl.tsx",
+      "anchor": "ClaudeQuotaControl"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/accounts/ClaudeQuotaControl.tsx",
+      "anchor": "ClaudeQuotaControl"
+    },
+    "bodySource": {
+      "path": "packages/web/src/components/accounts/claude-quota.shell-copy.ts",
+      "anchor": "claudeQuotaCopy"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "想看两个 Claude 订阅号还剩多少？到「猫猫团队 → 账户与登录」点各号的「读取余量」，会分别读取 Haiku 和 Fable，显示每个窗口与采集时间。备用号保留最后读数；需要换号时仍由你点「换成这个」并确认。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "查看 Claude 两号余量",
+      "draftPrompt": "请带我到账户与登录页，查看两个 Claude 订阅号的总周额度、Fable 窗口、重置和采集时间；解释怎样显式读取余量，由我亲自确认是否切号。"
     },
     "owner": "codex61-sol"
   },

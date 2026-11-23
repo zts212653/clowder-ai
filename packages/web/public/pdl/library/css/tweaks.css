@@ -1,0 +1,15 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 调参：把旧做法切回来对比 */
+/* ── 调参：把旧做法切回来对比 ── */
+.t-lines .rail, .t-lines .nav { box-shadow: inset -1px 0 var(--line); }
+.t-lines .panel { box-shadow: inset 1px 0 var(--line); }
+.t-lines .group, .t-lines .table-wrap, .t-lines .notice, .t-lines .letter, .t-lines .brief dl, .t-lines .composer, .t-lines .swatch, .t-lines .demo, .t-lines .kv > div { box-shadow: inset 0 0 0 1px var(--line-strong); }
+.t-lines .group > * + * { --hl-in: 0; --hl-c: var(--line-strong); }
+.t-lines tbody tr + tr > td { --hl-c: var(--line-strong); }
+.t-lines .chat-head, .t-lines .panel-head { box-shadow: 0 1px 0 var(--line); }
+.t-lines .input, .t-lines .select, .t-lines .seg { background: var(--bg-group); border: 1px solid var(--line-strong); }
+.t-sans { --fw-display: var(--fw-medium); }
+.t-sans .page-title, .t-sans .greet, .t-sans .dialog h3 { font-family: var(--font-text); }
+.t-compact { --row-h: 42px; --page-gap: 22px; }
+.t-compact .row { padding-block: var(--sp-xs); }
+.t-compact .field { padding-block: var(--sp-xs); }

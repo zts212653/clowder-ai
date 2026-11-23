@@ -21,6 +21,7 @@ import {
 import { AccountStoreVerdictError } from '../../../../../config/account-store-format.js';
 import { resolveBoundAccountRefForCat } from '../../../../../config/cat-account-binding.js';
 import { resolveCatRuntimeAccount } from '../../../../../config/cat-runtime-account.js';
+import { nativeClaudeQuotaSourceKnown } from '../../../../../config/claude-quota-source.js';
 import { claudeExecutionAccountSnapshot } from '../../../../../config/claude-token-account.js';
 import {
   type CodexAccountLaunchDescriptor,
@@ -56,6 +57,8 @@ export interface FrozenExecutionBinding {
     Pick<
       AgentServiceOptions,
       | 'frozenAcpMcpServers'
+      | 'frozenAcpMcpIssues'
+      | 'frozenAcpMcpCurrentness'
       | 'frozenNativeMcpConfig'
       | 'frozenKimiMcpConfig'
       | 'frozenCodexMcpInput'
@@ -213,14 +216,25 @@ export function freezeExecutionAccountBinding(input: {
     provider === 'openai' && resolvedAccount
       ? resolveCodexAccountLaunch(resolvedAccount, { cwd: input.workspace.workingProjectRoot })
       : undefined;
-  const executionAccount =
+  let executionAccount =
     resolvedAccount && codexAccountLaunch
       ? codexExecutionAccountSnapshot(resolvedAccount, codexAccountLaunch)
-      : provider === 'anthropic' && resolvedAccount?.claude
+      : provider === 'anthropic' && resolvedAccount
         ? claudeExecutionAccountSnapshot(resolvedAccount)
         : resolvedAccount
           ? providerProfileAccountSnapshot(provider!, resolvedAccount)
           : undefined;
+  if (
+    provider === 'anthropic' &&
+    !resolvedAccount?.claude &&
+    !nativeClaudeQuotaSourceKnown(
+      input.workspace.workingProjectRoot ?? projectRoot,
+      catConfig?.cliConfigArgs ?? [],
+      accountEnv,
+    ) &&
+    executionAccount
+  )
+    executionAccount = Object.freeze({ ...executionAccount, credentialVersion: undefined });
   if (selection?.expectedRevision !== undefined && selection.expectedRevision !== executionAccount?.accountRevision)
     throw new Error('selected execution account revision changed');
   const projectedProfiles = catConfig ? deepFreeze(projectMemberProfiles(catConfig)) : undefined;

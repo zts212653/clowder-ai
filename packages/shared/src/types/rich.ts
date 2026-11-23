@@ -7,6 +7,8 @@
 
 // ── Block Kinds ─────────────────────────────────────────────
 
+import type { TtsVoiceSelection } from './tts.js';
+
 export type RichBlockKind =
   | 'card'
   | 'diff'
@@ -102,6 +104,8 @@ export interface RichAudioBlock extends RichBlockBase {
   title?: string;
   durationSec?: number;
   mimeType?: string;
+  /** Server-resolved voice provenance for the generated file. */
+  voiceSelection?: TtsVoiceSelection;
 }
 
 /** F155: Direct action for interactive options that bypass the chat message pipeline */

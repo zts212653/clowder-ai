@@ -44,9 +44,14 @@ import {
   type AgentContextBinding,
   type AgentContextCapability,
   type AgentService,
+  type ObservedContextWindow,
   resolveCurrentContextUsage,
   type TokenUsage,
 } from '../../types.js';
+import type { InvocationCapacitySnapshot } from './capacity/invocation-capacity-types.js';
+import { applyObservedContextCapacity } from './capacity/observed-context-capacity.js';
+
+export type { InvocationCapacitySnapshot } from './capacity/invocation-capacity-types.js';
 
 const UNRESOLVED_CAPABILITY: AgentContextCapability = {
   provider: 'unknown',
@@ -61,33 +66,6 @@ const UNRESOLVED_CAPABILITY: AgentContextCapability = {
 };
 
 const log = createModuleLogger('invocation-capacity-snapshot');
-
-export interface InvocationCapacitySnapshot {
-  readonly capacity: ResolvedContextCapacity;
-  readonly capability: AgentContextCapability;
-  /** Concrete model/window proof for this service spawn or invocation config. */
-  readonly binding?: AgentContextBinding;
-  /** Immutable resolver inputs captured at this invocation boundary. */
-  readonly memberWindowTokens: number | null;
-  readonly model: string | undefined;
-  /**
-   * #1381: raw/native provider window owned by member configuration (manual or
-   * catalog source), captured before any session pin or carrier report applies.
-   * This is the ONLY value a provider may inject as its native window; the
-   * effective/pinned `capacity.windowTokens` must never feed back as native.
-   * `null` means this invocation has no config-owned native window (capacity is
-   * report-derived or unresolved) and the provider must not inject one.
-   */
-  readonly nativeWindowTokens: number | null;
-  /**
-   * #1381: raw carrier-reported window applied during this invocation, before
-   * any resolver floor adjustment. Used to surface (never auto-expand) a
-   * session pin sitting below the currently reported capacity — that state may
-   * be pre-fix feedback-loop pollution, and recovery stays explicit via
-   * seal/rollover.
-   */
-  readonly lastReportedWindowTokens?: number;
-}
 
 export interface AuthoritativeContextUsage {
   readonly usedTokens: number;
@@ -122,6 +100,9 @@ function snapshotWithCapacity(
 ): InvocationCapacitySnapshot {
   if (!snapshot.binding || snapshot.binding.windowTokens === capacity.windowTokens) {
     return { ...snapshot, capacity };
+  }
+  if (snapshot.binding.source === 'observed' && capacity.windowTokens <= (snapshot.binding.windowTokens ?? 0)) {
+    return { ...snapshot, capacity, binding: { ...snapshot.binding, windowTokens: capacity.windowTokens } };
   }
   const { binding: _discardedContradictoryBinding, ...withoutBinding } = snapshot;
   return { ...withoutBinding, capacity };
@@ -365,6 +346,7 @@ export function applyUsageEvidenceToInvocationSnapshot(options: {
   catId: CatId | string;
   capability: AgentContextCapability;
   reportedWindowSize?: number;
+  observedWindow?: ObservedContextWindow;
 }): InvocationCapacitySnapshot {
   const { snapshot, catId, capability, reportedWindowSize } = options;
   const capabilityRefreshed: InvocationCapacitySnapshot = {
@@ -372,11 +354,15 @@ export function applyUsageEvidenceToInvocationSnapshot(options: {
     capability,
     capacity: bindCatalogCapacityToCarrier(snapshot.capacity, capability, snapshot.binding, snapshot.model),
   };
-  return applyReportedWindowToInvocationSnapshot({
-    snapshot: capabilityRefreshed,
-    catId,
-    reportedWindowSize,
-  });
+  return applyObservedContextCapacity(
+    applyReportedWindowToInvocationSnapshot({
+      snapshot: capabilityRefreshed,
+      catId,
+      reportedWindowSize,
+    }),
+    String(catId),
+    options.observedWindow,
+  );
 }
 
 /** Read the current member configuration once for one invocation. */

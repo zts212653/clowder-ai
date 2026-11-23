@@ -21,6 +21,7 @@ import { deriveProactiveMemoryOpportunityRef } from './proactive-memory-opportun
 const PROPOSAL_TOOL_NAME = 'propose_person_memory';
 const DEFER_TOOL_NAME = 'defer_person_memory_delta';
 const ABSTENTION_TOOL_NAME = 'record_proactive_memory_abstention';
+const REMEMBER_TOOL_NAME = 'remember';
 
 interface ProjectedToolEvidence {
   readonly proposalSucceeded: boolean;
@@ -59,11 +60,47 @@ function groupEligibleEvents(
   return grouped;
 }
 
+/** Per-item outcomes from cat_cafe_remember; an abstention reason comes from that item's own payload. */
+function projectRememberEvent(event: ToolEvent): {
+  proposal: boolean;
+  defer: boolean;
+  abstentionReasons: ProactiveMemoryAbstentionReasonCode[];
+} {
+  const summary = toolSummary(event);
+  const projected = { proposal: false, defer: false, abstentionReasons: [] as ProactiveMemoryAbstentionReasonCode[] };
+  if (summary._resultMerged !== true || summary.isError === true || !Array.isArray(summary.proactiveMemoryOutcomes))
+    return projected;
+  const items = Array.isArray(summary.items) ? summary.items : [];
+  for (const entry of summary.proactiveMemoryOutcomes as unknown[]) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { itemId, outcome } = entry as { itemId?: unknown; outcome?: unknown };
+    if (outcome === 'proposal_submitted') projected.proposal = true;
+    else if (outcome === 'deferred_receipt_recorded') projected.defer = true;
+    else if (outcome === 'abstention_recorded') {
+      const item = items.find(
+        (candidate): candidate is { target?: unknown; payload?: { reasonCode?: unknown } } =>
+          !!candidate && typeof candidate === 'object' && (candidate as { itemId?: unknown }).itemId === itemId,
+      );
+      if (item?.target !== 'person_abstain') continue;
+      const reason = proactiveMemoryAbstentionReasonCodeSchema.safeParse(item.payload?.reasonCode);
+      if (reason.success) projected.abstentionReasons.push(reason.data);
+    }
+  }
+  return projected;
+}
+
 function projectToolEvidence(events: readonly ToolEvent[]): ProjectedToolEvidence {
   let proposalSucceeded = false;
   let deferSucceeded = false;
   const abstentionReasons = new Set<ProactiveMemoryAbstentionReasonCode>();
   for (const event of events) {
+    if (event.toolName === REMEMBER_TOOL_NAME) {
+      const remembered = projectRememberEvent(event);
+      proposalSucceeded ||= remembered.proposal;
+      deferSucceeded ||= remembered.defer;
+      for (const reason of remembered.abstentionReasons) abstentionReasons.add(reason);
+      continue;
+    }
     if (event.toolName === PROPOSAL_TOOL_NAME && isRecognizedSuccess(event, 'proposal_submitted')) {
       proposalSucceeded = true;
       continue;

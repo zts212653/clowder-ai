@@ -501,7 +501,7 @@ describe('F296 AC-A4: sparse output is accepted at every entry point', () => {
     assert.deepEqual(unexpected, [], `unexpected prompt sections appeared: ${JSON.stringify(unexpected)}`);
 
     // Sparse acceptance, stated positively: these are the things that MUST be there.
-    assert.match(block, /本轮输入来源（触发事实，不表示接责或新增授权）/);
+    assert.match(block, /本轮输入来源:/);
     assert.ok(block.includes(deps.currentUserMessageId), 'the actual queued source is identified');
     assert.doesNotMatch(block, /真相源: 未定位|下一步: cat_cafe_get_thread_context/);
     assert.match(block, /\[System: skipped 49 messages/, 'the omitted range is stated, not silently dropped');

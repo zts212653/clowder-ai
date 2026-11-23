@@ -51,7 +51,7 @@ test('A2A queue action loads and interrupts through the same source and real Que
   });
   assert.equal(confirmed.statusCode, 200, confirmed.body);
   assert.equal(confirmed.json().targets[0].status, 200);
-  assert.equal(confirmed.json().targets[0].result.started, true);
+  assert.equal(confirmed.json().targets[0].result.outcome, 'queued');
   assert.equal(previousController.signal.aborted, true);
   await waitFor(() => h.starts.includes(source.content));
   await waitFor(() => !h.tracker.has('thread', 'opus'));

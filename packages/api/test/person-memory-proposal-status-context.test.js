@@ -134,7 +134,7 @@ describe('F276 live proposal status invocation context', () => {
     assert.match(context, /person_candidate_withdrawn.*liveStatus=withdrawn/);
     assert.match(context, /person_candidate_materialized.*liveStatus=materialized/);
     assert.doesNotMatch(context, /liveStatus=pending_approval/);
-    assert.match(context, /历史卡片状态不得作为当前状态/);
+    assert.match(context, /旧卡片、旧回复与它不一致时以这里为准/);
   });
 
   it('fails closed when a structured proposal card cannot be resolved', async () => {
@@ -153,7 +153,7 @@ describe('F276 live proposal status invocation context', () => {
     const context = await resolver.resolve('owner-1', 'thread-f276');
 
     assert.match(context, /person_candidate_unavailable.*liveStatus=not_available/);
-    assert.match(context, /不得从聊天记录推断/);
+    assert.match(context, /cat_cafe_get_person_memory_proposal_status/);
   });
 
   it('fails closed instead of omitting the guard when the candidate store is unavailable', async () => {
@@ -168,7 +168,53 @@ describe('F276 live proposal status invocation context', () => {
     const context = await resolver.resolve('owner-1', 'thread-f276');
 
     assert.match(context, /person_candidate_no_store.*liveStatus=not_available.*candidate_store_unavailable/);
-    assert.match(context, /不得从聊天记录推断/);
+    assert.match(context, /cat_cafe_get_person_memory_proposal_status/);
+  });
+
+  // The words of a prompt decide nothing here: the block follows the cards found
+  // in the window, and the per-turn history digest carries the pointer to live
+  // status on each card it renders (rich-block-digest.test.js). Known gap, accepted
+  // by the owner on 2026-11-16 (thread_mw9jh0edn2fvrbny#0001794846471856-002307-d1556ff9):
+  // a card older than the window whose stale text is already frozen in a live
+  // session gets no reminder. Forwarded or quoted message bundles and message-read
+  // tools do not carry the pointer either.
+  it('adds nothing when the window holds no proposal card, whatever the prompt asks', async () => {
+    const { PersonMemoryProposalStatusContextResolver } = await import(
+      '../dist/domains/memory/people/PersonMemoryProposalStatusContextResolver.js'
+    );
+    const outsideWindow = staleProposalMessage('person_candidate_outside_window', 'pending_approval', '黄挺');
+    const plainMessages = Array.from({ length: 200 }, (_, index) => ({
+      ...staleProposalMessage(`person_candidate_plain_${index}`),
+      id: `plain-message-${index}`,
+      extra: undefined,
+    }));
+    const resolver = new PersonMemoryProposalStatusContextResolver(
+      {
+        async getCandidateForOwner() {
+          throw new Error('no candidate may be read without a card in the window');
+        },
+      },
+      createMessageStore([outsideWindow, ...plainMessages]),
+    );
+
+    assert.equal(await resolver.resolve('owner-1', 'thread-f276', '黄挺这张卡现在是什么状态？通过了吗'), '');
+    assert.equal(await resolver.resolve('owner-1', 'thread-f276', '这个 PR 现在什么状态？合入了吗'), '');
+  });
+
+  it('still says so when the thread history itself cannot be read', async () => {
+    const { PersonMemoryProposalStatusContextResolver } = await import(
+      '../dist/domains/memory/people/PersonMemoryProposalStatusContextResolver.js'
+    );
+    const resolver = new PersonMemoryProposalStatusContextResolver(null, {
+      async getByThread() {
+        throw new Error('history unavailable');
+      },
+    });
+
+    const context = await resolver.resolve('owner-1', 'thread-f276');
+
+    assert.match(context, /message_history_unavailable/);
+    assert.match(context, /cat_cafe_get_person_memory_proposal_status/);
   });
 
   it('ignores a typed card whose candidate id fails the canonical schema', async () => {
@@ -274,7 +320,7 @@ describe('F276 live proposal status invocation context', () => {
     assert.match(context, /person_candidate_structured_subject.*subject="黄挺".*liveStatus=withdrawn/);
   });
 
-  it('fails closed without hydrating the full thread when a named card is outside the bounded discovery window', async () => {
+  it('lists the window only and never hydrates the full thread for a card outside it', async () => {
     const { PersonMemoryProposalStatusContextResolver } = await import(
       '../dist/domains/memory/people/PersonMemoryProposalStatusContextResolver.js'
     );
@@ -309,9 +355,9 @@ describe('F276 live proposal status invocation context', () => {
 
     const context = await resolver.resolve('owner-1', 'thread-f276', '黄挺现在是什么状态？');
 
-    assert.match(context, /requestedProposal=not_available reason=no_deterministic_subject_match_in_bounded_discovery/);
+    assert.doesNotMatch(context, /requestedProposal|person_candidate_huang_ting_older_than_200/);
     assert.match(context, /person_candidate_recent_bounded_8 subject="最近人物 8".*liveStatus=withdrawn/);
-    assert.match(context, /未列出或 not_available 的提案不得从聊天记录推断/);
+    assert.match(context, /没列出或 not_available 的提案，用 proposalId 调/);
     assert.deepEqual(messageStore.calls.getByThread, [
       { threadId: 'thread-f276', limit: 200, userId: 'owner-1', options: { artifactProjection: true } },
     ]);
@@ -363,7 +409,7 @@ describe('F276 live proposal status invocation context', () => {
       assert.match(service.calls[0], /黄挺这张人物卡状态：pending_approval（旧快照）/);
       assert.match(service.calls[0], /person_candidate_route.*liveStatus=withdrawn/);
       assert.doesNotMatch(service.calls[0], /liveStatus=pending_approval/);
-      assert.match(service.calls[0], /历史卡片状态不得作为当前状态/);
+      assert.match(service.calls[0], /旧卡片、旧回复与它不一致时以这里为准/);
     });
   }
 
@@ -393,6 +439,6 @@ describe('F276 live proposal status invocation context', () => {
 
     assert.match(context, /person_candidate_a2a_oldest.*liveStatus=withdrawn/);
     assert.doesNotMatch(context, /person_candidate_a2a_recent_1.*liveStatus=/);
-    assert.match(context, /历史卡片状态不得作为当前状态/);
+    assert.match(context, /旧卡片、旧回复与它不一致时以这里为准/);
   });
 });

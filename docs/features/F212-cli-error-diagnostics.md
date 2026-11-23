@@ -4,7 +4,12 @@ related_features: [F153, F118, F173]
 topics: [cli, error-handling, diagnostics, sanitizer, frontend, observability]
 doc_kind: spec
 created: 2026-05-25
-tips_exempt: Codex CLI diagnostics regression fixes; Phase H and post-close timeout truth reuse the existing CliDiagnosticsPanel already tips-covered by F212 Phase D and add no new user action or capability surface
+updated: 2026-11-14
+description: "结构化 CLI 错误诊断（白名单分类、先脱敏后截断、折叠详情面板），覆盖 stderr、NDJSON 流错误与静默退出。"
+description_source: human
+description_author: gemini-argon
+description_updated_at: 2026-11-14T14:22:00Z
+tips_exempt: "Renewed 2026-11-14: Codex/Kimi/Pi CLI diagnostics regression fixes and post-close diagnostic separation reuse the existing CliDiagnosticsPanel / TerminalDiagnosticsPanel surfaces already tips-covered by F212 Phase D and add no new user action or capability surface."
 ---
 
 # F212: CLI Error Diagnostics — 结构化 CLI 错误诊断 + 受控前端展示

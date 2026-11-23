@@ -7,7 +7,6 @@ import {
 import { createModuleLogger } from '../../../infrastructure/logger.js';
 import type { ToolExecutionPolicy } from '../../cats/services/types.js';
 import { activateDeclaredMcp } from '../declared/declared-mcp-resources.js';
-import { DeclaredPluginUi } from '../declared/declared-plugin-ui.js';
 import {
   type DeclaredPluginTool,
   type DeclaredPluginWebhook,
@@ -60,7 +59,11 @@ export interface PluginRuntimeCarrier {
   /** Derived from the admitted package alone. Carrier selection has no other input. */
   claims(admission: PluginRuntimeAdmission): boolean;
   /** In-process carriers join Host contribution admission before publishing runtime health. */
-  start(pluginInstanceId: string, admitContributions?: () => Promise<void>): Promise<unknown>;
+  start(
+    pluginInstanceId: string,
+    admitContributions?: () => Promise<void>,
+    onRuntimeExit?: () => Promise<void> | void,
+  ): Promise<unknown>;
   stop(pluginInstanceId: string, reason: string): Promise<void>;
   readStream?(
     pluginInstanceId: string,
@@ -93,7 +96,6 @@ export interface PluginRuntimeCarrier {
 }
 
 export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
-  readonly ui = new DeclaredPluginUi();
   readonly nativeActions: NativePluginActions;
   readonly #nativeMcpLaunches: NativeMcpLaunches;
   readonly #carriers: PluginRuntimeCarrier[] = [];
@@ -166,13 +168,18 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
         this.#nativeMcpLaunches.activate(admission, generation, launches, shared.factories, shared.unavailable);
       })());
     try {
-      const result = await carrier.start(pluginInstanceId, admitContributions);
+      const result = await carrier.start(pluginInstanceId, admitContributions, async () => {
+        if (this.nativeActions.generation(pluginInstanceId) !== generation) return;
+        // The generation fence invalidates captured views immediately. Keep the MCP
+        // slot so a failed same-plugin instance cannot silently elect another source.
+        this.nativeActions.deactivate(pluginInstanceId);
+        await this.#runtimeContributions.deactivate(pluginInstanceId);
+      });
       // External and legacy carriers may not publish a separate Host-ready state.
       // Joining the same promise preserves one admission and its original rollback boundary.
       await admitContributions();
       // stop/stopAll invalidate this admission even after carrier readiness.
       if (this.nativeActions.generation(pluginInstanceId) === generation) {
-        this.ui.activate(admission);
         this.afterStart?.(pluginInstanceId);
       }
       return result;
@@ -186,7 +193,6 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
   }
 
   async stop(pluginInstanceId: string, reason = 'host_stop'): Promise<void> {
-    this.ui.deactivate(pluginInstanceId);
     this.#nativeMcpLaunches.deactivate(pluginInstanceId);
     this.nativeActions.deactivate(pluginInstanceId);
     const authority = await this.inventory.readAuthority(pluginInstanceId);
@@ -240,7 +246,6 @@ export class PluginRuntimeCarrierRouter implements PluginRuntimeLifecyclePort {
   }
 
   async stopAll(reason = 'host_shutdown'): Promise<void> {
-    this.ui.deactivateAll();
     this.#nativeMcpLaunches.deactivateAll();
     this.nativeActions.deactivateAll();
     if (this.beforeStop) {

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import platform
@@ -28,6 +29,7 @@ from embed_runtime_policy import (
     MemoryBudgetExceeded,
     MemoryMetricUnavailable,
     MlxMemoryEnvelope,
+    TransientOvershoot,
 )
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -177,25 +179,57 @@ async def create_embeddings(req: EmbedRequest, request: Request):
             400, detail=f"Batch too large ({len(texts)}, max {MAX_BATCH_SIZE})"
         )
 
+    memory_shape = {
+        "batch_size": len(texts),
+        "request_chars_total": sum(map(len, texts)),
+        "request_chars_max": max(map(len, texts)),
+        "token_batch": None,
+        "padded_token_width": None,
+        "configured_token_limit": (
+            _representation_recipe["tokenLimit"] if _representation_recipe else None
+        ),
+    }
     # Truncate long texts
     texts = [t[:MAX_TEXT_LENGTH] for t in texts]
+    memory_shape.update(
+        encode_chars_total=sum(map(len, texts)), encode_chars_max=max(map(len, texts))
+    )
 
     start_ms = time.time() * 1000
+    guard_phase = "pre"
     try:
         async with _admission.admit(
             deadline_ms=req.deadline_ms,
             is_disconnected=request.is_disconnected,
-        ):
+        ) as assert_still_wanted:
+            # Not handled: if this task were cancelled while a guard or encode
+            # thread is still running, the slot would be released early and
+            # the thread's verdict dropped. Nothing in the deployed stack
+            # cancels a request task while serving; see the task-cancellation
+            # section of docs/evidence/2026-11-15-embed-envelope-transient/README.md.
             if _memory_envelope is not None:
-                await asyncio.to_thread(
+                settled = await asyncio.to_thread(
                     _memory_envelope.assert_within_budget,
                     req.max_model_mem_mb,
                 )
-            embeddings = await asyncio.to_thread(_encode, texts)
+                _log_transient_overshoot(settled, guard_phase, memory_shape)
+                if settled is not None:
+                    # The settle wait ran after admission's last deadline and
+                    # disconnect check: do not allocate for a request nobody
+                    # is waiting for. Memory that stayed over budget has
+                    # already raised above; an expired or disconnected request
+                    # does not hide it.
+                    await assert_still_wanted()
+            embeddings = await asyncio.to_thread(_encode, texts, memory_shape)
+            guard_phase = "post"
             if _memory_envelope is not None:
-                await asyncio.to_thread(
-                    _memory_envelope.assert_within_budget,
-                    req.max_model_mem_mb,
+                _log_transient_overshoot(
+                    await asyncio.to_thread(
+                        _memory_envelope.assert_within_budget,
+                        req.max_model_mem_mb,
+                    ),
+                    guard_phase,
+                    memory_shape,
                 )
     except AdmissionError as error:
         raise HTTPException(
@@ -204,10 +238,24 @@ async def create_embeddings(req: EmbedRequest, request: Request):
         ) from error
     except MemoryBudgetExceeded as error:
         log.critical(
-            "Embedding memory envelope tripped: observed=%d delta=%d budget=%d; exiting sidecar",
+            "Embedding memory envelope tripped: observed=%d delta=%d budget=%d; "
+            "context=%s; exiting sidecar",
             error.observed_bytes,
             error.footprint_delta_bytes,
             error.budget_bytes,
+            json.dumps(
+                {
+                    **memory_shape,
+                    "phase": guard_phase,
+                    "mlx_active_memory_bytes": error.mlx_active_memory_bytes,
+                    "mlx_cache_memory_bytes": error.mlx_cache_memory_bytes,
+                    "os_footprint_bytes": error.os_footprint_bytes,
+                    "baseline_os_footprint_bytes": error.baseline_os_footprint_bytes,
+                    "first_observed_bytes": error.first_observed_bytes,
+                    "settle_ms": error.settle_ms,
+                },
+                separators=(",", ":"),
+            ),
         )
         _schedule_resource_exit()
         raise HTTPException(
@@ -295,6 +343,37 @@ async def health():
     }
 
 
+def _log_transient_overshoot(
+    overshoot: TransientOvershoot | None, phase: str, memory_shape: dict
+) -> None:
+    """Record a reading that was over budget and came back under it in the window.
+
+    The sidecar keeps serving. The line carries the same sample and request
+    shape as the fatal one, so the reading leaves evidence either way.
+    """
+    if overshoot is None:
+        return
+    log.warning(
+        "Embedding memory reading settled: first_observed=%d settled_observed=%d "
+        "budget=%d settle_ms=%d; context=%s",
+        overshoot.first.observed_bytes,
+        overshoot.settled.observed_bytes,
+        overshoot.budget_bytes,
+        overshoot.settle_ms,
+        json.dumps(
+            {
+                **memory_shape,
+                "phase": phase,
+                "mlx_active_memory_bytes": overshoot.first.mlx_active_memory_bytes,
+                "mlx_cache_memory_bytes": overshoot.first.mlx_cache_memory_bytes,
+                "os_footprint_bytes": overshoot.first.os_footprint_bytes,
+                "baseline_os_footprint_bytes": overshoot.baseline_os_footprint_bytes,
+            },
+            separators=(",", ":"),
+        ),
+    )
+
+
 def _schedule_resource_exit() -> None:
     """Hard-exit only this disposable sidecar after returning a fail-open 503."""
 
@@ -308,16 +387,20 @@ def _schedule_resource_exit() -> None:
 # ─── Encoding ─────────────────────────────────────────────────────
 
 
-def _encode(texts: List[str]) -> np.ndarray:
+def _encode(
+    texts: List[str], memory_shape: dict[str, int | None] | None = None
+) -> np.ndarray:
     """Encode texts to normalized embeddings with MRL truncation."""
     if _use_fastembed:
         return _encode_fastembed(texts)
     if _use_fallback:
         return _encode_fallback(texts)
-    return _encode_mlx(texts)
+    return _encode_mlx(texts, memory_shape)
 
 
-def _encode_mlx(texts: List[str]) -> np.ndarray:
+def _encode_mlx(
+    texts: List[str], memory_shape: dict[str, int | None] | None = None
+) -> np.ndarray:
     """MLX-native encoding using mlx-embeddings library."""
     from mlx_embeddings.utils import generate
 
@@ -326,6 +409,15 @@ def _encode_mlx(texts: List[str]) -> np.ndarray:
     output = generate(mlx_model, mlx_tokenizer, texts, **(
         {"max_length": _representation_recipe["tokenLimit"]} if _representation_recipe else {}
     ))
+    if memory_shape is not None:
+        # Read shape metadata only. Do not retain hidden tensors or tokenize/eval
+        # a second time just to diagnose a guard failure.
+        token_shape = getattr(getattr(output, "last_hidden_state", None), "shape", ())
+        if isinstance(token_shape, tuple) and len(token_shape) == 3 and all(
+            isinstance(dim, int) for dim in token_shape[:2]
+        ):
+            memory_shape["token_batch"] = token_shape[0]
+            memory_shape["padded_token_width"] = token_shape[1]
 
     # Unwrap BaseModelOutput if present (check value, not just attribute)
     if hasattr(output, "text_embeds") and output.text_embeds is not None:

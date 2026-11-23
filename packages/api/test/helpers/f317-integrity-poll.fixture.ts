@@ -21,6 +21,7 @@ import { createDormantPluginRuntimeComposition } from '../../src/domains/plugin/
 import { sessionAuthPlugin, sessionRoute } from '../../src/infrastructure/session-auth.js';
 import { conciergeRoutes } from '../../src/routes/concierge.js';
 import { desktopWindowFixture } from '../f317-window.fixture.js';
+import { companionConfigurationFixture } from './companion-configuration-fixture.js';
 
 /** Real admitted archive, Broker, private stage, bridge and owner authentication;
  * only the native window and realtime provider are synthetic. No media or Redis. */
@@ -46,13 +47,14 @@ export async function integrityPollFixture(t: TestContext, large = false) {
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute, { ownerUserId: 'integrity-poll-owner' });
   const callId = randomUUID();
-  const config = { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: 'opus' };
+  const companion = companionConfigurationFixture({ dutyCatProfileId: 'opus' });
   const configStore = new MemoryConciergeConfigStore();
-  await configStore.put('integrity-poll-owner', config);
+  await configStore.put('integrity-poll-owner', CONCIERGE_CONFIG_DEFAULTS);
   await app.register(conciergeRoutes, {
     conciergeConfigStore: configStore,
+    companionSettings: companion.read,
     conciergeThreadService: new ConciergeThreadService({
-      conciergeConfigStore: configStore,
+      companionSettings: companion.read,
       threadStore: new ThreadStore(),
     }),
     conciergeRelayStore: new MemoryConciergeRelayStore(),

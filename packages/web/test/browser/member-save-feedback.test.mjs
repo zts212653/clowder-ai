@@ -1,9 +1,58 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { test } from 'node:test';
+import { parseAcpCatalog } from '../../../api/dist/routes/runtime-model-catalog.js';
 import { scene, screenshots } from './f322-members-fixture.mjs';
 
 const rejection = '别名 "@重复" 已被其他成员使用';
+
+for (const options of [[{ value: 'duplicate' }, { value: 'duplicate' }], []])
+  test(`clearing an existing ACP model remains saveable (${options.length} choices)`, async () => {
+    const { context, page, state } = await scene();
+    try {
+      const acp = { command: 'fixture-acp', startupArgs: [], transport: 'stdio' };
+      Object.assign(state.cats[0], {
+        clientId: 'acp',
+        carrier: 'acp',
+        configurationSource: 'native_tool',
+        accountRef: '',
+        acp,
+      });
+      const session = { configOptions: [{ id: 'model', currentValue: 'duplicate', options }] };
+      const catalog = parseAcpCatalog(session, session);
+      assert.equal(catalog.defaultModelStatus, 'unavailable');
+      await page.route('**/api/cats/native-runtimes', (route) =>
+        route.fulfill({
+          json: {
+            runtimes: [{ id: 'acp:fixture', label: 'Fixture ACP', clientId: 'acp', installed: true, models: [], acp }],
+          },
+        }),
+      );
+      await page.route('**/api/cats/runtime-models', (route) => route.fulfill({ json: catalog }));
+      await page.reload();
+      await page
+        .getByRole('button', { name: /隔离测试甲/ })
+        .first()
+        .click();
+      const editor = page.getByTestId('member-settings-page');
+      const picker = editor.getByRole('group', { name: '模型', exact: true }).getByRole('combobox');
+      await picker.click();
+      await editor.getByRole('option', { name: /跟随 Fixture ACP/ }).click();
+      await editor.getByText(/默认模型尚未确认/).waitFor();
+      const save = editor.getByRole('button', { name: '保存', exact: true });
+      assert.equal(await save.isEnabled(), true);
+      if (screenshots)
+        await page.screenshot({ path: path.join(screenshots, `clear-unconfirmed-model-${options.length}.png`) });
+      await save.click();
+      await editor.getByRole('status').filter({ hasText: '已保存' }).waitFor();
+      const writes = state.writes.filter((write) => write.path === '/api/cats/fixture-a' && write.method === 'PATCH');
+      assert.equal(writes.length, 1);
+      assert.equal(writes[0].body.defaultModel, '');
+      assert.equal(state.cats[0].defaultModel, '');
+    } finally {
+      await context.close();
+    }
+  });
 
 async function assertVisibleAlert(alert) {
   await alert.waitFor({ state: 'attached' });

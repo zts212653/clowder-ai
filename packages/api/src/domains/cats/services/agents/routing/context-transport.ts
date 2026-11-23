@@ -490,7 +490,7 @@ export function formatRecallPointer(input: { label: string; candidateCount: numb
   return [
     `[${input.label} — pointer only]`,
     `${input.candidateCount} 条启发式候选未展开正文（未经当前适用性校验，不构成真相源）。`,
-    '需要时自行检索：cat_cafe_search_evidence(mode="hybrid") 或 cat_cafe_graph_resolve(anchor)。',
+    '需要时自行检索：cat_cafe_search_evidence（交原句或编号，精确编号同时返回图谱关系）。',
     `[/${input.label}]`,
   ].join('\n');
 }

@@ -6,12 +6,22 @@ import { fileURLToPath } from 'node:url';
 import { isStalePencilProbe, PENCIL_PROBE_RULE, pencilOwnedDescendants } from './lib/pencil-codex-probe-policy.mjs';
 import { enrichPencilProbes, revalidatePencilFinding } from './lib/pencil-codex-probes.mjs';
 import { isCatCafeCommand, STALE_DEV_PROCESS_RULES } from './lib/stale-dev-process-rules.mjs';
+import {
+  killWindowsProcess,
+  listWindowsProcesses,
+  parseWindowsProcessList,
+} from './lib/windows-stale-dev-processes.mjs';
 
 export {
   matchAgentBrowserMcpWrapper,
   matchPinchtabMcpWrapper,
   matchPlaywrightMcpWrapper,
 } from './lib/stale-dev-process-rules.mjs';
+export {
+  killWindowsProcess,
+  parseWindowsProcessList,
+  readWindowsCreationMs,
+} from './lib/windows-stale-dev-processes.mjs';
 
 const HOUR = 60 * 60;
 const KILL_GRACE_MS = 2000;
@@ -106,6 +116,7 @@ export function findLongLivedDevProcesses(processes, { ownPid = process.pid } = 
 }
 
 function listProcesses() {
+  if (process.platform === 'win32') return listWindowsProcesses();
   return execFileSync('ps', ['-axo', 'pid=,ppid=,pgid=,sess=,etime=,rss=,command='], {
     encoding: 'utf8',
     maxBuffer: 8 * 1024 * 1024,
@@ -160,9 +171,14 @@ export function processExists(pid) {
   }
 }
 
+function defaultKill(pid, signal, item) {
+  if (process.platform === 'win32') return killWindowsProcess(pid, item);
+  return process.kill(pid, signal);
+}
+
 function sendSignal(item, signal, killFn) {
   try {
-    killFn(item.pid, signal);
+    killFn(item.pid, signal, item);
     return { status: 'sent' };
   } catch (error) {
     if (error?.code === 'ESRCH') return { status: 'gone' };
@@ -179,17 +195,22 @@ function recordSignalOutcome(result, outcome, signal) {
 export async function terminateFindings(
   findings,
   {
-    killFn = process.kill.bind(process),
+    killFn = defaultKill,
     existsFn = processExists,
     sleepFn = sleep,
     graceMs = KILL_GRACE_MS,
     revalidatePencilFn = revalidatePencilFinding,
+    protectedPids = new Set([process.pid, process.ppid]),
   } = {},
 ) {
-  const result = { sigtermSent: 0, sigkillSent: 0, alreadyGone: 0, skippedChanged: 0, failed: [] };
+  const result = { sigtermSent: 0, sigkillSent: 0, alreadyGone: 0, skippedChanged: 0, skippedProtected: 0, failed: [] };
   const pending = [];
 
   for (const item of findings) {
+    if (protectedPids.has(item.pid)) {
+      result.skippedProtected++;
+      continue;
+    }
     if (item.ruleId === PENCIL_PROBE_RULE && !revalidatePencilFn(item)) {
       result.skippedChanged++;
       continue;
@@ -222,7 +243,7 @@ export async function terminateFindings(
 async function killFindings(findings) {
   const result = await terminateFindings(findings);
   console.log(
-    `[stale-dev-processes] sigterm=${result.sigtermSent} sigkill=${result.sigkillSent} gone=${result.alreadyGone} skippedChanged=${result.skippedChanged} failed=${result.failed.length}`,
+    `[stale-dev-processes] sigterm=${result.sigtermSent} sigkill=${result.sigkillSent} gone=${result.alreadyGone} skippedChanged=${result.skippedChanged} skippedProtected=${result.skippedProtected} failed=${result.failed.length}`,
   );
   if (result.failed.length > 0) {
     process.exitCode = 1;
@@ -233,17 +254,23 @@ async function killFindings(findings) {
 }
 
 export async function main(argv = process.argv.slice(2)) {
-  if (process.platform === 'win32') {
+  const run = argv.includes('--run');
+  const pencilOnly = argv.includes('--pencil-only');
+  let processes;
+  try {
+    const output = listProcesses();
+    processes = enrichPencilProbes(
+      process.platform === 'win32' ? parseWindowsProcessList(output) : parsePsOutput(output),
+    );
+  } catch (error) {
     console.error(
-      '[stale-dev-processes] Windows process enumeration/cleanup is not supported yet; no processes were inspected or terminated.',
+      `[stale-dev-processes] failed to enumerate processes; no processes were inspected or terminated: ${String(
+        error instanceof Error ? error.message : error,
+      )}`,
     );
     process.exitCode = 1;
     return;
   }
-  const run = argv.includes('--run');
-  const pencilOnly = argv.includes('--pencil-only');
-  const psOutput = listProcesses();
-  const processes = enrichPencilProbes(parsePsOutput(psOutput));
   const findings = findStaleDevProcesses(processes, { pencilOnly });
   const advisories = pencilOnly ? [] : findLongLivedDevProcesses(processes);
   printFindings(findings, advisories);

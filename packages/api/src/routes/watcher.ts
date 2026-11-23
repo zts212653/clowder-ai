@@ -2,18 +2,23 @@ import {
   catRegistry,
   formatCatDisplayName,
   parseWatcherThreadControl,
+  WATCHER_PANEL_DEFAULTS,
   type WatcherCapability,
+  type WatcherPanelConfig,
   watcherConfigPatchSchema,
   watcherThreadControlPatchSchema,
 } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { readAccountCatalogSnapshot } from '../config/account-store-snapshot.js';
 import { resolveThreadAccess } from '../domains/cats/services/session/thread-access-policy.js';
 import type { ILabelStore, IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { ITurnExecutionStore } from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
 import type { IConciergeConfigStore } from '../domains/concierge/ConciergeConfigStore.js';
+import { watcherPanelMemberSupported } from '../domains/concierge/watcher/panel/watcher-panel-member.js';
 import { effectiveWatcherState, readWatcherPreferences } from '../domains/concierge/watcher/watcher-controls.js';
 import { watcherDailyRows } from '../domains/concierge/watcher/watcher-daily.js';
+import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { requirePluginOwnerLocalAccess } from './plugin-access-guards.js';
 
 interface WatcherRouteOptions {
@@ -28,7 +33,8 @@ interface WatcherRouteOptions {
 const configBody = watcherConfigPatchSchema.extend({ expectedRevision: z.number().int().nonnegative() });
 const controlBody = watcherThreadControlPatchSchema.extend({ expectedRevision: z.number().int().nonnegative() });
 
-function owner(request: FastifyRequest, reply: FastifyReply, write: boolean): string | null {
+/** Person-session only: cat callback credentials never read or change watcher settings or the panel ledger. */
+export function watcherOwner(request: FastifyRequest, reply: FastifyReply, write: boolean): string | null {
   if (
     ['x-invocation-id', 'x-callback-token', 'x-agent-key-secret'].some((name) => request.headers[name] !== undefined)
   ) {
@@ -43,9 +49,30 @@ function owner(request: FastifyRequest, reply: FastifyReply, write: boolean): st
   return access.operator;
 }
 
+/** Panel accounts are execution-local choices; only accounts a Codex member can launch with are offered. */
+function panelAccounts(): Array<{ id: string; label: string }> {
+  try {
+    return Object.entries(readAccountCatalogSnapshot(resolveActiveProjectRoot(process.cwd())))
+      .filter(([, account]) => account.codex !== undefined || account.clientId === 'openai')
+      .map(([id, account]) => ({ id, label: account.displayName ?? id }));
+  } catch {
+    return [];
+  }
+}
+
+function panelProblem(panel: WatcherPanelConfig): string | null {
+  const accounts = new Set(panelAccounts().map((account) => account.id));
+  for (const member of panel.members) {
+    if (!catRegistry.tryGet(member.catId) || !watcherPanelMemberSupported(member.catId))
+      return `${member.catId} 不能担任多只守望（目前只支持 Codex 成员）`;
+    if (member.accountRef && !accounts.has(member.accountRef)) return `账号 ${member.accountRef} 不可用`;
+  }
+  return null;
+}
+
 export const watcherRoutes: FastifyPluginAsync<WatcherRouteOptions> = async (app, deps) => {
   app.get('/api/watcher/daily', async (request, reply) => {
-    const userId = owner(request, reply, false);
+    const userId = watcherOwner(request, reply, false);
     if (!userId) return;
     const parsed = z
       .object({
@@ -82,10 +109,15 @@ export const watcherRoutes: FastifyPluginAsync<WatcherRouteOptions> = async (app
       limit: 200,
     });
     return {
+      usageVersion: 2,
       day: parsed.data.day,
       timezone: parsed.data.timezone,
       rows: await Promise.all(
-        watcherDailyRows(page.records, (at) => dayOf(at) === parsed.data.day).map(async (row) => ({
+        watcherDailyRows(
+          page.records,
+          (at) => dayOf(at) === parsed.data.day,
+          (start, end) => dayOf(start) <= parsed.data.day && (end === undefined || dayOf(end) >= parsed.data.day),
+        ).map(async (row) => ({
           ...row,
           title: (await deps.threadStore.get(row.threadId))?.title ?? '已删除的对话',
         })),
@@ -100,6 +132,8 @@ export const watcherRoutes: FastifyPluginAsync<WatcherRouteOptions> = async (app
       ...preferences,
       // The settings switch is the only on/off control; this field only reports whether the watcher runtime is ready.
       rolloutEnabled: deps.runtimeReady?.() ?? true,
+      panelDefaults: WATCHER_PANEL_DEFAULTS,
+      panelAccounts: panelAccounts(),
       members: await Promise.all(
         catRegistry.getAllIds().map(async (catId) => {
           const config = catRegistry.tryGet(catId)?.config;
@@ -112,18 +146,19 @@ export const watcherRoutes: FastifyPluginAsync<WatcherRouteOptions> = async (app
                 })
               : catId,
             capability: await deps.capability(catId),
+            panelSupported: watcherPanelMemberSupported(catId),
           };
         }),
       ),
     };
   }
   app.get('/api/watcher/config', async (request, reply) => {
-    const userId = owner(request, reply, false);
+    const userId = watcherOwner(request, reply, false);
     if (!userId) return;
     return settings(userId);
   });
   app.put('/api/watcher/config', async (request, reply) => {
-    const userId = owner(request, reply, true);
+    const userId = watcherOwner(request, reply, true);
     if (!userId) return;
     const parsed = configBody.safeParse(request.body);
     if (!parsed.success)
@@ -131,6 +166,8 @@ export const watcherRoutes: FastifyPluginAsync<WatcherRouteOptions> = async (app
     const { expectedRevision, ...patch } = parsed.data;
     if (patch.memberCatId && !(await deps.capability(patch.memberCatId)).supported)
       return reply.code(422).send({ code: 'WATCHER_SESSION_UNSUPPORTED', error: '此成员暂不支持守望会话' });
+    const problem = patch.panel ? panelProblem(patch.panel) : null;
+    if (problem) return reply.code(422).send({ code: 'WATCHER_PANEL_INVALID', error: problem });
     if (patch.doNotDisturbLabelIds) {
       const allowed = new Set((await deps.labelStore.list(userId)).map((label) => label.id));
       if (patch.doNotDisturbLabelIds.some((id) => !allowed.has(id)))
@@ -141,7 +178,9 @@ export const watcherRoutes: FastifyPluginAsync<WatcherRouteOptions> = async (app
     const restarting =
       (!current.enabled && patch.enabled === true) ||
       (patch.scope !== undefined && patch.scope !== current.scope) ||
-      (patch.memberCatId !== undefined && patch.memberCatId !== current.memberCatId);
+      (patch.memberCatId !== undefined && patch.memberCatId !== current.memberCatId) ||
+      // Either watcher mode starts from now; neither replays turns that settled under the other.
+      (patch.panel !== undefined && patch.panel.enabled !== (current.panel?.enabled ?? false));
     const floor = restarting ? await deps.turnExecutionStore.settledHead(userId) : undefined;
     if (!(await deps.configStore.updateWatcherConfig(userId, expectedRevision, patch, floor)))
       return reply.code(409).send({ error: '设置已改变，请刷新后重试' });
@@ -149,7 +188,7 @@ export const watcherRoutes: FastifyPluginAsync<WatcherRouteOptions> = async (app
     return settings(userId);
   });
   async function thread(request: FastifyRequest, reply: FastifyReply, write: boolean) {
-    const userId = owner(request, reply, write);
+    const userId = watcherOwner(request, reply, write);
     if (!userId) return null;
     const { threadId } = request.params as { threadId: string };
     const row = await deps.threadStore.get(threadId);

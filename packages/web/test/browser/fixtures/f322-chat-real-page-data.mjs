@@ -8,7 +8,6 @@ export const BUSY_THREAD = 'composer-proof-1';
 export const PROJECT_PATH = '/work/projects/accepted-composer-with-a-very-long-project-name';
 export const GROUP_ID = 'composer-proof-group';
 export const GROUP_TITLE = '输入框与侧栏的真实使用 · 带长标题的完整协作讨论组';
-export const DRAFT = '下周开会的封面就定这张了，再帮我看看右侧的留白。';
 export const cats = [
   ['codex-astra', 'Astra', '#4e8278'],
   ['codex61-sol', 'Sol', '#b38341'],
@@ -84,15 +83,6 @@ export function createChatProofApi(now = Date.now(), crowded = false, surface = 
     collapsedPeek: {},
     groups: [{ id: GROUP_ID, name: GROUP_TITLE, threadIds: threads.map((thread) => thread.id) }],
   };
-  let draft = {
-    version: 1,
-    ownerUserId: 'owner-proof',
-    threadId: CURRENT_THREAD,
-    revision: 1,
-    text: DRAFT,
-    updatedAt: now,
-  };
-  let revision = 1;
   let conversationView = null;
   const requests = [];
   const sent = [];
@@ -118,6 +108,16 @@ export function createChatProofApi(now = Date.now(), crowded = false, surface = 
       threads.map((thread) => thread.id),
     );
     if (watcher) return watcher;
+    const quotaRingReadBodies = {
+      '/api/accounts': { projectPath: PROJECT_PATH, providers: [], unavailableAccounts: [] },
+      '/api/accounts/codex/members': { members: [], selection: { state: 'empty', members: [] } },
+      '/api/accounts/claude/members': { members: [], selection: { state: 'empty', members: [] } },
+      '/api/accounts/agy/members': { members: [], selection: { state: 'empty', members: [] } },
+      '/api/config/quota-pin': { pinned: true, selectedAccountRefs: null },
+    };
+    if (method === 'GET' && url.search === '' && Object.hasOwn(quotaRingReadBodies, url.pathname)) {
+      return reply(quotaRingReadBodies[url.pathname]);
+    }
     // The real HTTP client reports bounded timing facts after five seconds. Accept
     // only its authenticated diagnostic batch, never arbitrary POSTs or payloads.
     if (url.pathname === '/api/diagnostics/connection' && url.search === '' && method === 'POST') {
@@ -245,14 +245,6 @@ export function createChatProofApi(now = Date.now(), crowded = false, surface = 
         effective: 'next_work',
         source: 'product',
       });
-    if (url.pathname === `/api/threads/${CURRENT_THREAD}/composer-draft`) {
-      if (method !== 'GET') {
-        if (body.expectedRevision !== revision) return reply({ error: 'conflict' }, 409);
-        revision++;
-        draft = method === 'DELETE' ? null : { ...draft, ...body, revision, threadId: CURRENT_THREAD, updatedAt: now };
-      }
-      return reply({ draft, revision });
-    }
     if (surface && url.pathname === '/api/messages' && method === 'GET') {
       const history = {
         messages: [

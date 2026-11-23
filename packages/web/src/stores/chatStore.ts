@@ -41,7 +41,7 @@ import type {
 } from './chat-types';
 import { DEFAULT_THREAD_STATE } from './chat-types';
 import { projectTerminalActiveInvocationSlots } from './invocation-liveness';
-import { stampMessageWrite } from './local-write-clock';
+import { nextLocalWriteSeq, stampMessageWrite } from './local-write-clock';
 import {
   findLatestMessageIndexByTimeline,
   getMessageTimelineCursorTime,
@@ -77,6 +77,25 @@ export type {
 export { DEFAULT_THREAD_STATE } from './chat-types';
 
 // ── Helpers ──
+
+/** Only a server read issued after the latest deletion can prove that an id was restored. */
+function filterThreadDeletions(state: ChatState, threadId: string, msgs: ChatMessage[], readLocalWriteSeq?: number) {
+  const deleted = state.deletedMessageIds[threadId];
+  if (!deleted?.size) return { messages: msgs, deletedMessageIds: state.deletedMessageIds };
+  const remaining = new Map(deleted);
+  const messages = msgs.filter((message) => {
+    const deletedAt = deleted.get(message.id);
+    if (deletedAt === undefined) return true;
+    if (readLocalWriteSeq === undefined || readLocalWriteSeq < deletedAt) return false;
+    remaining.delete(message.id);
+    return true;
+  });
+  return {
+    messages,
+    deletedMessageIds:
+      remaining.size === deleted.size ? state.deletedMessageIds : { ...state.deletedMessageIds, [threadId]: remaining },
+  };
+}
 
 /**
  * Merge invocation metadata without letting a new parent inherit the previous child turn.
@@ -712,6 +731,8 @@ export interface ChatState {
 
   // Multi-thread state map (preserves per-thread state across switches)
   threadStates: Record<string, ThreadState>;
+  /** Latest deletion positions; a later server History read or restore event can supersede them. */
+  deletedMessageIds: Record<string, ReadonlyMap<string, number>>;
 
   // Multi-thread UI
   viewMode: 'single' | 'split';
@@ -747,8 +768,9 @@ export interface ChatState {
    *  Server GET is authoritative: replaces flat messages AND overwrites
    *  IDB snapshot in one atomic call. Use this instead of bare
    *  replaceMessages + saveMessagesSnapshot whenever a server GET response
-   *  fully replaces the current thread timeline. AC-C10. */
-  hydrateThread: (threadId: string, msgs: ChatMessage[], hasMore: boolean) => void;
+   *  fully replaces the current thread timeline. AC-C10.
+   *  Only server History supplies its issue-time write count; replay/IDB writes omit it. */
+  hydrateThread: (threadId: string, msgs: ChatMessage[], hasMore: boolean, readLocalWriteSeq?: number) => void;
   /**
    * F183 Phase B1.7 — thread-scoped reducer write entry point. Mirror of
    * `replaceMessages` but for arbitrary thread (current OR background).
@@ -758,7 +780,7 @@ export interface ChatState {
    * no IDB write, no hasMore-required (defaults to existing thread.hasMore),
    * mirrors flat when threadId === currentThreadId.
    */
-  replaceThreadMessages: (threadId: string, msgs: ChatMessage[], hasMore?: boolean) => void;
+  replaceThreadMessages: (threadId: string, msgs: ChatMessage[], hasMore?: boolean, readLocalWriteSeq?: number) => void;
   patchMessage: (id: string, patch: ChatMessagePatch) => void;
   appendToLastMessage: (content: string) => void;
   appendToMessage: (id: string, content: string) => void;
@@ -932,6 +954,7 @@ export interface ChatState {
   /** Upsert a same-id durable lifecycle snapshot without manufacturing unread work. */
   upsertLifecycleMessage: (threadId: string, msg: ChatMessage) => void;
   removeThreadMessage: (threadId: string, messageId: string) => void;
+  clearThreadMessageDeletion: (threadId: string, messageId: string) => void;
   patchThreadMessage: (threadId: string, messageId: string, patch: ChatMessagePatch) => void;
   appendToThreadMessage: (threadId: string, messageId: string, content: string) => void;
   appendToolEventToThread: (threadId: string, messageId: string, event: ToolEvent) => void;
@@ -1012,6 +1035,8 @@ export interface ChatState {
     deliveredAt: number,
     messages?: Array<{
       id: string;
+      visibility?: ChatMessage['visibility'];
+      whisperTo?: string[];
       from?: import('@cat-cafe/shared').MessageFrom;
       content: string;
       lifecycle?: import('@cat-cafe/shared').LifecycleStoredMessageMetadata;
@@ -1212,6 +1237,7 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
   queueFull: false,
 
   threadStates: {},
+  deletedMessageIds: {},
   viewMode: 'single',
   splitPaneThreadIds: [],
   splitPaneTargetId: null,
@@ -1306,6 +1332,8 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
             ...(serverMessage
               ? {
                   content: serverMessage.content,
+                  ...(serverMessage.visibility ? { visibility: serverMessage.visibility } : {}),
+                  ...(serverMessage.whisperTo ? { whisperTo: serverMessage.whisperTo } : {}),
                   ...(serverMessage.from ? { from: serverMessage.from } : {}),
                   ...(serverMessage.source ? { source: serverMessage.source } : {}),
                   ...(serverMessage.lifecycle ? { lifecycle: serverMessage.lifecycle } : {}),
@@ -1342,6 +1370,8 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
             if (existingIds.has(sm.id)) continue;
             const incoming: ChatMessage = {
               id: sm.id,
+              ...(sm.visibility ? { visibility: sm.visibility } : {}),
+              ...(sm.whisperTo ? { whisperTo: sm.whisperTo } : {}),
               // One shared rule, so a connector notice delivered through the Queue keeps the same
               // framing the server timeline gives it. The fallback covers an absent `from` only.
               type: timelineMessageKind(sm.from, Boolean(sm.source)) ?? (sm.catId ? 'assistant' : 'user'),
@@ -2087,30 +2117,34 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
   },
 
   // F183 Phase B1.7 — see interface comment.
-  replaceThreadMessages: (threadId, msgs, hasMore) => {
+  replaceThreadMessages: (threadId, msgs, hasMore, readLocalWriteSeq) => {
     return set((state) => {
+      const { messages, deletedMessageIds } = filterThreadDeletions(state, threadId, msgs, readLocalWriteSeq);
       if (threadId === state.currentThreadId) {
-        revokeRemovedBlobUrls(state.messages, msgs);
+        revokeRemovedBlobUrls(state.messages, messages);
         const nextHasMore = hasMore ?? state.hasMore;
         return {
-          messages: msgs,
+          messages,
+          deletedMessageIds,
           hasMore: nextHasMore,
-          ...mirrorActiveFlat(state, { messages: msgs, hasMore: nextHasMore }),
+          ...mirrorActiveFlat(state, { messages, hasMore: nextHasMore }),
         };
       }
       const baseThreadState = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
-      revokeRemovedBlobUrls(baseThreadState.messages, msgs);
+      revokeRemovedBlobUrls(baseThreadState.messages, messages);
       const nextHasMore = hasMore ?? baseThreadState.hasMore;
       return {
+        deletedMessageIds,
         threadStates: {
           ...state.threadStates,
-          [threadId]: { ...baseThreadState, messages: msgs, hasMore: nextHasMore },
+          [threadId]: { ...baseThreadState, messages, hasMore: nextHasMore },
         },
       };
     });
   },
 
-  hydrateThread: (threadId, msgs, hasMore) => {
+  hydrateThread: (threadId, msgs, hasMore, readLocalWriteSeq) => {
+    let hydrated = msgs;
     // F173 Phase C Task 5+6+7 — atomic server-authoritative hydration that
     // honors KD-2 (threadStates is the writer source, flat is compat mirror).
     //
@@ -2124,12 +2158,15 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
     // F183 Phase E AC-E2 (砚砚 R2 P1 fix): same strict-gate as the other
     // caller-driven writers. Runs only when strict mode is on.
     set((state) => {
+      const { messages, deletedMessageIds } = filterThreadDeletions(state, threadId, msgs, readLocalWriteSeq);
+      hydrated = messages;
       if (threadId === state.currentThreadId) {
-        revokeRemovedBlobUrls(state.messages, msgs);
+        revokeRemovedBlobUrls(state.messages, messages);
         return {
-          messages: msgs,
+          messages,
+          deletedMessageIds,
           hasMore,
-          ...mirrorActiveFlat(state, { messages: msgs, hasMore }),
+          ...mirrorActiveFlat(state, { messages, hasMore }),
         };
       }
       // background hydrate — confined to threadStates, flat untouched.
@@ -2142,11 +2179,12 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
       // Cloud Codex P2 (PR #1413): revoke blob: URLs dropped by hydration
       // to avoid leaking object URLs (locally uploaded images stay alive
       // until reload otherwise). No-op when prev messages is [].
-      revokeRemovedBlobUrls(baseThreadState.messages, msgs);
+      revokeRemovedBlobUrls(baseThreadState.messages, messages);
       return {
+        deletedMessageIds,
         threadStates: {
           ...state.threadStates,
-          [threadId]: { ...baseThreadState, messages: msgs, hasMore },
+          [threadId]: { ...baseThreadState, messages, hasMore },
         },
       };
     });
@@ -2154,7 +2192,7 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
     // current — avoids race against a thread switch that already cleared
     // the outgoing thread's IDB snapshot.
     if (get().currentThreadId === threadId) {
-      void saveMessagesSnapshot(threadId, msgs, hasMore).catch(() => {});
+      void saveMessagesSnapshot(threadId, hydrated, hasMore).catch(() => {});
     }
   },
 
@@ -2718,6 +2756,7 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
   /** Add a message to a specific thread (for background thread socket updates) */
   addMessageToThread: (threadId, input) =>
     set((state) => {
+      if (state.deletedMessageIds[threadId]?.has(input.id)) return state;
       const msg = stampMessageWrite(undefined, input);
       // Active thread — delegate to flat state
       if (threadId === state.currentThreadId) {
@@ -2763,6 +2802,7 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
 
   upsertLifecycleMessage: (threadId, msg) =>
     set((state) => {
+      if (state.deletedMessageIds[threadId]?.has(msg.id)) return state;
       const upsert = (messages: ChatMessage[]): ChatMessage[] => {
         const existingIndex = messages.findIndex((candidate) => candidate.id === msg.id);
         if (existingIndex === -1) {
@@ -2820,19 +2860,25 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
 
   removeThreadMessage: (threadId, messageId) =>
     set((state) => {
+      // Record unseen ids too: a suspended replay may not have inserted the response yet.
+      const deletedMessageIds = {
+        ...state.deletedMessageIds,
+        [threadId]: new Map(state.deletedMessageIds[threadId]).set(messageId, nextLocalWriteSeq()),
+      };
       if (threadId === state.currentThreadId) {
         const nextMessages = state.messages.filter((m) => m.id !== messageId);
-        if (nextMessages.length === state.messages.length) return state;
+        if (nextMessages.length === state.messages.length) return { deletedMessageIds };
         revokeRemovedBlobUrls(state.messages, nextMessages);
-        return { messages: nextMessages };
+        return { messages: nextMessages, deletedMessageIds };
       }
 
       const existing = state.threadStates[threadId];
-      if (!existing) return state;
+      if (!existing) return { deletedMessageIds };
       const nextMessages = existing.messages.filter((m) => m.id !== messageId);
-      if (nextMessages.length === existing.messages.length) return state;
+      if (nextMessages.length === existing.messages.length) return { deletedMessageIds };
       revokeRemovedBlobUrls(existing.messages, nextMessages);
       return {
+        deletedMessageIds,
         threadStates: {
           ...state.threadStates,
           [threadId]: {
@@ -2842,6 +2888,15 @@ export const chatStoreCreator: StateCreator<ChatState> = (set, get) => ({
           },
         },
       };
+    }),
+
+  clearThreadMessageDeletion: (threadId, messageId) =>
+    set((state) => {
+      const deleted = state.deletedMessageIds[threadId];
+      if (!deleted?.has(messageId)) return state;
+      const remaining = new Map(deleted);
+      remaining.delete(messageId);
+      return { deletedMessageIds: { ...state.deletedMessageIds, [threadId]: remaining } };
     }),
 
   patchThreadMessage: (threadId, messageId, patch) =>

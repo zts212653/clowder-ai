@@ -138,7 +138,7 @@ import {
   type Viewer,
 } from '../domains/cats/services/stores/visibility.js';
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
-import type { IConciergeConfigStore } from '../domains/concierge/ConciergeConfigStore.js';
+import type { ReadCompanionSettings } from '../domains/concierge/companion-settings.js';
 import {
   hasConciergeNavigationMarker,
   projectConciergeStoredContent,
@@ -177,7 +177,13 @@ import {
   carrierRecoveryPendingResponse,
   resolveSafeWaitCarrier,
 } from './callback-action-carrier-resolution.js';
-import { anchorPendingMention, anchorThreadMessage, truncateHead } from './callback-anchor-helpers.js';
+import {
+  anchorPendingMention,
+  anchorThreadMessage,
+  callbackRichSearchText,
+  projectRichBlocksSummary,
+  truncateHead,
+} from './callback-anchor-helpers.js';
 import {
   extractCallbackCredentials,
   registerCallbackAuthHook,
@@ -202,7 +208,11 @@ import { registerCallbackImageRoutes } from './callback-image-routes.js';
 import { registerCallbackLimbRoutes } from './callback-limb-routes.js';
 import { type CallbackMemoryCueDeps, registerCallbackMemoryCueRoutes } from './callback-memory-cue-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
-import { projectCallbackMessageBody, projectQueuedCallbackMessageBody } from './callback-message-body.js';
+import {
+  projectCallbackMessageBody,
+  projectCallbackMessageCitation,
+  projectQueuedCallbackMessageBody,
+} from './callback-message-body.js';
 import { registerCallbackMessageReadRoutes } from './callback-message-read-routes.js';
 import {
   prepareCallbackSearchAnswer,
@@ -245,8 +255,14 @@ import {
 import { prepareCallbackTaskHandoff } from './callback-task-handoff.js';
 import { registerCallbackTaskRoutes } from './callback-task-routes.js';
 import { registerCallbackThreadCatsRoutes } from './callback-thread-cats-routes.js';
+import {
+  filterCallbackMessages,
+  mergeCallbackMessageWindow,
+  readCallbackMessageWindow,
+} from './callback-visible-history.js';
 import { registerCallbackWithdrawThreadProposalRoutes } from './callback-withdraw-thread-proposal-routes.js';
 import { registerCallbackWorkflowSopRoutes } from './callback-workflow-sop-routes.js';
+import { isCatHiddenWatcherCallbackCard } from './canceled-watcher-callback.js';
 import { registerCompanionWorkReadRoutes } from './companion-work-read.js';
 import { resolveCrossThreadCoordination } from './cross-thread-coordination.js';
 import { verifyOutboundTerminalCoordinationBinding } from './cross-thread-coordination-outbound.js';
@@ -275,7 +291,7 @@ async function readBoundedUnreadContext(input: {
   readonly userId: string;
   readonly afterCursor: string | undefined;
   readonly requestedLimit: number;
-  readonly canInclude: (message: StoredMessage) => boolean;
+  readonly canInclude: (message: StoredMessage) => boolean | Promise<boolean>;
 }): Promise<{ readonly messages: StoredMessage[]; readonly hasMore: boolean }> {
   const unread: StoredMessage[] = [];
   const pageSize = Math.max(input.requestedLimit * 2, 50);
@@ -285,7 +301,7 @@ async function readBoundedUnreadContext(input: {
   while (unread.length < candidateTarget) {
     const batch = await input.messageStore.getByThreadAfter(input.threadId, scanAfter, pageSize, input.userId);
     if (batch.length === 0) break;
-    unread.push(...batch.filter(input.canInclude).slice(0, candidateTarget - unread.length));
+    unread.push(...(await filterCallbackMessages(batch, input.canInclude)).slice(0, candidateTarget - unread.length));
     const last = batch.at(-1);
     if (!last) break;
     const next = cursorFor(last);
@@ -696,9 +712,8 @@ function hasTypedConciergeNavigationAction(richBlocks: readonly RichBlock[]): bo
 
 async function projectCallbackContentForStorage(
   threadStore: IThreadStore | undefined,
-  conciergeConfigStore: IConciergeConfigStore | undefined,
+  companionSettings: ReadCompanionSettings | undefined,
   threadId: string,
-  userId: string,
   senderCatId: string,
   content: string,
   richBlocks: readonly RichBlock[],
@@ -707,7 +722,7 @@ async function projectCallbackContentForStorage(
   try {
     const thread = await threadStore.get(threadId);
     if (thread?.threadKind !== 'concierge') return { ok: true, content };
-    if (!conciergeConfigStore) {
+    if (!companionSettings) {
       return {
         ok: false,
         statusCode: 503,
@@ -715,8 +730,7 @@ async function projectCallbackContentForStorage(
         message: 'Concierge duty ownership is unavailable; no callback content was persisted.',
       };
     }
-    const config = await conciergeConfigStore.get(userId);
-    if (config.dutyCatProfileId !== senderCatId) return { ok: true, content };
+    if ((await companionSettings()).dutyCatProfileId !== senderCatId) return { ok: true, content };
     if (hasConciergeNavigationMarker(content) && !hasTypedConciergeNavigationAction(richBlocks)) {
       return {
         ok: false,
@@ -866,7 +880,7 @@ export interface CallbackRoutesOptions {
   /** For thinking mode filtering in thread-context + thread-cats discovery */
   threadStore?: IThreadStore;
   /** F229: duty-cat ownership for callback projection and action admission. */
-  conciergeConfigStore?: IConciergeConfigStore;
+  companionSettings?: ReadCompanionSettings;
   /** F211 Phase B: external IDE-direct runtime session registration. */
   sessionChainStore?: import('../domains/cats/services/stores/ports/SessionChainStore.js').ISessionChainStore;
   runtimeSessionStore?: IRuntimeSessionStore;
@@ -1456,9 +1470,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         ? { ok: true, content: durableCloudReturnDuplicate.content }
         : await projectCallbackContentForStorage(
             threadStore,
-            opts.conciergeConfigStore,
+            opts.companionSettings,
             effectiveThreadId,
-            principal.userId,
             senderCatId,
             storedContent,
             extractedBlocks,
@@ -2990,9 +3003,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // admission evidence: a navigation action must be carried by this callback.
     const contentProjection = await projectCallbackContentForStorage(
       threadStore,
-      opts.conciergeConfigStore,
+      opts.companionSettings,
       effectiveThreadId,
-      actor.userId,
       senderCatId,
       storedContent,
       extractedBlocks,
@@ -4006,6 +4018,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
               timestamp: item.timestamp,
               contentLength: body.contentLength,
               ...(body.contentBlocks ? { contentBlocks: body.contentBlocks } : {}),
+              ...(body.richBlocks ? { richBlocks: body.richBlocks } : {}),
               requiresDrill: false,
               ...(shouldIncludeAcked ? { acked: await isMentionAcked(item) } : {}),
             };
@@ -4266,7 +4279,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const getKeywordScore = (item: Awaited<ReturnType<typeof messageStore.getByThread>>[number]): number => {
       const cached = relevanceScores.get(item.id);
       if (cached !== undefined) return cached;
-      const score = scoreKeywordRelevance(item.content, keywordTerms);
+      const richText = callbackRichSearchText(item.extra?.rich?.blocks);
+      const searchableText = richText ? [item.content, richText].filter(Boolean).join('\n') : item.content;
+      const score = scoreKeywordRelevance(searchableText, keywordTerms);
       relevanceScores.set(item.id, score);
       return score;
     };
@@ -4283,17 +4298,20 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
       return true;
     };
-    const canIncludeContextItemWithoutKeyword = (
+    const canIncludeContextItemWithoutKeyword = async (
       item: Awaited<ReturnType<typeof messageStore.getByThread>>[number],
-    ): boolean => {
+    ): Promise<boolean> => {
       if (item.deletedAt) return false;
       if (!isTimelinePublished(item)) return false;
       if (item.userId !== principalUserId && !isSystemUserMessage(item)) return false;
       if (!canViewMessage(item, viewer)) return false;
+      if (await isCatHiddenWatcherCallbackCard(item, opts.turnExecutionStore)) return false;
       return matchesExtraFilters(item);
     };
-    const canIncludeContextItem = (item: Awaited<ReturnType<typeof messageStore.getByThread>>[number]): boolean => {
-      if (!canIncludeContextItemWithoutKeyword(item)) return false;
+    const canIncludeContextItem = async (
+      item: Awaited<ReturnType<typeof messageStore.getByThread>>[number],
+    ): Promise<boolean> => {
+      if (!(await canIncludeContextItemWithoutKeyword(item))) return false;
       if (keywordTerms.length === 0) return true;
       return getKeywordScore(item) > 0;
     };
@@ -4332,37 +4350,28 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     if (messageId) {
       const target = await messageStore.getById(messageId);
-      if (!target || target.threadId !== effectiveThreadId || !canIncludeContextItem(target)) {
+      if (!target || target.threadId !== effectiveThreadId || !(await canIncludeContextItem(target))) {
         reply.status(404);
         return { error: 'Message not found in thread context' };
       }
 
       const beforeCount = beforeWindow ?? 3;
       const afterCount = afterWindow ?? 3;
-      const beforeMessages =
-        beforeCount > 0
-          ? await messageStore.getByThreadBefore(
-              effectiveThreadId,
-              getTimelineOrderTime(target),
-              beforeCount,
-              target.id,
-              principalUserId,
-              exposureAwareThreadRead,
-            )
-          : [];
-      const afterMessages =
-        afterCount > 0
-          ? await messageStore.getByThreadAfter(
-              effectiveThreadId,
-              target.id,
-              afterCount,
-              principalUserId,
-              exposureAwareThreadRead,
-            )
-          : [];
-      filtered = [...beforeMessages, target, ...afterMessages]
-        .filter(canIncludeContextItem)
-        .sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
+      const window = {
+        store: messageStore,
+        threadId: effectiveThreadId,
+        userId: principalUserId,
+        anchor: target,
+        include: canIncludeContextItem,
+      };
+      const beforeMessages = await readCallbackMessageWindow({ ...window, direction: 'before', count: beforeCount });
+      const afterMessages = await readCallbackMessageWindow({ ...window, direction: 'after', count: afterCount });
+      filtered = mergeCallbackMessageWindow({
+        before: beforeMessages,
+        anchor: target,
+        after: afterMessages,
+        includeAnchor: true,
+      });
     } else if (keywordTerms.length > 0) {
       let cursorTimestamp = Number.MAX_SAFE_INTEGER;
       let cursorId: string | undefined;
@@ -4403,7 +4412,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           userId: principalUserId,
           afterCursor,
           requestedLimit,
-          canInclude: (item) => canIncludeContextItemWithoutKeyword(item) && isFreshnessRelevant(item),
+          canInclude: async (item) => isFreshnessRelevant(item) && (await canIncludeContextItemWithoutKeyword(item)),
         });
 
       if (readIntent === 'unread' && deliveryCursorStore) {
@@ -4444,7 +4453,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           if (batch.length === 0) break;
 
           for (const item of batch) {
-            if (!canIncludeContextItemWithoutKeyword(item)) continue;
+            if (!(await canIncludeContextItemWithoutKeyword(item))) continue;
             visible.push(item);
           }
 
@@ -4652,6 +4661,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           timestamp: item.timestamp,
           speaker: getMessageSpeakerName(item),
           ...projectedBody,
+          ...(isFullMode ? projectCallbackMessageCitation(item) : {}),
           truncated: false,
           ...queuedProjection,
           ...localReviewProjection,
@@ -4669,6 +4679,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           truncated: true,
           oversized: true,
           drillDown: anchored.drillDown,
+          ...projectRichBlocksSummary(item.extra?.rich?.blocks),
           ...queuedProjection,
           ...localReviewProjection,
           ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
@@ -4690,6 +4701,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             userId: principalUserId,
             catId: null,
             content: message.content,
+            ...(message.richBlocks ? { extra: { rich: { blocks: message.richBlocks } } } : {}),
             timestamp: message.timestamp,
           },
           { effectiveThreadId, speaker: message.speaker },
@@ -4719,6 +4731,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
                   : {
                       content: message.content,
                       ...(message.contentBlocks ? { contentBlocks: message.contentBlocks } : {}),
+                      ...(message.richBlocks ? { richBlocks: message.richBlocks } : {}),
                     }),
                 contentLength: message.contentLength,
                 truncated: Boolean(message.sourceUnavailableReason),
@@ -4733,6 +4746,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             contentLength: message.content.length,
             oversized: true,
             truncated: true,
+            ...projectRichBlocksSummary(message.richBlocks),
             deliveryStatus: message.deliveryStatus,
             queueEntryId: message.queueEntryId,
             ...(message.id.startsWith('queued:')

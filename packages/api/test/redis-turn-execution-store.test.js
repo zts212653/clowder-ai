@@ -57,6 +57,125 @@ describe('RedisTurnExecutionStore', { skip: redisIsolationSkipReason(REDIS_URL) 
     store = new RedisTurnExecutionStore(redis);
   });
 
+  test('F337: recent settled turns read newest first, per thread, for the owner only', async () => {
+    const settle = async (invocationId, threadId, userId, at) => {
+      await store.createRunning(
+        runningInput({ invocationId, parentInvocationId: `p-${invocationId}`, threadId, userId, startedAt: at }),
+      );
+      await store.transitionTerminal(invocationId, {
+        status: 'canceled',
+        endedAt: at + 1,
+        terminalReason: 'user_cancel',
+      });
+      await store.markResponseSettled(invocationId, { kind: 'no_response', reason: 'empty_turn', settledAt: at + 2 });
+    };
+    await settle('recent-a1', 'thread-a', 'redis-user-1', 100);
+    await settle('recent-b1', 'thread-b', 'redis-user-1', 200);
+    await settle('recent-a2', 'thread-a', 'redis-user-1', 300);
+    await settle('recent-other-user', 'thread-a', 'redis-user-2', 400);
+
+    const thread = await store.listRecentSettled({ userId: 'redis-user-1', threadId: 'thread-a', limit: 10 });
+    assert.deepEqual(
+      thread.map((record) => record.invocationId),
+      ['recent-a2', 'recent-a1'],
+    );
+    const owner = await store.listRecentSettled({ userId: 'redis-user-1', limit: 2 });
+    assert.deepEqual(
+      owner.map((record) => record.invocationId),
+      ['recent-a2', 'recent-b1'],
+    );
+    await assert.rejects(() => store.listRecentSettled({ userId: 'redis-user-1', limit: 0 }));
+  });
+
+  test('F337: member start index answers later turns exactly and the owed sleep ledger follows the terminal', async () => {
+    await store.createRunning(
+      runningInput({
+        invocationId: 'slept',
+        parentInvocationId: 'p-slept',
+        threadId: 't-a',
+        catId: 'kimi31-pro',
+        startedAt: 100,
+      }),
+    );
+    await store.transitionTerminal('slept', { status: 'failed', endedAt: 150, terminalReason: 'host_sleep' });
+    await store.createRunning(
+      runningInput({
+        invocationId: 'watch',
+        parentInvocationId: 'p-watch',
+        threadId: 't-a',
+        catId: 'kimi31-pro',
+        executionKind: 'watcher',
+        startedAt: 300,
+      }),
+    );
+    await store.createRunning(
+      runningInput({
+        invocationId: 'other-thread',
+        parentInvocationId: 'p-o',
+        threadId: 't-b',
+        catId: 'kimi31-pro',
+        startedAt: 400,
+      }),
+    );
+
+    const query = { userId: 'redis-user-1', threadId: 't-a', catId: 'kimi31-pro', startedAfter: 100 };
+    assert.equal(await store.hasMemberTurnStartedAfter(query), false, 'watchers and other threads do not count');
+    assert.deepEqual(
+      (await store.listOwedContinuations()).map((record) => record.invocationId),
+      ['slept'],
+    );
+
+    await store.createRunning(
+      runningInput({
+        invocationId: 'again',
+        parentInvocationId: 'p-again',
+        threadId: 't-a',
+        catId: 'kimi31-pro',
+        startedAt: 500,
+      }),
+    );
+    assert.equal(await store.hasMemberTurnStartedAfter(query), true);
+
+    await store.transitionTerminal('again', {
+      status: 'failed',
+      endedAt: 600,
+      terminalReason: 'provider_execution_failed',
+    });
+    await store.settleOwedContinuations(['slept']);
+    assert.deepEqual(await store.listOwedContinuations(), []);
+  });
+
+  // Review R1 P1-1 (codex61-sol, PR #7102): the release being stopped writes its sleep debts to the
+  // physical set it knows; the release that starts next must read that same set.
+  test('F337: a debt the previous release wrote is still owed after the upgrade', async () => {
+    await store.createRunning(
+      runningInput({ invocationId: 'legacy', parentInvocationId: 'p-legacy', threadId: 't-l', catId: 'kimi31-pro' }),
+    );
+    await store.transitionTerminal('legacy', { status: 'failed', endedAt: 200, terminalReason: 'host_sleep' });
+    await store.settleOwedContinuations(['legacy']);
+    await redis.sadd('turnexec:sleep-continuation-owed', 'legacy');
+    assert.deepEqual(
+      (await store.listOwedContinuations()).map((record) => record.invocationId),
+      ['legacy'],
+    );
+  });
+
+  test('F337: a turn the runtime stop cut off is owed in the same terminal write; its repeat is not', async () => {
+    for (const [invocationId, terminalReason] of [
+      ['cut', 'restart_shutdown'],
+      ['cut-again', 'restart_shutdown_repeat'],
+    ]) {
+      await store.createRunning(
+        runningInput({ invocationId, parentInvocationId: `p-${invocationId}`, threadId: 't-r', catId: 'opus' }),
+      );
+      await store.transitionTerminal(invocationId, { status: 'failed', endedAt: 200, terminalReason });
+    }
+    assert.deepEqual(
+      (await store.listOwedContinuations()).map((record) => record.invocationId),
+      ['cut'],
+    );
+  });
+
   test('response commit sequence survives restart and concurrent retries do not duplicate a wake', async () => {
     await store.createRunning(runningInput());
     await store.transitionTerminal('redis-child-1', { status: 'succeeded', endedAt: 200 });

@@ -1,0 +1,24 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 组件目录与说明页（原型工具，不属于产品界面） */
+/* ── 组件目录与说明页（不属于产品界面） ── */
+.proto { position: fixed; right: 34px; top: 50%; transform: translateY(-50%); z-index: var(--z-tool); width: calc(58 * var(--unit)); display: flex; flex-direction: column; gap: var(--sp-hair); padding: var(--sp-s); border-radius: var(--r-l); background: var(--bg-raised); box-shadow: var(--shadow-raised), inset 0 0 0 1.5px var(--proto); }
+.proto .lbl { font-size: var(--fs-s); color: var(--proto); font-weight: 500; padding: var(--sp-xs) var(--sp-s) var(--sp-xs); }
+.proto button { height: var(--ctl-m); padding: 0 var(--sp-s); border: 0; background: none; border-radius: var(--r-m); cursor: pointer; color: var(--fg-strong); font-size: var(--fs-m); display: flex; align-items: center; gap: var(--sp-s); text-align: left; }
+.proto button small { margin-left: auto; color: var(--fg-faint); font-size: var(--fs-s); }
+.proto button:hover { background: var(--bg-hover); }
+.proto button[aria-pressed="true"] { background: var(--proto); color: var(--on-proto); }
+.proto button[aria-pressed="true"] small { color: var(--on-proto); }
+.tweaks { position: fixed; right: 274px; top: 50%; transform: translateY(-50%); z-index: var(--z-tool); width: min(var(--span-4), calc(100vw - 2 * var(--sp-l))); background: var(--bg-raised); border-radius: var(--r-xl); box-shadow: var(--shadow-raised), inset 0 0 0 1.5px var(--proto); padding: var(--sp-l); display: flex; flex-direction: column; gap: var(--sp-m); }
+.tweaks h4 { margin: 0; font-size: var(--fs-l); font-weight: 500; color: var(--fg-strong); }
+.tweaks .t-row { display: flex; flex-direction: column; gap: var(--sp-xs); font-size: var(--fs-m); color: var(--fg-muted); }
+.notes { position: fixed; top: 0; right: 0; bottom: 0; width: var(--span-5); z-index: var(--z-tool); background: var(--bg-raised); box-shadow: var(--shadow-raised); display: flex; flex-direction: column; padding-top: env(safe-area-inset-top, 0); }
+.notes-head { display: flex; align-items: center; gap: var(--sp-s); padding: var(--sp-m) var(--sp-m) var(--sp-s) var(--sp-l); }
+.notes-head h4 { margin: 0; flex: 1; font-size: var(--fs-l); font-weight: 500; color: var(--fg-strong); }
+.notes ol { margin: 0; padding: var(--sp-xs) var(--sp-l) calc(30 * var(--unit)) var(--sp-l); list-style: none; display: flex; flex-direction: column; gap: var(--sp-m); font-size: var(--fs-m); line-height: 1.6; }
+.notes li { display: grid; grid-template-columns: var(--ctl-xs) minmax(0, 1fr); gap: var(--sp-s); }
+.notes li > span { width: var(--ctl-xs); height: var(--ctl-xs); border-radius: var(--r-m); background: var(--proto); color: var(--on-proto); font-size: var(--fs-xs); line-height: 20px; text-align: center; font-weight: 500; }
+.notes li em { font-style: normal; color: var(--fg-muted); display: block; margin-top: var(--sp-hair); }
+.notes .kind { font-size: var(--fs-s); color: var(--proto); font-weight: 500; display: block; margin-bottom: var(--sp-hair); }
+.notes-on .main { margin-right: 340px; }
+.notes-on [data-note] { position: relative; outline: 1.5px dashed var(--proto); outline-offset: 3px; border-radius: var(--r-s); }
+.notes-on [data-note]::after { content: attr(data-note); position: absolute; top: -10px; left: -10px; width: var(--ctl-xs); height: var(--ctl-xs); border-radius: var(--r-m); background: var(--proto); color: var(--on-proto); font: 500 var(--fs-xs)/20px var(--font-text); text-align: center; z-index: var(--z-sticky); pointer-events: none; }

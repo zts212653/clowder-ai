@@ -300,18 +300,11 @@ skills:
     sop_step: null
     merged_from: ["systematic-debugging"]
 
-  # ── Code as Harness（用代码修自己 / 建新能力） ──
+  # ── Code as Harness：You 不得不重说之后 ──
   code-as-harness:
     category: "治理"
     description: >
-      检测摩擦信号 → 搜证据确认重复 → 诊断根因 → 用代码修已有 harness 或沉淀新 harness。
-      Fix（确认重复→hook/lint/guard）+ Build（反复出现的新任务→规划新 skill）。
-      Use when: operator不满且搜证据确认历史上重复出现、连续 cancel、反复出现的陌生任务类型。
-      Not for: 一次性批评（搜证据未发现重复）、玩笑式笨猫、首次代码 bug（用 debugging）、
-      review 反馈（用 receive-review）、一次性新任务（直接做不建 harness）。
-      Output: 重复未确认=不强制 Rich Block；重复已确认且仍需 operator 决策=kind=interactive；
-      重复已确认且无需 operator 决策=直接行动后 kind=card。两类结构化诊断都包含根因、证据和处置/结果。
-      GOTCHA: 必须先搜证据确认重复才弹卡。"又"是高频词不能字面匹配。一次性新任务先做再沉淀。
+      You 重说或纠正了一件家里本来有答案的事之后：入错题本、找断点、修到他不用再说。Use: 已搜证据确认家里之前有；爪感差修复线程。Not: 他第一次提的要求、首次 bug、review 反馈、没让他重说的工具报错。Output: 错题本一行、按断点选的修法、退役条件。
     triggers:
       - "又忘了"
       - "多少次了"
@@ -319,15 +312,15 @@ skills:
       - "怎么还"
       - "总是忘"
       - "又失忆"
-      - "反复出现的新任务"
+      - "又犯了"
+      - "反复犯错"
     not_for:
-      - "一次性批评"
-      - "笨猫哈哈"
-      - "首次代码 bug"
+      - "他第一次提的要求"
+      - "首次 bug"
       - "review 反馈"
-      - "一次性新任务"
-    output: "重复未确认不强制 block；重复已确认后按 operator 决策需要产出 interactive 或行动后 card"
-    next: ["debugging", "deep-research", "writing-skills", "self-evolution"]
+      - "没让他重说的工具报错"
+    output: "错题本一行、按断点选的修法、退役条件"
+    next: ["debugging", "deep-research", "writing-skills"]
     sop_step: null
 
   paw-feel-daily:
@@ -554,7 +547,7 @@ skills:
       询问“能进化什么”时只解释边界、不创建 Program；给出具体目标时调用 cat_cafe_start_evolution_program；已有项目沿原责任链推进。
       直接命令式表达“让 / 请让 Agent 或业务能力达到某结果”且没有问句、延后或只讨论限定时，也是具体目标；未知实现由 F311 admission identity 与对象地图承接。
       Use when: 用户想让 Agent 或业务能力效果更好、直接给出要达成的能力结果、先准备改进依据，询问可进化对象或边界，或要求启动/推进具体能力项目。
-      Not for: 复盘已经发生的重复错误、SOP 缺口或知识沉淀（用 self-evolution）；确定性 bug；只有运行健康问题（走 F153 logs/metrics/traces）；明确只讨论、假设或延后启动的问句。
+      Not for: 家里本来有答案、You 不得不重说的事（用 code-as-harness）；既往方法总结留在原任务/文档，同类新活做到第二次想沉淀技能时用 writing-skills；确定性 bug；只有运行健康问题（走 F153 logs/metrics/traces）；明确只讨论、假设或延后启动的问句。
       Output: 信息型解释或可检查的准备产物；动作型目标幂等创建 durable Program，并由真实 invocation 在同一轮登记、提交和回读首轮版本化准备；已有项目按真实证据与权限沿原责任链继续取证、改进、复验和方法回流。
     triggers:
       - "我们来进化"
@@ -568,45 +561,11 @@ skills:
       - "Evolution Program"
       - "Capability Evolution"
     not_for:
-      - "复盘已经发生的重复错误、流程缺口或知识沉淀"
+      - "You 重说的既有要求或既往方法总结"
       - "确定性 bug 修复"
       - "性能、耗时或稳定性诊断"
     output: "Informational explanation or canonical Program with versioned preparation; evidence- and authority-bound investigation, change, fresh-outcome verification and method return through the original owners"
-    next: ["eval-design", "self-evolution"]
-    sop_step: null
-    merged_from: null
-
-  self-evolution:
-    category: "治理"
-    description: >
-      复盘已经发生的工作并沉淀改进，不是“我们来进化 X”的产品入口。
-      Use when: operator scope 发散偏离愿景、同类错误反复出现、SOP 流程缺口、有价值的知识/方法论值得沉淀。
-      Not for: 用户询问“能进化什么”、能力进化边界，或要求“我们来进化 X”（用 capability-evolution）；日常 SOP 推进（正常执行）；一次性个案 bug fix。
-      Output: Scope 收束提醒 / 流程改进提案 / 知识沉淀提案。
-    triggers:
-      - "scope 发散"
-      - "又犯了"
-      - "反复犯错"
-      - "流程缺口"
-      - "self-evolution"
-      - "这个错误犯了好多次"
-      - "要不要拆成多个 feat"
-      - "这个值得记住"
-      - "沉淀一下"
-      - "这个方法论不错"
-      - "episode card"
-      - "method card"
-      - "知识沉淀"
-      - "蒸馏"
-      - "eval ledger"
-      - "成熟度"
-    not_for:
-      - "询问能进化什么或能力进化边界"
-      - "要求我们来进化 X"
-      - "日常 SOP 推进"
-      - "一次性 bug fix"
-    output: "Scope Guard Log / Evolution Proposal / Episode Card → Method/Skill → Eval"
-    next: ["capability-evolution"]
+    next: ["eval-design", "code-as-harness", "writing-skills"]
     sop_step: null
     merged_from: null
 
@@ -639,7 +598,7 @@ skills:
       - "operator 已签字降级"
       - "trivial 任务"
     output: "Desperation Packet / 新方向行动计划 / operator 升级请求"
-    next: ["deep-research", "collaborative-thinking", "self-evolution"]
+    next: ["deep-research", "collaborative-thinking", "code-as-harness"]
     sop_step: null
     merged_from: null
 
@@ -792,9 +751,9 @@ skills:
     category: "调研与知识"
     description: >
       E0 资格门（GT 域/裁判射程/付薪方/自治上限）+ 指标出生证契约 + 纵向运行拓扑（进入/唤醒/成熟/可行动）+ 七公理设计自检 + 存量 eval 体检尺（五病：划水/污染/归因停滞/干预失证/摸鱼）。
-      Use when: 要判断 Agent 是否专业、省心或真正改善，需要设计判断依据与校准；按 ADR-031 判定 eval 资格、新增/修改指标、设计纵向触发或审计现有 eval。
-      Not for: 单次交付自检（用 quality-gate）、审外部 claim（用 source-audit）、摩擦诊断（用 code-as-harness）。
-      Output: 测量与校准草案或带出生证的指标定义（纵向 eval 含触发契约），或带病名+处置建议的体检报告（不输出总分排行榜）。
+      Use when: 要判断 Agent 是否专业、省心或真正改善，需要设计判断依据与校准；按 ADR-031 判定 eval 资格、新增/修改指标、在原任务设计比较、校准、干预或审计现有 eval。
+      Not for: 确定性 bug（用 debugging/tdd）、单次交付自检（用 quality-gate）、审外部 claim（用 source-audit）、摩擦诊断（用 code-as-harness）。
+      Output: 测量与校准草案或带出生证的指标定义（仅明确需要多轮时设计接续），或带病名+处置建议的体检报告（不输出总分排行榜）。
     triggers:
       - "设计 eval"
       - "定指标"
@@ -808,36 +767,12 @@ skills:
       - "摸鱼指标"
       - "metric design"
     not_for:
+      - "确定性 bug"
       - "单次交付自检"
       - "外部 claim 审计"
       - "摩擦诊断"
-    output: "Measurement/calibration draft or metric birth certificate（纵向 eval 含触发契约），或 eval 体检报告（病名 + 处置）"
-    next: ["capability-evolution", "quality-gate", "self-evolution"]
-    sop_step: null
-    merged_from: null
-
-  # ── 记忆系统三入口路由（F188 Phase F）──
-  memory-navigation:
-    category: "调研与知识"
-    description: >
-      记忆系统三入口路由（search_evidence / graph_resolve / list_recent）决策树 + 噪音控制 + 加载时机。F188 Phase F (AC-F6) 配套 skill。
-      Use when: 没先验、压缩后回顾、"我记得最近讨论过 X"、search_evidence 反复 low-hit。
-      Not for: 已有精确 anchor 直接 Read；代码符号查 Grep/LSP。
-      Output: 选定入口 + 噪音控制参数 + 进入对应 MCP 工具。
-    triggers:
-      - "没先验"
-      - "压缩后"
-      - "我记得讨论过"
-      - "最近讨论"
-      - "找不到 anchor"
-      - "cold start"
-      - "扫一眼最近"
-      - "memory navigation"
-    not_for:
-      - "已有精确 anchor"
-      - "代码符号查找"
-    output: "Entry choice + noise control params + downstream tool call"
-    next: ["feat-lifecycle", "debugging", "cross-cat-handoff"]
+    output: "Measurement/calibration draft or metric birth certificate（仅明确需要多轮时设计接续），或 eval 体检报告（病名 + 处置）"
+    next: ["capability-evolution", "quality-gate", "code-as-harness", "writing-skills"]
     sop_step: null
     merged_from: null
 
@@ -872,9 +807,9 @@ skills:
     description: >
       按问题与证据缺口选择记忆检索范围（8 类题型参考）。
       Use when: "哪些地方提过 X" / source-map / absence check / delta / coverage 全集 / 冷启动 onboard / 召回任务搜了 1 刀觉得不够。
-      Not for: 只是选入口走第一刀（用 memory-navigation）/ 已知精确 anchor 直接 Read / 代码符号查 Grep/LSP / 新功能开发。
+      Not for: 一刀就能答的普通查找（直接 search_evidence 交原句）/ 已知坐标单读（read_memory）/ 代码符号查 Grep/LSP / 新功能开发。
       Output: 单一 owner 汇总原始证据、实际覆盖与未验证边界，一次交付。
-      GOTCHA: 和 memory-navigation 互补不重叠 — memory-navigation 决定第一刀工具，本 skill 处理证据缺口与覆盖边界，不按模型家族或固定轮次决定停止。
+      GOTCHA: 找入口只有一个，不用先选工具；本 skill 处理证据缺口与覆盖边界，不按模型家族或固定轮次决定停止。
     triggers:
       - "哪些 thread"
       - "哪些 md"
@@ -892,7 +827,7 @@ skills:
       - "coverage"
       - "全集"
     not_for:
-      - "选入口（用 memory-navigation）"
+      - "一刀就能答的普通查找（直接 search_evidence）"
       - "已知精确 anchor 直接 Read"
       - "代码符号查找"
       - "新功能开发"
@@ -1173,11 +1108,13 @@ skills:
   rich-messaging:
     category: "创作与媒体"
     description: >
-      Use when: 在当前 Chat 交付可看、可听或可操作产物（语音、图片、截图、HTML/demo、卡片、清单、diff、交互选择），或保存、继续修改 HTML 图解/小工具，无需用户说“富文本”。
-      Not for: 纯文字、仅讨论 HTML 原理或修改仓库源码；复杂 localhost 应用用 browser-preview。
+      Use when: 找原话并带可点击出处，或在当前 Chat 交付可看、可听或可操作产物（语音、图片、截图、HTML/demo、卡片、清单、diff、交互选择），或保存、继续修改 HTML 图解/小工具，无需用户说“富文本”。
+      Not for: 不附来源或媒体的普通文字回复、仅讨论 HTML 原理或修改仓库源码；复杂 localhost 应用用 browser-preview。
       Output: 消息内富块，或按用途保存 HTML 作品并把固定版本卡发回当前 Chat；续改保留同一作品的历史。
     triggers:
       - "发语音"
+      - "找原话"
+      - "带出处"
       - "说一句"
       - "录一段"
       - "用语音说"
@@ -1383,7 +1320,7 @@ skills:
       - "日常 bug fix"
       - "预防性确认"
     output: "Emotional repair + damage control + lesson distillation"
-    next: ["self-evolution"]
+    next: ["code-as-harness"]
     sop_step: null
     merged_from: null
 

@@ -161,6 +161,7 @@ describe('F163 backstop retrieval suppression (AC-B3)', () => {
       embed: async (texts) => [new Float32Array([0.9, 0.1, 0.0])],
       getModelInfo: () => ({ modelId: 'test', modelRev: 'test', dim: 3 }),
     };
+    vectorStore.initMeta(mockEmbed.getModelInfo());
     store.setEmbedDeps({ embedding: mockEmbed, vectorStore, mode: 'on' });
 
     const results = await store.search('Redis keyPrefix', { mode: 'semantic', limit: 10 });
@@ -228,6 +229,7 @@ describe('F163 backstop retrieval suppression (AC-B3)', () => {
       embed: async (texts) => [new Float32Array([0.9, 0.1, 0.0])],
       getModelInfo: () => ({ modelId: 'test', modelRev: 'test', dim: 3 }),
     };
+    vectorStore.initMeta(mockEmbed.getModelInfo());
     store.setEmbedDeps({ embedding: mockEmbed, vectorStore, mode: 'on' });
 
     const results = await store.search('Redis keyPrefix', { mode: 'hybrid', limit: 10 });

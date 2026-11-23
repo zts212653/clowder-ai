@@ -42,7 +42,7 @@ function fixture() {
   const source = messages.append({
     threadId: old.id,
     userId: 'owner',
-    catId: null,
+    from: { kind: 'user', userId: 'owner' },
     timestamp: Date.now(),
     content: '头顶只有两块灰斑，按母图重画。',
   });
@@ -54,7 +54,7 @@ function fixture() {
   const opening = messages.append({
     threadId: fresh.id,
     userId: 'owner',
-    catId: null,
+    from: { kind: 'user', userId: 'owner' },
     timestamp: Date.now(),
     content: '我们做个3D宪宪喵建模',
   });
@@ -193,7 +193,7 @@ test('whole directory preserves old tail and gaps; clean model calls select with
     const second = f.messages.append({
       threadId: f.fresh.id,
       userId: 'owner',
-      catId: null,
+      from: { kind: 'user', userId: 'owner' },
       timestamp: Date.now(),
       content: '第二轮',
     });
@@ -271,14 +271,14 @@ test('the readable shared lobby is discoverable while missing index rows still d
     const publicMessage = f.messages.append({
       threadId: lobby.id,
       userId: 'owner',
-      catId: null,
+      from: { kind: 'user', userId: 'owner' },
       content: 'Earlier shared idea',
       timestamp: 1,
     });
     f.messages.append({
       threadId: lobby.id,
       userId: 'other-owner',
-      catId: null,
+      from: { kind: 'user', userId: 'other-owner' },
       content: 'FOREIGN_OWNER_BODY',
       timestamp: 2,
     });

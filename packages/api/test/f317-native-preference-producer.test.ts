@@ -3,9 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { type TestContext, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { CONCIERGE_CONFIG_DEFAULTS, catRegistry } from '@cat-cafe/shared';
-import { validateCompanionReply } from '@clowder-ai/plugin-contract';
+import { catRegistry } from '@cat-cafe/shared';
 import { validateCompanionReply as validateBeta20Reply } from '@clowder-ai/plugin-contract-beta20';
+import { validateCompanionReply as validateBeta21Reply } from '@clowder-ai/plugin-contract-beta21';
 import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 import { getRoster, loadCatConfig, toAllCatConfigs } from '../src/config/cat-config-loader.js';
@@ -19,8 +19,10 @@ import { CompanionHostBridge } from '../src/domains/concierge/live/CompanionHost
 import { LiveCompanionSessions } from '../src/domains/concierge/live/LiveCompanionSessions.js';
 import { createLiveConfigChange } from '../src/domains/concierge/live/live-config-transition.js';
 import { validateHostCompanionReply } from '../src/domains/plugin/desktop-window-runtime/companion-private-wire.js';
+import { readPluginConfig } from '../src/domains/plugin/plugin-config-store.js';
 import { sessionAuthPlugin, sessionRoute } from '../src/infrastructure/session-auth.js';
 import { conciergeRoutes } from '../src/routes/concierge.js';
+import { companionConfigurationFixture } from './helpers/companion-configuration-fixture.js';
 import { createIsolatedTemplateRoot } from './helpers/isolated-template-root.js';
 
 const require = createRequire(import.meta.url);
@@ -28,10 +30,7 @@ const { fixture: windowFixture, input } = require('../../../desktop/plugin-windo
 const { createManagedWindow } = require('../../../desktop/plugin-window/window.cjs');
 
 async function fixture(t: TestContext, includeFenceRead = true) {
-  const isolated = createIsolatedTemplateRoot(
-    process.env.TMPDIR ?? '/tmp',
-    fileURLToPath(new URL('../../../cat-template.json', import.meta.url)),
-  );
+  const isolated = createIsolatedTemplateRoot(fileURLToPath(new URL('../../../cat-template.json', import.meta.url)));
   t.after(isolated.cleanup);
   const template = loadCatConfig(isolated.templatePath);
   const cats = Object.values(toAllCatConfigs(template));
@@ -45,13 +44,18 @@ async function fixture(t: TestContext, includeFenceRead = true) {
   const app = Fastify();
   const store = new MemoryConciergeConfigStore();
   const sessions = new LiveCompanionSessions();
-  await store.put(owner, { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: carrier.id, behaviorEnabled: true });
+  const companion = companionConfigurationFixture({ dutyCatProfileId: carrier.id, behaviorEnabled: true });
   await app.register(cookie);
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute, { ownerUserId: owner });
+  companion.register(app);
   await app.register(conciergeRoutes, {
     conciergeConfigStore: store,
-    conciergeThreadService: new ConciergeThreadService({ conciergeConfigStore: store, threadStore: new ThreadStore() }),
+    companionSettings: companion.read,
+    conciergeThreadService: new ConciergeThreadService({
+      companionSettings: companion.read,
+      threadStore: new ThreadStore(),
+    }),
     conciergeRelayStore: new MemoryConciergeRelayStore(),
     conciergeConfirmationStore: new MemoryConciergeConfirmationStore(),
     messageStore: new MessageStore(),
@@ -92,7 +96,7 @@ async function fixture(t: TestContext, includeFenceRead = true) {
     request: (command: unknown) => bridge.request(command),
   });
   t.after(() => managed.close());
-  return { app, store, owner, bridge, f, managed };
+  return { app, store, companion, owner, bridge, f, managed };
 }
 
 test('actual Host state drives persisted native movement while the alpha.13 renderer keeps beta.21/20 replies', async (t) => {
@@ -105,7 +109,7 @@ test('actual Host state drives persisted native movement while the alpha.13 rend
   assert.equal(validateHostCompanionReply({ ...privateState, unexpectedPolicy: true }), false);
   const publicState = await f.f.request({ kind: 'state' });
   assert.ok(f.managed.motionLease(), 'production Bridge output, rather than fixture-invented flags, admits movement');
-  assert.equal(validateCompanionReply(publicState), true);
+  assert.equal(validateBeta21Reply(publicState), true);
   assert.equal(validateBeta20Reply(publicState), true);
   assert.equal('behaviorEnabled' in publicState, false, 'Host-only policy must not change the old renderer schema');
   assert.equal(
@@ -115,37 +119,34 @@ test('actual Host state drives persisted native movement while the alpha.13 rend
   );
   await f.f.request({ kind: 'prepare' }, true);
   assert.ok(f.managed.motionLease());
-  const config = await f.store.getSaved(f.owner);
-  await f.store.put(f.owner, { ...config, behaviorEnabled: false });
+  f.companion.set({ behaviorEnabled: false });
   await f.f.request({ kind: 'state' });
   assert.equal(f.managed.motionLease(), null);
 });
 
 test('a configured write transition without its status reader cannot prove native movement admission', async (t) => {
   const f = await fixture(t, false);
-  assert.equal((await f.store.getSaved(f.owner)).behaviorEnabled, true);
+  assert.equal((await f.companion.read()).behaviorEnabled, true);
   await f.f.request({ kind: 'state' });
   assert.equal(f.managed.motionLease(), null);
 });
 
-test('a saved record predating the behavior preference uses the same default as the Web projection', async (t) => {
+test('an unsaved behavior preference uses the plugin manifest default', async (t) => {
   const f = await fixture(t);
-  const legacy = await f.store.getSaved(f.owner);
-  delete legacy.behaviorEnabled;
-  await f.store.put(f.owner, legacy);
+  f.companion.set({ behaviorEnabled: null });
   const login = await f.app.inject({ url: '/api/session' });
   const headers = { cookie: String(login.headers['set-cookie']).split(';')[0]!, origin: 'http://localhost:5102' };
   const ordinary = (await f.app.inject({ url: '/api/concierge/config', headers })).json().config;
   assert.equal(ordinary.behaviorEnabled, undefined);
   const native = await f.app.inject({ url: '/api/concierge/config?view=native', headers });
   assert.equal(native.statusCode, 200);
-  assert.equal(native.json().behaviorEnabled, ordinary.behaviorEnabled ?? true);
+  assert.equal(native.json().behaviorEnabled, true);
   const state = await f.bridge.request({ kind: 'state' });
   assert.equal('behaviorEnabled' in state && state.behaviorEnabled, true);
   await f.f.request({ kind: 'state' });
   assert.ok(f.managed.motionLease());
   assert.equal(
-    (await f.store.getSaved(f.owner)).behaviorEnabled,
+    readPluginConfig(f.companion.projectRoot, 'official.companion').behaviorEnabled,
     undefined,
     'reading a default does not backfill storage',
   );
@@ -160,10 +161,10 @@ test('an unconfirmed write cannot re-arm native movement from its old persisted 
     release = resolve;
   });
   t.after(release);
-  const put = f.store.put.bind(f.store);
-  f.store.put = async (owner, config) => {
+  const patch = f.store.patch.bind(f.store);
+  f.store.patch = async (owner, config) => {
     await pending;
-    await put(owner, config);
+    await patch(owner, config);
   };
   const login = await f.app.inject({ url: '/api/session' });
   const headers = { cookie: String(login.headers['set-cookie']).split(';')[0]!, origin: 'http://localhost:5102' };
@@ -171,11 +172,11 @@ test('an unconfirmed write cannot re-arm native movement from its old persisted 
     method: 'PUT',
     url: '/api/concierge/config',
     headers,
-    payload: { behaviorEnabled: false },
+    payload: { householdReadsAllowed: false },
   });
   assert.equal(response.statusCode, 503);
   assert.equal(response.json().code, 'configuration_write_unconfirmed');
-  assert.equal((await f.store.getSaved(f.owner)).behaviorEnabled, true, 'the old record is still present');
+  assert.equal((await f.store.get(f.owner)).householdReadsAllowed, undefined, 'the old record is still present');
   await f.f.request({ kind: 'state' });
   assert.equal(
     f.managed.motionLease(),
@@ -185,6 +186,6 @@ test('an unconfirmed write cannot re-arm native movement from its old persisted 
   release();
   await new Promise((resolve) => setImmediate(resolve));
   await f.f.request({ kind: 'state' });
-  assert.equal(f.managed.motionLease(), null);
-  assert.equal((await f.store.getSaved(f.owner)).behaviorEnabled, false);
+  assert.ok(f.managed.motionLease(), 'movement re-arms only after the write settles');
+  assert.equal((await f.store.get(f.owner)).householdReadsAllowed, false);
 });
