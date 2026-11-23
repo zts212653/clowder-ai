@@ -39,21 +39,56 @@ function isNonemptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+const SUBAGENT_REQUEST_FIELDS = ['type_name', 'role', 'initial_prompt'];
+
+function hasCompleteSubagentRequest(value: unknown): boolean {
+  const child = asRecord(value);
+  return SUBAGENT_REQUEST_FIELDS.every((key) => isNonemptyString(child?.[key]));
+}
+
+export function joinAgySubagentOutputs(
+  receipts: readonly (string | null)[],
+  genericOutput: string | null,
+): string | null {
+  const parts = [
+    ...new Set([...receipts, genericOutput].filter((part): part is string => part !== null && part !== '')),
+  ];
+  return parts.length > 0 ? parts.join('\n\n') : null;
+}
+
 function invalidSubagentEntryFields(value: unknown, state: unknown): string[] {
   const child = asRecord(value);
   if (!child) return ['subagent_info.subagents[]'];
-  const invalid = ['type_name', 'role', 'initial_prompt'].filter((key) => !isNonemptyString(child[key]));
-  for (const key of ['conversation_id', 'log_uri']) {
-    const required = key === 'conversation_id' && state === 'DONE';
-    if ((required || child[key] != null) && !isNonemptyString(child[key])) invalid.push(key);
+  const invalid: string[] = [];
+  for (const key of [...SUBAGENT_REQUEST_FIELDS, 'conversation_id', 'log_uri']) {
+    const required = state === 'ACTIVE' && SUBAGENT_REQUEST_FIELDS.includes(key);
+    if ((required || child[key] !== undefined) && !isNonemptyString(child[key])) invalid.push(key);
   }
   if (
-    child.workspace_uris != null &&
+    child.workspace_uris !== undefined &&
     (!Array.isArray(child.workspace_uris) || child.workspace_uris.some((uri) => typeof uri !== 'string'))
   ) {
     invalid.push('workspace_uris');
   }
   return invalid.map((key) => `subagent_info.subagents[].${key}`);
+}
+
+/** Keep actual launch references before generic output/history truncation. The
+ * request prompt is input evidence, never a substitute for a launch receipt.
+ */
+function subagentLaunchReferences(entries: unknown[]): Record<string, unknown>[] {
+  return entries.flatMap((entry) => {
+    const child = asRecord(entry);
+    if (!child) return [];
+    const refs: Record<string, unknown> = {};
+    for (const key of ['conversation_id', 'log_uri']) {
+      if (isNonemptyString(child[key])) refs[key] = child[key];
+    }
+    if (Array.isArray(child.workspace_uris) && child.workspace_uris.length > 0) {
+      refs.workspace_uris = child.workspace_uris;
+    }
+    return Object.keys(refs).length > 0 ? [refs] : [];
+  });
 }
 
 /** AGY 1.5.12 invokes children through a distinct step type, carrying launch
@@ -64,7 +99,11 @@ export function parseAgySubagentFields(value: unknown, state: unknown): ReturnTy
   const info = asRecord(value);
   const subagents = info?.subagents;
   let invalid: string[];
-  if (!info || !Array.isArray(subagents) || subagents.length === 0) {
+  if (value === undefined) {
+    // step_update is sparse: omission neither fabricates a receipt nor invalidates
+    // the request retained from ACTIVE. Explicit unreadable values still fail.
+    invalid = [];
+  } else if (!info || !Array.isArray(subagents) || subagents.length === 0) {
     invalid = ['subagent_info.subagents'];
   } else {
     invalid = subagents.flatMap((entry) => invalidSubagentEntryFields(entry, state));
@@ -73,9 +112,14 @@ export function parseAgySubagentFields(value: unknown, state: unknown): ReturnTy
     kind: 'invalid_tool_evidence',
     detail: `unrecognized ${field}`,
   }));
+  const references = subagentLaunchReferences(Array.isArray(subagents) ? subagents : []);
+  const completeRequest =
+    Array.isArray(subagents) && subagents.length > 0 && subagents.every(hasCompleteSubagentRequest);
   return {
-    toolParameters: state === 'ACTIVE' && info ? info : null,
-    toolOutput: state === 'DONE' && info ? JSON.stringify(info) : null,
+    // A complete terminal snapshot can be the first observation. Reference-only
+    // sparse updates must not replace the request already retained from ACTIVE.
+    toolParameters: completeRequest ? info : null,
+    toolOutput: references.length > 0 ? JSON.stringify({ subagents: references }) : null,
     toolErrorMessage:
       anomalies.length > 0
         ? 'Native subagent invocation unconfirmed: unreadable launch evidence.'

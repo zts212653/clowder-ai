@@ -15,3 +15,9 @@ represented as captured provider output.
 `subagent/DONE` acknowledges the `invoke_subagent` operation and returns child
 conversation references. It does not independently prove the children finished
 their tasks. Child outputs must not become parent response text.
+
+Sparse terminal updates, reference-only child entries, hook-refused or partially
+started ERROR updates, concurrent generic output, long prompts, and mixed child
+text in the tests are synthetic counterexamples. They are not additional
+observations of this CLI. The complete captured frames do not establish a global
+requirement to repeat request fields or child references in every update.
