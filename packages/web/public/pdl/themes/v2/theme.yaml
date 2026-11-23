@@ -17927,6 +17927,8 @@ pdl:
                     runs: "@runs"
                     running: "@running"
                     error: "@failed"
+                    pending: "@pending"
+                    pendingLabel: t:v2a.pending
                     at: "@at"
                     unread: "@unread"
                     unreadLabel:
@@ -17963,26 +17965,51 @@ pdl:
                     of: "@unread"
                     map:
                       "0":
-                        of: "@at"
+                        of: "@pending"
                         map:
-                          "true": true
-                          _:
-                            of: "@failed"
+                          "0":
+                            of: "@at"
                             map:
                               "true": true
                               _:
-                                of: "@running"
+                                of: "@failed"
                                 map:
                                   "true": true
                                   _:
-                                    of: "@replied"
+                                    of: "@running"
                                     map:
                                       "true": true
                                       _:
-                                        of: "@lastWho"
+                                        of: "@replied"
                                         map:
-                                          "": "@note"
-                                          _: true
+                                          "true": true
+                                          _:
+                                            of: "@lastWho"
+                                            map:
+                                              "": "@note"
+                                              _: true
+                          "":
+                            of: "@at"
+                            map:
+                              "true": true
+                              _:
+                                of: "@failed"
+                                map:
+                                  "true": true
+                                  _:
+                                    of: "@running"
+                                    map:
+                                      "true": true
+                                      _:
+                                        of: "@replied"
+                                        map:
+                                          "true": true
+                                          _:
+                                            of: "@lastWho"
+                                            map:
+                                              "": "@note"
+                                              _: true
+                          _: true
                       _: true
               more:
                 - type: component

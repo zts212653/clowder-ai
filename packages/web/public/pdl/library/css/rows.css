@@ -138,7 +138,7 @@
 .color-row { display: grid; grid-template-columns: repeat(8, var(--ctl-xs)); gap: var(--sp-xs); }
 .color-pop .color-sw, .color-pop .color-sw:is(:hover, [aria-current="true"]) { display: block; width: var(--ctl-xs); height: var(--ctl-xs); padding: 0; background: var(--sw); }   /* 浮层是菜单的面：色块不吃菜单项（.menu button）的底色和尺寸 */
 .lr-sub .run { display: inline-block; max-inline-size: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }   /* 执行中那一行：放不下时省略，不撑出行 */
-.lr-sub .run > .dot { display: inline-block; vertical-align: middle; margin-inline-end: var(--sp-xs); }
+.lr-sub :is(.run, .cafe-err) > .dot { display: inline-block; vertical-align: middle; margin-inline-end: var(--sp-xs); }
 .lr.off > .lr-head { opacity: var(--op-disabled); cursor: default; }
 .lr.off:hover { background: none; }
 .lr-title mark { background: var(--accent-soft); color: var(--fg-strong); border-radius: var(--r-xs); }

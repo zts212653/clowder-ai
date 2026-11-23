@@ -6,6 +6,7 @@
  "threadRow": {
   "groupAttention": "{0} to see",
   "meta": {
+   "pending": "Needs decision",
    "repliedGeneric": "Replied"
   }
  },

@@ -225,15 +225,15 @@ function secCollapsed(key, dflt) { const st = secSt(key); return st && st.c != n
    段 { key, head, rows, peek, collapsed, empty, gid }（所有段的行缩进相同：行内容左边和段表头左边对齐，一条规则，段不能单独缩进）；head：{ kind: 'sec', label, n, note } 段名 + “N 个对话”（点了收起整段）、
    { kind: 'group', id, name, n, open } 对话组、{ kind: 'proj', id, name, tip, open, warn, fixed, n, add } 项目；（行 / 表头的 ⋯ 打开对话区的菜单 cafeMenu）{ other: { open, n } } 是“其他项目”开关 */
 function rowMore(menu, k, label, cls) { return btn(label || tc('common.moreActions'), { sm: true, iconOnly: true, icon: 'more', cls: cls, act: 'menu', data: ' data-menu="' + menu + '"' + MENU_DECL + (k != null ? ' data-k="' + h(k) + '"' : '') }); }
-const TROW_TONE = { run: { cls: 'run', dot: true }, err: { cls: 'cafe-err' } };   /* 行的状态：执行中（圆点按状态表挑节拍预设）、出错 */
+const TROW_TONE = { run: { cls: 'run', dot: 'run' }, err: { cls: 'cafe-err' }, warn: { cls: 'cafe-err', dot: 'warn' } };   /* 行的状态：执行中（圆点按状态表挑节拍预设）、出错、等你决定 */
 /* rn：原地改名的绑定（threads 块声明 rename = { form, path, blur }：回车提交给哪个表单、Esc 关掉哪个状态、失焦执行什么），组件不认识 */
 function threadRow(v, rn, root, movable) {
   if (v.renaming && rn) return ('<form class="cafe-trow renaming" data-form="' + rn.form + '"><label class="sr" for="row-rename">' + h(tc('threadRow.name')) + '</label><input class="input" id="row-rename" value="') + h(v.title) + ('" maxlength="200" data-path="' + h(rn.path) + '" data-on-esc="close" data-on-blur="' + rn.blur + '"></form>');
   /* 一项状态：可以带身份（who，颜色是这一项自己的能力，取不到就是组件的中性默认）和执行状态（status，和头像的圈读同一张表）；
      runs：一条对话里有几只猫同时在执行时，按节拍轮流显示（通用轮换 data-rot，悬停不换） */
   const one = function (m) { const tn = TROW_TONE[m.tone]; const c = m.who ? whoInfo(m.who).color : '', st = c ? '--c:' + c : '';
-    /* 执行中：圆点是唯一的 .dot（run 色调：身份色 + 状态表的颜色和节奏），不再用伪元素画 */
-    const dt = tn && tn.dot ? '<span class="dot" data-tone="run"' + (m.who ? ' data-live="' + h(m.who) + '" data-status="' + h(m.status || '') + '"' : m.status ? ' data-status="' + h(m.status) + '"' : '') + (st ? ' style="' + st + '"' : '') + '></span>' : '';
+    /* 状态圆点是唯一的 .dot（run 色调：身份色 + 状态表的颜色和节奏；warn：琥珀点），不再用伪元素画 */
+    const dt = tn && tn.dot ? '<span class="dot" data-tone="' + tn.dot + '"' + (m.who ? ' data-live="' + h(m.who) + '" data-status="' + h(m.status || '') + '"' : m.status ? ' data-status="' + h(m.status) + '"' : '') + (st ? ' style="' + st + '"' : '') + '></span>' : '';
     return tn ? '<span class="' + tn.cls + '"' + (m.who ? ' data-k="' + h(m.who) + '"' : '') + '>' + dt + h(m.text) + '</span>' : '<span>' + h(m.text) + '</span>'; };   /* data-k：这一项是谁（树键的一段）——轮换里换了顺序，节拍也按成员认，不按位置 */
   const state = [];
   if (v.hub) state.push({ text: tc('threadRow.meta.hub') });
@@ -241,6 +241,7 @@ function threadRow(v, rn, root, movable) {
   if (v.runs && v.runs.length) state.push({ runs: v.runs.map(function (r) { return { who: r.who, status: r.status, tone: 'run', text: tc('threadRow.meta.run', whoInfo(r.who).name, Math.max(1, Math.round((r.secs || 0) / 60))) }; }) });
   else if (v.failed) state.push({ text: tc('common.status.error'), tone: 'err' });
   else if (v.running && v.who) state.push({ text: tc('threadRow.meta.running', whoInfo(v.who).name) });
+  else if (v.pending) state.push({ text: tc('threadRow.meta.pending'), tone: 'warn' });
   else if (v.note || v.restored) state.push({ text: rn && rn.note ? pv(rn.note, v, root) : v.note });
   else if (v.lastWho) state.push({ text: tc('threadRow.meta.replied', whoInfo(v.lastWho).name) });
   else if (v.replied) state.push({ text: tc('threadRow.meta.repliedGeneric') });

@@ -46,6 +46,7 @@
     "replied": "已回复",
     "unread": "{0} 未读",
     "atYou": "@你",
+    "pending": "等你决定",
     "recall": "召回 {0}",
     "tools": "{0} 次工具调用",
     "errors": "其中 {0} 次出错",

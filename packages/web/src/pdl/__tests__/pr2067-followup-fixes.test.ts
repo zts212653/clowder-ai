@@ -88,12 +88,16 @@ async function bootConsole(
     if (name === '/api/plugin-manager/plugins') return { plugins: [] };
     if (name === '/api/plugin-manager/pdl') return { fragments: {} };
     if (name === '/api/concierge/work/decisions') {
-      const items = query?.mentionPeriod === 'handled' ? [] : (options.decisions?.() ?? []);
+      const all = query?.mentionPeriod === 'handled' ? [] : (options.decisions?.() ?? []);
+      const offset = Number(query?.offset ?? 0);
+      const limit = Number(query?.limit ?? 20);
+      const items = all.slice(offset, offset + limit);
       return {
         status: 'available',
         observedAt: Date.now(),
         identity: { ownerUserId: 'owner' },
-        attentionCount: items.length,
+        attentionCount: all.length,
+        page: { offset, limit, hasMore: offset + items.length < all.length },
         items,
       };
     }
@@ -398,6 +402,8 @@ describe('#2067 follow-up fixes across default and v2 themes', () => {
         (el) => el.getAttribute('data-tid'),
       );
       expect(visiblePeekRows).toEqual(['g-pending', 'g-at', 'g-unread-1']);
+      const pendingRowEl = peekContainer.querySelector('[data-tid="g-pending"]');
+      expect(pendingRowEl?.textContent).toContain('等你决定');
 
       const navModel = evalIn('VM.navThreads()') as {
         sections: Array<{ key: string; rows: Array<{ id: string; pending: number; unread: number }> }>;
@@ -420,6 +426,112 @@ describe('#2067 follow-up fixes across default and v2 themes', () => {
         (updatedSec!.querySelector('.gsec-peek') ?? updatedSec!).querySelectorAll('[data-tid]') as NodeListOf<Element>,
       ).map((el) => el.getAttribute('data-tid'));
       expect(updatedPeek).toEqual(['g-at', 'g-unread-1', 'g-unread-2']);
+    });
+
+    it(`loads pending decisions from page 2+ without opening inbox and shows 等你决定 cue (${themeId})`, async () => {
+      const now = Date.now();
+      const fillerDecisions = Array.from({ length: 20 }, (_, i) => ({
+        decisionRef: `f306.runtime_interaction:other-${i}`,
+        kind: 'approval',
+        summary: `其他会话待决定 ${i}`,
+        runtimeInteraction: {
+          interactionId: `other-${i}`,
+          revision: 1,
+          requesterCatId: 'momo',
+          createdAt: now - (i + 1) * 1_000,
+          title: `其他会话待决定 ${i}`,
+          kind: 'conversation_decision',
+          cardRef: { threadId: `other-thread-${i}`, messageId: `m-other-${i}`, blockId: `b-${i}` },
+        },
+        linkedNeedsMe: [],
+      }));
+      const groupDecision = {
+        decisionRef: 'f306.runtime_interaction:page2-group',
+        kind: 'approval',
+        summary: '第二页分组待决定',
+        runtimeInteraction: {
+          interactionId: 'page2-group',
+          revision: 1,
+          requesterCatId: 'momo',
+          createdAt: now - 30_000,
+          title: '第二页分组待决定',
+          kind: 'conversation_decision',
+          cardRef: { threadId: 'g-pending', messageId: 'm-page2', blockId: 'b-page2' },
+        },
+        linkedNeedsMe: [],
+      };
+      const { w } = await bootConsole(themeId, {
+        decisions: () => [...fillerDecisions, groupDecision],
+        configure: (data, sidebar) => {
+          const ids = [
+            'g-pending',
+            'g-at',
+            'g-unread-1',
+            'g-unread-2',
+            'g-quiet-1',
+            'g-quiet-2',
+            'g-quiet-3',
+            'g-quiet-4',
+            'g-quiet-5',
+            'g-quiet-6',
+            'g-quiet-7',
+          ];
+          data.threads.push(
+            ...ids.map((id, i) => ({
+              ...data.threads[0],
+              id,
+              title: `分页会话 ${id}`,
+              pinned: false,
+              lastActiveAt: now - i * 60_000,
+            })),
+          );
+          sidebar.threads = [...data.threads];
+          sidebar.attention.push(
+            { id: 'g-pending', unreadCount: 0, hasUserMention: false, presence: { status: 'idle' }, lastWho: '' },
+            { id: 'g-at', unreadCount: 0, hasUserMention: true, presence: { status: 'idle' }, lastWho: '' },
+            { id: 'g-unread-1', unreadCount: 2, hasUserMention: false, presence: { status: 'idle' }, lastWho: '' },
+            { id: 'g-unread-2', unreadCount: 1, hasUserMention: false, presence: { status: 'idle' }, lastWho: '' },
+            ...ids.slice(4).map((id) => ({
+              id,
+              unreadCount: 0,
+              hasUserMention: false,
+              presence: { status: 'idle' as const },
+              lastWho: '',
+            })),
+          );
+          sidebar.owner = {
+            preferences: {
+              groups: [{ id: 'grp-page2', name: '跨页待决定组', threadIds: ids }],
+              open: { 'group:grp-page2': false },
+              collapsedPeek: { 'group:grp-page2': true },
+              memberSort: {},
+            },
+            labels: [],
+          };
+        },
+      });
+
+      for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 10));
+
+      const sec = w.document.querySelector('[data-sec="grp:grp-page2"], [data-section="grp:grp-page2"]');
+      expect(sec).not.toBeNull();
+      expect(sec!.textContent).toContain('4 条要看');
+      expect(sec!.textContent).toContain('还有 1 条');
+
+      const peekContainer = sec!.querySelector('.gsec-peek') ?? sec!;
+      const visiblePeekRows = Array.from(peekContainer.querySelectorAll('[data-tid]') as NodeListOf<Element>).map(
+        (el) => el.getAttribute('data-tid'),
+      );
+      expect(visiblePeekRows).toEqual(['g-pending', 'g-at', 'g-unread-1']);
+
+      const pendingRowEl = peekContainer.querySelector('[data-tid="g-pending"]');
+      expect(pendingRowEl?.textContent).toContain('等你决定');
+      if (themeId === 'v2') {
+        expect(pendingRowEl?.innerHTML).toContain('var(--semantic-warning)');
+        expect(pendingRowEl?.querySelector('button[data-act="thread"]')?.className).toContain('font-semibold');
+      } else {
+        expect(pendingRowEl?.querySelector('.dot[data-tone="warn"]')).not.toBeNull();
+      }
     });
   }
 
