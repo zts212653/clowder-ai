@@ -206,11 +206,11 @@ describe('Gemini 4 Neon + xhigh & Windows AGY Native compatibility', () => {
   });
 
   it('fails closed on Windows turn retirement for birth-read errors, live children without --gemini_dir, missing kernel job, and PID reuse', () => {
-    const home = 'C:\\Users\\tester\\.cat-cafe\\agy-profile';
-    const runHome = `${home}\\.cat-cafe-native-runs\\run-abc123`;
+    const home = join('C:', 'Users', 'tester', '.cat-cafe', 'agy-profile');
+    const runHome = join(home, '.cat-cafe-native-runs', 'run-abc123');
     const ownerBase = {
       identity: { pid: 4000, ppid: 100, pgid: 0, startedAt: '2026-01-01T00:00:00.0000000Z' },
-      dataRoot: 'C:\\Users\\tester\\.cat-cafe\\data',
+      dataRoot: join('C:', 'Users', 'tester', '.cat-cafe', 'data'),
       invocationId: 'inv-win-retire',
       runHome,
       windowsJob: { jobName: 'Local\\ClowderApiJob-11111111-1111-1111-1111-111111111111', sessionId: 1 },
@@ -486,10 +486,16 @@ describe('Gemini 4 Neon + xhigh & Windows AGY Native compatibility', () => {
     (t) => {
       const root = realpathSync(mkdtempSync(join(tmpdir(), 'neon-acct-win-real-')));
       const prevGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      const prevPsModulePath = process.env.PSModulePath;
       process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
+      // Emulate a PowerShell 7 (`pwsh`) parent shell (e.g. GitHub Actions windows-latest)
+      // whose PSModulePath must never break Windows PowerShell 5.1 ACL inspection.
+      process.env.PSModulePath = 'C:\\Program Files\\PowerShell\\7\\Modules';
       t.after(() => {
         if (prevGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
         else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = prevGlobalRoot;
+        if (prevPsModulePath === undefined) delete process.env.PSModulePath;
+        else process.env.PSModulePath = prevPsModulePath;
         rmSync(root, { recursive: true, force: true });
       });
       const profileHome = join(root, 'profile');

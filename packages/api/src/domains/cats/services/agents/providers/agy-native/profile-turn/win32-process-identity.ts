@@ -44,12 +44,21 @@ function isValidBirthString(value: unknown): value is string {
   return typeof value === 'string' && ROUND_TRIP_UTC_BIRTH.test(value) && Number.isFinite(Date.parse(value));
 }
 
+function windowsPowerShellPath(): string {
+  return join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+}
+
+function windowsPowerShellEnv(): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== 'PSMODULEPATH'));
+}
+
 function processBirthScript(pid: number): string {
   // Use the same Win32_Process CIM CreationDate format as #1838 windows-job-native.ts
   // (round-trip 7-digit UTC ISO string). Never swallow read/access errors as "absent".
   return [
     "$ErrorActionPreference = 'Stop'",
-    '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+    "$ProgressPreference = 'SilentlyContinue'",
+    '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
     `$row = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}" -ErrorAction Stop`,
     'if ($null -eq $row -or $null -eq $row.CreationDate) { Write-Output "null"; exit 0 }',
     'Write-Output ([ordered]@{',
@@ -63,7 +72,8 @@ function processBirthScript(pid: number): string {
 function processSnapshotScript(): string {
   return [
     "$ErrorActionPreference = 'Stop'",
-    '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+    "$ProgressPreference = 'SilentlyContinue'",
+    '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
     '$rows = @(Get-CimInstance Win32_Process -ErrorAction Stop | ForEach-Object {',
     '  $birth = $null',
     "  if ($null -ne $_.CreationDate) { $birth = $_.CreationDate.ToUniversalTime().ToString('o') }",
@@ -80,7 +90,11 @@ function processSnapshotScript(): string {
 
 function parseWin32ProcessIdentity(raw: string): UnixProcessIdentity | null {
   try {
-    const parsed = JSON.parse(raw.trim()) as { pid?: unknown; ppid?: unknown; startedAt?: unknown } | null;
+    const parsed = JSON.parse(raw.replace(/^\uFEFF/, '').trim()) as {
+      pid?: unknown;
+      ppid?: unknown;
+      startedAt?: unknown;
+    } | null;
     if (
       !parsed ||
       !isPositiveSafeInt(parsed.pid) ||
@@ -97,7 +111,7 @@ function parseWin32ProcessIdentity(raw: string): UnixProcessIdentity | null {
 
 export function parseWin32ProcessSnapshot(raw: string): Win32ProcessSnapshotRow[] | null {
   try {
-    const parsed = JSON.parse(raw.trim()) as unknown;
+    const parsed = JSON.parse(raw.replace(/^\uFEFF/, '').trim()) as unknown;
     const list = Array.isArray(parsed) ? parsed : parsed && typeof parsed === 'object' ? [parsed] : null;
     if (!list) return null;
     const rows: Win32ProcessSnapshotRow[] = [];
@@ -149,11 +163,12 @@ function queryWindowsJobStopEvidenceSync(
   record: Pick<WindowsJobOwnerRecord, 'jobName' | 'sessionId'>,
 ): WindowsJobStopEvidence {
   const unknown = (reason: string): WindowsJobStopEvidence => ({ verdict: 'unknown', activeProcesses: 0, reason });
-  const result = spawnSync('powershell.exe', powershellArgs(jobQueryScript(record.jobName)), {
+  const result = spawnSync(windowsPowerShellPath(), powershellArgs(jobQueryScript(record.jobName)), {
     encoding: 'utf8',
     timeout: POWERSHELL_TIMEOUT_MS,
     windowsHide: true,
     maxBuffer: 1024 * 1024,
+    env: windowsPowerShellEnv(),
   });
   if (result.error || result.status !== 0 || typeof result.stdout !== 'string') {
     return unknown(`job_query_failed:${String(result.error ?? result.status)}`);
@@ -313,11 +328,12 @@ export function evaluateWin32NativeTurnRetirement(
 }
 
 function readWin32ProcessSnapshotSync(): Win32ProcessSnapshotRow[] | null {
-  const result = spawnSync('powershell.exe', powershellArgs(processSnapshotScript()), {
+  const result = spawnSync(windowsPowerShellPath(), powershellArgs(processSnapshotScript()), {
     encoding: 'utf8',
     timeout: POWERSHELL_TIMEOUT_MS,
     windowsHide: true,
     maxBuffer: 8 * 1024 * 1024,
+    env: windowsPowerShellEnv(),
   });
   if (result.error || result.status !== 0 || typeof result.stdout !== 'string') return null;
   return parseWin32ProcessSnapshot(result.stdout);
@@ -326,9 +342,15 @@ function readWin32ProcessSnapshotSync(): Win32ProcessSnapshotRow[] | null {
 function readWin32ProcessSnapshot(): Promise<Win32ProcessSnapshotRow[] | null> {
   return new Promise((resolveSnapshot) => {
     execFile(
-      'powershell.exe',
+      windowsPowerShellPath(),
       powershellArgs(processSnapshotScript()),
-      { encoding: 'utf8', timeout: POWERSHELL_TIMEOUT_MS, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+      {
+        encoding: 'utf8',
+        timeout: POWERSHELL_TIMEOUT_MS,
+        windowsHide: true,
+        maxBuffer: 8 * 1024 * 1024,
+        env: windowsPowerShellEnv(),
+      },
       (error, stdout) => {
         if (error || typeof stdout !== 'string') {
           resolveSnapshot(null);
@@ -343,11 +365,12 @@ function readWin32ProcessSnapshot(): Promise<Win32ProcessSnapshotRow[] | null> {
 /** Windows birth-identity probe for AGY native profile turn leases. Fail-closed on error. */
 export function readWin32ProcessIdentitySync(pid: number): UnixProcessIdentity | null {
   if (!isPositiveSafeInt(pid)) return null;
-  const result = spawnSync('powershell.exe', powershellArgs(processBirthScript(pid)), {
+  const result = spawnSync(windowsPowerShellPath(), powershellArgs(processBirthScript(pid)), {
     encoding: 'utf8',
     timeout: POWERSHELL_TIMEOUT_MS,
     windowsHide: true,
     maxBuffer: 64 * 1024,
+    env: windowsPowerShellEnv(),
   });
   if (result.error || result.status !== 0 || typeof result.stdout !== 'string') return null;
   return parseWin32ProcessIdentity(result.stdout);
@@ -358,9 +381,15 @@ export function readWin32ProcessIdentity(pid: number): Promise<UnixProcessIdenti
   if (!isPositiveSafeInt(pid)) return Promise.resolve(null);
   return new Promise((resolveIdentity) => {
     execFile(
-      'powershell.exe',
+      windowsPowerShellPath(),
       powershellArgs(processBirthScript(pid)),
-      { encoding: 'utf8', timeout: POWERSHELL_TIMEOUT_MS, windowsHide: true, maxBuffer: 64 * 1024 },
+      {
+        encoding: 'utf8',
+        timeout: POWERSHELL_TIMEOUT_MS,
+        windowsHide: true,
+        maxBuffer: 64 * 1024,
+        env: windowsPowerShellEnv(),
+      },
       (error, stdout) => {
         if (error || typeof stdout !== 'string') {
           resolveIdentity(null);

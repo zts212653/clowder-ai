@@ -27,6 +27,19 @@ function normalizeWin32Path(path: string): string {
   return resolve(path).replaceAll('/', '\\').toLowerCase();
 }
 
+function windowsPowerShellPath(): string {
+  return join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+}
+
+/**
+ * Strip inherited PSModulePath when invoking Windows PowerShell 5.1 so a parent
+ * PowerShell 7 (`pwsh`) shell (such as GitHub Actions windows-latest) cannot
+ * poison .NET Framework 4.8 module loading.
+ */
+function windowsPowerShellEnv(): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== 'PSMODULEPATH'));
+}
+
 function getCurrentWin32UserSid(): string | null {
   if (cachedCurrentUserSid) return cachedCurrentUserSid;
   const whoami = spawnSync('whoami.exe', ['/user', '/fo', 'csv', '/nh'], {
@@ -43,12 +56,20 @@ function getCurrentWin32UserSid(): string | null {
     }
   }
   const ps = spawnSync(
-    'powershell.exe',
-    powershellArgs('[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value'),
-    { encoding: 'utf8', timeout: SECURITY_TOOL_TIMEOUT_MS, windowsHide: true, maxBuffer: 16 * 1024 },
+    windowsPowerShellPath(),
+    powershellArgs(
+      "$ProgressPreference = 'SilentlyContinue'\n[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
+    ),
+    {
+      encoding: 'utf8',
+      timeout: SECURITY_TOOL_TIMEOUT_MS,
+      windowsHide: true,
+      maxBuffer: 16 * 1024,
+      env: windowsPowerShellEnv(),
+    },
   );
   if (!ps.error && ps.status === 0 && typeof ps.stdout === 'string') {
-    const sid = ps.stdout.trim();
+    const sid = ps.stdout.replace(/^\uFEFF/, '').trim();
     if (SID_PATTERN.test(sid)) {
       cachedCurrentUserSid = sid;
       return cachedCurrentUserSid;
@@ -79,45 +100,54 @@ function inspectWin32DirectoryAcls(dirs: readonly string[]): (Win32DirectoryAclS
   const items = dirs.map(psLiteral).join(', ');
   const script = [
     "$ErrorActionPreference = 'Stop'",
-    '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+    "$ProgressPreference = 'SilentlyContinue'",
+    '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
+    '$sidType = [System.Security.Principal.SecurityIdentifier]',
+    '$allow = [System.Security.AccessControl.AccessControlType]::Allow',
     '$me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
     `$paths = @(${items})`,
     '$results = @()',
     'foreach ($target in $paths) {',
     '  try {',
-    '    $acl = Get-Acl -LiteralPath $target -ErrorAction Stop',
-    '    $ownerSid = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value',
-    '    $allowSids = @()',
-    '    foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {',
-    '      if ($rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow) {',
-    '        $allowSids += $rule.IdentityReference.Value',
+    '    $acl = [System.IO.Directory]::GetAccessControl($target)',
+    '    $ownerSid = $acl.GetOwner($sidType).Value',
+    '    $seen = [System.Collections.Generic.HashSet[string]]::new()',
+    '    foreach ($rule in $acl.GetAccessRules($true, $true, $sidType)) {',
+    '      if ($rule.AccessControlType -eq $allow) {',
+    '        [void]$seen.Add($rule.IdentityReference.Value)',
     '      }',
     '    }',
-    '    $results += [ordered]@{ currentUserSid = $me; ownerSid = $ownerSid; allowSids = @($allowSids | Select-Object -Unique) }',
+    '    $results += [ordered]@{ currentUserSid = $me; ownerSid = $ownerSid; allowSids = @($seen) }',
     '  } catch {',
     '    $results += $null',
     '  }',
     '}',
     'ConvertTo-Json -InputObject $results -Compress -Depth 4',
   ].join('\n');
-  const result = spawnSync('powershell.exe', powershellArgs(script), {
+  const result = spawnSync(windowsPowerShellPath(), powershellArgs(script), {
     encoding: 'utf8',
     timeout: SECURITY_TOOL_TIMEOUT_MS,
     windowsHide: true,
     maxBuffer: 256 * 1024,
+    env: windowsPowerShellEnv(),
   });
   if (result.error || result.status !== 0 || typeof result.stdout !== 'string') return null;
   try {
-    const parsed = JSON.parse(result.stdout.trim()) as unknown;
+    const parsed = JSON.parse(result.stdout.replace(/^\uFEFF/, '').trim()) as unknown;
     const list = Array.isArray(parsed) ? parsed : [parsed];
     if (list.length !== dirs.length) return null;
     return list.map((entry) => {
       if (!entry || typeof entry !== 'object') return null;
       const obj = entry as Record<string, unknown>;
-      if (typeof obj.currentUserSid !== 'string' || typeof obj.ownerSid !== 'string' || !Array.isArray(obj.allowSids))
-        return null;
-      const allowSids = obj.allowSids.filter((v): v is string => typeof v === 'string');
-      if (allowSids.length !== obj.allowSids.length) return null;
+      if (typeof obj.currentUserSid !== 'string' || typeof obj.ownerSid !== 'string') return null;
+      const rawSids = Array.isArray(obj.allowSids)
+        ? obj.allowSids
+        : typeof obj.allowSids === 'string'
+          ? [obj.allowSids]
+          : null;
+      if (!rawSids) return null;
+      const allowSids = rawSids.filter((v): v is string => typeof v === 'string');
+      if (allowSids.length !== rawSids.length) return null;
       return { currentUserSid: obj.currentUserSid, ownerSid: obj.ownerSid, allowSids };
     });
   } catch {
@@ -257,20 +287,22 @@ export function listWin32Hardlinks(filePath: string): string[] | null {
   }
   const script = [
     "$ErrorActionPreference = 'Stop'",
-    '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+    "$ProgressPreference = 'SilentlyContinue'",
+    '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
     HARDLINK_ENUM_INTEROP,
     `$links = [ClowderHardlinkInterop]::ListLinks(${psLiteral(filePath)})`,
     'ConvertTo-Json -InputObject @($links) -Compress',
   ].join('\n');
-  const result = spawnSync('powershell.exe', powershellArgs(script), {
+  const result = spawnSync(windowsPowerShellPath(), powershellArgs(script), {
     encoding: 'utf8',
     timeout: SECURITY_TOOL_TIMEOUT_MS,
     windowsHide: true,
     maxBuffer: 256 * 1024,
+    env: windowsPowerShellEnv(),
   });
   if (result.error || result.status !== 0 || typeof result.stdout !== 'string') return null;
   try {
-    const parsed = JSON.parse(result.stdout.trim()) as unknown;
+    const parsed = JSON.parse(result.stdout.replace(/^\uFEFF/, '').trim()) as unknown;
     const list = Array.isArray(parsed) ? parsed : typeof parsed === 'string' ? [parsed] : null;
     if (!list) return null;
     const links = list.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
