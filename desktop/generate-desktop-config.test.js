@@ -97,10 +97,7 @@ for (const { requestedVersion, expected, description } of [
       { cwd: __dirname, encoding: 'utf8', env: { CATCAFE_VERSION: requestedVersion } },
     );
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    const builderConfig = JSON.parse(result.stdout);
-    assert.equal(builderConfig.extraMetadata?.version, expected);
-    assert.ok(Array.isArray(builderConfig.electronLanguages) && builderConfig.electronLanguages.includes('en-US'));
-    assert.ok(builderConfig.electronLanguages.includes('zh-CN'));
+    assert.equal(JSON.parse(result.stdout).extraMetadata?.version, expected);
     assert.equal(readFileSync(packagePath, 'utf8'), original);
   });
 

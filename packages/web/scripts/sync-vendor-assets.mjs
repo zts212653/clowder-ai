@@ -37,6 +37,9 @@ function resolvePackageDir(pkgName) {
   }
 }
 
+export const VAD_RUNTIME_ASSETS = Object.freeze(['silero_vad_v5.onnx', 'vad.worklet.bundle.min.js']);
+export const ONNX_RUNTIME_ASSETS = Object.freeze(['ort-wasm-simd-threaded.wasm', 'ort-wasm-simd-threaded.mjs']);
+
 function removeStaleManagedAssets(target, allowedFiles, isManaged) {
   if (!existsSync(target)) return;
   for (const existing of readdirSync(target)) {
@@ -46,28 +49,29 @@ function removeStaleManagedAssets(target, allowedFiles, isManaged) {
   }
 }
 
-function copyVadAssets() {
-  const vadRoot = resolve(resolvePackageDir('@ricky0123/vad-web'), 'dist');
-  const target = resolve(vendorRoot, 'vad');
+export function syncVadAssets({
+  vadRoot = resolve(resolvePackageDir('@ricky0123/vad-web'), 'dist'),
+  target = resolve(vendorRoot, 'vad'),
+} = {}) {
   // useVadInterrupt explicitly uses Silero VAD v5; skip the unused legacy model.
-  const files = ['silero_vad_v5.onnx', 'vad.worklet.bundle.min.js'];
-  for (const file of files) {
+  for (const file of VAD_RUNTIME_ASSETS) {
     const src = resolve(vadRoot, file);
     if (!existsSync(src)) {
       throw new Error(`Missing VAD asset: ${src}`);
     }
     copyAsset(src, resolve(target, file));
   }
-  removeStaleManagedAssets(target, new Set(files), (name) => name === 'silero_vad_legacy.onnx');
+  removeStaleManagedAssets(target, new Set(VAD_RUNTIME_ASSETS), (name) => name === 'silero_vad_legacy.onnx');
+  return [...VAD_RUNTIME_ASSETS];
 }
 
-function copyOnnxRuntimeAssets() {
-  const ortRoot = resolve(resolvePackageDir('onnxruntime-web'), 'dist');
-  const target = resolve(vendorRoot, 'onnxruntime');
-  // @ricky0123/vad-web imports onnxruntime-web/wasm, which only loads the CPU
-  // SIMD-threaded WASM pair; omit the unused JSEP/JSPI/Asyncify variants (~66 MB).
-  const files = ['ort-wasm-simd-threaded.wasm', 'ort-wasm-simd-threaded.mjs'];
-  for (const file of files) {
+export function syncOnnxRuntimeAssets({
+  ortRoot = resolve(resolvePackageDir('onnxruntime-web'), 'dist'),
+  target = resolve(vendorRoot, 'onnxruntime'),
+} = {}) {
+  // @ricky0123/vad-web/dist/real-time-vad.js imports onnxruntime-web/wasm, which only
+  // loads the CPU SIMD-threaded WASM pair; omit the unused JSEP/JSPI/Asyncify variants (~66 MB).
+  for (const file of ONNX_RUNTIME_ASSETS) {
     const src = resolve(ortRoot, file);
     if (!existsSync(src)) {
       throw new Error(`Missing ONNX Runtime asset: ${src}`);
@@ -76,9 +80,18 @@ function copyOnnxRuntimeAssets() {
   }
   removeStaleManagedAssets(
     target,
-    new Set(files),
+    new Set(ONNX_RUNTIME_ASSETS),
     (name) => name.startsWith('ort-wasm') && (name.endsWith('.wasm') || name.endsWith('.mjs')),
   );
+  return [...ONNX_RUNTIME_ASSETS];
+}
+
+function copyVadAssets() {
+  syncVadAssets();
+}
+
+function copyOnnxRuntimeAssets() {
+  syncOnnxRuntimeAssets();
 }
 
 function copyEsbuildWasm() {

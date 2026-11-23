@@ -83,6 +83,32 @@ describe('production PWA cache policy', () => {
     findHashedChunkUrl(artifacts.serviceWorker);
   });
 
+  it('precaches only the active VAD v5 and CPU SIMD-threaded ONNX Runtime assets', () => {
+    for (const requiredUrl of [
+      '/vendor/vad/silero_vad_v5.onnx',
+      '/vendor/vad/vad.worklet.bundle.min.js',
+      '/vendor/onnxruntime/ort-wasm-simd-threaded.mjs',
+      '/vendor/onnxruntime/ort-wasm-simd-threaded.wasm',
+    ]) {
+      assert.ok(
+        artifacts.serviceWorker.includes(`url:"${requiredUrl}"`),
+        `service worker precache must include ${requiredUrl}`,
+      );
+    }
+    for (const pruned of [
+      'silero_vad_legacy.onnx',
+      'ort-wasm-simd-threaded.jsep.',
+      'ort-wasm-simd-threaded.jspi.',
+      'ort-wasm-simd-threaded.asyncify.',
+    ]) {
+      assert.equal(
+        artifacts.serviceWorker.includes(pruned),
+        false,
+        `service worker precache must not retain pruned vendor variant ${pruned}`,
+      );
+    }
+  });
+
   it('leaves API and Socket.IO requests to the browser', () => {
     const routes = routesFromServiceWorker(artifacts.serviceWorker);
     for (const href of API_TRAFFIC_SAMPLES) {
