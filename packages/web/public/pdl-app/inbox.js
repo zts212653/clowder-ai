@@ -2,7 +2,28 @@
 'use strict';
 const MODAL_INIT = {};
 const MODALS = {};
+let inboxPendingCounts = {};
+function inboxDecisionThreadId(r) {
+  if (!r || r.userMention) return '';
+  if (r.approval?.resolution && r.approval.resolution !== 'open') return '';
+  const nav = r.approval?.navigation;
+  return (
+    r.originalApprovalCard?.cardRef?.threadId ||
+    r.runtimeInteraction?.cardRef?.threadId ||
+    r.choiceRequest?.cardRef?.threadId ||
+    (nav?.state === 'anchored'
+      ? nav.approvalCardRef?.threadId || nav.originRef?.threadId || ''
+      : nav?.state === 'legacy_unanchored'
+        ? nav.legacyThreadId || ''
+        : '')
+  );
+}
+function inboxPendingCount(threadId) {
+  if (projectionNeeded) projectionNeeded.add('inbox');
+  return (threadId && inboxPendingCounts[threadId]) || 0;
+}
 function bindInbox() {
+  inboxPendingCounts = {};
   CS.ib = {
     view: 'main',
     time: 'week',
@@ -22,6 +43,23 @@ function bindInbox() {
     confirmed = false,
     sequence = 0,
     owner;
+  function rebuildPendingCounts() {
+    const next = {};
+    if (read && Array.isArray(read.items)) {
+      read.items.forEach(function (r) {
+        const tid = inboxDecisionThreadId(r);
+        if (tid) next[tid] = (next[tid] || 0) + 1;
+      });
+    }
+    if (conciergeThread && Array.isArray(confirmations)) {
+      confirmations.forEach(function (c) {
+        if (c && c.status === 'rendered') next[conciergeThread] = (next[conciergeThread] || 0) + 1;
+      });
+    }
+    const changed = !chatDataEqual(inboxPendingCounts, next);
+    inboxPendingCounts = next;
+    return changed;
+  }
   function requireCurrent() {
     if (!confirmed) throw new Error(tc('inboxRefresh.retained'));
   }
@@ -70,6 +108,7 @@ function bindInbox() {
       confirmations = receiveProjectValue(confirmations, extra.value.confirmations, 'inbox.confirmations', diff);
     if (thread.status === 'fulfilled') conciergeThread = thread.value.threadId;
     if (last.status === 'fulfilled') lastHandling = last.value.receipt;
+    if (rebuildPendingCounts()) navStale();
     await chatDataRender();
   }
   api.on('session:changed', function (identity) {

@@ -218,6 +218,7 @@ function bindSidebar() {
           : '',
       lastWho: lastWho,
       unread: attention ? attention.unreadCount : 0,
+      pending: typeof inboxPendingCount === 'function' ? inboxPendingCount(t.id) : 0,
       at: !!attention && attention.hasUserMention,
       replied: !!presence && presence.status === 'done',
       status: presence ? presence.status : '',

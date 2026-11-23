@@ -17,6 +17,7 @@ async function bootConsole(
   options: {
     threadId?: string;
     configure?: (data: ReturnType<typeof fixtureData>, sidebar: ReturnType<typeof fixtureSidebar>) => void;
+    decisions?: () => unknown[];
   } = {},
 ) {
   const dom = new JSDOM('<!doctype html><div id="app"></div>', {
@@ -76,7 +77,7 @@ async function bootConsole(
   options.configure?.(data, sidebar);
 
   const actions: Array<{ name: string; args: Record<string, string> }> = [];
-  const get = vi.fn(async (name: string) => {
+  const get = vi.fn(async (name: string, query?: Record<string, unknown>) => {
     if (name === '/api/config/console-themes')
       return { themes: { active: themeId === 'v2' ? 'pkg:v2' : 'sys:1', customs: [] } };
     if (name === '/api/console-themes/packages') return { packages: await builtinThemes.list() };
@@ -86,6 +87,19 @@ async function bootConsole(
     if (name === '/api/config/chat-background/images') return { images: [] };
     if (name === '/api/plugin-manager/plugins') return { plugins: [] };
     if (name === '/api/plugin-manager/pdl') return { fragments: {} };
+    if (name === '/api/concierge/work/decisions') {
+      const items = query?.mentionPeriod === 'handled' ? [] : (options.decisions?.() ?? []);
+      return {
+        status: 'available',
+        observedAt: Date.now(),
+        identity: { ownerUserId: 'owner' },
+        attentionCount: items.length,
+        items,
+      };
+    }
+    if (name === '/api/concierge/confirmations') return { confirmations: [] };
+    if (name === '/api/concierge/thread') return { threadId: null };
+    if (name === '/api/concierge/work/mentions/last-handling') return { receipt: null };
     if (name.startsWith('/api/client-accounts') || name === '/api/accounts')
       return { providers: [], accounts: [], selection: { members: [] } };
     return {};
@@ -276,6 +290,136 @@ describe('#2067 follow-up fixes across default and v2 themes', () => {
         const titleBtn = sec!.querySelector('[data-tid="g-thread-3"] button[data-act="thread"]');
         expect(titleBtn).not.toBeNull();
       }
+    });
+
+    it(`counts and prioritizes a pending-only (zero-unread) thread in collapsed groups (${themeId})`, async () => {
+      const now = Date.now();
+      let activeDecisions: unknown[] = [
+        themeId === 'default'
+          ? {
+              decisionRef: 'f306.runtime_interaction:int-1',
+              kind: 'approval',
+              summary: '请确认发布方案',
+              runtimeInteraction: {
+                interactionId: 'int-1',
+                revision: 1,
+                requesterCatId: 'momo',
+                createdAt: now - 5_000,
+                title: '请确认发布方案',
+                kind: 'conversation_decision',
+                cardRef: { threadId: 'g-pending', messageId: 'm-dec-1', blockId: 'b-1' },
+              },
+              linkedNeedsMe: [],
+            }
+          : {
+              decisionRef: 'f246.approval:prop-1',
+              kind: 'approval',
+              summary: '请审批新线程提案',
+              approval: {
+                proposalId: 'prop-1',
+                sourceFeatureId: 'F128',
+                requesterCatId: 'momo',
+                summary: '请审批新线程提案',
+                detail: {},
+                inlineApprovable: true,
+                resolution: 'open',
+                materialization: { state: 'not_started' },
+                createdAt: now - 5_000,
+                navigation: {
+                  state: 'anchored',
+                  originRef: { kind: 'message', threadId: 'g-pending', messageId: 'm-dec-2' },
+                  approvalCardRef: { threadId: 'g-pending', messageId: 'm-dec-2' },
+                },
+              },
+              linkedNeedsMe: [],
+            },
+      ];
+      const { w, evalIn } = await bootConsole(themeId, {
+        decisions: () => activeDecisions,
+        configure: (data, sidebar) => {
+          const ids = [
+            'g-pending',
+            'g-at',
+            'g-unread-1',
+            'g-unread-2',
+            'g-quiet-1',
+            'g-quiet-2',
+            'g-quiet-3',
+            'g-quiet-4',
+            'g-quiet-5',
+            'g-quiet-6',
+            'g-quiet-7',
+          ];
+          const extra = ids.map((id, i) => ({
+            ...data.threads[0],
+            id,
+            title: `分组会话 ${id}`,
+            pinned: false,
+            lastActiveAt: now - i * 60_000,
+          }));
+          data.threads.push(...extra);
+          sidebar.threads = [...data.threads];
+          sidebar.attention.push(
+            { id: 'g-pending', unreadCount: 0, hasUserMention: false, presence: { status: 'idle' }, lastWho: '' },
+            { id: 'g-at', unreadCount: 0, hasUserMention: true, presence: { status: 'idle' }, lastWho: '' },
+            { id: 'g-unread-1', unreadCount: 2, hasUserMention: false, presence: { status: 'idle' }, lastWho: '' },
+            { id: 'g-unread-2', unreadCount: 1, hasUserMention: false, presence: { status: 'idle' }, lastWho: '' },
+            ...ids.slice(4).map((id) => ({
+              id,
+              unreadCount: 0,
+              hasUserMention: false,
+              presence: { status: 'idle' as const },
+              lastWho: '',
+            })),
+          );
+          sidebar.owner = {
+            preferences: {
+              groups: [{ id: 'grp-pending', name: '待决定组', threadIds: ids }],
+              open: { 'group:grp-pending': false },
+              collapsedPeek: { 'group:grp-pending': true },
+              memberSort: {},
+            },
+            labels: [],
+          };
+        },
+      });
+
+      // Wait for boot inbox load + rerender to settle.
+      for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 10));
+
+      const sec = w.document.querySelector('[data-sec="grp:grp-pending"], [data-section="grp:grp-pending"]');
+      expect(sec).not.toBeNull();
+      expect(sec!.textContent).toContain('11');
+      expect(sec!.textContent).toContain('4 条要看');
+      expect(sec!.textContent).toContain('还有 1 条');
+
+      const peekContainer = sec!.querySelector('.gsec-peek') ?? sec!;
+      const visiblePeekRows = Array.from(peekContainer.querySelectorAll('[data-tid]') as NodeListOf<Element>).map(
+        (el) => el.getAttribute('data-tid'),
+      );
+      expect(visiblePeekRows).toEqual(['g-pending', 'g-at', 'g-unread-1']);
+
+      const navModel = evalIn('VM.navThreads()') as {
+        sections: Array<{ key: string; rows: Array<{ id: string; pending: number; unread: number }> }>;
+      };
+      const pendingRow = navModel.sections
+        .find((s) => s.key === 'grp:grp-pending')
+        ?.rows.find((r) => r.id === 'g-pending');
+      expect(pendingRow?.pending).toBe(1);
+      expect(pendingRow?.unread).toBe(0);
+
+      // Once the pending decision is resolved, inbox reload updates the collapsed group count and preview.
+      activeDecisions = [];
+      await w.clowderChat.emit('cat-cafe:runtime-interaction-updated');
+      for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 10));
+
+      const updatedSec = w.document.querySelector('[data-sec="grp:grp-pending"], [data-section="grp:grp-pending"]');
+      expect(updatedSec!.textContent).toContain('3 条要看');
+      expect(updatedSec!.textContent).not.toContain('还有 1 条');
+      const updatedPeek = Array.from(
+        (updatedSec!.querySelector('.gsec-peek') ?? updatedSec!).querySelectorAll('[data-tid]') as NodeListOf<Element>,
+      ).map((el) => el.getAttribute('data-tid'));
+      expect(updatedPeek).toEqual(['g-at', 'g-unread-1', 'g-unread-2']);
     });
   }
 
