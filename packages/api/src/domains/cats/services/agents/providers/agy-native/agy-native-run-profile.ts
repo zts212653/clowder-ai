@@ -2,6 +2,11 @@ import { lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } 
 import { join, relative } from 'node:path';
 import { prepareAgyAccountDataView } from './run/agy-account-data-view.js';
 
+const DISPOSE_RM_OPTIONS =
+  process.platform === 'win32'
+    ? ({ recursive: true, force: true, maxRetries: 5, retryDelay: 100 } as const)
+    : ({ recursive: true, force: true } as const);
+
 export const AGY_NATIVE_RUNS = '.cat-cafe-native-runs';
 
 function directory(path: string): void {
@@ -48,6 +53,6 @@ export function createAgyNativeRunProfile(
     home,
     geminiDir,
     appDataDir: relative(geminiDir, credentialHome ? prepareAgyAccountDataView(account, credentialHome) : data),
-    dispose: () => rmSync(home, { recursive: true, force: true }),
+    dispose: () => rmSync(home, DISPOSE_RM_OPTIONS),
   };
 }

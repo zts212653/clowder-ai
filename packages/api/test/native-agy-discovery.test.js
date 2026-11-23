@@ -98,10 +98,20 @@ test('reading either AGY model catalog never launches a process without its prof
       method: 'POST',
       url: '/api/cats/runtime-models',
       headers: { 'x-cat-cafe-user': 'fixture' },
-      payload: { runtimeId },
+      payload: { runtimeId, model: 'gemini-4-neon-xhigh' },
     });
     assert.equal(response.statusCode, 200, response.body);
-    assert.equal(response.json().message, 'configured_only');
+    const body = response.json();
+    assert.equal(body.message, 'configured_only');
+    assert.ok(
+      body.models.some((entry) => entry.value === 'gemini-4-neon-xhigh'),
+      'AGY read-only catalog must list gemini-4-neon-xhigh',
+    );
+    assert.deepEqual(
+      body.effortOptions?.map((entry) => entry.value),
+      ['low', 'medium', 'high', 'xhigh'],
+    );
+    assert.equal(body.selectedEffort, 'xhigh');
     assert.equal(existsSync(marker), false, 'read-side discovery must not start an unisolated AGY process');
   }
 });

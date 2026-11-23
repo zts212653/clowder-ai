@@ -14,6 +14,12 @@ import { AgyNativeRunInput } from './agy-native-run-input.js';
 import { AgyNativeRunOutput } from './agy-native-run-output.js';
 
 const log = createModuleLogger('agy-native');
+/**
+ * On Windows, `agy.exe --input-format stream-json` ignores stdin EOF after emitting
+ * its terminal `result` event and lingers until terminated. Allow a brief grace window
+ * for natural (clean or non-zero) exit before terminating the owned process.
+ */
+const WINDOWS_POST_EOF_EXIT_GRACE_MS = 2_000;
 
 async function* archiveNativeStream(
   stream: AsyncIterable<unknown>,
@@ -64,6 +70,15 @@ export async function* runAgyNativeInvocation(input: {
   } = input;
   const inputLifetime = new AbortController();
   const processLifetime = new AbortController();
+  let windowsPostEofTimer: ReturnType<typeof setTimeout> | undefined;
+  const armWindowsPostEofShutdown = (): void => {
+    if (process.platform !== 'win32' || windowsPostEofTimer) return;
+    windowsPostEofTimer = setTimeout(() => {
+      processLifetime.abort();
+    }, WINDOWS_POST_EOF_EXIT_GRACE_MS);
+    windowsPostEofTimer.unref();
+  };
+  inputLifetime.signal.addEventListener('abort', armWindowsPostEofShutdown, { once: true });
   const multiTurn = Boolean(options?.activeRunDispatch && !compactionRequested && prompt.trim() !== '/compact');
   const imagePublisher = new AgyNativeImagePublisher(
     catId,
@@ -296,6 +311,8 @@ export async function* runAgyNativeInvocation(input: {
     settleCapacity(observed, successful(messages));
     yield* progress.final(messages);
   } finally {
+    if (windowsPostEofTimer) clearTimeout(windowsPostEofTimer);
+    inputLifetime.signal.removeEventListener('abort', armWindowsPostEofShutdown);
     processLifetime.abort();
     await runInput?.dispose();
   }

@@ -16,6 +16,7 @@ import {
   parseNativeTurnOwner,
   retireOrphanCredentials,
 } from './store.js';
+import { isWin32NativeTurnRetired, readWin32ProcessIdentity } from './win32-process-identity.js';
 
 let ownIdentity: UnixProcessIdentity | undefined;
 function sqliteBusy(error: unknown): boolean {
@@ -26,6 +27,7 @@ function sqliteBusy(error: unknown): boolean {
 async function isRetired(owner: ProfileTurnOwner, home: string): Promise<boolean> {
   // A verified birth identity is stable for this API's entire lifetime.
   if (owner.identity.pid === process.pid && sameUnixProcess(owner.identity, ownIdentity)) return false;
+  if (process.platform === 'win32') return isWin32NativeTurnRetired(owner, home);
   const exact = await readUnixProcessSnapshot({ pids: [owner.identity.pid] });
   if (!exact || sameUnixProcess(owner.identity, exact.get(owner.identity.pid))) return false;
   const snapshot = await readUnixProcessSnapshot({
@@ -43,7 +45,10 @@ export async function acquireAgyNativeProfileTurnAsync(
   signal?: AbortSignal,
 ): Promise<() => Promise<void>> {
   signal?.throwIfAborted();
-  ownIdentity ??= (await readUnixProcessSnapshot({ pids: [process.pid] }))?.get(process.pid);
+  ownIdentity ??=
+    process.platform === 'win32'
+      ? ((await readWin32ProcessIdentity(process.pid)) ?? undefined)
+      : (await readUnixProcessSnapshot({ pids: [process.pid] }))?.get(process.pid);
   if (!ownIdentity) throw new Error('Native profile ownership requires a verified process birth identity');
   const identity = ownIdentity;
   let store: ReturnType<typeof openNativeTurnStore>;

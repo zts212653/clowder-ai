@@ -19,7 +19,8 @@ export function materializeAgyNativeEffectGuard(input: {
   approvalBridgeFile?: string;
 }): string {
   const script = realpathSync(secretRuntimeScript('agy-native-effect-guard.mjs'));
-  const quote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
+  const quote = (value: string) =>
+    process.platform === 'win32' ? `"${value.replaceAll('"', '""')}"` : `'${value.replaceAll("'", `'"'"'`)}'`;
   // Carry the host state coordinate separately: isolated OAuth HOME is not the
   // home in which our daemon writes its self-host record.
   const command = [

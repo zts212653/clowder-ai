@@ -13,6 +13,10 @@ export function agyOAuthFile(home: string): string {
   return join(home, '.gemini', 'antigravity-cli', AGY_OAUTH_FILE);
 }
 
+function hasUnsafePosixPermissions(mode: number): boolean {
+  return process.platform !== 'win32' && (mode & 0o077) !== 0;
+}
+
 /** Only new account-owned directories. Never import an existing profile or system keychain. */
 export function prepareAgyAccount(projectRoot: string, accountRef: string): NonNullable<AccountConfig['agy']> {
   if (!/^agy-[a-f0-9-]{36}$/.test(accountRef)) throw new Error('agy_account_ref_invalid');
@@ -25,7 +29,7 @@ export function prepareAgyAccount(projectRoot: string, accountRef: string): NonN
   const home = join(base, accountRef);
   for (const path of [base, home, join(home, '.gemini'), join(home, '.gemini', 'antigravity-cli')]) {
     const stat = lstatSync(path, { throwIfNoEntry: false });
-    if (stat && (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0))
+    if (stat && (!stat.isDirectory() || stat.isSymbolicLink() || hasUnsafePosixPermissions(stat.mode)))
       throw new Error('agy_account_directory_unsafe');
     mkdirSync(path, { recursive: true, mode: 0o700 });
   }
@@ -36,7 +40,7 @@ export function assertAgyCredentialHome(home: string): void {
   if (!isAbsolute(home) || resolve(home) === resolve(homedir())) throw new Error('agy_account_directory_unsafe');
   for (const path of [home, join(home, '.gemini'), join(home, '.gemini', 'antigravity-cli')]) {
     const stat = lstatSync(path);
-    if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0)
+    if (!stat.isDirectory() || stat.isSymbolicLink() || hasUnsafePosixPermissions(stat.mode))
       throw new Error('agy_account_directory_unsafe');
   }
 }
@@ -48,7 +52,13 @@ export function inspectAgyLogin(home: string): AgyLoginStatus {
     const path = agyOAuthFile(home);
     const stat = lstatSync(path, { throwIfNoEntry: false });
     if (!stat) return 'not_logged_in';
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || (stat.mode & 0o077) !== 0) return 'unreadable';
+    if (
+      !stat.isFile() ||
+      stat.isSymbolicLink() ||
+      (process.platform !== 'win32' && stat.nlink !== 1) ||
+      hasUnsafePosixPermissions(stat.mode)
+    )
+      return 'unreadable';
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
       auth_method?: unknown;
       token?: { access_token?: unknown; refresh_token?: unknown; expiry?: unknown };
@@ -71,7 +81,7 @@ export function inspectAgyLogin(home: string): AgyLoginStatus {
 }
 
 function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
+  return process.platform === 'win32' ? `'${value.replaceAll("'", "''")}'` : `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 /** Official remote/SSH auth selects the CLI's file store. No OS keychain setup or token transport. */

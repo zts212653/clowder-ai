@@ -77,8 +77,8 @@ export async function resolveAgyCapacityScope(
     if (
       !credentialStat.isFile() ||
       credentialStat.isSymbolicLink() ||
-      credentialStat.nlink !== 1 ||
-      (credentialStat.mode & 0o077) !== 0 ||
+      (process.platform !== 'win32' && credentialStat.nlink !== 1) ||
+      (process.platform !== 'win32' && (credentialStat.mode & 0o077) !== 0) ||
       credentialStat.size > 16384
     )
       return undefined;

@@ -39,6 +39,32 @@ export const GEMINI35_LEGACY_ROLE_DESCRIPTIONS = new Set([
 ]);
 export const GEMINI35_LEGACY_VARIANT_LABELS = new Set(['Gemini 3.5 Flash', 'Gemini 3.8 Flash']);
 
+export interface AgyNativeKnownModel {
+  readonly id: string;
+  readonly label: string;
+}
+
+/**
+ * Read-only reference catalog of known AGY Native model IDs exposed by AGY CLI.
+ * Never spawns the CLI during read-side discovery; users can still enter custom IDs.
+ */
+export const AGY_NATIVE_KNOWN_MODELS: readonly AgyNativeKnownModel[] = [
+  { id: 'gemini-4-neon-xhigh', label: 'Gemini 4 Neon (XHigh)' },
+  { id: 'gemini-4-neon-high', label: 'Gemini 4 Neon (High)' },
+  { id: 'gemini-4-neon-medium', label: 'Gemini 4 Neon (Medium)' },
+  { id: 'gemini-4-neon-low', label: 'Gemini 4 Neon (Low)' },
+  { id: 'gemini-4-hydrogen-xhigh', label: 'Gemini 4 Hydrogen (XHigh)' },
+  { id: 'gemini-4-hydrogen-high', label: 'Gemini 4 Hydrogen (High)' },
+  { id: 'gemini-4-hydrogen-medium', label: 'Gemini 4 Hydrogen (Medium)' },
+  { id: 'gemini-4-hydrogen-low', label: 'Gemini 4 Hydrogen (Low)' },
+  { id: 'gemini-4-argon-high', label: 'Gemini 4 Argon (High)' },
+  { id: 'gemini-4-argon-medium', label: 'Gemini 4 Argon (Medium)' },
+  { id: 'gemini-4-argon-low', label: 'Gemini 4 Argon (Low)' },
+  { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
+  { id: 'gemini-3.8-flash-medium', label: 'Gemini 3.8 Flash (Medium)' },
+  { id: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)' },
+];
+
 export function normalizeAgyGeminiModelSelector(model: string): string {
   const trimmed = model.trim();
   return AGY_GEMINI_MODEL_BY_LEGACY_MODEL_ID.get(trimmed) ?? trimmed;
@@ -50,5 +76,7 @@ export function resolveAgyGeminiDefaultModel(resolvedCatId: string, defaultModel
     return AGY_GEMINI_DEFAULT_MODEL_BY_CAT_ID.get(GEMINI35_CAT_ID);
   }
   if (!model.startsWith('gemini-')) return undefined;
+  // Explicit modern AGY Gemini 4 / orchestrator model IDs must never be downgraded to legacy labels.
+  if (/^gemini-4-|^gemini-pro-orchestrator-/i.test(model)) return undefined;
   return AGY_GEMINI_MODEL_BY_LEGACY_MODEL_ID.get(model) ?? AGY_GEMINI_DEFAULT_MODEL_BY_CAT_ID.get(resolvedCatId);
 }

@@ -29,6 +29,7 @@ import {
   createCatId,
   developmentPlanRefSchema,
   developmentRevisionSchema,
+  inferGoogleModelEffort,
   normalizeCliEffortForProvider,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
@@ -1080,13 +1081,18 @@ export function getCatEffort(
   catId: string,
   config?: CatCafeConfig,
   fallbackProvider?: ClientId,
-  _effectiveModel?: string | null,
+  effectiveModel?: string | null,
 ): CliEffortLevel {
   const nativeConfig = config ? undefined : catRegistry.tryGet(catId)?.config;
   if (nativeConfig?.configurationSource === 'native_tool') return nativeConfig.cli?.effort?.trim() ?? '';
   const cfg = config ?? getCachedConfig();
   if (!cfg) {
-    const normalized = normalizeCliEffortForProvider(fallbackProvider ?? 'anthropic', undefined);
+    const provider = fallbackProvider ?? 'anthropic';
+    if (provider === 'google' || provider === 'antigravity') {
+      const inferred = inferGoogleModelEffort(effectiveModel);
+      if (inferred) return inferred;
+    }
+    const normalized = normalizeCliEffortForProvider(provider, undefined);
     return normalized ?? 'high';
   }
 
@@ -1105,6 +1111,11 @@ export function getCatEffort(
 
   // Client-aware defaults: use variant's clientId if found, otherwise fallbackProvider
   const effectiveProvider = variant?.clientId ?? fallbackProvider;
+  if (effectiveProvider === 'google' || effectiveProvider === 'antigravity') {
+    const modelForEffort = effectiveModel ?? variant?.agyProfile?.model ?? variant?.defaultModel;
+    const inferred = inferGoogleModelEffort(modelForEffort);
+    if (inferred) return inferred;
+  }
   if (effectiveProvider) {
     const normalized = normalizeCliEffortForProvider(effectiveProvider, undefined);
     if (normalized) return normalized;

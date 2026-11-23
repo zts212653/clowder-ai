@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstatSync, mkdirSync, readlinkSync, realpathSync, symlinkSync } from 'node:fs';
+import { linkSync, lstatSync, mkdirSync, readlinkSync, realpathSync, symlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { AGY_OAUTH_FILE, agyOAuthFile, assertAgyCredentialHome } from '../../../../../../../config/agy-account.js';
 
@@ -16,14 +16,33 @@ function directory(path: string): void {
   if (stat && (!stat.isDirectory() || stat.isSymbolicLink())) throw new Error('agy_account_view_directory_unsafe');
   mkdirSync(path, { recursive: true, mode: 0o700 });
 }
-function link(target: string, path: string): void {
+function link(target: string, path: string, isDirectory: boolean): void {
   const stat = lstatSync(path, { throwIfNoEntry: false });
   if (stat) {
-    if (!stat.isSymbolicLink() || resolve(readlinkSync(path)) !== target)
-      throw new Error('agy_account_view_link_changed');
+    if (stat.isSymbolicLink() && resolve(readlinkSync(path)) === target) return;
+    if (process.platform === 'win32' && !isDirectory && stat.isFile()) {
+      const targetStat = lstatSync(target, { throwIfNoEntry: false });
+      if (targetStat?.isFile() && stat.dev === targetStat.dev && stat.ino === targetStat.ino) return;
+    }
+    throw new Error('agy_account_view_link_changed');
+  }
+  if (isDirectory) {
+    symlinkSync(target, path, process.platform === 'win32' ? 'junction' : 'dir');
     return;
   }
-  symlinkSync(target, path);
+  try {
+    symlinkSync(target, path);
+  } catch (error) {
+    if (process.platform === 'win32' && (error as NodeJS.ErrnoException).code === 'EPERM') {
+      const targetStat = lstatSync(target, { throwIfNoEntry: false });
+      if (!targetStat) return;
+      if (targetStat.isFile() && !targetStat.isSymbolicLink()) {
+        linkSync(target, path);
+        return;
+      }
+    }
+    throw error;
+  }
 }
 
 /**
@@ -43,15 +62,16 @@ export function prepareAgyAccountDataView(profileHome: string, credentialHome: s
   // Settings, entitlement caches and plugin secrets stay private. The CLI
   // atomically replaces some of them, so linking every app-data entry is wrong.
   for (const name of [...SHARED_DIRECTORIES, ...SHARED_FILES]) {
+    const isDir = SHARED_DIRECTORIES.includes(name);
     const target = join(data, name);
-    if (SHARED_DIRECTORIES.includes(name)) directory(target);
+    if (isDir) directory(target);
     else {
       const stat = lstatSync(target, { throwIfNoEntry: false });
-      if (stat && (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1))
+      if (stat && (!stat.isFile() || stat.isSymbolicLink() || (process.platform !== 'win32' && stat.nlink !== 1)))
         throw new Error('agy_shared_session_file_unsafe');
     }
-    link(target, join(view, name));
+    link(target, join(view, name), isDir);
   }
-  link(agyOAuthFile(account), join(view, AGY_OAUTH_FILE));
+  link(agyOAuthFile(account), join(view, AGY_OAUTH_FILE), false);
   return view;
 }

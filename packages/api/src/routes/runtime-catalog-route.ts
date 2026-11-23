@@ -1,7 +1,7 @@
 import { statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { catRegistry, isDshLauncher } from '@cat-cafe/shared';
+import { catRegistry, getCliEffortOptionsForProvider, inferGoogleModelEffort, isDshLauncher } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { resolveByAccountRef } from '../config/account-resolver.js';
@@ -96,9 +96,23 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
     if (data.accountRef) {
       const account = resolveByAccountRef(root, data.accountRef);
       if (!account) return { status: 'unavailable', models: [], message: 'account_unavailable' };
+      const accountModels = (account?.models ?? []).map((value) => ({ value, label: value }));
+      if ('agyCarrier' in runtime) {
+        const selectedModel = data.model || undefined;
+        const agyEfforts = selectedModel ? getCliEffortOptionsForProvider('google', selectedModel) : null;
+        const selectedEffort = selectedModel ? (inferGoogleModelEffort(selectedModel) ?? undefined) : undefined;
+        return {
+          ...fallback,
+          models: accountModels.length ? accountModels : fallback.models,
+          ...(selectedModel ? { selectedModel } : {}),
+          ...(selectedEffort ? { selectedEffort, selectedEffortSource: 'tool_config' as const } : {}),
+          ...(agyEfforts ? { effortOptions: agyEfforts.map((value) => ({ value, label: value })) } : {}),
+          message: 'account_catalog',
+        };
+      }
       return {
         ...fallback,
-        models: (account?.models ?? []).map((value) => ({ value, label: value })),
+        models: accountModels,
         message: 'account_catalog',
       };
     }
@@ -112,6 +126,14 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
       const selectedModel = data.model || ('configuredModel' in runtime ? runtime.configuredModel : undefined);
       const selected =
         'modelCatalog' in runtime ? runtime.modelCatalog.find((model) => model.value === selectedModel) : undefined;
+      const agyFallbackEfforts =
+        'agyCarrier' in runtime && selectedModel && !selected?.efforts
+          ? getCliEffortOptionsForProvider('google', selectedModel)?.map((value) => ({ value, label: value }))
+          : undefined;
+      const agyFallbackEffort =
+        'agyCarrier' in runtime && selectedModel && !selected?.defaultEffort
+          ? (inferGoogleModelEffort(selectedModel) ?? undefined)
+          : undefined;
       return {
         ...fallback,
         defaultModel: 'configuredModel' in runtime ? runtime.configuredModel : undefined,
@@ -119,12 +141,12 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
         defaultModelSource: 'tool_config',
         defaultEffortSource: 'tool_config',
         ...('configuredThinkingEnabled' in runtime ? { thinkingEnabled: runtime.configuredThinkingEnabled } : {}),
-        ...('modelCatalog' in runtime
+        ...('modelCatalog' in runtime || 'agyCarrier' in runtime
           ? {
               selectedModel,
-              selectedEffort: selected?.defaultEffort,
+              selectedEffort: selected?.defaultEffort ?? agyFallbackEffort,
               selectedEffortSource: 'tool_config' as const,
-              effortOptions: selected?.efforts,
+              effortOptions: selected?.efforts ?? agyFallbackEfforts,
             }
           : {}),
         message: 'configured_only',

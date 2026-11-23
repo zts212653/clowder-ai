@@ -9,6 +9,10 @@ export function usesAgyAcp(form: Pick<HubCatEditorFormState, 'clientId' | 'carri
   return form.clientId === 'google' && form.carrier === 'acp' && form.agyAcpEnabled === true;
 }
 
+function isAbsolutePath(value: string): boolean {
+  return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\');
+}
+
 export function buildAgyProfilePatch(
   form: HubCatEditorFormState,
   cat?: CatData | null,
@@ -22,7 +26,7 @@ export function buildAgyProfilePatch(
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(profileId)) throw new Error('隔离 Profile ID 格式无效');
   const model = form.defaultModel.trim();
   if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(model))
-    throw new Error('AGY Native 模型需填写实际模型 ID，例如 gemini-3.8-flash-high');
+    throw new Error('AGY Native 模型需填写实际模型 ID，例如 gemini-4-neon-xhigh');
   const trustedWorkspaces = Array.from(
     new Set(
       (form.agyTrustedWorkspaces ?? '')
@@ -33,7 +37,7 @@ export function buildAgyProfilePatch(
   );
   if (!form.agyAutoApprove && !trustedWorkspaces.length) throw new Error('AGY Native 需要至少一个批准工作区');
   const homeRoot = form.agyHomeRoot?.trim();
-  if (trustedWorkspaces.some((path) => !path.startsWith('/')) || (homeRoot && !homeRoot.startsWith('/'))) {
+  if (trustedWorkspaces.some((path) => !isAbsolutePath(path)) || (homeRoot && !isAbsolutePath(homeRoot))) {
     throw new Error('Profile 根目录和批准工作区必须使用绝对路径');
   }
   return {

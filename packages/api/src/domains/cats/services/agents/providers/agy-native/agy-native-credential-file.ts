@@ -7,7 +7,7 @@ export const AGY_NATIVE_CREDENTIAL_DIR = 'cat-cafe-credentials';
 
 function requireOwnerDirectory(path: string): void {
   const stat = lstatSync(path);
-  if (stat.isSymbolicLink() || !stat.isDirectory() || (stat.mode & 0o077) !== 0) {
+  if (stat.isSymbolicLink() || !stat.isDirectory() || (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)) {
     throw new Error('AGY native credential directory must be owner-only and not a symlink');
   }
 }

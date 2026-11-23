@@ -8,6 +8,7 @@ const HEADERS = { 'x-cat-cafe-user': 'test-user', 'content-type': 'application/j
 const THREAD_ID = 'thread-effort-001';
 const GOOGLE_EFFORT_SUPPORTED = 'test-google-effort-supported';
 const GOOGLE_EFFORT_UNSUPPORTED = 'test-google-effort-unsupported';
+const GOOGLE_NEON_XHIGH = 'test-google-neon-xhigh';
 
 if (!catRegistry.has('codex-sol')) {
   const base = catRegistry.getOrThrow('codex').config;
@@ -23,6 +24,7 @@ if (!catRegistry.has('codex-sol')) {
 for (const [catId, model] of [
   [GOOGLE_EFFORT_SUPPORTED, 'gemini-4-carbon-high'],
   [GOOGLE_EFFORT_UNSUPPORTED, 'gemini-2.5-pro'],
+  [GOOGLE_NEON_XHIGH, 'gemini-4-neon-xhigh'],
 ]) {
   catRegistry.register(catId, {
     ...catRegistry.getOrThrow('gemini').config,
@@ -30,6 +32,9 @@ for (const [catId, model] of [
     clientId: 'google',
     displayName: catId,
     defaultModel: model,
+    ...(catId === GOOGLE_NEON_XHIGH
+      ? { agyProfile: { enabled: true, carrier: 'native', profileId: catId, model, autoApprove: true } }
+      : {}),
   });
 }
 
@@ -122,6 +127,11 @@ describe('F262 thread member effort routes', () => {
     const google = body.members.find((row) => row.catId === GOOGLE_EFFORT_SUPPORTED);
     assert.ok(google);
     assert.deepEqual(google.options, ['low', 'medium', 'high']);
+    const neon = body.members.find((row) => row.catId === GOOGLE_NEON_XHIGH);
+    assert.ok(neon);
+    assert.deepEqual(neon.options, ['low', 'medium', 'high', 'xhigh']);
+    assert.equal(neon.inherited, 'xhigh');
+    assert.equal(neon.effective, 'xhigh');
     const firstNonParticipant = body.members.findIndex((row) => !row.isParticipant);
     assert.ok(firstNonParticipant >= 0);
     assert.ok(body.members.slice(0, firstNonParticipant).every((row) => row.isParticipant));
@@ -130,6 +140,8 @@ describe('F262 thread member effort routes', () => {
   for (const [catId, effort] of [
     ['codex-sol', 'ultra'],
     [GOOGLE_EFFORT_SUPPORTED, 'high'],
+    [GOOGLE_NEON_XHIGH, 'xhigh'],
+    [GOOGLE_NEON_XHIGH, 'low'],
   ]) {
     it(`PATCH ${catId} writes a valid override and null clears back to inheritance`, async () => {
       const setRes = await app.inject({

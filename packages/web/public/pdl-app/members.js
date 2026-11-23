@@ -327,7 +327,9 @@ function bindMembers() {
   }
   // A typed model the catalog doesn't list has no catalog of its own: only following the tool or a listed model re-reads.
   function listedModel(f, id, runtime) {
-    const state = runtimeCatalogState(f, id, runtime),
+    const resolvedRuntime = runtime || selectedRuntime(f);
+    if (resolvedRuntime && resolvedRuntime.agyCarrier) return true;
+    const state = runtimeCatalogState(f, id, resolvedRuntime),
       catalog = state && state.value;
     return (
       !f.defaultModel ||

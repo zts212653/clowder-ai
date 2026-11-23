@@ -16,6 +16,7 @@ import {
   parseNativeTurnOwner,
   retireOrphanCredentials,
 } from './profile-turn/store.js';
+import { isWin32NativeTurnRetiredSync, readWin32ProcessIdentitySync } from './profile-turn/win32-process-identity.js';
 
 export { AgyNativeProfileBusyError, type AgyNativeTurnScope } from './profile-turn/store.js';
 
@@ -38,6 +39,7 @@ export async function waitForAgyNativeProfileTurn(
 }
 
 function isRetired(owner: ProfileTurnOwner, home: string): boolean {
+  if (process.platform === 'win32') return isWin32NativeTurnRetiredSync(owner, home);
   const exact = readUnixProcessSnapshotSync({ pids: [owner.identity.pid] });
   if (!exact || sameUnixProcess(owner.identity, exact.get(owner.identity.pid))) return false;
   const snapshot = readUnixProcessSnapshotSync({
@@ -53,7 +55,10 @@ export function acquireAgyNativeProfileTurn(
   invocationId?: string,
   scope: AgyNativeTurnScope = {},
 ): () => void {
-  const identity = readUnixProcessSnapshotSync({ pids: [process.pid] })?.get(process.pid);
+  const identity =
+    process.platform === 'win32'
+      ? (readWin32ProcessIdentitySync(process.pid) ?? undefined)
+      : readUnixProcessSnapshotSync({ pids: [process.pid] })?.get(process.pid);
   if (!identity) throw new Error('Native profile ownership requires a verified process birth identity');
   const { db, table, key, value } = openNativeTurnStore(home, scope);
   const token = randomUUID();
