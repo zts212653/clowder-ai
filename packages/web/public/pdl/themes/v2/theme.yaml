@@ -16313,6 +16313,17 @@ pdl:
                   label: t:v2a.collapse
                   act: toggle
                   args:
+                    path: s.navOpen
+                  attrs: ' data-v2-nav-drawer="1"'
+                  role: icon
+                  icon: panelLeft
+                when: "!$.navHidden"
+              - type: component
+                use: v2ChatIconButton
+                props:
+                  label: t:v2a.collapse
+                  act: toggle
+                  args:
                     path: cs.navHidden
                   role: icon
                   icon: panelLeft
@@ -17010,6 +17021,8 @@ pdl:
                     who: "@who"
                     name: "@name"
                     what: "@what"
+                    time: "@time"
+                    ticking: "@ticking"
                     stop:
                       label:
                         t: composer.actions.stopNamed
@@ -17022,6 +17035,83 @@ pdl:
                 when:
                   - "!$.home"
                   - $.runners
+            queue:
+              - type: component
+                use: queue
+                props:
+                  key: $.queue.key
+                  items: $.queue.items
+                  label: t:chat.deliveryState.pending
+                  order: cafeQueueOrder
+                  targets:
+                    - who: "@id"
+                      form: avatar
+                      size: sm
+                    - text:
+                        t: queue.delivery.state
+                        args:
+                          - of: "@failure.acceptance"
+                            map:
+                              unknown:
+                                of: "@dispatch.inputRead.status"
+                                map:
+                                  read: read_uncertain
+                                  _: uncertain
+                              not_accepted: failed
+                              _:
+                                of: "@dispatch.appendAcceptance"
+                                map:
+                                  pending: confirming
+                                  written:
+                                    of: "@dispatch.inputRead.status"
+                                    map:
+                                      read: read_wait
+                                      _: written
+                                  _:
+                                    of: "@dispatch.inputRead.status"
+                                    map:
+                                      read: read
+                                      _: delivered
+                      when:
+                        of: "@failure.acceptance"
+                        map:
+                          unknown: true
+                          not_accepted: true
+                          _: "@dispatch"
+                  actions:
+                    - label: t:queue.item.label
+                      icon: send
+                      act: cafeQueueSend
+                      args:
+                        i: "@index"
+                      when: "@queued"
+                    - label: t:queue.item.recallAndEdit
+                      icon: pen
+                      act: cafeQueue
+                      args:
+                        v: edit
+                        i: "@index"
+                      when: "@recallable"
+                    - label: t:common.delete
+                      icon: delete
+                      act: cafeQueue
+                      args:
+                        v: drop
+                        i: "@index"
+                      when: "@queued"
+                    - type: more
+                      label: t:common.moreActions
+                      items:
+                        - label: t:queue.targets.title
+                          act: queueTargets
+                          args:
+                            entryId: "@key"
+                      when:
+                        - "@queued"
+                        - "@key"
+                when:
+                  - "!$.home"
+                  - $.queue
             header:
               - type: component
                 use: v2ComposerTitle
@@ -17752,6 +17842,63 @@ pdl:
           use: v2Threads
           props:
             from: $.sections
+            groupMore:
+              label: t:threadRow.groupMore
+              items:
+                - label: t:chat.group.menu.label
+                  act: modal
+                  args:
+                    v: org
+                    gid: "@id"
+                - label: t:chat.group.menu.showPendingWhenCollapsed
+                  act: setStatus
+                  args:
+                    entity: group
+                    id: "@id"
+                    field: peek
+                  cur: "@peek"
+                - label: t:chat.group.menu.renameMenu
+                  act: rename
+                  args:
+                    entity: group
+                    id: "@id"
+                - scope: t:chat.group.menu.group
+                - label: t:hub.lastActive
+                  act: setStatus
+                  args:
+                    entity: group
+                    id: "@id"
+                    field: sort
+                    v: recent
+                  cur:
+                    of: "@sort"
+                    map:
+                      recent: true
+                      _: false
+                - label: t:chat.group.menu.manualOrder
+                  act: setStatus
+                  args:
+                    entity: group
+                    id: "@id"
+                    field: sort
+                    v: manual
+                  cur:
+                    of: "@sort"
+                    map:
+                      manual: true
+                      _: false
+                - label: t:chat.group.menu.runningFirst
+                  act: setStatus
+                  args:
+                    entity: group
+                    id: "@id"
+                    field: sort
+                    v: running
+                  cur:
+                    of: "@sort"
+                    map:
+                      running: true
+                      _: false
             row:
               rename:
                 form: cafeRowRename
@@ -17777,8 +17924,10 @@ pdl:
                         "": "@who"
                         _: "@lastWho"
                     participants: "@participants"
+                    runs: "@runs"
                     running: "@running"
                     error: "@failed"
+                    at: "@at"
                     unread: "@unread"
                     unreadLabel:
                       t: v2a.unread
@@ -17793,27 +17942,47 @@ pdl:
                           map:
                             "true": t:v2a.working
                             _:
-                              of: "@lastWho"
+                              of: "@replied"
                               map:
-                                "": "@note"
-                                _: t:v2a.replied
+                                "true": t:v2a.replied
+                                _:
+                                  of: "@lastWho"
+                                  map:
+                                    "": "@note"
+                                    _: t:v2a.replied
                     replied:
-                      of: "@lastWho"
+                      of: "@replied"
                       map:
-                        "": false
-                        _: true
+                        "true": true
+                        _:
+                          of: "@lastWho"
+                          map:
+                            "": false
+                            _: true
                   when:
                     of: "@unread"
                     map:
                       "0":
-                        of: "@lastWho"
+                        of: "@at"
                         map:
-                          "":
-                            of: "@running"
+                          "true": true
+                          _:
+                            of: "@failed"
                             map:
                               "true": true
-                              _: "@note"
-                          _: true
+                              _:
+                                of: "@running"
+                                map:
+                                  "true": true
+                                  _:
+                                    of: "@replied"
+                                    map:
+                                      "true": true
+                                      _:
+                                        of: "@lastWho"
+                                        map:
+                                          "": "@note"
+                                          _: true
                       _: true
               more:
                 - type: component
@@ -24888,29 +25057,6 @@ pdl:
                 when:
                   - $.binary
                   - "!$.media"
-                  - "!$.documentFrame"
-              - type: component
-                use: v2Action
-                props:
-                  label: 协作编辑
-                  act: fileOffice
-                when:
-                  - $.documentEditor
-                  - "!$.documentFrame"
-              - type: component
-                use: v2Action
-                props:
-                  label: t:common.back
-                  act: fileOffice
-                when:
-                  - $.documentEditor
-                  - $.documentFrame
-              - type: frame
-                title: $.name
-                key: $.documentFrame
-                src: $.documentFrame
-                tall: true
-                when: $.documentFrame
               - type: component
                 use: v2Each
                 props:

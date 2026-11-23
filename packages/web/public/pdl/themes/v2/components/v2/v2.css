@@ -21780,6 +21780,18 @@ font-weight: 500;
 .v2-popover, .v2-menu, .v2-workspace-menu { position:fixed; position-anchor:var(--u-anchor); position-area:bottom span-right; margin-block:4px; position-try-fallbacks:flip-inline,flip-block,flip-block flip-inline; }
 .v2-popover[data-up="true"] { position-area:top span-right; }
 .v2-workspace-menu { width:min(360px,calc(100vw - 32px)); max-height:70vh; }
+.v2-composer-bar .qwrap { --qmax: min(100%, 720px); }
+.v2-shell [data-v2-nav-drawer="1"] { display: none; }
+@media (max-width: 960px) {
+  .v2-shell .v2-sidebar { position: fixed; left: var(--rail-w); top: 0; bottom: 0; width: min(280px, calc(100vw - var(--rail-w) - 16px)); z-index: var(--z-drawer); transform: translateX(calc(-100% - 80px)); transition: transform var(--dur-med); box-shadow: var(--shadow-raised); padding-top: env(safe-area-inset-top, 0); }
+  .v2-shell.nav-open .v2-sidebar { transform: none; }
+  .v2-shell .v2-resize { display: none; }
+  .v2-shell [data-v2-nav-drawer="1"] { display: inline-flex; }
+}
+@media (max-width: 640px) {
+  .v2-shell .v2-sidebar { left: var(--g-mod); width: min(280px, calc(100vw - var(--g-mod) - 16px)); }
+  .v2-shell .v2-conversation [data-thread-chat-surface] { --thread-chat-inset-end: 1.5rem; }
+}
 
 /* System appearance uses the same old v2 dark declarations; explicit light keeps priority. */
 @media (prefers-color-scheme: dark) {

@@ -243,6 +243,7 @@ function threadRow(v, rn, root, movable) {
   else if (v.running && v.who) state.push({ text: tc('threadRow.meta.running', whoInfo(v.who).name) });
   else if (v.note || v.restored) state.push({ text: rn && rn.note ? pv(rn.note, v, root) : v.note });
   else if (v.lastWho) state.push({ text: tc('threadRow.meta.replied', whoInfo(v.lastWho).name) });
+  else if (v.replied) state.push({ text: tc('threadRow.meta.repliedGeneric') });
   const meta = (v.fav ? ['<span class="cafe-star" data-tip="' + h(tc('threadRow.starred')) + '">' + icon('star', 12) + '</span>'] : []).concat(state.map(function (m) {
     if (!m.runs || m.runs.length < 2) return one(m.runs ? m.runs[0] : m);
     return rotHtml('span', 'trow-rot', m.runs.map(function (r) { return one(r); })); }));
@@ -277,7 +278,7 @@ function threadSecHead(hd, dc, root) {
   if (hd.kind === 'sec') return secHead({ act: 'fold', data: ' data-f="sec" data-k="' + h(hd.key) + '"' + (hd.dflt ? ' data-dflt="1"' : ''), open: !hd.collapsed, icon: ic, name: tc('threadRow.section', hd.key), n: hd.n, note: hd.note });
   const more = d.more ? rowMore(d.more.items ? menuLive(pvMenu(d.more.items, hd, root)) : d.more.menu, hd.id, pv(d.more.label, hd, root), 'cafe-hov') : '', add = hd.add && d.add ? btn(pv(d.add.label, hd, root), { iconOnly: true, icon: 'plus', sm: true, act: d.add.act, data: pvArgs(d.add.args, hd, root), cls: 'cafe-hov' }) : '';
   return secHead({ act: d.act, data: pvArgs(d.args, hd, root), open: hd.open, icon: ic, name: hd.unassigned ? tc('threadRow.unassigned') : hd.name, tip: hd.tip, n: hd.n,
-    extra: (hd.warn ? lrDot('warn', hd.warn) : '') + (hd.fixed ? '<span class="t-s faint">' + h(tc('threadRow.fixed')) + '</span>' : ''), acts: hd.add ? add + more : more });
+    extra: (hd.warn ? lrDot('warn', hd.warn) : '') + (hd.fixed ? '<span class="t-s faint">' + h(tc('threadRow.fixed')) + '</span>' : '') + (hd.kind === 'group' && !hd.open && hd.attention > 0 ? '<span class="t-s faint">' + h(tc('threadRow.groupAttention', hd.attention)) + '</span>' : ''), acts: hd.add ? add + more : more });
 }
 /* dc：threads 块的声明（groups 每种段的默认、heads 段头的绑定、other「其他项目」那一段的开合、rename 行的原地改名）。
    「其他项目」是同一种段头（名字 · 数量 · 箭头），点了展开的是它下面的几段（other.sections） */
@@ -288,8 +289,10 @@ function threadSections(list, dc, root) {
     if (s.other) { const d = dc.other || {}; return secHead({ act: d.act, data: pvArgs(d.args, s.other, root), open: s.other.open, name: tc('threadRow.otherProjects'), n: s.other.n }) + (s.other.open ? threadSections(s.other.sections, dc, root) : ''); }
     /* move（主题声明的动作）：对话能拖进别的分组、拖出到不分组的段；段是放下的容器（data-move-act + 它是哪一段）；rowDrop（段的数据）：放在这一段的行上是插进先后（insert）还是放到那一行上（onto） */
     const mvAct = dc.move ? pv(dc.move, root, root) : '', mv = !!mvAct;
-    return gsection({ key: s.key, collapsed: s.collapsed, dflt: !!dflt.collapsed, step: dflt.limit, rows: s.rows.map(function (v) { return threadRow(v, dc.rename, root, mv); }), peek: (s.peek || []).map(function (v) { return threadRow(v, dc.rename, root, mv); }), empty: s.empty ? emptyState(tc('threadRow.empty', s.empty)) : '',
-      attrs: (s.gid ? ' data-gid="' + h(s.gid) + '"' : '') + (mv ? ' data-move="threads" data-move-act="' + h(mvAct) + '" data-to="' + h(s.gid || '') + '"' + (s.rowDrop ? ' data-move-rows="' + h(s.rowDrop) + '"' : '') : ''), head: threadSecHead(Object.assign({ key: s.key, collapsed: s.collapsed != null ? s.collapsed : secCollapsed(s.key, !!dflt.collapsed), dflt: !!dflt.collapsed }, s.head), dc, root) });
+    const hd = Object.assign({ key: s.key, collapsed: s.collapsed != null ? s.collapsed : secCollapsed(s.key, !!dflt.collapsed), dflt: !!dflt.collapsed }, s.head);
+    const d = (dc.heads || {})[hd.kind] || {};
+    return gsection({ key: s.key, collapsed: s.collapsed, dflt: !!dflt.collapsed, step: dflt.limit, rows: s.rows.map(function (v) { return threadRow(v, dc.rename, root, mv); }), peek: (s.peek || []).map(function (v) { return threadRow(v, dc.rename, root, mv); }), peekMore: s.peekMore || 0, peekAct: d.act || '', peekData: d.args ? pvArgs(d.args, hd, root) : '', empty: s.empty ? emptyState(tc('threadRow.empty', s.empty)) : '',
+      attrs: (s.gid ? ' data-gid="' + h(s.gid) + '"' : '') + (mv ? ' data-move="threads" data-move-act="' + h(mvAct) + '" data-to="' + h(s.gid || '') + '"' + (s.rowDrop ? ' data-move-rows="' + h(s.rowDrop) + '"' : '') : ''), head: threadSecHead(hd, dc, root) });
   }).join('');
 }
 function gsection(o) {
@@ -298,9 +301,10 @@ function gsection(o) {
   /* 所有行都画出来，收起 / “还有 N 条”只改段上的属性（data-collapsed / data-more），点开关是本地更新、不重画：
      展开时露 .gsec-rows（多出的几条在 .gsec-x 里，data-more 时才露）；收起时只露 .gsec-peek（需要注意的那几行） */
   const fold = rows.length > n ? secMoreTg(key, more, rows.length - n) : '';
+  const peekFold = o.peekMore > 0 && o.peekAct ? '<button type="button" class="fold-tg" data-act="' + h(o.peekAct) + '"' + (o.peekData || '') + '>' + tc('fold.moreHtml', '<span class="num">' + o.peekMore + '</span>') + '</button>' : '';
   return '<section class="gsec" data-sec="' + h(key) + '"' + (collapsed ? ' data-collapsed' : '') + (more ? ' data-more' : '') + (o.attrs || '') + '><div class="gsec-h">' + o.head + '</div><div class="gsec-b">' +
     '<div class="gsec-rows">' + (rows.slice(0, n).join('') || (o.empty || '')) + (rows.length > n ? '<div class="gsec-x">' + rows.slice(n).join('') + '</div>' : '') + fold + '</div>' +
-    '<div class="gsec-peek">' + (o.peek || []).join('') + '</div></div></section>';
+    '<div class="gsec-peek">' + (o.peek || []).join('') + peekFold + '</div></div></section>';
 }
 function secMoreTg(key, more, extra) { return foldTg(more, 'fold', ' data-f="more" data-k="' + h(key) + '"', more ? '' : tc('fold.moreHtml', '<span class="num">' + extra + '</span>'), more ? tc('common.collapse') : '', 'bottom'); }
 /* 段的收起 / 展开：本地更新（段的属性 + 表头箭头），不重画整页。对话组、项目的表头也走它（状态各自存，DOM 一样改） */

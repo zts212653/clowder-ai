@@ -333,6 +333,8 @@ export interface ChatProjectionInput {
     ready?: boolean;
     optionsLocked?: boolean;
     preferredCats?: string[];
+    title?: string;
+    pinned?: boolean;
     homeState?: { busy: boolean; state: string };
   };
   export?: {
@@ -1352,6 +1354,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
       return {
         spot: false,
         home: data.threadId === 'default',
+        homePin: !!(input?.admission?.pinned ?? ui.homePin),
         multi: ui.multi,
         picked: chosen().length,
         locked: locked(),
@@ -1411,6 +1414,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
               : null,
           id: 'chat-input',
           home: data.threadId === 'default',
+          title: input?.admission?.title ?? ui.homeTitle ?? '',
           whisper: ui.whisper,
           history: data.historyEntries,
           value: data.input,

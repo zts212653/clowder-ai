@@ -45,6 +45,7 @@
     "workCount": "{0} works",
     "replied": "Replied",
     "unread": "{0} unread",
+    "atYou": "@you",
     "recall": "Recall {0}",
     "tools": "{0} tool calls",
     "errors": "{0} errors",

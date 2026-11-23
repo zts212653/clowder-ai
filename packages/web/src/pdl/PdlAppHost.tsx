@@ -901,6 +901,11 @@ function ChatBinding({
   current.current = data;
   // A send the server took clears the draft of the conversation it came from, wherever the owner is now.
   const clearSentDraft = (sent: string) => {
+    if (sent === 'default') {
+      homeDirtyRef.current = { title: false, pinned: false };
+      ui.current.homeTitle = '';
+      ui.current.homePin = false;
+    }
     if (current.current.threadId === sent) {
       setInput('');
       setImages([]);
@@ -944,6 +949,7 @@ function ChatBinding({
 
   const forwardRetryRef = useRef<{ fingerprint: string; key: string } | null>(null);
   const admissionRef = useRef<NewConversationAdmission | null>(null);
+  const homeDirtyRef = useRef({ title: false, pinned: false });
 
   useLayoutEffect(() => {
     const state = useChatStore.getState(),
@@ -1248,6 +1254,16 @@ function ChatBinding({
       case 'newProject':
         admissionRef.current!.updateProject(args.id || undefined);
         return;
+      case 'homeTitle':
+        ui.current.homeTitle = args.v ?? '';
+        homeDirtyRef.current.title = true;
+        admissionRef.current?.updateTitle(ui.current.homeTitle);
+        return;
+      case 'homePin':
+        ui.current.homePin = args.pinned === 'true';
+        homeDirtyRef.current.pinned = true;
+        admissionRef.current?.updatePinned(ui.current.homePin);
+        return;
       case 'compose': {
         const pop = composerTrigger(args.v, Number(args.pos));
         if (pop || ui.current.pop?.typed) ui.current.pop = pop;
@@ -1290,6 +1306,14 @@ function ChatBinding({
         if (!input.trim() && !contexts.length) return;
         if (input.trim()) inputHistory.addEntry(input);
         const sentThread = threadId;
+        if (sentThread === 'default' && admission) {
+          if (homeDirtyRef.current.title && (admission.intent?.title ?? '') !== (ui.current.homeTitle ?? '')) {
+            admission.updateTitle(ui.current.homeTitle ?? '');
+          }
+          if (homeDirtyRef.current.pinned && !!admission.intent?.pinned !== !!ui.current.homePin) {
+            admission.updatePinned(!!ui.current.homePin);
+          }
+        }
         await sendHeldDraft({
           threadId: sentThread,
           signature: JSON.stringify([
@@ -2065,6 +2089,8 @@ function ChatBinding({
         ready: admissionRef.current.ready,
         optionsLocked: admissionRef.current.optionsLocked,
         preferredCats: admissionRef.current.intent?.preferredCats ?? [],
+        title: admissionRef.current.intent?.title ?? '',
+        pinned: !!admissionRef.current.intent?.pinned,
         homeState: { busy: admissionRef.current.optionsLocked, state: admissionRef.current.phase },
       },
     };
@@ -2226,6 +2252,18 @@ function ChatBinding({
   const firstMessageChanged = useCallback(
     (admission: NewConversationAdmission, preview: RoutingPreviewState) => {
       admissionRef.current = admission;
+      if (admission.intent && !admission.intent.creationStarted) {
+        if (homeDirtyRef.current.title && (admission.intent.title ?? '') !== (ui.current.homeTitle ?? '')) {
+          admission.updateTitle(ui.current.homeTitle ?? '');
+        } else if (!homeDirtyRef.current.title) {
+          ui.current.homeTitle = admission.intent.title ?? '';
+        }
+        if (homeDirtyRef.current.pinned && !!admission.intent.pinned !== !!ui.current.homePin) {
+          admission.updatePinned(!!ui.current.homePin);
+        } else if (!homeDirtyRef.current.pinned) {
+          ui.current.homePin = !!admission.intent.pinned;
+        }
+      }
       setNewProjectId(admission.intent?.projectPath);
       prospectivePreview.current = preview;
       current.current = { ...current.current, newProjectId: admission.intent?.projectPath, routingPreview: preview };
