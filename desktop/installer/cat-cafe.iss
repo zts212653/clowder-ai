@@ -5,7 +5,7 @@
 ; Build:         iscc.exe desktop\installer\cat-cafe.iss
 ;
 ; The installer:
-;   1. Ships bulk tar.gz archives (deploy packages, Electron, Node.js)
+;   1. Ships bulk .tar archives (deploy packages, Electron, Node.js)
 ;      plus a single frozen shared dependency tree, without duplicate shell resources.
 ;   2. Extracts Node with system tar, then runtime archives with bundled npm tar,
 ;      integrity manifests, live progress and diagnostic heartbeats.
@@ -43,8 +43,10 @@ DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=..\..\dist
 OutputBaseFilename=ClowderAI-Setup-{#MyAppVersion}
-Compression=lzma2/ultra64
+Compression=lzma2/max
 SolidCompression=yes
+LZMAUseSeparateProcess=yes
+LZMANumBlockThreads=4
 WizardStyle=modern
 ; Always create a setup log (%TEMP%\Setup Log *.txt) for post-mortem debugging.
 SetupLogging=yes
@@ -100,23 +102,23 @@ Source: "..\scripts\configure-desktop-instance.ps1"; Flags: dontcopy
 Source: "..\scripts\stop-installed-desktop.ps1"; Flags: dontcopy
 
 ; ── Bulk archives ─────────────────────────────────────────────────────
-; Shipped as tar.gz and extracted post-install by Windows' built-in tar.exe.
-; This replaces per-file Inno Setup extraction of 30K+ node_modules files,
-; Runtime extraction still creates files; actual install timings must be measured.
+; Shipped as uncompressed .tar archives compressed once by Inno Setup's solid
+; LZMA2 stream, then extracted post-install by Windows' built-in tar.exe / npm tar.
+; This replaces per-file Inno Setup extraction of 30K+ node_modules files while
+; avoiding double gzip+LZMA compression and shrinking the final .exe significantly.
 Source: "..\scripts\extract-runtime-archive.cjs"; DestDir: "{app}\scripts"
 Source: "..\scripts\native-runtime-extractor.cjs"; DestDir: "{app}\scripts"
-Source: "..\..\bundled\archives\deploy-dependencies.tar.gz.json"; DestDir: "{app}\bundled\archives"
-Source: "..\..\bundled\archives\deploy-api.tar.gz.json"; DestDir: "{app}\bundled\archives"
-Source: "..\..\bundled\archives\deploy-web.tar.gz.json"; DestDir: "{app}\bundled\archives"
-Source: "..\..\bundled\archives\deploy-mcp-server.tar.gz.json"; DestDir: "{app}\bundled\archives"
-Source: "..\..\bundled\archives\electron.tar.gz.json"; DestDir: "{app}\bundled\archives"
-; Already compressed: copying these verbatim avoids a second compression/decode layer.
-Source: "..\..\bundled\archives\node.tar.gz"; DestDir: "{app}\bundled\archives"; Flags: nocompression; AfterInstall: ExtractRuntimeArchive('node.tar.gz')
-Source: "..\..\bundled\archives\deploy-dependencies.tar.gz"; DestDir: "{app}\bundled\archives"; Flags: nocompression; AfterInstall: ExtractRuntimeArchive('deploy-dependencies.tar.gz')
-Source: "..\..\bundled\archives\deploy-api.tar.gz"; DestDir: "{app}\bundled\archives"; Flags: nocompression; AfterInstall: ExtractRuntimeArchive('deploy-api.tar.gz')
-Source: "..\..\bundled\archives\deploy-web.tar.gz"; DestDir: "{app}\bundled\archives"; Flags: nocompression; AfterInstall: ExtractRuntimeArchive('deploy-web.tar.gz')
-Source: "..\..\bundled\archives\deploy-mcp-server.tar.gz"; DestDir: "{app}\bundled\archives"; Flags: nocompression; AfterInstall: ExtractRuntimeArchive('deploy-mcp-server.tar.gz')
-Source: "..\..\bundled\archives\electron.tar.gz"; DestDir: "{app}\bundled\archives"; Flags: nocompression; AfterInstall: ExtractRuntimeArchive('electron.tar.gz')
+Source: "..\..\bundled\archives\deploy-dependencies.tar.json"; DestDir: "{app}\bundled\archives"
+Source: "..\..\bundled\archives\deploy-api.tar.json"; DestDir: "{app}\bundled\archives"
+Source: "..\..\bundled\archives\deploy-web.tar.json"; DestDir: "{app}\bundled\archives"
+Source: "..\..\bundled\archives\deploy-mcp-server.tar.json"; DestDir: "{app}\bundled\archives"
+Source: "..\..\bundled\archives\electron.tar.json"; DestDir: "{app}\bundled\archives"
+Source: "..\..\bundled\archives\node.tar"; DestDir: "{app}\bundled\archives"; AfterInstall: ExtractRuntimeArchive('node.tar')
+Source: "..\..\bundled\archives\deploy-dependencies.tar"; DestDir: "{app}\bundled\archives"; AfterInstall: ExtractRuntimeArchive('deploy-dependencies.tar')
+Source: "..\..\bundled\archives\deploy-api.tar"; DestDir: "{app}\bundled\archives"; AfterInstall: ExtractRuntimeArchive('deploy-api.tar')
+Source: "..\..\bundled\archives\deploy-web.tar"; DestDir: "{app}\bundled\archives"; AfterInstall: ExtractRuntimeArchive('deploy-web.tar')
+Source: "..\..\bundled\archives\deploy-mcp-server.tar"; DestDir: "{app}\bundled\archives"; AfterInstall: ExtractRuntimeArchive('deploy-mcp-server.tar')
+Source: "..\..\bundled\archives\electron.tar"; DestDir: "{app}\bundled\archives"; AfterInstall: ExtractRuntimeArchive('electron.tar')
 ; ── Individual files (small — per-file overhead negligible) ───────────
 ; cat-template.json — the authoritative source for cat model defaults.
 ; cat-config-loader.js resolves it relative to its own location 4 dirs up
@@ -159,7 +161,7 @@ Source: "..\..\assets\*";                          DestDir: "{app}\assets"; \
 ; Missing → bootcamp/guide features crash on first request.
 Source: "..\..\guides\*";                          DestDir: "{app}\guides"; \
   Flags: recursesubdirs createallsubdirs
-; (Node.js runtime is shipped as node.tar.gz in bulk archives above)
+; (Node.js runtime is shipped as node.tar in bulk archives above)
 ; Desktop scripts (post-install config generation)
 Source: "..\scripts\post-install-offline.ps1";   DestDir: "{app}\scripts"
 Source: "..\scripts\configure-desktop-instance.ps1"; DestDir: "{app}\scripts"
@@ -171,14 +173,16 @@ Source: "..\..\.claude\hooks\user-level\*";      DestDir: "{app}\.claude\hooks\u
   Flags: recursesubdirs createallsubdirs
 ; #1542: canonical Node compaction carrier packaged for spawn-time --settings injection.
 Source: "..\..\.claude\hooks\f24-compaction.mjs"; DestDir: "{app}\.claude\hooks"
-; (Electron app is shipped as electron.tar.gz in bulk archives above)
+; (Electron app is shipped as electron.tar in bulk archives above)
 ; Desktop assets (icon used by uninstaller entry)
 Source: "..\assets\*";                           DestDir: "{app}\desktop\assets"; \
   Flags: recursesubdirs createallsubdirs
 ; Portable Redis for Windows — fail-closed: any publishable installer MUST
 ; include Redis. The build script retries download 3× and verifies
 ; redis-server.exe; Inno Setup will abort here if bundled/redis/ is empty.
+; Exclude duplicate copies of redis-server.exe (sentinel/check-aof/check-rdb) and unused benchmark.
 Source: "..\..\bundled\redis\*";                 DestDir: "{app}\.cat-cafe\redis\windows"; \
+  Excludes: "redis-sentinel.exe,redis-check-aof.exe,redis-check-rdb.exe,redis-benchmark.exe"; \
   Flags: recursesubdirs createallsubdirs
 
 [Tasks]
@@ -323,9 +327,9 @@ begin
   if not RuntimeExtractionSucceeded then exit;
   AppDir := ExpandConstant('{app}');
   WizardForm.StatusLabel.Caption := 'Extracting ' + ArchiveName + '...';
-  if ArchiveName = 'node.tar.gz' then begin
+  if ArchiveName = 'node.tar' then begin
     ProgramPath := ExpandConstant('{sys}\tar.exe');
-    Arguments := '-xzf "' + AppDir + '\bundled\archives\node.tar.gz" -C "' + AppDir + '\node"';
+    Arguments := '-xf "' + AppDir + '\bundled\archives\node.tar" -C "' + AppDir + '\node"';
   end else begin
     ProgramPath := AppDir + '\node\node.exe';
     Arguments := '"' + AppDir + '\scripts\extract-runtime-archive.cjs" "' + AppDir + '" "' + ArchiveName + '"';
@@ -337,7 +341,7 @@ begin
   CancelWasEnabled := WizardForm.CancelButton.Enabled;
   WizardForm.CancelButton.Enabled := False;
   try
-    if ArchiveName = 'node.tar.gz' then
+    if ArchiveName = 'node.tar' then
       Started := Exec(ProgramPath, Arguments, AppDir, SW_HIDE, ewWaitUntilTerminated, ExitCode)
     else
       Started := ExecAndLogOutput(ProgramPath, Arguments, AppDir, SW_SHOWNORMAL, ewWaitUntilTerminated, ExitCode, @ExtractionOutput);
@@ -349,6 +353,10 @@ begin
     ', started=' + IntToStr(Ord(Started)) + ', elapsedMs=' + IntToStr(GetTickCount - StartedAt));
   if (not Started) or (ExitCode <> 0) then
     FailRuntimeExtraction('Runtime extraction failed: ' + ArchiveName + '. See setup log and ' + AppDir + '\.installer-logs\extract-runtime.log');
-  if (ArchiveName = 'node.tar.gz') and (not FileExists(AppDir + '\node\node.exe')) then
+  if (ArchiveName = 'node.tar') and (not FileExists(AppDir + '\node\node.exe')) then
     FailRuntimeExtraction('Bundled Node.js is incomplete. Installation cannot continue.');
+  if RuntimeExtractionSucceeded then begin
+    DeleteFile(AppDir + '\bundled\archives\' + ArchiveName);
+    DeleteFile(AppDir + '\bundled\archives\' + ArchiveName + '.json');
+  end;
 end;

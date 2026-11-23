@@ -7,12 +7,12 @@ import test from 'node:test';
 
 const script = path.join(import.meta.dirname, 'scripts', 'verify-runtime-archives.mjs');
 const names = [
-  'node.tar.gz',
-  'deploy-dependencies.tar.gz',
-  'deploy-api.tar.gz',
-  'deploy-web.tar.gz',
-  'deploy-mcp-server.tar.gz',
-  'electron.tar.gz',
+  'node.tar',
+  'deploy-dependencies.tar',
+  'deploy-api.tar',
+  'deploy-web.tar',
+  'deploy-mcp-server.tar',
+  'electron.tar',
 ];
 
 function makeRoot({ empty = false, missingSidecar = false } = {}) {
@@ -22,7 +22,7 @@ function makeRoot({ empty = false, missingSidecar = false } = {}) {
   for (const name of names) {
     const archive = path.join(dir, name);
     fs.writeFileSync(archive, empty ? '' : 'archive');
-    if (name !== 'node.tar.gz' && !missingSidecar) {
+    if (name !== 'node.tar' && !missingSidecar) {
       fs.writeFileSync(`${archive}.json`, JSON.stringify({ archive: name, bytes: 7 }));
     }
   }

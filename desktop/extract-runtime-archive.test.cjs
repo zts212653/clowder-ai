@@ -82,11 +82,12 @@ test('keeps Unicode runtime files and fails on missing/unknown payloads', async 
 test('installer extracts bundled Node first and stops on any extraction error', () => {
   const script = fs.readFileSync(path.join(__dirname, 'installer/cat-cafe.iss'), 'utf8');
   assert.ok(
-    script.indexOf("AfterInstall: ExtractRuntimeArchive('node.tar.gz')") <
-      script.indexOf("AfterInstall: ExtractRuntimeArchive('deploy-api.tar.gz')"),
+    script.indexOf("AfterInstall: ExtractRuntimeArchive('node.tar')") <
+      script.indexOf("AfterInstall: ExtractRuntimeArchive('deploy-api.tar')"),
   );
   assert.match(script, /ExitCode <> 0[\s\S]*FailRuntimeExtraction/);
   assert.match(script, /extract-runtime-archive\.cjs/);
+  assert.match(script, /DeleteFile\(AppDir \+ '\\bundled\\archives\\' \+ ArchiveName\)/);
 });
 
 test('an existing entry cannot make a newly incomplete upgrade archive succeed', async () => {
@@ -123,11 +124,11 @@ test(
       fs.writeFileSync(path.join(input, 'Clowder AI.exe'), 'new entry');
       fs.writeFileSync(path.join(destination, 'Clowder AI.exe'), 'old entry');
       fs.mkdirSync(path.join(root, 'bundled/archives'), { recursive: true });
-      const file = path.join(root, 'bundled/archives/electron.tar.gz');
-      await tar.c({ file, gzip: true, cwd: input }, ['.']);
+      const file = path.join(root, 'bundled/archives/electron.tar');
+      await tar.c({ file, gzip: false, cwd: input }, ['.']);
       let entries = 0;
       await tar.t({ file, onReadEntry: () => entries++ });
-      const manifest = { archive: 'electron.tar.gz', entries, bytes: fs.statSync(file).size, sha256: '0'.repeat(64) };
+      const manifest = { archive: 'electron.tar', entries, bytes: fs.statSync(file).size, sha256: '0'.repeat(64) };
       fs.writeFileSync(file + '.json', JSON.stringify(manifest));
       await assert.rejects(
         extractRuntimeArchive(root, manifest.archive, tar, { engine: 'native' }),
@@ -145,7 +146,7 @@ test(
       assert.ok(events.at(-1).verifyMs + events.at(-1).extractMs <= events.at(-1).elapsedMs);
       fs.mkdirSync(path.join(input, '中文目录'), { recursive: true });
       fs.writeFileSync(path.join(input, '中文目录/snow ☃.txt'), 'unicode witness');
-      await tar.c({ file, gzip: true, cwd: input }, ['.']);
+      await tar.c({ file, gzip: false, cwd: input }, ['.']);
       entries = 0;
       await tar.t({ file, onReadEntry: () => entries++ });
       Object.assign(manifest, {

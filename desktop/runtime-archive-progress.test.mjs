@@ -16,7 +16,7 @@ test('real archive producer supplies integrity and extraction validates it, incl
     const input = path.join(root, 'input');
     fs.mkdirSync(input);
     fs.writeFileSync(path.join(input, 'Clowder AI.exe'), 'entry');
-    const file = path.join(root, 'bundled/archives/electron.tar.gz');
+    const file = path.join(root, 'bundled/archives/electron.tar');
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const manifest = await createRuntimeArchive(input, file);
     const events = [];
@@ -44,7 +44,7 @@ test('waiting for tar emits diagnostic heartbeats before completion and stops th
     const input = path.join(root, 'input');
     fs.mkdirSync(input);
     fs.writeFileSync(path.join(input, 'Clowder AI.exe'), 'entry');
-    const file = path.join(root, 'bundled/archives/electron.tar.gz');
+    const file = path.join(root, 'bundled/archives/electron.tar');
     fs.mkdirSync(path.dirname(file), { recursive: true });
     await createRuntimeArchive(input, file);
     const { Writable } = await import('node:stream');
@@ -86,7 +86,8 @@ test('Windows shell excludes runtime resources and every distribution carries th
   const packageJson = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
   const skillsResources = packageJson.build.extraResources.filter((entry) => entry.to.startsWith('cat-cafe-skills'));
   assert.match(iss, /ExecAndLogOutput[\s\S]*@ExtractionOutput/);
-  assert.match(iss, /deploy-dependencies.tar.gz/);
+  assert.match(iss, /deploy-dependencies\.tar/);
+  assert.doesNotMatch(iss, /Flags:\s*nocompression/);
   assert.match(iss, /Excludes: [^\n]*\.cat-cafe-shared-refs/);
   assert.match(iss, /Excludes:\s*"\.cat-cafe-shared-refs\*"/);
   assert.match(iss, /cat-cafe-skills\\refs\\\*[^\n]*\.cat-cafe-shared-refs/);
