@@ -604,6 +604,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
     isReadonly: !!data.readonly,
     forwardingBlocked: data.forwardingBlocked !== false,
   });
+  const availableMemberIds = () => data.cats.filter((cat) => cat.roster?.available !== false).map((cat) => cat.id);
   const memberItems = (selected: readonly string[], among?: readonly string[]) =>
     members()
       .filter((member) => !among || among.includes(member.id))
@@ -1544,7 +1545,8 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
                   ? preferredIds()
                   : recipients(),
             // "View as" lists this conversation's members (its participants, or who has spoken here), not everyone.
-            kind === 'people' ? conversationMembers() : undefined,
+            // Recipient pickers ("target", "whisper", "prefer") only offer currently enabled cats.
+            kind === 'people' ? conversationMembers() : availableMemberIds(),
           ),
         };
       if (kind === 'plus' && subpage === 'mode') return { ...base, sendScope: ui.sendScope, sendMode: ui.sendMode };
@@ -1557,7 +1559,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
           preferNames: preferredIds().map((id) => members().find((member) => member.id === id)?.name ?? id),
           preferredIds: preferredIds(),
           preferredExpanded: !!pop()?.preferredExpanded,
-          members: memberItems(preferredIds()),
+          members: memberItems(preferredIds(), availableMemberIds()),
           connection: connection(),
           homeState: data.threadId === 'default' ? (input?.admission?.homeState ?? null) : null,
           attachments: attachments(),
