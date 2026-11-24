@@ -120,3 +120,101 @@ for (const sharedDependencies of [false, true])
       fs.rmSync(base, { recursive: true, force: true });
     }
   });
+
+for (const sharedDependencies of [false, true])
+  for (const targetPlatform of ['win32-x64', 'win32-arm64', 'darwin-arm64'])
+    test(`native runtime export preserves target files and private packages (${targetPlatform}, shared=${sharedDependencies})`, () => {
+      const base = fs.mkdtempSync(path.join(os.tmpdir(), 'frozen-native-target-'));
+      const workspace = path.join(base, 'workspace');
+      const file = (relative, value) => {
+        const target = path.join(workspace, relative);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, value);
+      };
+      const foreign = ['win32-arm64', 'linux-arm64', 'linux-x64', 'darwin-arm64', 'darwin-x64'];
+      try {
+        file('pnpm-lock.yaml', 'locked fixture');
+        file('packages/api/package.json', '{"name":"api"}');
+        file('packages/api/node_modules/terminal-helper/package.json', '{"name":"terminal-helper"}');
+        for (const location of [
+          'node_modules/node-pty',
+          'packages/api/node_modules/terminal-helper/node_modules/node-pty',
+        ]) {
+          file(`${location}/package.json`, '{"name":"node-pty","version":"1.2.0-beta.12"}');
+          for (const architecture of ['win32-x64', 'future-platform', ...foreign])
+            file(`${location}/prebuilds/${architecture}/binding.node`, architecture);
+          file(`${location}/prebuilds/win32-x64/conpty.pdb`, 'keep target debug symbols');
+          file(`${location}/lib/index.js.map`, 'keep source maps');
+          file(`${location}/vendor/darwin-arm64/data`, 'unclassified runtime asset');
+        }
+        file('node_modules/other-package/package.json', '{"name":"other-package"}');
+        file('node_modules/other-package/prebuilds/linux-x64/binding.node', 'unrelated package');
+        file('node_modules/alias-root/package.json', '{"name":"alias-root"}');
+        file('node_modules/alias-root/node_modules/node-pty/package.json', '{"name":"different-package"}');
+        file('node_modules/alias-root/node_modules/node-pty/prebuilds/linux-x64/data', 'preserve different identity');
+        const out = path.join(base, 'output');
+        exportFrozenRuntime(workspace, out, ['api'], path.join(workspace, 'pnpm-lock.yaml'), {
+          sharedDependencies,
+          targetPlatform,
+        });
+        const modules = path.join(out, sharedDependencies ? 'dependencies' : 'api/node_modules');
+        for (const destination of [
+          path.join(modules, 'node-pty'),
+          path.join(out, 'api/node_modules/terminal-helper/node_modules/node-pty'),
+        ]) {
+          for (const architecture of foreign)
+            assert.equal(
+              fs.existsSync(path.join(destination, 'prebuilds', architecture)),
+              targetPlatform !== 'win32-x64',
+              architecture,
+            );
+          for (const relative of [
+            'prebuilds/win32-x64/binding.node',
+            'prebuilds/win32-x64/conpty.pdb',
+            'prebuilds/future-platform/binding.node',
+            'lib/index.js.map',
+            'vendor/darwin-arm64/data',
+          ])
+            assert.equal(fs.existsSync(path.join(destination, relative)), true, relative);
+        }
+        assert.equal(fs.existsSync(path.join(modules, 'other-package/prebuilds/linux-x64/binding.node')), true);
+        assert.equal(
+          fs.existsSync(path.join(modules, 'alias-root/node_modules/node-pty/prebuilds/linux-x64/data')),
+          true,
+        );
+        assert.equal(
+          fs.existsSync(path.join(workspace, 'node_modules/node-pty/prebuilds/win32-arm64/binding.node')),
+          true,
+          'never prune source dependencies',
+        );
+      } finally {
+        fs.rmSync(base, { recursive: true, force: true });
+      }
+    });
+
+test('native prebuild filtering cannot hide a link outside the frozen workspace', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'native-filter-link-'));
+  const workspace = path.join(base, 'workspace');
+  try {
+    fs.mkdirSync(path.join(workspace, 'node_modules/node-pty/prebuilds'), { recursive: true });
+    fs.mkdirSync(path.join(workspace, 'packages/api'), { recursive: true });
+    fs.mkdirSync(path.join(base, 'outside'));
+    fs.writeFileSync(path.join(workspace, 'pnpm-lock.yaml'), 'locked');
+    fs.writeFileSync(path.join(workspace, 'packages/api/package.json'), '{"name":"api"}');
+    fs.writeFileSync(path.join(workspace, 'node_modules/node-pty/package.json'), '{"name":"node-pty"}');
+    fs.symlinkSync(
+      path.join(base, 'outside'),
+      path.join(workspace, 'node_modules/node-pty/prebuilds/win32-arm64'),
+      'junction',
+    );
+    assert.throws(
+      () =>
+        exportFrozenRuntime(workspace, path.join(base, 'output'), ['api'], path.join(workspace, 'pnpm-lock.yaml'), {
+          targetPlatform: 'win32-x64',
+        }),
+      /External packaging link/,
+    );
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
