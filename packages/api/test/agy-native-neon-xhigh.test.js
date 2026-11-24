@@ -459,10 +459,10 @@ describe('Gemini 4 Neon + xhigh & Windows AGY Native compatibility', () => {
       'EXDEV must fail closed without copying tokens',
     );
 
-    // 3. Controlled hardlink validator rejects extra uncontrolled aliases
+    // 3. Controlled hardlink validator rejects extra uncontrolled aliases (including 8.3 short-path canonicalization)
     if (process.platform === 'win32') {
       const oauthPath = agyOAuthFile(prepared.credentialHome);
-      const canonicalRel = oauthPath.slice(2);
+      const canonicalRel = realpathSync.native(oauthPath).slice(2);
       assert.equal(
         hasOnlyControlledWin32Hardlinks(oauthPath, (p) => p.includes('\\.cat-cafe-account-views\\'), {
           expectedNlink: 2,

@@ -27,6 +27,14 @@ function normalizeWin32Path(path: string): string {
   return resolve(path).replaceAll('/', '\\').toLowerCase();
 }
 
+/**
+ * Expand Windows 8.3 short path segments (such as `RUNNER~1` -> `runneradmin`) to match
+ * the long NTFS volume-relative paths returned by `fsutil hardlink list` and `FindFirstFileNameW`.
+ */
+function canonicalWin32Path(path: string): string {
+  return typeof realpathSync.native === 'function' ? realpathSync.native(path) : realpathSync(path);
+}
+
 function windowsPowerShellPath(): string {
   return join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
@@ -339,7 +347,7 @@ export function hasOnlyControlledWin32Hardlinks(
 
   let canonical: string;
   try {
-    canonical = realpathSync(filePath);
+    canonical = canonicalWin32Path(filePath);
   } catch {
     return false;
   }
@@ -373,11 +381,16 @@ export function isControlledAgyOAuthAlias(
   accountCanonicalHome: string,
   fileName: string,
 ): (fullPath: string) => boolean {
-  const expectedHash = createHash('sha256').update(accountCanonicalHome).digest('hex').toLowerCase();
-  const suffix = `\\.cat-cafe-account-views\\${expectedHash}\\${fileName.toLowerCase()}`;
+  const hashes = new Set<string>([createHash('sha256').update(accountCanonicalHome).digest('hex').toLowerCase()]);
+  try {
+    hashes.add(createHash('sha256').update(canonicalWin32Path(accountCanonicalHome)).digest('hex').toLowerCase());
+  } catch {
+    // Keep caller hash if the directory cannot be re-resolved on this platform.
+  }
+  const suffixes = [...hashes].map((hash) => `\\.cat-cafe-account-views\\${hash}\\${fileName.toLowerCase()}`);
   return (fullPath: string): boolean => {
     const normalized = normalizeWin32Path(fullPath);
-    if (!normalized.endsWith(suffix)) return false;
+    if (!suffixes.some((suffix) => normalized.endsWith(suffix))) return false;
     const viewDir = dirname(fullPath);
     const viewsDir = dirname(viewDir);
     try {
@@ -407,7 +420,13 @@ export function isControlledAgySharedFileAlias(
   profileCanonicalHome: string,
   fileName: string,
 ): (fullPath: string) => boolean {
-  const viewsRoot = normalizeWin32Path(join(profileCanonicalHome, '.cat-cafe-account-views'));
+  let resolvedProfile = profileCanonicalHome;
+  try {
+    resolvedProfile = canonicalWin32Path(profileCanonicalHome);
+  } catch {
+    // Keep caller path if not resolvable on this platform.
+  }
+  const viewsRoot = normalizeWin32Path(join(resolvedProfile, '.cat-cafe-account-views'));
   const expectedFile = fileName.toLowerCase();
   return (fullPath: string): boolean => {
     const normalized = normalizeWin32Path(fullPath);

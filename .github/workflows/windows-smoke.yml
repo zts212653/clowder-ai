@@ -38,6 +38,13 @@ jobs:
         run: node --test packages/api/test/windows-temp-lifecycle.test.mjs packages/api/test/isolated-template-root.test.js
       - run: pnpm --filter @cat-cafe/shared build
       - run: pnpm --filter @cat-cafe/api build
+      - name: AGY Native Neon/xhigh & Windows hardening regressions (#2072)
+        run: >-
+          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
+          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
+          node --test --test-timeout=120000
+          test/agy-native-neon-xhigh.test.js
+          test/native-agy-discovery.test.js
       - name: Anchor mode writer, hook and eval bridge temporary paths (#1912)
         run: node --test packages/api/test/f236-temp-protocol.test.js packages/api/test/f236-set-read-mode.test.js
       - name: Git marketplace pnpm isolation and diagnostic sanitization
@@ -336,13 +343,6 @@ jobs:
           node --test packages/api/test/cli-spawn-win.test.js
           node --test packages/api/test/process-liveness-probe.test.js
           node --test packages/api/test/pick-directory.test.js
-      - name: AGY Native Neon/xhigh & Windows hardening regressions (#2072)
-        run: >-
-          pnpm --filter @cat-cafe/api exec node ./scripts/with-test-home.mjs
-          --env CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1
-          node --test --test-timeout=120000
-          test/agy-native-neon-xhigh.test.js
-          test/native-agy-discovery.test.js
       - name: Browser env wrapper regression
         run: node --test --test-name-pattern='applies --env' packages/web/test/run-with-node-env-test.test.cjs
       - name: Windows stale-process entrypoint guard
