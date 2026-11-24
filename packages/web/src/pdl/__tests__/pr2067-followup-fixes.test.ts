@@ -18,7 +18,7 @@ async function bootConsole(
   options: {
     threadId?: string;
     configure?: (data: ReturnType<typeof fixtureData>, sidebar: ReturnType<typeof fixtureSidebar>) => void;
-    decisions?: () => unknown[];
+    decisions?: (query?: Record<string, unknown>) => unknown[];
   } = {},
 ) {
   const dom = new JSDOM('<!doctype html><div id="app"></div>', {
@@ -89,7 +89,7 @@ async function bootConsole(
     if (name === '/api/plugin-manager/plugins') return { plugins: [] };
     if (name === '/api/plugin-manager/pdl') return { fragments: {} };
     if (name === '/api/concierge/work/decisions') {
-      const all = query?.mentionPeriod === 'handled' ? [] : (options.decisions?.() ?? []);
+      const all = query?.mentionPeriod === 'handled' ? [] : (options.decisions?.(query) ?? []);
       const offset = Number(query?.offset ?? 0);
       const limit = Number(query?.limit ?? 20);
       const items = all.slice(offset, offset + limit);
@@ -461,8 +461,18 @@ describe('#2067 follow-up fixes across default and v2 themes', () => {
         },
         linkedNeedsMe: [],
       };
+      let failPage2Once = false;
+      let page2Failures = 0;
+      let includeGroupDecision = true;
       const { w } = await bootConsole(themeId, {
-        decisions: () => [...fillerDecisions, groupDecision],
+        decisions: (query) => {
+          if (failPage2Once && Number(query?.offset ?? 0) >= 20) {
+            failPage2Once = false;
+            page2Failures += 1;
+            throw new Error('HTTP 503 Service Unavailable');
+          }
+          return includeGroupDecision ? [...fillerDecisions, groupDecision] : [...fillerDecisions];
+        },
         configure: (data, sidebar) => {
           const ids = [
             'g-pending',
@@ -514,25 +524,51 @@ describe('#2067 follow-up fixes across default and v2 themes', () => {
 
       for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 10));
 
-      const sec = w.document.querySelector('[data-sec="grp:grp-page2"], [data-section="grp:grp-page2"]');
-      expect(sec).not.toBeNull();
-      expect(sec!.textContent).toContain('4 条要看');
-      expect(sec!.textContent).toContain('还有 1 条');
+      const assertGroupDecisionVisible = () => {
+        const sec = w.document.querySelector('[data-sec="grp:grp-page2"], [data-section="grp:grp-page2"]');
+        expect(sec).not.toBeNull();
+        expect(sec!.textContent).toContain('4 条要看');
+        expect(sec!.textContent).toContain('还有 1 条');
 
-      const peekContainer = sec!.querySelector('.gsec-peek') ?? sec!;
-      const visiblePeekRows = Array.from(peekContainer.querySelectorAll('[data-tid]') as NodeListOf<Element>).map(
-        (el) => el.getAttribute('data-tid'),
-      );
-      expect(visiblePeekRows).toEqual(['g-pending', 'g-at', 'g-unread-1']);
+        const peekContainer = sec!.querySelector('.gsec-peek') ?? sec!;
+        const visiblePeekRows = Array.from(peekContainer.querySelectorAll('[data-tid]') as NodeListOf<Element>).map(
+          (el) => el.getAttribute('data-tid'),
+        );
+        expect(visiblePeekRows).toEqual(['g-pending', 'g-at', 'g-unread-1']);
 
-      const pendingRowEl = peekContainer.querySelector('[data-tid="g-pending"]');
-      expect(pendingRowEl?.textContent).toContain('等你决定');
-      if (themeId === 'v2') {
-        expect(pendingRowEl?.innerHTML).toContain('var(--semantic-warning)');
-        expect(pendingRowEl?.querySelector('button[data-act="thread"]')?.className).toContain('font-semibold');
-      } else {
-        expect(pendingRowEl?.querySelector('.dot[data-tone="warn"]')).not.toBeNull();
-      }
+        const pendingRowEl = peekContainer.querySelector('[data-tid="g-pending"]');
+        expect(pendingRowEl?.textContent).toContain('等你决定');
+        if (themeId === 'v2') {
+          expect(pendingRowEl?.innerHTML).toContain('var(--semantic-warning)');
+          expect(pendingRowEl?.querySelector('button[data-act="thread"]')?.className).toContain('font-semibold');
+        } else {
+          expect(pendingRowEl?.querySelector('.dot[data-tone="warn"]')).not.toBeNull();
+        }
+      };
+
+      // 1. Initial complete paginated load shows all 4 items including page-2 pending decision
+      assertGroupDecisionVisible();
+
+      // 2. Transient 503 on page 2 during refresh must retain the previous complete decision list
+      failPage2Once = true;
+      w.clowderChat.emit('cat-cafe:runtime-interaction-updated', undefined);
+      for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 10));
+      expect(page2Failures).toBe(1);
+      assertGroupDecisionVisible();
+
+      // 3. Subsequent refresh succeeds and stays consistent
+      w.clowderChat.emit('cat-cafe:runtime-interaction-updated', undefined);
+      for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 10));
+      assertGroupDecisionVisible();
+
+      // 4. Once the decision is genuinely resolved on a complete refresh, counts update cleanly
+      includeGroupDecision = false;
+      w.clowderChat.emit('cat-cafe:runtime-interaction-updated', undefined);
+      for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 10));
+      const secAfterResolve = w.document.querySelector('[data-sec="grp:grp-page2"], [data-section="grp:grp-page2"]');
+      expect(secAfterResolve!.textContent).toContain('3 条要看');
+      const peekAfterResolve = secAfterResolve!.querySelector('.gsec-peek') ?? secAfterResolve!;
+      expect(peekAfterResolve.querySelector('[data-tid="g-pending"]')).toBeNull();
     });
   }
 

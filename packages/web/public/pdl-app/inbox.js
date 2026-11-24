@@ -79,14 +79,14 @@ function bindInbox() {
             opt,
           );
         } catch {
-          break;
+          return null;
         }
         if (ticket !== sequence) return null;
-        if (owner !== undefined && pageData?.identity?.ownerUserId !== owner) break;
+        if (owner !== undefined && pageData?.identity?.ownerUserId !== owner) return null;
       }
-      if (!pageData || !Array.isArray(pageData.items)) break;
+      if (!pageData || !Array.isArray(pageData.items)) return null;
       items.push.apply(items, pageData.items);
-      if (!pageData.page?.hasMore || !pageData.items.length) break;
+      if (!pageData.page?.hasMore || !pageData.items.length) return items;
     }
     return items;
   }
@@ -142,7 +142,7 @@ function bindInbox() {
     if (confirmed && read) {
       const collected = await loadAllDecisionItems(ticket, read, currentOffset, opt);
       if (ticket !== sequence) return;
-      if (collected) allDecisions = collected;
+      if (Array.isArray(collected)) allDecisions = collected;
     }
     if (rebuildPendingCounts()) navStale();
     await chatDataRender();
