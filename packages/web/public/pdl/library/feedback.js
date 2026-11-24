@@ -65,6 +65,8 @@ function skel(n, shape) {
   const a = []; for (let i = 0; i < n; i++) a.push(shape === 'card' ? '<div class="cgrid-card">' + skelBar('prev') + '<div class="cgrid-meta">' + skelBar('line') + skelBar('line short') + '</div></div>' : skelBar('row'));
   return '<div class="' + (shape === 'card' ? 'cgrid' : 'group') + '" aria-busy="true">' + a.join('') + '</div>';
 }
+/* 数据读取中（组件库，唯一一处）：三点按共用节拍轮流起伏，表示正在读取数据（不是容器骨架） */
+function loadingDots(label) { return '<span class="load-dots" role="status" aria-label="' + h(label || tc('common.loading')) + '"><i aria-hidden="true"></i><i aria-hidden="true"></i><i aria-hidden="true"></i></span>'; }
 /* ───────── 目录登记：这个文件里的组件 ───────── */
 Object.assign(LIB_CATALOG, {
   tooltip: { g: 'structure', inline: true, via: ['prop:tip', 'prop:help'], ex: function (s) { return btn(s.more, { act: 'noop', data: ' data-tip="' + h(s.sub) + '"' }) + helpTip(s.sub); } },
@@ -72,5 +74,6 @@ Object.assign(LIB_CATALOG, {
     tones: function (t, s) { return toastHtml(s.toneText[t], null, { cls: 'cat-static', tone: t }); } },
   badge: { g: 'alerts', inline: true, via: ['type:threads', 'shell'], ex: function () { return badge(8) + badge(true) + badge(3, { at: true }) + badge(2, { tone: 'warn' }); },
     tones: function (t) { return badge(3, { tone: t }) + badge(true, { tone: t }); },
-    count: function () { return badge(4) + badge(120) + badge(true) + badge(2, { at: true }); } }
+    count: function () { return badge(4) + badge(120) + badge(true) + badge(2, { at: true }); } },
+  loadingDots: { g: 'basics', inline: true, via: ['type:stream'], ex: function () { return loadingDots(); } }
 });

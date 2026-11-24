@@ -91,8 +91,8 @@ function clearedStreamedBody(message: ChatMessage): ChatMessagePatch {
 
 /**
  * Admit one agent event of `threadId` before it is handled. Returns false when the event is one the
- * page already holds and must not be handled again; otherwise the handler runs as usual (a reply
- * found incomplete here refuses its body writes on its own).
+ * page already holds and must not be handled again; otherwise the handler runs as usual. A reply
+ * found incomplete keeps accepting body writes while its room's replay is requested.
  */
 export function admitStreamEvent(event: AdmittedEvent, threadId: string, store: () => PositionStore): boolean {
   if (!event.messageId) return true;

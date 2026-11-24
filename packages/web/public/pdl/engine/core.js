@@ -270,7 +270,7 @@ function nodeId(n) {
 }
 function treeKey(el) { const ks = []; for (let n = el; n && n !== document.body; n = n.parentElement) { const k = nodeId(n); if (k) ks.unshift(k); } return ks.join('/'); }
 /* 节点的“版本”就是它的 HTML：相位（节拍、轮换起点）从不写进 HTML，由动画诞生时按时间原点对齐 */
-function streamVer(el) { return el.outerHTML.replace(/ data-aname="[^"]*"/g, ''); }   /* 锚点名（anchor.js）是插进页面后按身份写上的，不算内容 */
+function streamVer(el) { return el.outerHTML.replace(/ data-aname="[^"]*"/g, '').replace(/(<[^>]* data-tick="[^"]*"[^>]*>)[^<]*/g, '$1'); }   /* 锚点名（anchor.js）与会走的计时字（data-tick）不算内容，避免重画拆装孤岛打断动画 */
 /* 本地更新之后（只改了某个节点里的属性 / 一小块）：把所在消息节点、各层孤岛记下的版本更新成现在的样子，
    下次整页重画时它们照样被复用（前提：本地更新出来的 HTML 和重画出来的一样） */
 /* 组件在页面上写的测量结果（CSS 变量、data-foldable、按测量改的提示文字）不算内容：记版本前由各组件把副本还原成“刚画出来”的样子 */
@@ -367,7 +367,7 @@ function reuseApply(old) {
    · 贴底的区（stick-end）停在底部：锚点是底，变化往上长（浏览器的反向排列本来就这样，不用补）；普通的区停在顶上：锚点是顶，变化往下长；
    · 否则：锚点是窗口里第一张完整可见的单位（带身份的最外层节点：消息、行……）的上沿，它不动，变化都往它下面长；
      它被删掉了，就由紧挨着它的下一张接到它原来的位置；
-   · 窗口里没有完整可见的单位（一张卡比一屏还高）：没有卡片锚点，只有窗口——贴底的区照旧往上走，普通的区停在原处。
+   · 窗口里没有完整可见的单位（一张卡比一屏还高）：以第一张与窗口相交的单位为锚，仍保持它的屏幕偏移。
    用户（或 streamScrollTo / scrollToMessage）滚动后重新取锚点；尺寸变化和增删由一个观察器统一还原。滚动位置只有这一个写入者（浏览器的原生锚定关掉）。 */
 const KEYED_SEL = '[id], [data-island], [data-mid], [data-id], [data-k]';
 const ANCHOR = new WeakMap();
@@ -376,15 +376,21 @@ function keySel(n) { const d = n.dataset; return d.island ? '[data-island="' + C
 function keyedIn(sc, ref) { return Array.prototype.filter.call(sc.querySelectorAll(ref.sel), function (x) { return nodeId(x) === ref.id && treeKey(x) === ref.key; }); }
 /* 单位 = 带身份的最外层节点。按文档顺序从第一张完整可见的单位起取 max 张：从滚动区往下走，找到之前只进和窗口相交的分支，单位里面不再进 */
 function anchorUnits(sc, r, max) {
-  const out = [];
+  const out = []; let partial = null;
   (function walk(p) {
     for (let n = p.firstElementChild; n && out.length < max; n = n.nextElementSibling) {
       const q = n.getBoundingClientRect();
-      if (n.matches(KEYED_SEL)) { if (nodeId(n) && q.height && (out.length || (q.top >= r.top - 0.5 && q.bottom <= r.bottom + 0.5))) out.push(n); continue; }
+      if (n.matches(KEYED_SEL)) {
+        if (nodeId(n) && q.height) {
+          if (out.length || (q.top >= r.top - 0.5 && q.bottom <= r.bottom + 0.5)) out.push(n);
+          else if (!partial && q.bottom > r.top && q.top < r.bottom) partial = n;
+        }
+        continue;
+      }
       if (out.length || !q.height || (q.bottom > r.top && q.top < r.bottom)) walk(n);
     }
   })(sc);
-  return out;
+  return out.length || !partial ? out : [partial];
 }
 function anchorRef(sc, n) { const ref = { el: n, id: nodeId(n), key: treeKey(n), sel: keySel(n) }; ref.i = keyedIn(sc, ref).indexOf(n); return ref; }
 function anchorTake(sc) {
@@ -432,6 +438,7 @@ document.addEventListener('scroll', function (e) { const sc = e.target; if (!sc.
    消息流是 stick-end：scrollTop ≤ 0，0 就是底 */
 function streamTop() { const s = document.getElementById('stream'); return s ? s.scrollTop : 0; }   /* 消息流现在的位置（给“返回原处”记下；还原走 streamScrollTo） */
 function streamScrollTo(top) {
+  jumpDrop();
   /* top：数字 = scrollTop；null = 到底；{ mid, off } = 让这条消息离视口顶 off（之后内容高度变了由浏览器的滚动锚定保持） */
   const s = document.getElementById('stream'); if (!s) return;
   const el = top && typeof top === 'object' ? s.querySelector('[data-stream] > [data-mid="' + top.mid + '"]') : null;
@@ -439,7 +446,7 @@ function streamScrollTo(top) {
   else s.scrollTop = top == null ? 0 : typeof top === 'object' ? top.top : top;
 }
 /* 跳到某条消息（跳到原文、点引用、补充消息的跳到原文、跨对话落点、查找命中……都走这一个）：
-   浏览器原生的平滑滚动（scrollIntoView，减少动态效果时直接到位），停下来之后（scrollend）才回调——强调从这时开始；
+   浏览器原生的滚动（scrollIntoView，超过一屏或减少动态效果时直接到位），停下来之后（scrollend）才回调——强调从这时开始；
    目标还没加载（更早的消息）时先加载再滚。仍然是消息流唯一的滚动所有者：只有这里和 streamScrollTo 改 #stream 的位置 */
 const STREAM_OLDER = { load: null };   /* 对话区登记“加载更早的消息”（返回 false 表示已经没有更早的了） */
 /* 落点强调：跳转 / 定位停下来之后，目标闪一下（--dur-emph）。节点上直接加类；期间重画时组件按 landed(key) 照样画上，到时清掉 */
@@ -460,23 +467,59 @@ function locateNode(attr, value, o) {
   return true;
 }
 let JUMP_WAIT = null;   /* 正在滚向的那次跳转：重画后看一眼流 / 目标还在不在 */
-function scrollToMessage(mid, done, tries) {
+function jumpDrop() {
+  if (!JUMP_WAIT) return;
+  JUMP_WAIT.drop(); JUMP_WAIT = null;
+  const s = document.getElementById('stream');
+  if (s) s.scrollTo({ top: s.scrollTop, left: s.scrollLeft, behavior: 'instant' });
+}
+/* 原生滚动输入立即接管：取消等待读取的回调，也停止浏览器尚未结束的平滑滚动。 */
+['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach(function (type) {
+  document.addEventListener(type, function (e) {
+    if (!JUMP_WAIT) return;
+    const s = document.getElementById('stream'); if (!s) return;
+    if (type === 'keydown') {
+      if (!['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(e.key) || e.target.closest('input, textarea, select, button, [contenteditable]')) return;
+      const sc = e.target.closest('.scroll'); if (sc && sc !== s) return;
+    } else if (!s.contains(e.target)) return;
+    jumpDrop();
+  }, { capture: true, passive: true });
+});
+function scrollToMessage(mid, done) {
+  jumpDrop();   /* 新的跳转先接替旧的，包括已经在位、无需滚动的落点 */
   const s = document.getElementById('stream'); done = done || function () {};
   /* 只认消息节点（流的直接子项）：按钮、引用这类也带 data-mid，不能当成落点；正在输出的那条用 data-run 标它的消息号 */
   const el = s && s.querySelector('[data-stream] > [data-mid="' + mid + '"], [data-stream] > [data-run="' + mid + '"]');
-  if (!el && ENGINE_PARTS.unitsAll && ENGINE_PARTS.unitsAll()) { scrollToMessage(mid, done, tries); return; }   /* 目标在数据里但还没画（长列表分批画）：先全画上 */
-  if (!el) { if ((tries || 0) < 3 && STREAM_OLDER.load && STREAM_OLDER.load(function () { scrollToMessage(mid, done, (tries || 0) + 1); }) !== false) return; done(false); return; }
+  if (!el && ENGINE_PARTS.unitsAll && ENGINE_PARTS.unitsAll()) { scrollToMessage(mid, done); return; }   /* 目标在数据里但还没画（长列表分批画）：先全画上 */
+  if (!el) {
+    if (STREAM_OLDER.load) {
+      let pending = true;
+      const owner = { check: function () {}, drop: function () { pending = false; } };
+      JUMP_WAIT = owner;
+      if (STREAM_OLDER.load(function (loaded) {
+        if (!pending) return;
+        if (loaded === false) { owner.drop(); JUMP_WAIT = null; done(false); }
+        else scrollToMessage(mid, done);
+      }) !== false) return;
+      if (JUMP_WAIT === owner) { owner.drop(); JUMP_WAIT = null; }
+    }
+    done(false); return;
+  }
   let live = true;
   const fin = function () { if (!live) return; live = false; JUMP_WAIT = null; land(el, mid, 'emph'); done(true, el); };
   /* 滚动途中整页重画换掉了消息流（或目标节点）：旧节点上的 scrollend 不会再来，按 mid 重新找一次再滚 */
-  const again = function () { if (!live) return; live = false; JUMP_WAIT = null; scrollToMessage(mid, done, tries); };
+  const again = function () { if (!live) return; live = false; JUMP_WAIT = null; scrollToMessage(mid, done); };
   /* 已经在位（或滚不动）时不会有 scrollend：读一下目标和当前的差（只读，不用来定位）。
      之前的滚动留下的 scrollend 可能晚一拍才到：到了还没在位、也还滚得动，就接着等下一个 */
   /* 居中算的是连同滚动外边距（scroll-margin）的那一块：浏览器就是这样居中的，不算的话带外边距的消息永远差几像素“不在位” */
-  const away = function () { const sr = s.getBoundingClientRect(), r = el.getBoundingClientRect(), m = getComputedStyle(el), d = (r.top - parseFloat(m.scrollMarginTop) + r.bottom + parseFloat(m.scrollMarginBottom)) / 2 - (sr.top + sr.height / 2), room = d > 0 ? -s.scrollTop : s.scrollHeight - s.clientHeight + s.scrollTop;   /* stick-end：往下（朝底）还能滚 -scrollTop，往上还能滚到 -(sh - ch) */ return Math.abs(d) >= 2 && room >= 2; };
-  if (!away() || motionOff()) { el.scrollIntoView({ block: 'center', behavior: 'instant' }); fin(); return; }
-  if (JUMP_WAIT) JUMP_WAIT.drop();   /* 新的跳转接替旧的 */
+  const away = function () { const sr = s.getBoundingClientRect(), r = el.getBoundingClientRect(), m = getComputedStyle(el), d = (r.top - parseFloat(m.scrollMarginTop) + r.bottom + parseFloat(m.scrollMarginBottom)) / 2 - (sr.top + sr.height / 2), room = d > 0 ? -s.scrollTop : s.scrollHeight - s.clientHeight + s.scrollTop;   /* stick-end：往下（朝底）还能滚 -scrollTop，往上还能滚到 -(sh - ch) */ return Math.abs(d) >= 2 && room >= 2 ? d : 0; };
+  const distance = away();
   JUMP_WAIT = { check: function () { if (!s.isConnected || !el.isConnected) again(); }, drop: function () { live = false; } };
+  if (!distance || motionOff() || Math.abs(distance) > s.clientHeight) {
+    /* 先让被取消的原生动画交回这一帧，再落位；旧动画的末帧不能覆盖新的位置。 */
+    requestAnimationFrame(function () { if (live) { el.scrollIntoView({ block: 'center', behavior: 'instant' }); fin(); } });
+    return;
+  }
   /* 在文档上（捕获）等 scrollend：流被换掉时也收得到 */
   const wait = function () { document.addEventListener('scrollend', function (e) {
     if (!live) return;
@@ -573,7 +616,7 @@ let CLICK_EAT = false;
 function clickEat() { CLICK_EAT = true; setTimeout(function () { CLICK_EAT = false; }, 0); }
 document.addEventListener('click', function (e) { if (CLICK_EAT) { e.stopImmediatePropagation(); e.preventDefault(); CLICK_EAT = false; } }, true);
 (function () {
-  const EDGE = 6; let sess = null, cur = null;
+  const EDGE = 6, DRAG_SLOP = 4; let sess = null, cur = null;
   const onEdge = function (el, e) { const r = el.getBoundingClientRect(); return e.clientX - r.left < EDGE || r.right - e.clientX < EDGE || e.clientY - r.top < EDGE || r.bottom - e.clientY < EDGE; };
   /* 嵌套拖动按命中层级取最近的可抓元素；外层窗口不能先截走里面的入口。 */
   const hit = function (t, e) {
@@ -585,8 +628,17 @@ document.addEventListener('click', function (e) { if (CLICK_EAT) { e.stopImmedia
     }
     return found;
   };
+  const restoreIframes = function () { document.querySelectorAll('iframe').forEach(function (f) { f.style.pointerEvents = ''; }); };
   document.addEventListener('mousemove', function (e) {
-    if (sess) { sess.moved = true; sess.s.move(e); return; }
+    if (sess) {
+      if (!sess.moved) {
+        if (Math.hypot(e.clientX - sess.x0, e.clientY - sess.y0) < DRAG_SLOP) return;
+        const s = sess.pr.start(sess.el, sess.e0);
+        if (!s) { sess = null; restoreIframes(); return; }
+        sess.s = s; sess.moved = true;
+      }
+      sess.s.move(e); return;
+    }
     const x = hit(e.target, e), el = x && x.el;
     if (cur && cur !== el) cur.style.cursor = '';
     if (el) el.style.cursor = 'move';
@@ -595,11 +647,10 @@ document.addEventListener('click', function (e) { if (CLICK_EAT) { e.stopImmedia
   document.addEventListener('mousedown', function (e) {
     if (e.button !== 0) return;
     const x = hit(e.target, e); if (!x) return;
-    const s = x.pr.start(x.el, e); if (!s) return;
-    sess = { s: s, moved: false }; e.preventDefault();
+    sess = { pr: x.pr, el: x.el, e0: e, x0: e.clientX, y0: e.clientY, s: null, moved: false }; e.preventDefault();
     document.querySelectorAll('iframe').forEach(function (f) { f.style.pointerEvents = 'none'; });   /* 拖过框（插件页面）时指针不被框吃掉 */
   }, true);
-  document.addEventListener('mouseup', function (e) { if (!sess) return; const s = sess; sess = null; document.querySelectorAll('iframe').forEach(function (f) { f.style.pointerEvents = ''; }); if (s.moved) clickEat(); s.s.end(e, s.moved); });
+  document.addEventListener('mouseup', function (e) { if (!sess) return; const s = sess; sess = null; restoreIframes(); if (s.moved) { clickEat(); s.s.end(e, true); } });
 })();
 /* 弹窗拖动：弹窗框架（[data-pop] 的第一个子元素）能不能拖只看 PDL_POPUPS 的 drag 声明，不逐个开启。拖动是相对初始位置（at）的偏移，只在这次打开期间有效：关掉再打开回到初始位置 */
 S.dragPos = {};
@@ -1022,7 +1073,7 @@ SET_AFTER['s.dialog.panes.cur'] = function (v) { const p = S.dialog && S.dialog.
 (function () {
   let tm = null;
   document.addEventListener('input', function (e) {
-    const scope = e.target && e.target.closest && e.target.closest('.typing-scope'); if (!scope) return;
+    const scope = e.target && e.target.closest && e.target.closest('.typing-scope'); if (!scope || !scope.querySelector('[data-htype]')) return;
     scope.dataset.typing = '1'; clearTimeout(tm);
     tm = setTimeout(function () { delete scope.dataset.typing; }, ms('--typing-hold'));
   });
