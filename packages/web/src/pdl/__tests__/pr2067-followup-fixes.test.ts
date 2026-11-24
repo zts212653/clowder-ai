@@ -9,6 +9,7 @@ import { scriptSources } from '../runtime';
 import type { ChatPort } from '../types';
 import { builtinThemes, defaultThemePdl } from './builtin-theme';
 import { fixtureData, fixtureInput, fixtureSidebar, fixtureUi } from './chat-fixture';
+import { fixtureWorkbenchSource } from './owner-console';
 
 const { JSDOM, VirtualConsole } = createRequire(import.meta.url)('jsdom');
 
@@ -590,5 +591,96 @@ describe('#2067 follow-up fixes across default and v2 themes', () => {
 
     const drawerBtn = w.document.querySelector('[data-v2-nav-drawer="1"]');
     expect(drawerBtn).not.toBeNull();
+  });
+
+  for (const themeId of ['default', 'v2'] as const) {
+    it(`preserves #2031 documentFrame wiring and marks tall PDF/PPTX frames in workbench (${themeId})`, async () => {
+      const { w, evalIn } = await bootConsole(themeId);
+      const benchBase = {
+        ...fixtureWorkbenchSource(),
+        workspace: {
+          worktreeId: 'wt',
+          worktrees: [{ id: 'wt', root: '/project', branch: 'next', head: '266714d', current: true }],
+          tree: [
+            { path: 'deck.pptx', kind: 'file' },
+            { path: 'report.pdf', kind: 'file' },
+            { path: 'spec.docx', kind: 'file' },
+          ],
+          loading: false,
+          error: null,
+        },
+        opened: null,
+      };
+      const pushOpened = (name: string, mime: string, pageUnit: string, pageCount: number) => {
+        w.clowderChat.pushProject({
+          workbench: {
+            ...benchBase,
+            opened: {
+              worktreeId: 'wt',
+              file: {
+                path: name,
+                absolutePath: `/project/${name}`,
+                binary: true,
+                mime,
+                content: '',
+                sha256: `sha-${name}`,
+                size: 24_576,
+                modifiedAt: 1_795_400_000_000,
+                pageUnit,
+                pageCount,
+              },
+            },
+          },
+        });
+      };
+
+      w.clowderChat.pushProject({ workbench: benchBase });
+
+      // 1. Open PPTX from 项目文件 -> mounts tall documentFrame iframe
+      await evalIn(`A.wsFile({ p: 'deck.pptx', w: 'wt' })`);
+      pushOpened('deck.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'slides', 1);
+      evalIn(`render(true)`);
+      const pptxFrame = w.document.querySelector('aside.panel iframe') as HTMLIFrameElement | null;
+      expect(pptxFrame).not.toBeNull();
+      expect(pptxFrame?.getAttribute('src')).toBe('/workspace-document?worktreeId=wt&path=deck.pptx');
+      expect(pptxFrame?.classList.contains('tall')).toBe(true);
+      expect(pptxFrame?.classList.contains(themeId === 'v2' ? 'v2-frame' : 'vw-widget')).toBe(true);
+
+      // 2. Open PDF from 项目文件 -> mounts tall documentFrame iframe
+      await evalIn(`A.wsFile({ p: 'report.pdf', w: 'wt' })`);
+      pushOpened('report.pdf', 'application/pdf', 'pages', 1);
+      evalIn(`render(true)`);
+      const pdfFrame = w.document.querySelector('aside.panel iframe') as HTMLIFrameElement | null;
+      expect(pdfFrame).not.toBeNull();
+      expect(pdfFrame?.getAttribute('src')).toBe('/workspace-document?worktreeId=wt&path=report.pdf');
+      expect(pdfFrame?.classList.contains('tall')).toBe(true);
+
+      // 3. Open DOCX -> stays behind explicit fileOffice trigger until clicked
+      await evalIn(`A.wsFile({ p: 'spec.docx', w: 'wt' })`);
+      pushOpened('spec.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'pages', 1);
+      evalIn(`render(true)`);
+      expect(w.document.querySelector('aside.panel iframe')).toBeNull();
+      const editBtn = w.document.querySelector('aside.panel [data-act="fileOffice"]') as HTMLButtonElement | null;
+      expect(editBtn).not.toBeNull();
+      editBtn!.click();
+      evalIn(`render(true)`);
+      const docxFrame = w.document.querySelector('aside.panel iframe') as HTMLIFrameElement | null;
+      expect(docxFrame?.getAttribute('src')).toBe('/workspace-document?worktreeId=wt&path=spec.docx');
+      expect(docxFrame?.classList.contains('tall')).toBe(true);
+    });
+  }
+
+  it('gives v2 tall document frames default-parity viewport height and keeps non-self-scrolling workbench panes scrollable', () => {
+    const v2Css = readFileSync(path.join(process.cwd(), 'public/pdl/themes/v2/components/v2/v2.css'), 'utf8');
+    const v2bCss = readFileSync(path.join(process.cwd(), 'public/pdl/themes/v2/components/v2/v2b.css'), 'utf8');
+    expect(v2Css).toContain(
+      '.v2-shell .v2-workbench > .panel-body:has(.home-v2, .v2-works-panel) { padding:0; gap:0; overflow:hidden; }',
+    );
+    expect(v2bCss).toContain('.v2-frame.tall { min-height:calc(var(--row-h) * 12); }');
+    expect(v2bCss).toContain(
+      '.v2-frame[src].tall { min-height:round(down, 100vh - 5 * var(--row-h-1), var(--row-h-1)); }',
+    );
+    expect(v2bCss).toContain('.v2-shell :is(.space-y-4, .space-y-3) > .v2-frame[src].tall { height:auto; }');
+    expect(v2bCss).toContain('.v2-shell .split.wide .panel-body > :has(.v2-frame[src].tall) { max-inline-size:none; }');
   });
 });

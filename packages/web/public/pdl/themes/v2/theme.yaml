@@ -25084,6 +25084,29 @@ pdl:
                 when:
                   - $.binary
                   - "!$.media"
+                  - "!$.documentFrame"
+              - type: component
+                use: v2Action
+                props:
+                  label: 协作编辑
+                  act: fileOffice
+                when:
+                  - $.documentEditor
+                  - "!$.documentFrame"
+              - type: component
+                use: v2Action
+                props:
+                  label: t:common.back
+                  act: fileOffice
+                when:
+                  - $.documentEditor
+                  - $.documentFrame
+              - type: frame
+                title: $.name
+                key: $.documentFrame
+                src: $.documentFrame
+                tall: true
+                when: $.documentFrame
               - type: component
                 use: v2Each
                 props:
