@@ -396,4 +396,82 @@ describe('private-collection-bindings: corpus indexing (INV-9)', () => {
     const hits = await store.search('SHOULD NOT BE RE-INDEXED');
     assert.equal(hits.length, 0, 'archived collection must not rebuild even when store is present');
   });
+
+  test('registerPrivateAndExternalCollections closes failed external store and leaves no dangling catalog entry', async () => {
+    const { registerPrivateAndExternalCollections } = await import(
+      '../../dist/domains/memory/private-collection-bindings.js'
+    );
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    const { LibraryCatalog } = await import('../../dist/domains/memory/LibraryCatalog.js');
+
+    const healthyRoot = join(tmp, 'healthy-ext');
+    const brokenRoot = join(tmp, 'broken-ext');
+    mkdirSync(healthyRoot, { recursive: true });
+    mkdirSync(brokenRoot, { recursive: true });
+
+    const now = new Date().toISOString();
+    const brokenManifest = {
+      id: 'research:broken-init',
+      kind: 'research',
+      name: 'broken-init',
+      displayName: 'Broken External Collection',
+      root: brokenRoot,
+      sensitivity: 'internal',
+      scannerLevel: 0,
+      indexPolicy: { autoRebuild: false },
+      reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: true },
+      createdAt: now,
+      updatedAt: now,
+    };
+    const healthyManifest = {
+      ...brokenManifest,
+      id: 'research:healthy-init',
+      name: 'healthy-init',
+      displayName: 'Healthy External Collection',
+      root: healthyRoot,
+    };
+
+    const origInit = SqliteEvidenceStore.prototype.initialize;
+    const origClose = SqliteEvidenceStore.prototype.close;
+    let closedBrokenStores = 0;
+    SqliteEvidenceStore.prototype.initialize = async function () {
+      await origInit.call(this);
+      if (this.sourceRef === 'research:broken-init') {
+        throw new Error('simulated external store initialization failure');
+      }
+    };
+    SqliteEvidenceStore.prototype.close = function () {
+      if (this.sourceRef === 'research:broken-init') {
+        closedBrokenStores += 1;
+      }
+      return origClose.call(this);
+    };
+
+    const catalog = new LibraryCatalog();
+    const stores = new Map();
+    try {
+      await registerPrivateAndExternalCollections({
+        catalog,
+        stores,
+        externalManifests: [brokenManifest, healthyManifest],
+        dataDir,
+        now,
+      });
+    } finally {
+      SqliteEvidenceStore.prototype.initialize = origInit;
+      SqliteEvidenceStore.prototype.close = origClose;
+    }
+
+    for (const s of stores.values()) storesToClose.push(s);
+
+    assert.equal(closedBrokenStores, 1, 'failed external store must be closed to prevent SQLite handle leak');
+    assert.equal(stores.get('research:broken-init'), undefined, 'failed external store must not enter stores map');
+    assert.equal(
+      catalog.get('research:broken-init'),
+      undefined,
+      'failed external collection must not leave a dangling entry in catalog when stores lacks it',
+    );
+    assert.ok(stores.get('research:healthy-init'), 'healthy sibling external store must still be registered');
+    assert.ok(catalog.get('research:healthy-init'), 'healthy sibling external manifest must still be registered');
+  });
 });

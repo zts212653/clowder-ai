@@ -81,19 +81,24 @@ export async function registerPrivateAndExternalCollections(options: PrivateBind
   }
 
   for (const externalManifest of options.externalManifests) {
+    let store: SqliteEvidenceStore | undefined;
     try {
       const manifest = bindLegacyPrivateOwner(externalManifest, privateUserId);
-      catalog.register(manifest);
-      if (manifest.status === 'archived') continue;
+      if (manifest.status === 'archived') {
+        catalog.register(manifest);
+        continue;
+      }
       const storePath = resolveCollectionStorePath(dataDir, manifest.id);
       mkdirSync(dirname(storePath), { recursive: true });
-      const store = new SqliteEvidenceStore(storePath, undefined, {
+      store = new SqliteEvidenceStore(storePath, undefined, {
         sourceRoot: manifest.root,
         sourceRef: manifest.id,
       });
       await store.initialize();
+      catalog.register(manifest);
       stores.set(manifest.id, store);
     } catch {
+      store?.close();
       // fail-open: skip broken external collections
     }
   }
