@@ -674,6 +674,51 @@ it('lists only this conversation members when viewing as one member, and everyon
   expect(ids(chatModels(data, ui).chatPop)).toContain('opencode-glm');
 });
 
+it('excludes disabled and historical-only cats from recipient pickers while keeping them in people view', () => {
+  const data = fixtureData(),
+    ui = fixtureUi();
+  data.cats.push(
+    {
+      ...data.cats[0],
+      id: 'enabled-cat',
+      displayName: 'Enabled',
+      mentionPatterns: ['@enabled'],
+      roster: { family: 'test', roles: [], lead: false, available: true, evaluation: '' },
+    },
+    {
+      ...data.cats[0],
+      id: 'disabled-cat',
+      displayName: 'Disabled',
+      mentionPatterns: ['@disabled'],
+      roster: { family: 'test', roles: [], lead: false, available: false, evaluation: '' },
+    },
+  );
+  data.threads[0].participants = ['codex', 'disabled-cat', 'deleted-cat'];
+  data.messages.push({
+    ...data.messages[0],
+    id: 'hist-deleted',
+    type: 'assistant',
+    catId: 'deleted-cat',
+    content: 'from removed cat',
+  });
+
+  const ids = (pop: unknown) => (pop as { members: { id: string }[] }).members.map((m) => m.id);
+
+  for (const pop of [
+    { kind: 'target' },
+    { kind: 'whisper' },
+    { kind: 'plus' },
+    { kind: 'plus', page: 'whisper' },
+    { kind: 'plus', page: 'prefer' },
+  ]) {
+    ui.pop = pop;
+    expect(ids(chatModels(data, ui).chatPop)).toEqual(['codex', 'enabled-cat']);
+  }
+
+  ui.pop = { kind: 'people' };
+  expect(ids(chatModels(data, ui).chatPop)).toEqual(['codex', 'disabled-cat', 'deleted-cat']);
+});
+
 it('gives one composer capsule per member, carrying every run as an entry when there are several', () => {
   const rows = [
     { who: 'sol', command: true, key: 'cmd-1' },
