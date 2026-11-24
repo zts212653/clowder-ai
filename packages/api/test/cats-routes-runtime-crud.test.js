@@ -3533,7 +3533,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(getRuntimeOverride('runtime-strategy-cat'), undefined);
   });
 
-  it('DELETE /api/cats/:id removes runtime members from subsequent reads', async () => {
+  it('DELETE /api/cats/:id removes runtime members without awaiting background prompt warmup', async (t) => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -3568,6 +3568,37 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     });
     assert.equal(createRes.statusCode, 201);
 
+    const { createCloudConversationComposition } = await import(
+      '../dist/domains/cats/services/cloud-bridge/plugin-conversation-host/cloud-conversation-composition.js'
+    );
+    const { manualScheduler } = await import('./helpers/f202-return-poller-harness.js');
+    let releaseWarm;
+    let warming = false;
+    const warm = new Promise((resolve) => {
+      releaseWarm = resolve;
+    });
+    const cloud = createCloudConversationComposition({
+      cats: catRegistry,
+      scheduler: manualScheduler(),
+      ingestService: { ingest: async () => assert.fail('no cloud return expected') },
+      grantPersistence: 'ephemeral',
+      logger: { info() {}, warn() {} },
+      catalogLog: { info() {}, warn() {} },
+      async reconcileCats() {
+        assert.equal(catRegistry.has('runtime-temp'), false, 'routing sees the deletion before response');
+      },
+      warmCats() {
+        warming = true;
+        return warm;
+      },
+    });
+    t.after(async () => {
+      releaseWarm();
+      cloud.stop();
+      await app.close();
+    });
+    cloud.start();
+
     const deleteRes = await app.inject({
       payload: {
         expectedRevision: await readMemberRequestRevision(app, '/api/cats/runtime-temp', {
@@ -3581,6 +3612,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       },
     });
     assert.equal(deleteRes.statusCode, 200);
+    assert.equal(warming, true, 'response arrives while the prompt compiler is still pending');
 
     const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
     const listBody = JSON.parse(listRes.body);
