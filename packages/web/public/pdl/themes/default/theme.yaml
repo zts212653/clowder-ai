@@ -27344,7 +27344,7 @@ pdl:
               when: $.documentEditor
               items:
                 - type: button
-                  label: 协作编辑
+                  label: t:workbench.file.collabEdit
                   act: fileOffice
                   when: "!$.documentFrame"
                 - type: button

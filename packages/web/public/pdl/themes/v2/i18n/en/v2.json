@@ -2832,7 +2832,8 @@
     "file": {
       "openProject": "Open project file",
       "openLocal": "Open with default application",
-      "noPreview": "This file type cannot be previewed here"
+      "noPreview": "This file type cannot be previewed here",
+      "collabEdit": "Collaborative edit"
     },
     "pageActionState": {
       "ready": "Ready to inspect",

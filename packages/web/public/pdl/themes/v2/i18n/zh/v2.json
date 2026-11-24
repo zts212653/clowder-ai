@@ -2832,7 +2832,8 @@
     "file": {
       "openProject": "打开项目文件",
       "openLocal": "用默认应用打开",
-      "noPreview": "这种文件不能在这里预览"
+      "noPreview": "这种文件不能在这里预览",
+      "collabEdit": "协作编辑"
     },
     "pageActionState": {
       "ready": "待预检",

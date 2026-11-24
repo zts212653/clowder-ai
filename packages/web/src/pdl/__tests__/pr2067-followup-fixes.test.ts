@@ -645,6 +645,10 @@ describe('#2067 follow-up fixes across default and v2 themes', () => {
       expect(pptxFrame?.getAttribute('src')).toBe('/workspace-document?worktreeId=wt&path=deck.pptx');
       expect(pptxFrame?.classList.contains('tall')).toBe(true);
       expect(pptxFrame?.classList.contains(themeId === 'v2' ? 'v2-frame' : 'vw-widget')).toBe(true);
+      if (themeId === 'v2') {
+        expect(pptxFrame?.classList.contains('h-full')).toBe(false);
+        expect(w.document.querySelector('aside.panel [data-view="file.body"]')).not.toBeNull();
+      }
 
       // 2. Open PDF from 项目文件 -> mounts tall documentFrame iframe
       await evalIn(`A.wsFile({ p: 'report.pdf', w: 'wt' })`);
@@ -654,6 +658,9 @@ describe('#2067 follow-up fixes across default and v2 themes', () => {
       expect(pdfFrame).not.toBeNull();
       expect(pdfFrame?.getAttribute('src')).toBe('/workspace-document?worktreeId=wt&path=report.pdf');
       expect(pdfFrame?.classList.contains('tall')).toBe(true);
+      if (themeId === 'v2') {
+        expect(pdfFrame?.classList.contains('h-full')).toBe(false);
+      }
 
       // 3. Open DOCX -> stays behind explicit fileOffice trigger until clicked
       await evalIn(`A.wsFile({ p: 'spec.docx', w: 'wt' })`);
@@ -662,6 +669,7 @@ describe('#2067 follow-up fixes across default and v2 themes', () => {
       expect(w.document.querySelector('aside.panel iframe')).toBeNull();
       const editBtn = w.document.querySelector('aside.panel [data-act="fileOffice"]') as HTMLButtonElement | null;
       expect(editBtn).not.toBeNull();
+      expect(editBtn?.textContent?.trim()).toBe('协作编辑');
       editBtn!.click();
       evalIn(`render(true)`);
       const docxFrame = w.document.querySelector('aside.panel iframe') as HTMLIFrameElement | null;
@@ -670,7 +678,7 @@ describe('#2067 follow-up fixes across default and v2 themes', () => {
     });
   }
 
-  it('gives v2 tall document frames default-parity viewport height and keeps non-self-scrolling workbench panes scrollable', () => {
+  it('gives v2 tall document frames default-parity viewport height without container-specific overrides', () => {
     const v2Css = readFileSync(path.join(process.cwd(), 'public/pdl/themes/v2/components/v2/v2.css'), 'utf8');
     const v2bCss = readFileSync(path.join(process.cwd(), 'public/pdl/themes/v2/components/v2/v2b.css'), 'utf8');
     expect(v2Css).toContain(
@@ -680,7 +688,8 @@ describe('#2067 follow-up fixes across default and v2 themes', () => {
     expect(v2bCss).toContain(
       '.v2-frame[src].tall { min-height:round(down, 100vh - 5 * var(--row-h-1), var(--row-h-1)); }',
     );
-    expect(v2bCss).toContain('.v2-shell :is(.space-y-4, .space-y-3) > .v2-frame[src].tall { height:auto; }');
-    expect(v2bCss).toContain('.v2-shell .split.wide .panel-body > :has(.v2-frame[src].tall) { max-inline-size:none; }');
+    expect(v2bCss).toContain('.v2-starry-page > .v2-frame { height:100%; min-height:0; }');
+    expect(v2bCss).not.toContain('.space-y-4');
+    expect(v2bCss).not.toContain('.split.wide .panel-body > :has(.v2-frame[src].tall)');
   });
 });

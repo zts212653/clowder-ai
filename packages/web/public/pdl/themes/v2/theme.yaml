@@ -25088,7 +25088,7 @@ pdl:
               - type: component
                 use: v2Action
                 props:
-                  label: 协作编辑
+                  label: t:workbench.file.collabEdit
                   act: fileOffice
                 when:
                   - $.documentEditor
@@ -25223,7 +25223,6 @@ pdl:
                     map:
                       src: false
                       _: true
-      bare: true
     ws.tasks:
       loading: t:wsTasks.load.loading
       error: t:wsTasks.load.error
