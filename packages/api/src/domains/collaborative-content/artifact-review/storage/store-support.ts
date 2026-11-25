@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ArtifactReview } from '@cat-cafe/shared';
-import { ArtifactReviewError } from './errors.js';
+import { ArtifactReviewError } from '../errors.js';
 import type { PendingReviewVersion, ReviewMutation } from './store.js';
 
 export function receiptReference(reviewId: string, operationId: string): string {

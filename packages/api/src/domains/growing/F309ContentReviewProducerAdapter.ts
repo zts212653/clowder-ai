@@ -6,7 +6,7 @@ import {
 } from '@cat-cafe/shared';
 import { ArtifactReviewError } from '../collaborative-content/artifact-review/errors.js';
 import type { ArtifactReviewService } from '../collaborative-content/artifact-review/service.js';
-import type { ArtifactReviewStore } from '../collaborative-content/artifact-review/store.js';
+import type { ArtifactReviewStore } from '../collaborative-content/artifact-review/storage/store.js';
 import { MediaOwnerError } from '../video-studio/content-owner/media-errors.js';
 import type {
   NeedsMeProducerAdapter,

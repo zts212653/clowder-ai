@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { WorkCatalogue } from '../src/domains/collaborative-content/works/catalogue.js';
 import { inspectWorkResult } from '../src/domains/collaborative-content/works/inspection.js';
 import { LivingWorkService, type OpenWorkSource } from '../src/domains/collaborative-content/works/service.js';

@@ -8,7 +8,7 @@ import type { PublicationReviewTarget } from '../workspace-review/publication-re
 import type { WorkspaceReviewPrincipal } from '../workspace-review/service.js';
 import { ArtifactReviewError } from './errors.js';
 import type { ArtifactReviewService } from './service.js';
-import type { ArtifactReviewStore } from './store.js';
+import type { ArtifactReviewStore } from './storage/store.js';
 
 export async function readPublicationReviewContexts(
   deps: {

@@ -9,17 +9,17 @@ import {
   type ReviewedMediaAsset,
   workReviewResponseSchema,
 } from '@cat-cafe/shared';
-import {
-  ensureRoundLedgers,
-  ledgerFromRound,
-  publicationLedgerId,
-} from '../src/domains/collaborative-content/artifact-review/canonical-ledger.js';
 import { commitReviewAction } from '../src/domains/collaborative-content/artifact-review/linked-review-action.js';
 import {
   appendRespondedVersion,
   applyArtifactReviewAction,
 } from '../src/domains/collaborative-content/artifact-review/reducer.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import {
+  ensureRoundLedgers,
+  ledgerFromRound,
+  publicationLedgerId,
+} from '../src/domains/collaborative-content/artifact-review/storage/canonical-ledger.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { publicationLedgerSource } from '../src/domains/collaborative-content/workspace-review/publication-review-source.js';
 
 const now = '2026-10-20T21:10:00.000Z';

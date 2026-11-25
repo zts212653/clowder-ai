@@ -5,7 +5,7 @@ import type { PublishedMediaService } from '../../video-studio/content-owner/pub
 import { ArtifactReviewError } from '../artifact-review/errors.js';
 import { currentReviewModification } from '../artifact-review/modification-request-reference.js';
 import { isLineageLinked } from '../artifact-review/review-authority.js';
-import type { ArtifactReviewStore } from '../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../artifact-review/storage/store.js';
 import { assertModificationSourceAuthority } from '../modification/request-authority.js';
 import { workMediaPrincipal } from './access.js';
 import type { WorkResponseAuthorityInput } from './review-response.js';

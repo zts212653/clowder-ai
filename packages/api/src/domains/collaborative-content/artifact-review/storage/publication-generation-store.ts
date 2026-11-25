@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
-import type { MediaPublicationReturnIntent } from '../modification/media-publication/media-publication-return.js';
-import { ArtifactReviewError } from './errors.js';
+import type { MediaPublicationReturnIntent } from '../../modification/media-publication/media-publication-return.js';
+import { ArtifactReviewError } from '../errors.js';
 
 interface CurrentPublication {
   receipt_ref: string;

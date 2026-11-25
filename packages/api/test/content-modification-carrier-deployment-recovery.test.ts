@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import type { PersistedQueueDeliveryInput } from '../src/domains/cats/services/agents/invocation/PersistedQueueDelivery.js';
 import { ArtifactReviewService } from '../src/domains/collaborative-content/artifact-review/service.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { ContentTextModificationService } from '../src/domains/collaborative-content/modification/text/text-service.js';
 import { ArtifactReviewReturnDispatcher } from '../src/domains/growing/ArtifactReviewReturnDispatcher.js';
 import { PublishedMediaAccess } from '../src/domains/video-studio/content-owner/published-media-access.js';

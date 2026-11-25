@@ -1,6 +1,6 @@
 import type { ArtifactReview } from '@cat-cafe/shared';
 import { type ArtifactReviewService, reviewRetainsArtifact } from '../collaborative-content/artifact-review/service.js';
-import type { ArtifactReviewStore } from '../collaborative-content/artifact-review/store.js';
+import type { ArtifactReviewStore } from '../collaborative-content/artifact-review/storage/store.js';
 import { MediaOwnerError } from '../video-studio/content-owner/media-errors.js';
 import type { MediaReviewPrincipal } from '../video-studio/content-owner/published-media-access.js';
 import type { PreparedArtifactReader, PreparedArtifactReadInput } from './EntrustedWorkOwnerReadService.js';

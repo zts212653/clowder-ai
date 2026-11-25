@@ -1,11 +1,11 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { ArtifactReview, ArtifactReviewReceipt, ContentModificationRecord } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
-import type { MediaPublicationReturnIntent } from '../modification/media-publication/media-publication-return.js';
+import type { MediaPublicationReturnIntent } from '../../modification/media-publication/media-publication-return.js';
 import {
   type TextWritebackCompletionIntent,
   textCompletionBinding,
-} from '../modification/text/text-writeback-completion-intent.js';
+} from '../../modification/text/text-writeback-completion-intent.js';
 import { PublicationGenerationStore } from './publication-generation-store.js';
 import type { ReviewMutation } from './store.js';
 

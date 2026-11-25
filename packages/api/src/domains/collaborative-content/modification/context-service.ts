@@ -9,7 +9,7 @@ import type { MediaReviewPrincipal } from '../../video-studio/content-owner/publ
 import type { PublishedMediaService } from '../../video-studio/content-owner/published-media-service.js';
 import { ArtifactReviewError } from '../artifact-review/errors.js';
 import type { ArtifactReviewService } from '../artifact-review/service.js';
-import type { ArtifactReviewStore } from '../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../artifact-review/storage/store.js';
 import type { WorkspaceContentReviewService } from '../workspace-review/service.js';
 import { inspectEvolutionModification } from './bindings/evolution-binding.js';
 import { readLegacyModificationSource } from './bindings/legacy-review-binding.js';

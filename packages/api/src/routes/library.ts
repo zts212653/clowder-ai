@@ -168,6 +168,7 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
       root?: string;
       sensitivity?: string;
       scannerLevel?: number | 'auto';
+      indexPolicy?: { autoRebuild?: boolean };
       exclude?: string[];
     };
 
@@ -216,7 +217,7 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
       ...(ownerUserId ? { ownerUserId } : {}),
       scannerLevel: (body.scannerLevel ?? 'auto') as CollectionManifest['scannerLevel'],
       status: 'registered',
-      indexPolicy: { autoRebuild: false },
+      indexPolicy: { autoRebuild: body.indexPolicy?.autoRebuild === true },
       reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: true },
       exclude: body.exclude,
       createdAt: now,

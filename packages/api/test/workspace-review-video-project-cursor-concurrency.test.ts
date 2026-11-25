@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { cursorFor } from '../src/domains/cats/services/stores/cursor.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { projectReviewHttpFixture } from './helpers/video-project-review-http.js';
 
 const owner = 'operator',

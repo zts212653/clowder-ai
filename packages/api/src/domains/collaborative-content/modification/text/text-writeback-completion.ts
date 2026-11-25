@@ -5,7 +5,7 @@ import type { ITaskStore } from '../../../cats/services/stores/ports/TaskStore.j
 import { MediaOwnerError } from '../../../video-studio/content-owner/media-errors.js';
 import { WorkspaceWritebackError } from '../../../workspace/writeback/journal.js';
 import type { WorkspaceWritebackService } from '../../../workspace/writeback/service.js';
-import type { ArtifactReviewStore } from '../../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../../artifact-review/storage/store.js';
 import { assertModificationSourceAuthority, requireModificationSourceMessage } from '../request-authority.js';
 import { textCompletionTaskBinding } from './text-completion-task-binding.js';
 import { type TextWritebackCompletionIntent, textCompletionBinding } from './text-writeback-completion-intent.js';
