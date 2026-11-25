@@ -49,7 +49,7 @@ function assertExistingInstallation({ initial, selected, receipt, marker, appId,
   assert.ok(ready.includes(initial), 'Ready must show the existing installation path');
   assert.match(ready, /in place/);
   assert.match(ready, /uninstall.*reinstall/i);
-  assert.match(ready, /configuration.*history.*personal/i);
+  assert.match(ready, /retains your existing data directory/i);
   assert.equal(ready.split('in place').length - 1, 1, 'returning to Ready must not duplicate the explanation');
 }
 

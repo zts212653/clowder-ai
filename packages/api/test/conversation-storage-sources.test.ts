@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import type { SessionRecord } from '@cat-cafe/shared';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import type { SessionRecord } from '@cat-cafe/shared';
 import { TranscriptReader } from '../src/domains/cats/services/session/TranscriptReader.js';
 import type { Thread } from '../src/domains/cats/services/stores/ports/ThreadStore.js';
 import { createConversationStorageSourceReader } from '../src/domains/plugin/host-surface/conversation-storage-sources.js';
