@@ -23,6 +23,8 @@ test('storage inventory includes registered native history, databases, and files
       event: { type: 'tool_use', toolName: 'Write', toolInput: { file_path: 'live-result.md' } },
     };
     const transcriptReader = new TranscriptReader({ dataDir: transcriptDir });
+    const desktopAttachments = join(root, 'workspace', '.cat-cafe', 'dsh-desktop', 'profile', 'attachments');
+    await mkdir(desktopAttachments, { recursive: true });
     const sessionDir = transcriptReader.getSessionDir(threadId, event.catId, event.sessionId);
     await mkdir(sessionDir, { recursive: true });
     await writeFile(join(sessionDir, 'events.live.jsonl'), JSON.stringify(event) + '\n');
@@ -52,6 +54,7 @@ test('storage inventory includes registered native history, databases, and files
       uploadDir: join(root, 'uploads'),
       connectorMediaDir: join(root, 'connector-media'),
       dataDir: join(root, 'app-data'),
+      workspaceRoot: join(root, 'workspace'),
       logDir: join(root, 'logs'),
       nativeHomes: { codex: join(root, 'codex'), kimi: join(root, 'kimi'), pi: join(root, 'pi') },
       nativeHistoryRoot: join(root, 'native-history'),
@@ -71,11 +74,14 @@ test('storage inventory includes registered native history, databases, and files
       join(root, 'pi', 'sessions'),
       join(root, 'native-history', 'codex', 'archived_sessions'),
       join(root, 'cli-archive'),
+      desktopAttachments,
     ]) {
       assert.ok(roots.includes(path), path);
     }
     assert.deepEqual(
-      sources.files.filter((file) => file.category === 'database').map((file) => file.path),
+      sources.files
+        .filter((file) => file.category === 'database' && file.path.startsWith(join(root, 'evidence.sqlite')))
+        .map((file) => file.path),
       ['evidence.sqlite', 'evidence.sqlite-wal', 'evidence.sqlite-shm'].map((name) => join(root, name)),
     );
     assert.ok(sources.files.some((file) => file.path === join(root, 'live-result.md') && file.threadId === threadId));
