@@ -2,12 +2,21 @@ import { randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import {
+  areWin32DirectoriesAclPrivate,
+  canonicalWin32Path,
+  hardenWin32PrivateDirectoryAcl,
+} from '../../../../../../config/win32-fs-security.js';
 
 export const AGY_NATIVE_CREDENTIAL_DIR = 'cat-cafe-credentials';
 
 function requireOwnerDirectory(path: string): void {
   const stat = lstatSync(path);
-  if (stat.isSymbolicLink() || !stat.isDirectory() || (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)) {
+  if (
+    stat.isSymbolicLink() ||
+    !stat.isDirectory() ||
+    (process.platform !== 'win32' ? (stat.mode & 0o077) !== 0 : !areWin32DirectoriesAclPrivate([path]))
+  ) {
     throw new Error('AGY native credential directory must be owner-only and not a symlink');
   }
 }
@@ -43,17 +52,28 @@ export function prepareAgyNativeCredentialFile(
   const suppliedHome = resolve(profileHome);
   if (lstatSync(suppliedHome).isSymbolicLink()) throw new Error('AGY native credential HOME must not be a symlink');
   const home = realpathSync(suppliedHome);
-  if (home === realpathSync(homedir())) throw new Error('AGY native credential requires an isolated HOME');
+  if (canonicalWin32Path(suppliedHome) === canonicalWin32Path(homedir()))
+    throw new Error('AGY native credential requires an isolated HOME');
   const configDir = join(home, '.gemini', 'config');
   for (const dir of [join(home, '.gemini'), configDir]) {
     const stat = lstatSync(dir);
     if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('AGY native credential config path is unsafe');
   }
   const dir = join(configDir, AGY_NATIVE_CREDENTIAL_DIR);
+  let created = false;
   try {
     mkdirSync(dir, { mode: 0o700 });
+    created = true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+  if (created) {
+    try {
+      hardenWin32PrivateDirectoryAcl(dir);
+    } catch {
+      rmSync(dir, { recursive: true, force: true });
+      throw new Error('AGY native credential directory must be owner-only and not a symlink');
+    }
   }
   requireOwnerDirectory(dir);
   const path = join(dir, `${randomUUID()}.json`);

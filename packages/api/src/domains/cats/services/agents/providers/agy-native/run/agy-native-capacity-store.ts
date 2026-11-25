@@ -13,6 +13,7 @@ import {
 import { join } from 'node:path';
 import { AGY_OAUTH_FILE, agyOAuthFile } from '../../../../../../../config/agy-account.js';
 import {
+  canonicalWin32Path,
   hasOnlyControlledWin32Hardlinks,
   isControlledAgyOAuthAlias,
 } from '../../../../../../../config/win32-fs-security.js';
@@ -72,10 +73,10 @@ export async function resolveAgyCapacityScope(
       versions.set(executable, cliVersion);
     }
     input.signal?.throwIfAborted();
-    const profileHome = realpathSync(input.profileHome);
+    const profileHome = canonicalWin32Path(input.profileHome);
     const config = join(profileHome, '.gemini/config');
-    if (realpathSync(config) !== config) return undefined;
-    const account = realpathSync(input.credentialHome ?? profileHome);
+    if (canonicalWin32Path(config) !== config) return undefined;
+    const account = canonicalWin32Path(input.credentialHome ?? profileHome);
     const credential = agyOAuthFile(account);
     const credentialStat = lstatSync(credential);
     if (

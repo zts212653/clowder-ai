@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { linkSync, lstatSync, mkdirSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync } from 'node:fs';
+import { linkSync, lstatSync, mkdirSync, readlinkSync, renameSync, rmSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { AGY_OAUTH_FILE, agyOAuthFile, assertAgyCredentialHome } from '../../../../../../../config/agy-account.js';
 import {
   areWin32DirectoriesAclPrivate,
+  canonicalWin32Path,
   hardenWin32PrivateDirectoryAcl,
   hasOnlyControlledWin32Hardlinks,
   isControlledAgyOAuthAlias,
@@ -145,8 +146,8 @@ export function prepareAgyAccountDataView(
   options: PrepareAgyAccountDataViewOptions = {},
 ): string {
   assertAgyCredentialHome(credentialHome);
-  const profile = realpathSync(profileHome);
-  const account = realpathSync(credentialHome);
+  const profile = canonicalWin32Path(profileHome);
+  const account = canonicalWin32Path(credentialHome);
   const data = join(profile, '.gemini', 'antigravity-cli');
   const views = join(profile, '.cat-cafe-account-views');
   const view = join(views, createHash('sha256').update(account).digest('hex'));

@@ -1,5 +1,6 @@
 import { execFile, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
+import { windowsPowerShellEnv, windowsPowerShellPath } from '../../../../../../../config/win32-fs-security.js';
 import type { UnixProcessIdentity } from '../../../../../../../utils/cli-process-ownership.js';
 import { readWindowsJobNamesLinkedTo } from '../../../../../../../utils/windows-job-execution-links.js';
 import { jobQueryScript, powershellArgs } from '../../../../../../../utils/windows-job-native.js';
@@ -7,6 +8,7 @@ import {
   queryWindowsJobStopEvidence,
   readWindowsJobOwnerRecords,
   type WindowsJobOwnerRecord,
+  type WindowsJobQueryExecute,
   type WindowsJobStopEvidence,
 } from '../../../../../../../utils/windows-job-owner.js';
 import type { ProfileTurnOwner } from './store.js';
@@ -44,13 +46,32 @@ function isValidBirthString(value: unknown): value is string {
   return typeof value === 'string' && ROUND_TRIP_UTC_BIRTH.test(value) && Number.isFinite(Date.parse(value));
 }
 
-function windowsPowerShellPath(): string {
-  return join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-}
-
-function windowsPowerShellEnv(): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== 'PSMODULEPATH'));
-}
+const executeWindowsJobQueryAsync = ((
+  _file: string,
+  args?: readonly string[] | null,
+  options?: Record<string, unknown>,
+) =>
+  new Promise<{ stdout: string; stderr: string }>((resolveExec, rejectExec) => {
+    execFile(
+      windowsPowerShellPath(),
+      args ?? [],
+      {
+        timeout: POWERSHELL_TIMEOUT_MS,
+        windowsHide: true,
+        maxBuffer: 1024 * 1024,
+        ...(options ?? {}),
+        encoding: 'utf8',
+        env: windowsPowerShellEnv(),
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          rejectExec(error);
+          return;
+        }
+        resolveExec({ stdout: String(stdout), stderr: String(stderr) });
+      },
+    );
+  })) as unknown as WindowsJobQueryExecute;
 
 function processBirthScript(pid: number): string {
   // Use the same Win32_Process CIM CreationDate format as #1838 windows-job-native.ts
@@ -231,7 +252,7 @@ async function resolveOwnerJobEvidenceAsync(owner: ProfileTurnOwner): Promise<Wi
   if (!collected.ok) return { status: 'unverified', reason: collected.reason };
   if (collected.targets.length === 0) return { status: 'none' };
   for (const target of collected.targets) {
-    const evidence = await queryWindowsJobStopEvidence(target);
+    const evidence = await queryWindowsJobStopEvidence(target, { execute: executeWindowsJobQueryAsync });
     if (evidence.verdict !== 'absent') {
       return { status: 'unverified', reason: `job_${evidence.verdict}:${evidence.reason}` };
     }

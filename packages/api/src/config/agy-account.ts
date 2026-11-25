@@ -1,4 +1,4 @@
-import { lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import type { AccountConfig } from '@cat-cafe/shared';
@@ -7,6 +7,8 @@ import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { resolveAccountWriteRoot } from './account-store-topology.js';
 import {
   areWin32DirectoriesAclPrivate,
+  canonicalWin32Path,
+  escapePowerShellSingleQuotedLiteral,
   hardenWin32PrivateDirectoryAcl,
   hasOnlyControlledWin32Hardlinks,
   isControlledAgyOAuthAlias,
@@ -48,7 +50,7 @@ export function prepareAgyAccount(projectRoot: string, accountRef: string): NonN
   }
   if (existingDirs.length > 0 && !areWin32DirectoriesAclPrivate(existingDirs))
     throw new Error('agy_account_directory_unsafe');
-  return { storage: 'cli_file', credentialHome: realpathSync(home) };
+  return { storage: 'cli_file', credentialHome: canonicalWin32Path(home) };
 }
 
 export function assertAgyCredentialHome(home: string): void {
@@ -66,7 +68,7 @@ export function assertAgyCredentialHome(home: string): void {
 export function inspectAgyLogin(home: string): AgyLoginStatus {
   try {
     assertAgyCredentialHome(home);
-    const canonicalHome = realpathSync(home);
+    const canonicalHome = canonicalWin32Path(home);
     const path = agyOAuthFile(canonicalHome);
     const stat = lstatSync(path, { throwIfNoEntry: false });
     if (!stat) return 'not_logged_in';
@@ -99,7 +101,9 @@ export function inspectAgyLogin(home: string): AgyLoginStatus {
 }
 
 function shellQuote(value: string): string {
-  return process.platform === 'win32' ? `'${value.replaceAll("'", "''")}'` : `'${value.replaceAll("'", "'\\''")}'`;
+  return process.platform === 'win32'
+    ? escapePowerShellSingleQuotedLiteral(value)
+    : `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 /** Official remote/SSH auth selects the CLI's file store. No OS keychain setup or token transport. */

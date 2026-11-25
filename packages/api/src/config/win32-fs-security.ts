@@ -19,8 +19,13 @@ export interface Win32DirectoryAclSnapshot {
 
 let cachedCurrentUserSid: string | undefined;
 
-function psLiteral(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`;
+/**
+ * Escape a PowerShell single-quoted string literal across all five Windows PowerShell 5.1
+ * single-quote delimiters: ASCII `'` (U+0027) and Unicode curly single quotes
+ * `‘` (U+2018), `’` (U+2019), `‚` (U+201A), and `‛` (U+201B).
+ */
+export function escapePowerShellSingleQuotedLiteral(value: string): string {
+  return `'${value.replace(/['\u2018\u2019\u201A\u201B]/g, '$&$&')}'`;
 }
 
 function normalizeWin32Path(path: string): string {
@@ -31,11 +36,11 @@ function normalizeWin32Path(path: string): string {
  * Expand Windows 8.3 short path segments (such as `RUNNER~1` -> `runneradmin`) to match
  * the long NTFS volume-relative paths returned by `fsutil hardlink list` and `FindFirstFileNameW`.
  */
-function canonicalWin32Path(path: string): string {
+export function canonicalWin32Path(path: string): string {
   return typeof realpathSync.native === 'function' ? realpathSync.native(path) : realpathSync(path);
 }
 
-function windowsPowerShellPath(): string {
+export function windowsPowerShellPath(): string {
   return join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
 
@@ -44,7 +49,7 @@ function windowsPowerShellPath(): string {
  * PowerShell 7 (`pwsh`) shell (such as GitHub Actions windows-latest) cannot
  * poison .NET Framework 4.8 module loading.
  */
-function windowsPowerShellEnv(): NodeJS.ProcessEnv {
+export function windowsPowerShellEnv(): NodeJS.ProcessEnv {
   return Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toUpperCase() !== 'PSMODULEPATH'));
 }
 
@@ -105,7 +110,7 @@ export function isWin32AclSnapshotPrivate(snapshot: Win32DirectoryAclSnapshot | 
 
 function inspectWin32DirectoryAcls(dirs: readonly string[]): (Win32DirectoryAclSnapshot | null)[] | null {
   if (dirs.length === 0) return [];
-  const items = dirs.map(psLiteral).join(', ');
+  const items = dirs.map(escapePowerShellSingleQuotedLiteral).join(', ');
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "$ProgressPreference = 'SilentlyContinue'",
@@ -298,7 +303,7 @@ export function listWin32Hardlinks(filePath: string): string[] | null {
     "$ProgressPreference = 'SilentlyContinue'",
     '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
     HARDLINK_ENUM_INTEROP,
-    `$links = [ClowderHardlinkInterop]::ListLinks(${psLiteral(filePath)})`,
+    `$links = [ClowderHardlinkInterop]::ListLinks(${escapePowerShellSingleQuotedLiteral(filePath)})`,
     'ConvertTo-Json -InputObject @($links) -Compress',
   ].join('\n');
   const result = spawnSync(windowsPowerShellPath(), powershellArgs(script), {

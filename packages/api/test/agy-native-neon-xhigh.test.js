@@ -24,13 +24,31 @@ import {
   inspectAgyLogin,
   prepareAgyAccount,
 } from '../dist/config/agy-account.js';
-import { hasOnlyControlledWin32Hardlinks, isWin32AclSnapshotPrivate } from '../dist/config/win32-fs-security.js';
+import {
+  areWin32DirectoriesAclPrivate,
+  canonicalWin32Path,
+  escapePowerShellSingleQuotedLiteral,
+  hardenWin32PrivateDirectoryAcl,
+  hasOnlyControlledWin32Hardlinks,
+  isWin32AclSnapshotPrivate,
+  listWin32Hardlinks,
+  windowsPowerShellEnv,
+  windowsPowerShellPath,
+} from '../dist/config/win32-fs-security.js';
 import { AgyNativeAgentService } from '../dist/domains/cats/services/agents/providers/agy-native/AgyNativeAgentService.js';
+import {
+  AGY_NATIVE_CREDENTIAL_DIR,
+  prepareAgyNativeCredentialFile,
+} from '../dist/domains/cats/services/agents/providers/agy-native/agy-native-credential-file.js';
 import { materializeAgyNativeEffectGuard } from '../dist/domains/cats/services/agents/providers/agy-native/agy-native-effect-guard.js';
 import { prepareAgyNativeLaunch } from '../dist/domains/cats/services/agents/providers/agy-native/agy-native-launch.js';
 import { acquireAgyNativeProfileTurn } from '../dist/domains/cats/services/agents/providers/agy-native/agy-native-profile-turn.js';
+import { createAgyNativeRunProfile } from '../dist/domains/cats/services/agents/providers/agy-native/agy-native-run-profile.js';
 import { parseNativeTurnOwner } from '../dist/domains/cats/services/agents/providers/agy-native/profile-turn/store.js';
-import { evaluateWin32NativeTurnRetirement } from '../dist/domains/cats/services/agents/providers/agy-native/profile-turn/win32-process-identity.js';
+import {
+  evaluateWin32NativeTurnRetirement,
+  isWin32NativeTurnRetired,
+} from '../dist/domains/cats/services/agents/providers/agy-native/profile-turn/win32-process-identity.js';
 import { prepareAgyAccountDataView } from '../dist/domains/cats/services/agents/providers/agy-native/run/agy-account-data-view.js';
 import { spawnCli } from '../dist/utils/cli-spawn.js';
 
@@ -619,7 +637,13 @@ describe('Gemini 4 Neon + xhigh & Windows AGY Native compatibility', () => {
     },
   );
 
-  it('executes materialized effect guard hooks through real cmd.exe (including /v:on delayed expansion) with spaces, Chinese, &, %TEMP%, and !BANG!', (t) => {
+  it('executes materialized effect guard hooks through real cmd.exe (including /v:on delayed expansion) with spaces, Chinese, curly quotes, &, %TEMP%, and !BANG!', (t) => {
+    // Cross-platform check: all five Windows PowerShell 5.1 single-quote delimiters must be doubled.
+    assert.equal(
+      escapePowerShellSingleQuotedLiteral("a'b\u2018c\u2019d\u201Ae\u201Bf"),
+      "'a''b\u2018\u2018c\u2019\u2019d\u201A\u201Ae\u201B\u201Bf'",
+    );
+
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'neon-hook-')));
     t.after(() => rmSync(root, { recursive: true, force: true }));
     if (process.platform !== 'win32') {
@@ -639,16 +663,29 @@ describe('Gemini 4 Neon + xhigh & Windows AGY Native compatibility', () => {
       return;
     }
 
-    // Real Windows NTFS directory names containing spaces, Chinese, &, literal %TEMP%, and !BANG!
-    const trickyDir = join(root, 'dir 中文 & %TEMP% !BANG!');
-    const profileHome = join(trickyDir, 'profile 中文 & !BANG!');
-    const workspaceRoot = join(trickyDir, 'ws 中文 & %TEMP% !BANG!');
+    // Real Windows NTFS directory names containing spaces, Chinese, Unicode right single quote
+    // (U+2019 — a PowerShell 5.1 single-quote delimiter), &, literal %TEMP%, and !BANG!
+    const trickyDir = join(root, 'User\u2019s dir 中文 & %TEMP% !BANG!');
+    const profileHome = join(trickyDir, 'profile\u2019s 中文 & !BANG!');
+    const workspaceRoot = join(trickyDir, 'ws\u2019s 中文 & %TEMP% !BANG!');
     const outsideDir = join(trickyDir, 'outside dir');
     mkdirSync(join(profileHome, '.gemini', 'config'), { recursive: true });
     mkdirSync(workspaceRoot, { recursive: true });
     mkdirSync(outsideDir, { recursive: true });
-    const sampleFile = join(workspaceRoot, 'hello 中文.txt');
+    const sampleFile = join(workspaceRoot, 'hello\u2019s 中文.txt');
     writeFileSync(sampleFile, 'hello');
+
+    // Verify BOTH win32-fs-security PowerShell helpers (hardlinks + ACLs) survive U+2019 without quote breakout.
+    const hardlinks = listWin32Hardlinks(sampleFile);
+    assert.ok(Array.isArray(hardlinks) && hardlinks.length >= 1, 'Expected hardlink list for curly-quote path');
+    const curlyPrivateDir = join(trickyDir, 'private\u2019s-acl-check');
+    mkdirSync(curlyPrivateDir, { recursive: true });
+    hardenWin32PrivateDirectoryAcl(curlyPrivateDir);
+    assert.equal(
+      areWin32DirectoriesAclPrivate([curlyPrivateDir]),
+      true,
+      'ACL probe must succeed cleanly on hardened curly-quote path',
+    );
 
     const runGuardViaCmd = (command, payload, delayedExpansion) => {
       const args = delayedExpansion ? ['/d', '/v:on', '/c', command] : ['/d', '/c', command];
@@ -670,7 +707,7 @@ describe('Gemini 4 Neon + xhigh & Windows AGY Native compatibility', () => {
 
     // 1. Normal mode with requireApproval + allowWorkspaceWrites:
     //    proves workspaceRoot (argv[5]) & profileHome (argv[4]) arrive byte-for-byte intact
-    //    through BOTH cmd /d /c AND cmd /d /v:on /c without expanding %TEMP% or !BANG!.
+    //    through BOTH cmd /d /c AND cmd /d /v:on /c without expanding %TEMP%, !BANG!, or breaking on U+2019.
     const hooksPath = materializeAgyNativeEffectGuard({
       profileHome,
       runtimeRoot: process.cwd(),
@@ -681,9 +718,10 @@ describe('Gemini 4 Neon + xhigh & Windows AGY Native compatibility', () => {
     });
     const normalCommand = JSON.parse(readFileSync(hooksPath, 'utf8'))['cat-cafe-native-effect'].PreToolUse[0].hooks[0]
       .command;
+    const expectedPsPrefix = `${windowsPowerShellPath()} -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand `;
     assert.ok(
-      normalCommand.startsWith('powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand '),
-      `Expected EncodedCommand wrapper on Windows, got: ${normalCommand}`,
+      normalCommand.startsWith(expectedPsPrefix),
+      `Expected explicit System32 WinPS 5.1 EncodedCommand wrapper on Windows, got: ${normalCommand}`,
     );
 
     for (const delayed of [false, true]) {
@@ -769,6 +807,115 @@ describe('Gemini 4 Neon + xhigh & Windows AGY Native compatibility', () => {
     assert.equal(denyReadOnlyWrite.decision, 'deny', JSON.stringify(denyReadOnlyWrite));
     assert.match(denyReadOnlyWrite.reason ?? '', /read-only/i);
   });
+
+  it(
+    'hardens cat-cafe-credentials and run profile ACLs on Windows, rejects Everyone-readable credentials, strips PSModulePath in async job retirement, and canonicalizes 8.3 short paths symmetrically',
+    { skip: process.platform !== 'win32' },
+    async (t) => {
+      const root = canonicalWin32Path(mkdtempSync(join(tmpdir(), 'neon-win-sec-hardening-')));
+      const prevGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      const prevPsModulePath = process.env.PSModulePath;
+      process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
+      process.env.PSModulePath = 'C:\\Program Files\\PowerShell\\7\\Modules';
+      t.after(() => {
+        if (prevGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+        else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = prevGlobalRoot;
+        if (prevPsModulePath === undefined) delete process.env.PSModulePath;
+        else process.env.PSModulePath = prevPsModulePath;
+        rmSync(root, { recursive: true, force: true });
+      });
+
+      // 1. P1: createAgyNativeRunProfile + prepareAgyNativeCredentialFile harden Windows ACLs
+      //    and reject an Everyone-readable cat-cafe-credentials directory (fail closed).
+      const profileRoot = join(root, 'very-long-profile-home-root');
+      mkdirSync(profileRoot, { recursive: true });
+      const runProfile = createAgyNativeRunProfile(profileRoot);
+      t.after(() => runProfile.dispose());
+      const callbackEnv = {
+        CAT_CAFE_API_URL: 'http://127.0.0.1:3012/',
+        CAT_CAFE_INVOCATION_ID: 'inv-cred-acl',
+        CAT_CAFE_CALLBACK_TOKEN: 'tok-cred-acl',
+      };
+      const binding = prepareAgyNativeCredentialFile(runProfile.home, callbackEnv);
+      const credDir = join(runProfile.geminiDir, 'config', AGY_NATIVE_CREDENTIAL_DIR);
+      assert.equal(
+        areWin32DirectoriesAclPrivate([
+          join(profileRoot, '.cat-cafe-native-runs'),
+          runProfile.home,
+          join(runProfile.geminiDir, 'config'),
+          credDir,
+        ]),
+        true,
+        'run profile and cat-cafe-credentials directories must have private Windows ACLs',
+      );
+      binding.dispose();
+
+      // Grant Everyone:Read (*S-1-1-0:(OI)(CI)R) to cat-cafe-credentials -> MUST fail closed
+      const grantEveryone = spawnSync('icacls.exe', [credDir, '/grant', '*S-1-1-0:(OI)(CI)R'], {
+        encoding: 'utf8',
+        windowsHide: true,
+      });
+      assert.equal(grantEveryone.status, 0, grantEveryone.stderr || grantEveryone.stdout);
+      assert.throws(
+        () => prepareAgyNativeCredentialFile(runProfile.home, callbackEnv),
+        /AGY native credential directory must be owner-only/,
+      );
+
+      // 2. P2: async isWin32NativeTurnRetired strips poisoned PSModulePath when querying Windows Job stop evidence
+      const sidResult = spawnSync(
+        windowsPowerShellPath(),
+        ['-NoProfile', '-NonInteractive', '-Command', '[System.Diagnostics.Process]::GetCurrentProcess().SessionId'],
+        { encoding: 'utf8', windowsHide: true, env: windowsPowerShellEnv() },
+      );
+      assert.equal(sidResult.status, 0, sidResult.stderr || sidResult.stdout);
+      const currentSessionId = Number.parseInt(sidResult.stdout.trim(), 10);
+      assert.ok(Number.isSafeInteger(currentSessionId), `Expected numeric sessionId, got ${sidResult.stdout}`);
+      const retiredAsync = await isWin32NativeTurnRetired(
+        {
+          identity: { pid: 999_999, ppid: 1, pgid: 0, startedAt: '2026-01-01T00:00:00.0000000Z' },
+          dataRoot: root,
+          invocationId: 'inv-async-job-clean',
+          runHome: runProfile.home,
+          windowsJob: {
+            jobName: `Local\\ClowderApiJob-${randomUUID()}`,
+            sessionId: currentSessionId,
+          },
+        },
+        profileRoot,
+      );
+      assert.equal(retiredAsync, true, 'async job stop query must succeed under poisoned pwsh PSModulePath');
+
+      // 3. P2: Windows 8.3 short-path vs long-path symmetry across prepareAgyAccount, prepareAgyAccountDataView, and inspectAgyLogin
+      const longBase = join(root, 'very-long-account-parent-directory');
+      mkdirSync(longBase, { recursive: true });
+      process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = longBase;
+      const acct = prepareAgyAccount(longBase, `agy-${randomUUID()}`);
+      assert.equal(acct.credentialHome, canonicalWin32Path(acct.credentialHome));
+      writeFileSync(agyOAuthFile(acct.credentialHome), makeOAuthToken('tok-83-symmetry'), { mode: 0o600 });
+
+      const resolveWin32ShortPath = (targetPath) => {
+        const res = spawnSync('cmd.exe', ['/d', '/c', `for %I in ("${targetPath}") do @echo %~sI`], {
+          encoding: 'utf8',
+          windowsHide: true,
+          windowsVerbatimArguments: true,
+        });
+        const candidate = res.status === 0 ? res.stdout.trim().replace(/^"|"$/g, '') : '';
+        return candidate && existsSync(candidate) ? candidate : targetPath;
+      };
+      const shortAccountHome = resolveWin32ShortPath(acct.credentialHome);
+      const shortProfileRoot = resolveWin32ShortPath(profileRoot);
+      // Create the view FIRST with the 8.3 short paths, then inspect & re-prepare via the expanded long paths.
+      const shortView = prepareAgyAccountDataView(shortProfileRoot, shortAccountHome, {
+        forceWin32HardlinkFallback: true,
+      });
+      assert.equal(inspectAgyLogin(acct.credentialHome), 'ready');
+      assert.equal(inspectAgyLogin(shortAccountHome), 'ready');
+      const longView = prepareAgyAccountDataView(profileRoot, acct.credentialHome, {
+        forceWin32HardlinkFallback: true,
+      });
+      assert.equal(shortView, longView, 'short and long credentialHome inputs must hash to the same canonical view');
+    },
+  );
 
   describe(
     'Windows post-EOF teardown & terminal preservation regressions',

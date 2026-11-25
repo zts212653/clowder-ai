@@ -2,22 +2,25 @@ import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { secretRuntimeScript } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
+import {
+  escapePowerShellSingleQuotedLiteral,
+  windowsPowerShellPath,
+} from '../../../../../../config/win32-fs-security.js';
 import { validateAgyNativeConfigReceipt, writeAgyNativeConfigReceipt } from './agy-native-config-receipt.js';
-
-function psLiteral(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`;
-}
 
 function buildEffectGuardCommand(args: readonly string[]): string {
   if (process.platform === 'win32') {
     // AGY executes hook commands via cmd.exe on Windows. Wrap the invocation in
-    // PowerShell `-EncodedCommand` (base64 UTF-16LE, strictly [A-Za-z0-9+/=]) so
-    // cmd.exe (/c, /s /c, and /v:on delayed expansion) never interprets spaces,
-    // Unicode characters, &, %VAR%, !VAR!, or quotes, while stdin/stdout/exit code pass through.
+    // Windows PowerShell 5.1 `-EncodedCommand` (base64 UTF-16LE, strictly [A-Za-z0-9+/=])
+    // using the explicit System32 binary path so PATH shadowing and cmd.exe (/c, /s /c,
+    // /v:on delayed expansion) never interpret spaces, Unicode characters, &, %VAR%,
+    // !VAR!, or quotes, while stdin/stdout/exit code pass through.
     const [executable, ...rest] = args;
-    const script = `& ${psLiteral(executable)} ${rest.map(psLiteral).join(' ')}; exit $LASTEXITCODE`;
+    const script = `& ${escapePowerShellSingleQuotedLiteral(executable)} ${rest.map(escapePowerShellSingleQuotedLiteral).join(' ')}; exit $LASTEXITCODE`;
     const encoded = Buffer.from(script, 'utf16le').toString('base64');
-    return `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encoded}`;
+    const psExe = windowsPowerShellPath();
+    const psInvocation = /\s/.test(psExe) ? `"${psExe.replaceAll('"', '""')}"` : psExe;
+    return `${psInvocation} -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encoded}`;
   }
   const quote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
   return args.map(quote).join(' ');
