@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { collectiveContentScopeRef } from '../../video-studio/content-owner/collective-scope.js';
 import type { ProjectContentOwnerService } from '../../video-studio/content-owner/service.js';
 import type { ContentSettlementReceiptV1 } from '../../video-studio/content-owner/types.js';
-import type { ArtifactReviewStore } from '../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../artifact-review/storage/store.js';
 import { WorkspaceContentReviewError } from '../workspace-review/errors.js';
 import type { AdmittedCollectiveMarkdown } from './markdown-authority.js';
 import { reconcileCollectiveDisposition } from './markdown-modification-apply.js';

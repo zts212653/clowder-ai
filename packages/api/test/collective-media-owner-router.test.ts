@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { createCollectiveArtifactOwner } from '../src/domains/collaborative-content/collective-artifact/owner-router.js';
 import { collectiveArtifactOwnerFixture } from './collective-artifact-owner.fixture.js';
 import { collectiveMediaHttpFixture } from './collective-media-http.fixture.js';

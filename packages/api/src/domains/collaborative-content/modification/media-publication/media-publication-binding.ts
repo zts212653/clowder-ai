@@ -18,7 +18,7 @@ import type { TurnExecutionSourceReadPort } from '../../../cats/services/stores/
 import type { PublishedMediaService } from '../../../video-studio/content-owner/published-media-service.js';
 import { currentReviewModification } from '../../artifact-review/modification-request-reference.js';
 import { reviewAuthorityState } from '../../artifact-review/review-authority.js';
-import type { ArtifactReviewStore } from '../../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../../artifact-review/storage/store.js';
 import { sameAudience, witnessedPublicationCaller } from './media-publication-caller.js';
 import type { MediaPublicationReturnIntent } from './media-publication-return.js';
 import { readModificationSourceExecution } from './source-execution.js';

@@ -10,7 +10,7 @@ import type { ITurnExecutionStore } from '../../../cats/services/stores/ports/Tu
 import type { EntrustedWorkLifecycleService } from '../../../growing/EntrustedWorkLifecycleService.js';
 import type { MediaReviewPrincipal } from '../../../video-studio/content-owner/published-media-access.js';
 import type { VideoProjectReadPort } from '../../../video-studio/project/types.js';
-import type { ArtifactReviewStore } from '../../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../../artifact-review/storage/store.js';
 import type { VideoProjectMessageImporter } from '../../workspace-review/project-message/import.js';
 import type { VideoProjectMessageAuthority } from '../../workspace-review/project-message/types.js';
 import type { ResolvedMessageTakeover } from '../message/types.js';

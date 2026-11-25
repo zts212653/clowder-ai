@@ -5,7 +5,7 @@ import type { TestContext } from 'node:test';
 import { createCatId } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { InvocationRegistry } from '../../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
-import { ArtifactReviewStore } from '../../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { createWorkAuthorizer } from '../../src/domains/collaborative-content/works/access.js';
 import { LivingWorkService } from '../../src/domains/collaborative-content/works/service.js';
 import { registerLivingWorkRoutes } from '../../src/routes/living-work-routes.js';

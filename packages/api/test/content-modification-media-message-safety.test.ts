@@ -7,7 +7,7 @@ import { catRegistry, createCatId } from '@cat-cafe/shared';
 import Database from 'better-sqlite3';
 import { handleTakeOverContentModification } from '../../mcp-server/src/tools/content-modification-tools.js';
 import { ArtifactReviewService } from '../src/domains/collaborative-content/artifact-review/service.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { createContentModificationIntegration } from '../src/domains/collaborative-content/modification/composition.js';
 import { mediaMessageFixture } from './helpers/media-message-fixture.js';
 

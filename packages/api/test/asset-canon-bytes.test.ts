@@ -3,7 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import Fastify from 'fastify';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { AssetCanonService } from '../src/domains/collaborative-content/asset-canon/service.js';
 import { registerAssetCanonRoutes } from '../src/routes/asset-canon-routes.js';
 import { canonCat, canonFixture, canonHuman } from './helpers/asset-canon-fixture.js';

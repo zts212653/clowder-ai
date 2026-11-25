@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ContentModificationRecord } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../../cats/services/stores/ports/TaskStore.js';
 import type { EntrustedWorkLifecycleService } from '../../../growing/EntrustedWorkLifecycleService.js';
-import type { ArtifactReviewStore } from '../../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../../artifact-review/storage/store.js';
 import { modificationOperationKeys } from '../journal.js';
 
 /** Cancelling a request persists first. Only a real F310 human disposition can cancel its sole new Task. */
