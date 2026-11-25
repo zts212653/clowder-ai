@@ -202,6 +202,15 @@ export const ENV_DEFINITIONS_6: readonly EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'GEMINI_CLI_HOME',
+    defaultValue: '~',
+    description: 'Gemini CLI 用户主目录。存储清单从其下的 .gemini/antigravity/conversations 只读统计会话。',
+    category: 'gemini',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'GOOGLE_API_KEY',
     defaultValue: '(未设置 → 由 accounts/credentials 系统注入)',
     description: 'Google API Key（#340 P6: 由统一账户系统管理，子进程通过 callbackEnv 注入）',
