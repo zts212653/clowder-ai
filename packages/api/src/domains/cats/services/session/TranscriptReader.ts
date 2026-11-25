@@ -398,14 +398,22 @@ export class TranscriptReader {
     catId: string,
     visitor: (event: TranscriptEvent) => void | Promise<void>,
     signal?: AbortSignal,
+    includeLive = false,
   ): Promise<ScanEventsResult> {
     signal?.throwIfAborted();
-    const jsonlPath = join(this.sessionDir(threadId, catId, sessionId), 'events.jsonl');
+    const sessionDir = this.sessionDir(threadId, catId, sessionId);
+    let jsonlPath = join(sessionDir, 'events.jsonl');
 
     try {
       await stat(jsonlPath);
     } catch {
-      return { present: false, eventCount: 0 };
+      if (!includeLive) return { present: false, eventCount: 0 };
+      jsonlPath = join(sessionDir, 'events.live.jsonl');
+      try {
+        await stat(jsonlPath);
+      } catch {
+        return { present: false, eventCount: 0 };
+      }
     }
 
     let eventCount = 0;

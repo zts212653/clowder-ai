@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:p
 import { z } from 'zod';
 import { collectThreadMessageArtifacts } from '../../cats/services/agents/routing/thread-artifacts-aggregator.js';
 import type { TranscriptReader } from '../../cats/services/session/TranscriptReader.js';
+import { materializeFilesTouched, recordFilesTouched } from '../../cats/services/session/transcript-file-touches.js';
 import type { IMessageStore } from '../../cats/services/stores/ports/MessageStore.js';
 import type { ISessionChainStore } from '../../cats/services/stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../../cats/services/stores/ports/ThreadStore.js';
@@ -39,13 +40,16 @@ interface SourcesInput {
   threads: Pick<IThreadStore, 'list'>;
   messages: Pick<IMessageStore, 'getByThread' | 'getByThreadBefore'>;
   sessions: Pick<ISessionChainStore, 'getChainByThread'>;
-  transcriptReader?: Pick<TranscriptReader, 'readDigest'>;
+  transcriptReader?: Pick<TranscriptReader, 'readDigest' | 'scanEvents' | 'getSessionDir'>;
   transcriptDir: string;
   uploadDir: string;
   connectorMediaDir: string;
   dataDir: string;
   logDir: string;
-  nativeHomes: { codex: string; claude: string; dsh: string };
+  nativeHomes: Partial<Record<NativeProvider, string>>;
+  nativeHistoryRoot?: string;
+  databasePaths?: string[];
+  cliArchiveDir?: string;
   tempDir: string;
 }
 
@@ -63,11 +67,18 @@ export function createConversationStorageSourceReader(input: SourcesInput) {
       { path: input.logDir, category: 'log', optional: true },
     ];
     const files: StorageSource[] = [];
+    for (const path of input.databasePaths ?? []) {
+      if (!isAbsolute(path)) continue;
+      for (const suffix of ['', '-wal', '-shm'])
+        files.push({ path: path + suffix, category: 'database', optional: true });
+    }
+    if (input.cliArchiveDir) roots.push({ path: input.cliArchiveDir, category: 'log', optional: true });
     const nativeSessions: ConversationStorageSources['nativeSessions'] = [];
     const omissions: ConversationStorageSources['omissions'] = [];
+    const transcriptReader = input.transcriptReader;
     const nativeRoots = new Set<string>();
     const gitRoots = new Map<string, Promise<string | null>>();
-    const addNativeHome = (provider: keyof SourcesInput['nativeHomes'], path: string) => {
+    const addNativeHome = (provider: NativeProvider, path: string) => {
       if (!isDirectoryBelowRoot(path)) return;
       for (const [directory, category] of nativeLocations[provider]) {
         const fullPath = join(path, directory);
@@ -98,9 +109,11 @@ export function createConversationStorageSourceReader(input: SourcesInput) {
         roots.push({ path: join(mainPath, '.git', 'objects'), category: 'git', optional: true });
     }
 
-    addNativeHome('codex', input.nativeHomes.codex);
-    addNativeHome('claude', input.nativeHomes.claude);
-    addNativeHome('dsh', input.nativeHomes.dsh);
+    for (const provider of Object.keys(nativeLocations).filter(isNativeProvider)) {
+      const home = input.nativeHomes[provider];
+      if (home) addNativeHome(provider, home);
+      if (input.nativeHistoryRoot) addNativeHome(provider, join(input.nativeHistoryRoot, provider));
+    }
 
     const threads = await input.threads.list(input.ownerUserId, { signal });
     for (const thread of threads) {
@@ -119,15 +132,20 @@ export function createConversationStorageSourceReader(input: SourcesInput) {
         const native = session.hostExecutionBoundary;
         if (native?.accountStateRoot && isNativeProvider(native.clientId))
           addNativeHome(native.clientId, native.accountStateRoot);
-        if (input.transcriptReader && session.status === 'sealed') {
-          const digest = await input.transcriptReader.readDigest(session.id, threadId, session.catId);
-          const touches = digestFiles.safeParse(digest?.filesTouched);
-          if (touches.success) {
-            for (const file of touches.data) {
-              if (!file.ops.includes('create') && !file.ops.includes('edit')) continue;
-              const path = fileUnderWorkspace(session.workingDirectory ?? thread.projectPath, file.path);
-              if (path) files.push({ path, category: 'work', threadId });
-            }
+        if (transcriptReader) {
+          const touches = await readSessionFileTouches(transcriptReader, session, threadId, signal).catch(() => {
+            signal.throwIfAborted();
+            omissions.push({
+              path: transcriptReader.getSessionDir(threadId, session.catId, session.id),
+              reason: 'transcript-unavailable',
+              count: 1,
+            });
+            return [];
+          });
+          for (const file of touches) {
+            if (!file.ops.includes('create') && !file.ops.includes('edit')) continue;
+            const path = fileUnderWorkspace(session.workingDirectory ?? thread.projectPath, file.path);
+            if (path) files.push({ path, category: 'work', threadId });
           }
         }
       }
@@ -161,17 +179,28 @@ const nativeLocations = {
     ['sessions', 'native-session'],
     ['archived_sessions', 'native-session'],
     ['generated_images', 'attachment'],
+    ['attachments', 'attachment'],
   ],
-  claude: [['projects', 'native-session']],
+  claude: [
+    ['projects', 'native-session'],
+    ['file-history', 'work'],
+  ],
   dsh: [
     ['sessions', 'native-session'],
     ['attachments', 'attachment'],
     ['storages', 'database'],
     ['spill', 'temp'],
   ],
+  kimi: [
+    ['sessions', 'native-session'],
+    ['file-history', 'work'],
+  ],
+  pi: [['sessions', 'native-session']],
 } as const;
 
-function isNativeProvider(client: string): client is keyof typeof nativeLocations {
+type NativeProvider = keyof typeof nativeLocations;
+
+function isNativeProvider(client: string): client is NativeProvider {
   return Object.hasOwn(nativeLocations, client);
 }
 
@@ -180,6 +209,32 @@ function isDirectoryBelowRoot(path: string): boolean {
 }
 
 const digestFiles = z.array(z.object({ path: z.string(), ops: z.array(z.string()) }));
+
+async function readSessionFileTouches(
+  reader: NonNullable<SourcesInput['transcriptReader']>,
+  session: { id: string; catId: string; status: string },
+  threadId: string,
+  signal: AbortSignal,
+) {
+  if (session.status === 'sealed') {
+    const digest = await reader.readDigest(session.id, threadId, session.catId);
+    const touches = digestFiles.safeParse(digest?.filesTouched);
+    if (touches.success) return touches.data;
+  }
+  const paths = new Map<string, Set<string>>();
+  await reader.scanEvents(
+    session.id,
+    threadId,
+    session.catId,
+    ({ event }) => {
+      const name = event.toolName ?? event.name;
+      if (typeof name === 'string') recordFilesTouched(paths, event, name);
+    },
+    signal,
+    true,
+  );
+  return materializeFilesTouched(paths);
+}
 
 function fileUnderWorkspace(root: string, file: string) {
   if (!isDirectoryBelowRoot(root)) return undefined;
@@ -214,6 +269,8 @@ export function configuredNativeStorageHomes() {
     codex: process.env.CODEX_HOME || join(homedir(), '.codex'),
     claude: process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'),
     dsh: process.env.DSH_HOME || join(homedir(), '.dsh'),
+    kimi: process.env.KIMI_CODE_HOME || join(homedir(), '.kimi-code'),
+    pi: process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent'),
   };
 }
 
