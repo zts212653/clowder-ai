@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
@@ -40,6 +41,46 @@ export function resolveDshDesktopLaunch(command: string, args: readonly string[]
   } catch {
     return null;
   }
+}
+
+/** Known Desktop profiles supporting the native startup persona patch and persisted ACP resume. */
+export function supportsDshDesktopL0(command: string, args: readonly string[]): boolean {
+  if (process.platform !== 'win32' || args[0] !== '--profile' || args[1] !== 'acp') return false;
+  // Onboarding may save prior configuration overlays. Keep them in order and
+  // limit this path to the standard ACP profile and its explicit patch files.
+  const patches = args.slice(2);
+  if (
+    patches.length % 2 !== 0 ||
+    !patches.every((arg, index) => (index % 2 === 0 ? arg === '--patch' : isAbsolute(arg)))
+  )
+    return false;
+  const plan = resolveDshDesktopLaunch(command, args);
+  if (!plan) return false;
+  try {
+    const metadata = z
+      .object({ desktopVersion: z.string() })
+      .parse(
+        JSON.parse(readFileSync(join(dirname(plan.command), 'resources/runtime/primary-runtime/runtime.json'), 'utf8')),
+      );
+    return metadata.desktopVersion === '0.2.2-rc.5' || metadata.desktopVersion === '0.2.3-alpha.2';
+  } catch {
+    return false;
+  }
+}
+
+export function serializeDshDesktopL0Patch(body: string): string {
+  const marker = `<!-- clowder-l0:${createHash('sha256').update(body).digest('hex')} -->`;
+  return JSON.stringify([
+    {
+      insert: [
+        {
+          id: 'clowder-l0-series',
+          name: new URL('./dsh-l0-series.js', import.meta.url).href,
+          config: { marker, body },
+        },
+      ],
+    },
+  ]);
 }
 
 /** Read Desktop installation metadata; no Harness process or package manager is started. */

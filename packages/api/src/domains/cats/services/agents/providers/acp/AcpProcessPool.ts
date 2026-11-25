@@ -55,7 +55,14 @@ export interface AcpLease {
   release(): Promise<boolean>;
 }
 
+export interface AcpPoolStartup {
+  readonly revision: string;
+  createInitializedClient(): Promise<AcpPoolClient>;
+}
+
 export interface AcpAcquireOptions {
+  /** Optional process-bound configuration. Persisted session identity is independent of this revision. */
+  startup?: AcpPoolStartup;
   /** Existing ACP session id that should resume on the client that owns it. */
   sessionId?: string;
 }
@@ -107,12 +114,13 @@ interface AcpPoolVariantConfig {
 
 interface PoolEntry {
   client: AcpPoolClient;
+  startupRevision?: string;
   poolKey: PoolKey;
   leaseCount: number;
   /** Bumped on stale-lease force-release so old lease closures become no-ops (#992). */
   leaseGeneration: number;
   lastUsedAt: number;
-  state: 'initializing' | 'ready' | 'closing';
+  state: 'ready' | 'closing';
   /** Stop admission after failed session cleanup; existing peers drain before retirement. */
   turnCloseFailed?: boolean;
   idleTimer: ReturnType<typeof setTimeout> | null;
@@ -199,6 +207,8 @@ export class AcpProcessPool {
     await this.waitForRetirement(key);
     let entries = this.entries.get(key) ?? [];
     const sessionId = options.sessionId?.trim();
+    const startup = options.startup;
+    const pendingKey = startup ? JSON.stringify([key, startup.revision]) : key;
     let canResumeRequestedSession = true;
 
     // #1203: Retire ready processes whose bootstrap cwd was deleted after spawn.
@@ -222,7 +232,10 @@ export class AcpProcessPool {
         log.warn({ poolKey, sessionId }, 'ACP session is sealed; acquiring carrier for a fresh replacement session');
       } else {
         const owner = this.sessionOwners.get(sessionKey);
-        if (owner && !owner.turnCloseFailed && owner.state === 'ready' && owner.client.isAlive) {
+        const reusableOwner = owner && !owner.turnCloseFailed && owner.state === 'ready' && owner.client.isAlive;
+        if (reusableOwner && owner.startupRevision !== startup?.revision && owner.leaseCount > 0)
+          throw new Error('ACP session is active with an earlier process configuration');
+        if (reusableOwner && owner.startupRevision === startup?.revision) {
           if (this.rejectActiveSessionLease && owner.leaseCount > 0)
             throw new Error('ACP session has an active lease; refusing concurrent ownership');
           if (!this.supportsMultiplexing && owner.client.isSafeForSingleFlightReuse === false) {
@@ -253,13 +266,14 @@ export class AcpProcessPool {
             return this.leaseReadyEntry(owner, poolKey, canResumeRequestedSession);
           }
         }
-        if (owner) this.sessionOwners.delete(sessionKey);
+        if (!reusableOwner) this.sessionOwners.delete(sessionKey);
       }
     }
 
     // 1. Try warm reuse. Single-flight carriers may reuse only idle processes.
     const warm = entries.find(
       (e) =>
+        e.startupRevision === startup?.revision &&
         !e.turnCloseFailed &&
         e.state === 'ready' &&
         e.client.isAlive &&
@@ -271,7 +285,7 @@ export class AcpProcessPool {
 
     // 2. Coalesce in-flight spawns only for carriers that permit concurrent prompts.
     if (this.supportsMultiplexing) {
-      const pending = this.pendingSpawns.get(key);
+      const pending = this.pendingSpawns.get(pendingKey);
       if (pending) {
         const entry = await pending;
         entry.leaseCount++;
@@ -294,14 +308,20 @@ export class AcpProcessPool {
     // 4. Reserve slot atomically (sync) before async spawn
     this._metrics.liveProcessCount++;
 
-    const spawnPromise = this.doSpawn(poolKey, key, this.supportsMultiplexing ? key : undefined, retirement);
+    const spawnPromise = this.doSpawn(
+      poolKey,
+      key,
+      this.supportsMultiplexing ? pendingKey : undefined,
+      retirement,
+      startup,
+    );
     this.inFlightSpawns.add(spawnPromise);
     const completed = () => {
       this.inFlightSpawns.delete(spawnPromise);
       this.checkRetirementDrained();
     };
     void spawnPromise.then(completed, completed);
-    if (this.supportsMultiplexing) this.pendingSpawns.set(key, spawnPromise);
+    if (this.supportsMultiplexing) this.pendingSpawns.set(pendingKey, spawnPromise);
 
     const entry = await spawnPromise;
     return this.createLease(entry, poolKey, canResumeRequestedSession);
@@ -355,11 +375,12 @@ export class AcpProcessPool {
     key: string,
     pendingKey?: string,
     retirement?: Promise<void> | null,
+    startup?: AcpPoolStartup,
   ): Promise<PoolEntry> {
     try {
       if (retirement) await retirement;
       if (this.closed) throw new Error('Pool is closed');
-      const entry = await this.spawnEntry(poolKey);
+      const entry = await this.spawnEntry(poolKey, startup);
       if (this.closed) {
         await entry.client.close();
         throw new Error('Pool is closed');
@@ -589,24 +610,26 @@ export class AcpProcessPool {
     }
   }
 
-  private async spawnEntry(poolKey: PoolKey): Promise<PoolEntry> {
-    const client = this.clientFactory();
+  private async spawnEntry(poolKey: PoolKey, startup?: AcpPoolStartup): Promise<PoolEntry> {
+    const client = startup ? await startup.createInitializedClient() : this.clientFactory();
+    if (!startup) {
+      try {
+        await client.initialize();
+      } catch (err) {
+        await client.close().catch(() => {});
+        throw err;
+      }
+    }
     const entry: PoolEntry = {
       client,
+      startupRevision: startup?.revision,
       poolKey,
       leaseCount: 0, // doSpawn claims the admitted acquire before publishing
       leaseGeneration: 0,
       lastUsedAt: Date.now(),
-      state: 'initializing',
+      state: 'ready',
       idleTimer: null,
     };
-    try {
-      await client.initialize();
-    } catch (err) {
-      await client.close().catch(() => {});
-      throw err;
-    }
-    entry.state = 'ready';
     log.info({ poolKey }, 'ACP process spawned (cold start)');
     return entry;
   }

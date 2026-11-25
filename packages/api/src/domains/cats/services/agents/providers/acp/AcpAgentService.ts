@@ -19,7 +19,7 @@ import { createAcpPermissionHandler } from './permissions/acp-permission-interac
  *     if the session is gone (process restarted, evicted, etc.).
  *   - 4-window abort coverage (pre-invoke, post-newSession, post-yield, during-prompt)
  *   - Failure classification: init_failure / prompt_failure / model_capacity / mcp_pollution / stream_idle_stall / turn_budget_exceeded
- *   - System prompt: prepended to prompt text (ACP agents have no system prompt flag)
+ *   - L0: native for supported DSH Desktop and AGY, user prefix for generic ACP
  */
 
 import { type CatId, type ClientId, catRegistry } from '@cat-cafe/shared';
@@ -43,6 +43,7 @@ import type {
   PreparedProviderRequestV1,
 } from '../../../types.js';
 import { agentServiceGeneration } from '../../registry/AgentRegistry.js';
+import { compileL0ViaSubprocess } from '../l0-compiler.js';
 import {
   type AcpCapacitySignal,
   type AcpClient,
@@ -56,6 +57,7 @@ import {
 import {
   type AcpLease,
   type AcpPoolClient,
+  type AcpPoolStartup,
   type AcpProcessPool,
   DEFAULT_ACP_IDLE_TTL_MS,
   type PoolKey,
@@ -182,6 +184,7 @@ export type CreateAcpMemberClient = (
 export interface AcpAgentServiceConfig {
   /** Factory admitted the reviewed Desktop turn bridge for this pooled carrier. */
   dshTurnInput?: boolean;
+  dshL0Startup?: (body: string) => AcpPoolStartup;
   executionApproval?: 'auto' | 'ask_user';
   defaultPermissionDecision?: 'allow' | 'reject';
   /** Factory-verified installed native DSH, separate from ordinary pooled sessions. */
@@ -256,6 +259,7 @@ export class AcpAgentService implements AgentService {
   private readonly nativeDsh?: DshNativeLaunch;
   private readonly createStdioClient?: CreateAcpMemberClient;
   private readonly dshTurnInput: boolean;
+  private readonly dshL0Startup?: AcpAgentServiceConfig['dshL0Startup'];
   private readonly nativeKimi?: KimiNativeLaunch;
   private readonly antigravity?: AgyAcpConfig;
   readonly catId: CatId;
@@ -299,6 +303,7 @@ export class AcpAgentService implements AgentService {
 
   constructor(config: AcpAgentServiceConfig) {
     this.dshTurnInput = config.dshTurnInput === true;
+    this.dshL0Startup = config.dshL0Startup;
     this.nativeDsh = config.nativeDsh;
     this.createStdioClient = config.createStdioClient;
     this.nativeKimi = config.nativeKimi;
@@ -372,7 +377,7 @@ export class AcpAgentService implements AgentService {
   }
 
   injectsL0Natively(): boolean {
-    return Boolean(this.antigravity);
+    return Boolean(this.antigravity || this.dshL0Startup);
   }
 
   supportsToolExecutionPolicy(policy: import('../../../types.js').ToolExecutionPolicy): boolean {
@@ -622,6 +627,8 @@ export class AcpAgentService implements AgentService {
         : undefined,
     };
     let lease: AcpLease | null = null;
+    let dshL0: string | undefined;
+    let startup: AcpPoolStartup | undefined;
     let invokeServers: AcpMcpServer[];
     let pluginMcpCurrentness: AgentServiceOptions['frozenAcpMcpCurrentness'];
     let preparingMcp = true;
@@ -643,7 +650,21 @@ export class AcpAgentService implements AgentService {
       }
       options?.signal?.throwIfAborted();
       preparingMcp = false;
-      lease = await this.pool.acquire(this.poolKey, { sessionId: options?.sessionId });
+      if (this.dshL0Startup) {
+        dshL0 = await compileL0ViaSubprocess({
+          catId: this.catId,
+          userId: options?.callbackEnv?.CAT_CAFE_USER_ID ?? options?.auditContext?.userId,
+          frozenInput: options?.frozenL0Input,
+          requireFrozenInput: true,
+        });
+        if (!dshL0.trim()) throw new Error('DSH Desktop canonical L0 is empty');
+        options?.signal?.throwIfAborted();
+        startup = this.dshL0Startup(dshL0);
+      }
+      lease = await this.pool.acquire(this.poolKey, {
+        sessionId: options?.sessionId,
+        ...(startup ? { startup } : {}),
+      });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       const errorCode = options?.signal?.aborted ? 'prompt_failure' : preparingMcp ? 'mcp_pollution' : 'init_failure';
@@ -968,7 +989,7 @@ export class AcpAgentService implements AgentService {
             }
           }
         } catch (err) {
-          if (agy || err instanceof AcpSessionBindingError || options?.signal?.aborted) throw err;
+          if (agy || dshL0 || err instanceof AcpSessionBindingError || options?.signal?.aborted) throw err;
           // The existing resume -> fresh fallback uses the same one-shot budget.
           initializationRecoveryUsed = true;
           const unavailable = removeUnavailablePluginMcp();
@@ -1151,19 +1172,20 @@ export class AcpAgentService implements AgentService {
         return;
       }
 
-      // Prepend system prompt (ACP agents have no system prompt flag).
+      // Generic ACP uses the user prefix; native adapters already supply L0.
       // Any resumed turn that had to create a fresh session lost the identity it
       // expected session memory to carry, so restore the fallback exactly once.
       const restoresResumeIdentity = resumeDisposition === 'load_failed_fresh' || resumeDisposition === 'sealed_fresh';
       const fallbackSystemPrompt =
         restoresResumeIdentity && options?.resumeFallbackSystemPrompt ? options.resumeFallbackSystemPrompt : undefined;
-      const effectivePrompt = agy
-        ? prompt
-        : options?.systemPrompt
-          ? `${options.systemPrompt}\n\n${prompt}`
-          : fallbackSystemPrompt
-            ? `${fallbackSystemPrompt}\n\n${prompt}`
-            : prompt;
+      const effectivePrompt =
+        agy || dshL0
+          ? prompt
+          : options?.systemPrompt
+            ? `${options.systemPrompt}\n\n${prompt}`
+            : fallbackSystemPrompt
+              ? `${fallbackSystemPrompt}\n\n${prompt}`
+              : prompt;
 
       // Window 4: onAbort listener covers the duration of promptStream
       // Kimi's cause must be a record appended after this boundary, not a clock guess.
@@ -1187,7 +1209,11 @@ export class AcpAgentService implements AgentService {
             ...(busyAttempt > 0 ? { boundaryReason: 'provider_busy' as const } : {}),
             message: Object.freeze({ body: effectivePrompt }),
             nativeInstructions: Object.freeze(
-              agy ? [{ body: agy.body, injectionDecision: 'antigravity_native_system_append' }] : [],
+              agy
+                ? [{ body: agy.body, injectionDecision: 'antigravity_native_system_append' }]
+                : dshL0
+                  ? [{ body: dshL0, injectionDecision: 'dsh_native_system_persona_prefix' }]
+                  : [],
             ),
             runtime: Object.freeze({
               provider: this.providerName,
@@ -1330,7 +1356,8 @@ export class AcpAgentService implements AgentService {
       // Detect this and retry with a fresh session so the cat isn't silently dead.
       const promptElapsedMs = Date.now() - promptStreamStartedAt;
       const RESUME_EMPTY_THRESHOLD_MS = 3_000;
-      if (agy && eventCount === 0) throw new Error('AGY ACP returned an empty turn; no automatic replay was attempted');
+      if ((agy || dshL0) && eventCount === 0)
+        throw new Error(`${agy ? 'AGY' : 'DSH Desktop'} ACP returned an empty turn; no automatic replay was attempted`);
       if (resumeDisposition === 'resumed' && eventCount === 0 && promptElapsedMs < RESUME_EMPTY_THRESHOLD_MS) {
         log.warn(
           { ...ctx, sessionId, promptElapsedMs },
@@ -1650,7 +1677,7 @@ export class AcpAgentService implements AgentService {
         }
       }
       try {
-        if (isInvocationBoundMcpLaunch(options?.callbackEnv) && sessionId) {
+        if ((dshL0 || isInvocationBoundMcpLaunch(options?.callbackEnv)) && sessionId) {
           try {
             await lease.closeTurn(sessionId);
           } catch (err) {
@@ -1658,7 +1685,7 @@ export class AcpAgentService implements AgentService {
             // any active peers drain. Cleanup must not rewrite the turn result.
             log.warn(
               { ...ctx, sessionId, err: err instanceof Error ? err.message : String(err) },
-              'ACP turn-bound session cleanup failed; carrier draining',
+              'ACP session cleanup failed; carrier draining',
             );
           }
         } else if (this.protocolAdapter === 'icode' && sessionId) {
