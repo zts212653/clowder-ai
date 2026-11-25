@@ -573,7 +573,12 @@ export function createDormantPluginRuntimeComposition(
           : {}),
         ...(options.members ? { members: options.members } : {}),
         ...(options.runtimeInfo ? { runtimeInfo: options.runtimeInfo } : {}),
-        ...(options.conversationStorage ? { conversationStorage: options.conversationStorage } : {}),
+        ...(options.conversationStorage && options.threadOwnerUserId
+          ? {
+              conversationStorage: options.conversationStorage,
+              conversationStorageOwnerUserId: options.threadOwnerUserId,
+            }
+          : {}),
         ...(options.memberSessions && options.threadOwnerUserId
           ? {
               memberSessions: (assertCurrent: () => Promise<void>) =>

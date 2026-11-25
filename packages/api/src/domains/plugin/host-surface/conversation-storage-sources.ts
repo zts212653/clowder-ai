@@ -1,7 +1,9 @@
 ﻿import { lstat, readdir } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
+import { z } from 'zod';
 import { collectThreadMessageArtifacts } from '../../cats/services/agents/routing/thread-artifacts-aggregator.js';
+import type { TranscriptReader } from '../../cats/services/session/TranscriptReader.js';
 import type { IMessageStore } from '../../cats/services/stores/ports/MessageStore.js';
 import type { ISessionChainStore } from '../../cats/services/stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../../cats/services/stores/ports/ThreadStore.js';
@@ -37,6 +39,7 @@ interface SourcesInput {
   threads: Pick<IThreadStore, 'list'>;
   messages: Pick<IMessageStore, 'getByThread' | 'getByThreadBefore'>;
   sessions: Pick<ISessionChainStore, 'getChainByThread'>;
+  transcriptReader?: Pick<TranscriptReader, 'readDigest'>;
   transcriptDir: string;
   uploadDir: string;
   connectorMediaDir: string;
@@ -116,6 +119,17 @@ export function createConversationStorageSourceReader(input: SourcesInput) {
         const native = session.hostExecutionBoundary;
         if (native?.accountStateRoot && isNativeProvider(native.clientId))
           addNativeHome(native.clientId, native.accountStateRoot);
+        if (input.transcriptReader && session.status === 'sealed') {
+          const digest = await input.transcriptReader.readDigest(session.id, threadId, session.catId);
+          const touches = digestFiles.safeParse(digest?.filesTouched);
+          if (touches.success) {
+            for (const file of touches.data) {
+              if (!file.ops.includes('create') && !file.ops.includes('edit')) continue;
+              const path = fileUnderWorkspace(session.workingDirectory ?? thread.projectPath, file.path);
+              if (path) files.push({ path, category: 'work', threadId });
+            }
+          }
+        }
       }
 
       for (const path of thread.threadMetadata?.worktrees ?? []) await addWorktree(path, threadId);
@@ -123,13 +137,10 @@ export function createConversationStorageSourceReader(input: SourcesInput) {
         const path = localAttachment(artifact.url, input);
         if (path) files.push({ path, category: 'attachment', threadId });
       }
-      if (!isDirectoryBelowRoot(thread.projectPath)) continue;
       for (const entry of thread.threadMemory?.recentArtifacts ?? []) {
         if (entry.type !== 'file') continue;
-        const path = resolve(thread.projectPath, entry.ref);
-        const rel = relative(thread.projectPath, path);
-        if (rel && !isAbsolute(rel) && rel !== '..' && !rel.startsWith('..' + sep))
-          files.push({ path, category: 'work', threadId });
+        const path = fileUnderWorkspace(thread.projectPath, entry.ref);
+        if (path) files.push({ path, category: 'work', threadId });
       }
     }
 
@@ -166,6 +177,15 @@ function isNativeProvider(client: string): client is keyof typeof nativeLocation
 
 function isDirectoryBelowRoot(path: string): boolean {
   return isAbsolute(path) && resolve(path) !== parse(resolve(path)).root && !path.startsWith('\\\\');
+}
+
+const digestFiles = z.array(z.object({ path: z.string(), ops: z.array(z.string()) }));
+
+function fileUnderWorkspace(root: string, file: string) {
+  if (!isDirectoryBelowRoot(root)) return undefined;
+  const path = resolve(root, file);
+  const rel = relative(root, path);
+  return rel && !isAbsolute(rel) && rel !== '..' && !rel.startsWith('..' + sep) ? path : undefined;
 }
 
 function directoryName(name: string): boolean {

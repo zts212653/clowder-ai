@@ -5775,6 +5775,7 @@ async function initializeApi(
       threads: threadStore,
       messages: messageStore,
       sessions: sessionChainStore,
+      transcriptReader,
       transcriptDir: transcriptDataDir,
       uploadDir: getDefaultUploadDir(process.env.UPLOAD_DIR),
       connectorMediaDir: getDefaultConnectorMediaDir(process.env.CONNECTOR_MEDIA_DIR),

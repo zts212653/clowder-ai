@@ -37,6 +37,7 @@ interface Deps {
   readonly conversationStorage?: (
     signal: AbortSignal,
   ) => Promise<import('./conversation-storage-sources.js').ConversationStorageSources>;
+  readonly conversationStorageOwnerUserId?: string;
   readonly memberSessions?: (assertCurrent: () => Promise<void>) => PluginNeutralHost['memberSessions'];
   readonly collectiveMaterialSource?: CollectiveMaterialSourceHolder;
   readonly collectiveArtifactOwner?: CollectiveArtifactOwnerHolder;
@@ -127,11 +128,16 @@ export async function createPluginNeutralHost(deps: Deps): Promise<PluginNeutral
 
 function conversationStorageFor(pluginId: string, deps: Deps, assertCurrent: () => Promise<void>) {
   const read = deps.conversationStorage;
-  if (pluginId !== 'official.storage-governance' || !read || !deps.activationSignal) return undefined;
+  const ownerUserId = deps.conversationStorageOwnerUserId;
+  if (pluginId !== 'official.storage-governance' || !read || !ownerUserId) return undefined;
   return Object.freeze({
     async startRead() {
       const owner = currentPluginOwnerRequestContext(deps.pluginInstanceId);
-      if (owner?.requestIdentity?.method !== 'POST' || owner.requestIdentity.declaredPath !== 'scan')
+      if (
+        owner?.userId !== ownerUserId ||
+        owner.requestIdentity?.method !== 'POST' ||
+        owner.requestIdentity.declaredPath !== 'scan'
+      )
         refuse('Conversation storage requires an authenticated owner scan request');
       await assertCurrent();
       await owner.assertCurrent();
