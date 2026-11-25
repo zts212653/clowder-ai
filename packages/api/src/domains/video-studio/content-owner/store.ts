@@ -187,6 +187,12 @@ export class ProjectContentOwnerStore {
     }
   }
 
+  async *retainedThreadStorageDirectories(ownerUserId: string, threadId: string) {
+    for await (const { contentRef } of this.retainedThreadMediaHeads(ownerUserId, threadId)) {
+      yield this.contentRoot(contentRef);
+    }
+  }
+
   private async readIndexedState(ref: string) {
     const state = await this.readState(ref);
     if (state) return state;

@@ -8,6 +8,7 @@ import { materializeFilesTouched, recordFilesTouched } from '../../cats/services
 import type { IMessageStore } from '../../cats/services/stores/ports/MessageStore.js';
 import type { ISessionChainStore } from '../../cats/services/stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../../cats/services/stores/ports/ThreadStore.js';
+import { ProjectContentOwnerStore } from '../../video-studio/content-owner/store.js';
 import { readGitWorktreeList } from '../../workspace/git-worktree-probe.js';
 
 type Category =
@@ -37,7 +38,7 @@ export interface ConversationStorageSources {
 
 interface SourcesInput {
   ownerUserId: string;
-  threads: Pick<IThreadStore, 'list'>;
+  threads: Pick<IThreadStore, 'list' | 'listDeleted'>;
   messages: Pick<IMessageStore, 'getByThread' | 'getByThreadBefore'>;
   sessions: Pick<ISessionChainStore, 'getChainByThread'>;
   transcriptReader?: Pick<TranscriptReader, 'readDigest' | 'scanEvents' | 'getSessionDir'>;
@@ -54,6 +55,7 @@ interface SourcesInput {
 }
 
 export function createConversationStorageSourceReader(input: SourcesInput) {
+  const works = new ProjectContentOwnerStore(input.dataDir);
   return async (signal: AbortSignal): Promise<ConversationStorageSources> => {
     const transcripts = join(input.transcriptDir, 'threads');
     const roots: StorageSource[] = [
@@ -115,7 +117,11 @@ export function createConversationStorageSourceReader(input: SourcesInput) {
       if (input.nativeHistoryRoot) addNativeHome(provider, join(input.nativeHistoryRoot, provider));
     }
 
-    const threads = await input.threads.list(input.ownerUserId, { signal });
+    const [active, retained] = await Promise.all([
+      input.threads.list(input.ownerUserId, { signal }),
+      input.threads.listDeleted(input.ownerUserId),
+    ]);
+    const threads = [...new Map([...active, ...retained].map((thread) => [thread.id, thread])).values()];
     for (const thread of threads) {
       signal.throwIfAborted();
       const threadId = thread.id;
@@ -151,6 +157,19 @@ export function createConversationStorageSourceReader(input: SourcesInput) {
       }
 
       for (const path of thread.threadMetadata?.worktrees ?? []) await addWorktree(path, threadId);
+      try {
+        for await (const path of works.retainedThreadStorageDirectories(input.ownerUserId, threadId)) {
+          signal.throwIfAborted();
+          roots.push({ path, category: 'work', threadId });
+        }
+      } catch {
+        signal.throwIfAborted();
+        omissions.push({
+          path: join(input.dataDir, 'projects', 'content-owner-v1'),
+          reason: 'work-attribution-unavailable',
+          count: 1,
+        });
+      }
       for (const artifact of artifacts) {
         const path = localAttachment(artifact.url, input);
         if (path) files.push({ path, category: 'attachment', threadId });
