@@ -278,7 +278,10 @@ function bindPluginSpaces() {
   };
   VM.ext = function () {
     if (navArg('pluginId')) S.extSel = ownerPluginId(navArg('pluginId'));
-    if (!loaded) return { load: load, q: S.extQuery || '', scope: S.extScope || 'all', browserGroups: [] };
+    if (!loaded) return {
+      load: load, q: S.extQuery || '', scope: S.extScope || 'all',
+      counts: { all: 0, attention: 0, installed: 0, available: 0 }, browserGroups: [],
+    };
     const query = S.extQuery || '';
     const matches = pluginRows().filter(function (plugin) {
       return (plugin.displayName + ' ' + plugin.pluginId).toLowerCase().indexOf(query.toLowerCase()) >= 0;

@@ -85,6 +85,13 @@ it('projects package descriptions, documentation and provided capabilities witho
   });
   runInContext(readFileSync('public/pdl-app/plugins.js', 'utf8'), context);
   runInContext('bindPluginSpaces()', context);
+  const emptyCounts = { all: 0, attention: 0, installed: 0, available: 0 };
+  expect(runInContext('VM.ext()', context)).toMatchObject({ load: 'loading', counts: emptyCounts, browserGroups: [] });
+
+  context.chatPort.action.mockRejectedValueOnce(new Error('Inventory unavailable'));
+  await starts.data[0]();
+  expect(runInContext('VM.ext()', context)).toMatchObject({ load: 'error', counts: emptyCounts, browserGroups: [] });
+
   await starts.data[0]();
   const model = runInContext('VM.ext()', context);
   expect(model.groups[0]).toMatchObject({ kind: 'installed' });
