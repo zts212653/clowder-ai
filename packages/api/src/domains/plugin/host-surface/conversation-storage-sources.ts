@@ -19,6 +19,7 @@ type Category =
   | 'git'
   | 'database'
   | 'native-session'
+  | 'archive'
   | 'temp'
   | 'log';
 interface StorageSource {
@@ -46,6 +47,7 @@ interface SourcesInput {
   uploadDir: string;
   connectorMediaDir: string;
   dataDir: string;
+  workspaceRoot?: string;
   logDir: string;
   nativeHomes: Partial<Record<NativeProvider, string>>;
   nativeHistoryRoot?: string;
@@ -55,26 +57,36 @@ interface SourcesInput {
 }
 
 export function createConversationStorageSourceReader(input: SourcesInput) {
-  const works = new ProjectContentOwnerStore(input.dataDir);
+  const workspaceData = input.workspaceRoot ? join(input.workspaceRoot, '.cat-cafe') : input.dataDir;
+  const workData = [...new Set([input.dataDir, workspaceData].map((path) => resolve(path)))].map((path) => ({
+    path: join(path, 'projects', 'content-owner-v1'),
+    store: new ProjectContentOwnerStore(path),
+  }));
   return async (signal: AbortSignal): Promise<ConversationStorageSources> => {
     const transcripts = join(input.transcriptDir, 'threads');
     const roots: StorageSource[] = [
       { path: transcripts, category: 'transcript', optional: true },
       { path: input.uploadDir, category: 'attachment', optional: true },
       { path: input.connectorMediaDir, category: 'attachment', optional: true },
-      { path: join(input.dataDir, 'projects', 'content-owner-v1'), category: 'work', optional: true },
+      ...workData.map(({ path }) => ({ path, category: 'work' as const, optional: true })),
       { path: join(input.dataDir, 'collaborative-content'), category: 'database', optional: true },
       { path: join(input.dataDir, 'redis'), category: 'database', optional: true },
       { path: join(dirname(input.transcriptDir), 'redis'), category: 'database', optional: true },
       { path: input.logDir, category: 'log', optional: true },
+      { path: join(input.dataDir, 'redis-backups'), category: 'archive', optional: true },
+      { path: join(input.dataDir, 'native-sessions'), category: 'archive', optional: true },
     ];
     const files: StorageSource[] = [];
-    for (const path of input.databasePaths ?? []) {
+    for (const path of [
+      ...(input.databasePaths ?? []),
+      join(input.dataDir, 'listen-mode.sqlite'),
+      join(input.dataDir, 'workspace', 'writebacks.sqlite'),
+    ]) {
       if (!isAbsolute(path)) continue;
       for (const suffix of ['', '-wal', '-shm'])
         files.push({ path: path + suffix, category: 'database', optional: true });
     }
-    if (input.cliArchiveDir) roots.push({ path: input.cliArchiveDir, category: 'log', optional: true });
+    if (input.cliArchiveDir) roots.push({ path: input.cliArchiveDir, category: 'archive', optional: true });
     const nativeSessions: ConversationStorageSources['nativeSessions'] = [];
     const omissions: ConversationStorageSources['omissions'] = [];
     const transcriptReader = input.transcriptReader;
@@ -115,6 +127,16 @@ export function createConversationStorageSourceReader(input: SourcesInput) {
       const home = input.nativeHomes[provider];
       if (home) addNativeHome(provider, home);
       if (input.nativeHistoryRoot) addNativeHome(provider, join(input.nativeHistoryRoot, provider));
+    }
+    const desktopDsh = join(workspaceData, 'dsh-desktop');
+    const profiles = await readdir(desktopDsh, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') omissions.push({ path: desktopDsh, reason: 'unreadable', count: 1 });
+      return [];
+    });
+    for (const profile of profiles.filter((entry) => entry.isDirectory())) {
+      const home = join(desktopDsh, profile.name);
+      for (const [directory, category] of nativeLocations.dsh.slice(0, 2))
+        roots.push({ path: join(home, directory), category, optional: true });
     }
 
     const [active, retained] = await Promise.all([
@@ -157,18 +179,16 @@ export function createConversationStorageSourceReader(input: SourcesInput) {
       }
 
       for (const path of thread.threadMetadata?.worktrees ?? []) await addWorktree(path, threadId);
-      try {
-        for await (const path of works.retainedThreadStorageDirectories(input.ownerUserId, threadId)) {
+      for (const work of workData) {
+        try {
+          for await (const path of work.store.retainedThreadStorageDirectories(input.ownerUserId, threadId)) {
+            signal.throwIfAborted();
+            roots.push({ path, category: 'work', threadId });
+          }
+        } catch {
           signal.throwIfAborted();
-          roots.push({ path, category: 'work', threadId });
+          omissions.push({ path: work.path, reason: 'work-attribution-unavailable', count: 1 });
         }
-      } catch {
-        signal.throwIfAborted();
-        omissions.push({
-          path: join(input.dataDir, 'projects', 'content-owner-v1'),
-          reason: 'work-attribution-unavailable',
-          count: 1,
-        });
       }
       for (const artifact of artifacts) {
         const path = localAttachment(artifact.url, input);
@@ -202,7 +222,7 @@ const nativeLocations = {
   ],
   claude: [
     ['projects', 'native-session'],
-    ['file-history', 'work'],
+    ['file-history', 'native-session'],
   ],
   dsh: [
     ['sessions', 'native-session'],
@@ -212,9 +232,10 @@ const nativeLocations = {
   ],
   kimi: [
     ['sessions', 'native-session'],
-    ['file-history', 'work'],
+    ['file-history', 'native-session'],
   ],
   pi: [['sessions', 'native-session']],
+  gemini: [['.gemini/antigravity/conversations', 'native-session']],
 } as const;
 
 type NativeProvider = keyof typeof nativeLocations;
@@ -290,6 +311,7 @@ export function configuredNativeStorageHomes() {
     dsh: process.env.DSH_HOME || join(homedir(), '.dsh'),
     kimi: process.env.KIMI_CODE_HOME || join(homedir(), '.kimi-code'),
     pi: process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent'),
+    gemini: process.env.GEMINI_CLI_HOME || homedir(),
   };
 }
 

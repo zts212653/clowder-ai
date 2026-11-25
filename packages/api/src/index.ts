@@ -5791,10 +5791,18 @@ async function initializeApi(
       uploadDir: getDefaultUploadDir(process.env.UPLOAD_DIR),
       connectorMediaDir: getDefaultConnectorMediaDir(process.env.CONNECTOR_MEDIA_DIR),
       dataDir: process.env.CAT_CAFE_DATA_DIR ?? join(resolveActiveProjectRoot(), '.cat-cafe'),
+      workspaceRoot: resolveActiveProjectRoot(),
       logDir: LOG_DIR_PATH,
       nativeHomes: configuredNativeStorageHomes(),
       nativeHistoryRoot: join(homedir(), 'native-history'),
-      databasePaths: [process.env.EVIDENCE_DB ?? resolve(repoRoot, 'evidence.sqlite')],
+      databasePaths: [
+        process.env.EVIDENCE_DB ?? resolve(repoRoot, 'evidence.sqlite'),
+        process.env.GLOBAL_KNOWLEDGE_DB ??
+          join(
+            process.env.CAT_CAFE_DATA_DIR ?? join(resolveActiveProjectRoot(), '.cat-cafe'),
+            'global_knowledge.sqlite',
+          ),
+      ],
       cliArchiveDir: resolve(process.env.CLI_RAW_ARCHIVE_DIR ?? './data/cli-raw-archive'),
       tempDir: conversationStorageTempDir(),
     }),
