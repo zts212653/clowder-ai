@@ -234,7 +234,9 @@ export class AcpProcessPool {
         const owner = this.sessionOwners.get(sessionKey);
         const reusableOwner = owner && !owner.turnCloseFailed && owner.state === 'ready' && owner.client.isAlive;
         if (reusableOwner && owner.startupRevision !== startup?.revision && owner.leaseCount > 0)
-          throw new Error('ACP session is active with an earlier process configuration');
+          throw new Error(
+            'ACP session is still running with its previous configuration; retry after the active turn finishes',
+          );
         if (reusableOwner && owner.startupRevision === startup?.revision) {
           if (this.rejectActiveSessionLease && owner.leaseCount > 0)
             throw new Error('ACP session has an active lease; refusing concurrent ownership');

@@ -43,9 +43,9 @@ export function resolveDshDesktopLaunch(command: string, args: readonly string[]
   }
 }
 
-/** Known Desktop profiles supporting the native startup persona patch and persisted ACP resume. */
-export function supportsDshDesktopL0(command: string, args: readonly string[]): boolean {
-  if (process.platform !== 'win32' || args[0] !== '--profile' || args[1] !== 'acp') return false;
+/** Only report compatibility for the standard Windows DSH Desktop ACP launch. */
+export function dshDesktopL0Compatibility(command: string, args: readonly string[]) {
+  if (process.platform !== 'win32' || args[0] !== '--profile' || args[1] !== 'acp') return undefined;
   // Onboarding may save prior configuration overlays. Keep them in order and
   // limit this path to the standard ACP profile and its explicit patch files.
   const patches = args.slice(2);
@@ -53,18 +53,22 @@ export function supportsDshDesktopL0(command: string, args: readonly string[]): 
     patches.length % 2 !== 0 ||
     !patches.every((arg, index) => (index % 2 === 0 ? arg === '--patch' : isAbsolute(arg)))
   )
-    return false;
+    return undefined;
   const plan = resolveDshDesktopLaunch(command, args);
-  if (!plan) return false;
+  if (!plan) return undefined;
   try {
     const metadata = z
       .object({ desktopVersion: z.string() })
       .parse(
         JSON.parse(readFileSync(join(dirname(plan.command), 'resources/runtime/primary-runtime/runtime.json'), 'utf8')),
       );
-    return metadata.desktopVersion === '0.2.2-rc.5' || metadata.desktopVersion === '0.2.3-alpha.2';
+    const { desktopVersion } = metadata;
+    return {
+      desktopVersion,
+      supported: desktopVersion === '0.2.2-rc.5' || desktopVersion === '0.2.3-alpha.2',
+    };
   } catch {
-    return false;
+    return { supported: false };
   }
 }
 

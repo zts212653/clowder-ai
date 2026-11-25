@@ -27,7 +27,7 @@ test('ACP only reuses a carrier with the requested startup revision and keeps th
     pool.rememberSession(key, 'old-session', original);
     await assert.rejects(
       pool.acquire(key, { sessionId: 'old-session', startup: startup('l0-v2') }),
-      /active with an earlier process configuration/,
+      /retry after the active turn finishes/,
     );
     await original.release();
     const warm = await pool.acquire(key, { sessionId: 'old-session', startup: startup('l0-v1') });

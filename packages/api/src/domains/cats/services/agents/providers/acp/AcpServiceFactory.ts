@@ -22,7 +22,7 @@ import { inspectKimiNativeLaunch } from '../../../../../../config/native-account
 import { resolveEffectiveOpenCodeModel } from '../../../../../../config/opencode-model.js';
 import { invalidateCliCommand, resolveCliCommandOrBare } from '../../../../../../utils/cli-resolve.js';
 import { resolveWindowsSpawnPlan, type WindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.js';
-import { supportsDshDesktopL0 } from '../../../../../../utils/dsh-desktop-launch.js';
+import { dshDesktopL0Compatibility } from '../../../../../../utils/dsh-desktop-launch.js';
 import { saveSpan } from '../../../../../../utils/member-save-diagnostics.js';
 import type { AgentRegistrationFailure } from '../../registry/AgentServiceUnavailableError.js';
 import { ExecutionAdmissionConflict, StaleServiceSourceConflict } from '../../registry/AgentServiceUnavailableError.js';
@@ -540,20 +540,28 @@ export async function createAcpServiceForConfig(
     ensureAcpPool(effectiveInput, verified, spawn, preparedEnv, preparedSpawn, construction),
   );
 
-  const nativeDshL0 = acpConfig.transport !== 'httpstream' && supportsDshDesktopL0(selectedCommand, originalArgs);
+  const desktopL0 =
+    acpConfig.transport === 'httpstream' ? undefined : dshDesktopL0Compatibility(selectedCommand, originalArgs);
+  if (desktopL0 && !desktopL0.supported) {
+    input.log.warn(
+      { catId, desktopVersion: desktopL0.desktopVersion },
+      'DSH Desktop version has not been qualified for native L0; using the ACP user-message prefix',
+    );
+  }
   // #712 P1-1: pass whitelist — MCP resolution happens at invoke time in
   // AcpAgentService so capability toggles take effect without registry rebuild.
   const service = new AcpAgentService({
     createStdioClient: input.createClient,
     ...(turnPatch ? { dshTurnInput: true } : {}),
     ...(nativeDsh ? { nativeDsh } : {}),
-    ...(nativeDshL0
+    ...(desktopL0?.supported
       ? {
           dshL0Startup: (body) =>
             createDshL0Startup({
               body,
               cwd: () => verified.verifyCwd(preparedSpawn.command, [...preparedSpawn.args], preparedEnv),
-              assertLaunch: () => supportsDshDesktopL0(selectedCommand, originalArgs),
+              assertLaunch: () =>
+                dshDesktopL0Compatibility(selectedCommand, originalArgs)?.desktopVersion === desktopL0.desktopVersion,
               createClient,
             }),
         }

@@ -55,40 +55,43 @@ function prepared() {
   });
 }
 
-it('records the exact cold-start capsule only after the provider observes that native request', async () => {
-  const deliveries = [];
-  const { recorder } = fixture({
-    profileRepository: { readCapsule: () => ({ content: '先讲结果。', revision: 'sha256:fixture-capsule' }) },
-    onProfileOpeningObserved: async (delivery) => deliveries.push(delivery),
-    snapshot: () => ({
-      continuity: { mode: 'cold', contextEpoch: 1, transition: 'fresh', capability: 'exact', compactionRefs: [] },
-      messageSourceRefs: [],
-      nativeInstructionSourceRefs: [],
-      presentations: [],
-    }),
+for (const injectionDecision of ['native_l0_compiled', 'dsh_native_system_persona_prefix']) {
+  it(`records the exact cold-start capsule only after provider observation (${injectionDecision})`, async () => {
+    const deliveries = [];
+    const { recorder } = fixture({
+      profileRepository: { readCapsule: () => ({ content: '先讲结果。', revision: 'sha256:fixture-capsule' }) },
+      onProfileOpeningObserved: async (delivery) => deliveries.push(delivery),
+      snapshot: () => ({
+        continuity: { mode: 'cold', contextEpoch: 1, transition: 'fresh', capability: 'exact', compactionRefs: [] },
+        messageSourceRefs: [],
+        nativeInstructionSourceRefs: [],
+        presentations: [],
+      }),
+    });
+    const commit = await recorder.recordPrepared(
+      {
+        ...prepared(),
+        nativeInstructions: [{ body: '身份\n## 主人画像\n\n先讲结果。', injectionDecision }],
+      },
+      { attempt: 1 },
+    );
+    assert.equal(deliveries.length, 0, 'assembly is not delivery');
+    await recorder.recordObserved(commit, { evidenceRef: 'provider-turn-accepted' });
+    assert.equal(deliveries.length, 1);
+    assert.equal(deliveries[0].sourceRevision, 'sha256:fixture-capsule');
+    assert.equal(deliveries[0].scope.ownerUserId, 'user-1');
+    assert.equal(deliveries[0].scope.invocationId, 'inv-1');
+    await recorder.recordObserved(commit, { evidenceRef: 'provider-turn-accepted' });
+    assert.equal(deliveries.length, 1);
   });
-  const commit = await recorder.recordPrepared(
-    {
-      ...prepared(),
-      nativeInstructions: [{ body: '身份\n## 主人画像\n\n先讲结果。', injectionDecision: 'native_l0_compiled' }],
-    },
-    { attempt: 1 },
-  );
-  assert.equal(deliveries.length, 0, 'assembly is not delivery');
-  await recorder.recordObserved(commit, { evidenceRef: 'provider-turn-accepted' });
-  assert.equal(deliveries.length, 1);
-  assert.equal(deliveries[0].sourceRevision, 'sha256:fixture-capsule');
-  assert.equal(deliveries[0].scope.ownerUserId, 'user-1');
-  assert.equal(deliveries[0].scope.invocationId, 'inv-1');
-  await recorder.recordObserved(commit, { evidenceRef: 'provider-turn-accepted' });
-  assert.equal(deliveries.length, 1);
-});
+}
 
 it('does not invent opening delivery for a warm turn, unmatched profile bytes, or an unproven native channel', async () => {
   for (const injectionDecision of [
     'native_l0_compiled',
     'native_l0_compiled_with_signature_boundary',
     'native_agent_file_compiled',
+    'dsh_native_system_persona_prefix',
   ]) {
     for (const scenario of ['warm', 'changed-profile', 'unknown-channel', 'near-match']) {
       const deliveries = [];
