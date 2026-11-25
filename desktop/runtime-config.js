@@ -1,5 +1,22 @@
 const path = require('node:path');
 const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
+
+let windowsUserSid;
+
+function resolveInstallDataRoot(installRoot) {
+  const base = path.join(fs.realpathSync.native(installRoot), 'user-state');
+  if (fs.realpathSync.native(base).toLowerCase() !== base.toLowerCase() || !fs.statSync(base).isDirectory()) {
+    throw new Error('The installation data directory is missing or redirected');
+  }
+  windowsUserSid ??= execFileSync(
+    path.join(process.env.SystemRoot, 'System32', 'whoami.exe'),
+    ['/user', '/fo', 'csv', '/nh'],
+    { encoding: 'utf8', windowsHide: true },
+  ).match(/,"(S-1-\d+(?:-\d+)+)"/)?.[1];
+  if (!windowsUserSid) throw new Error('Cannot identify the Windows user for desktop storage');
+  return path.join(base, windowsUserSid);
+}
 
 function canonicalWithMissingSuffix(value) {
   const suffix = [];
@@ -40,7 +57,7 @@ function assertDesktopDataBoundary(instanceRoot, installRoot) {
   }
 }
 
-/** Opt-in isolated desktop instance; ordinary launches retain all historical defaults. */
+/** Resolve the install-owned profile, explicit data root, or isolated desktop identity. */
 function resolveDesktopRuntime(env = process.env, executable = process.execPath) {
   // Persisted installer identity survives upgrades launched without the original shell.
   const directory = path.dirname(executable);
@@ -64,7 +81,10 @@ function resolveDesktopRuntime(env = process.env, executable = process.execPath)
   if (instanceRoot === undefined) {
     const config = { frontendPort: 3003, apiPort: 3004, redisPort: 6399, instanceRoot: null };
     if (!hasDataMarker) return config;
-    const { dataRoot } = JSON.parse(fs.readFileSync(dataMarker, 'utf8'));
+    const { dataRoot, mode } = JSON.parse(fs.readFileSync(dataMarker, 'utf8'));
+    if (mode === 'install') {
+      return { ...config, dataRoot: resolveInstallDataRoot(installRoot), useInstallDataRoot: true };
+    }
     if (typeof dataRoot !== 'string' || !path.isAbsolute(dataRoot))
       throw new Error('Desktop data root must be absolute');
     if (!fs.existsSync(dataRoot) || !fs.statSync(dataRoot).isDirectory())

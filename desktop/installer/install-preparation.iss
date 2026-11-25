@@ -95,6 +95,8 @@ begin
   Cmd := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}') +
          '\configure-desktop-instance.ps1" -AppDir "' + AppDir + '"';
   if DataRoot <> '' then Cmd := Cmd + ' -DataRoot "' + DataRoot + '"';
+  if (ExistingInstallDir <> '') and (CompareText(ExistingInstallDir, AppDir) = 0) then
+    Cmd := Cmd + ' -ExistingInstallation';
   // PowerShell may bind the next switch as the value of an empty argument.
   if InstanceRoot <> '' then begin
     Cmd := Cmd + ' -InstanceRoot "' + InstanceRoot + '"';
