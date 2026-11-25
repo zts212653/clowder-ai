@@ -7,13 +7,13 @@ import {
   responseJudgmentIsCurrent,
 } from '../collaborative-content/artifact-review/response-judgment-return.js';
 import { reviewReturnAttempt } from '../collaborative-content/artifact-review/return-attempt.js';
+import type { ArtifactReviewService } from '../collaborative-content/artifact-review/service.js';
 import type {
   ContentReturnIntent,
   ReviewReturnIntent,
   TextModificationReturnIntent,
-} from '../collaborative-content/artifact-review/return-store.js';
-import type { ArtifactReviewService } from '../collaborative-content/artifact-review/service.js';
-import type { ArtifactReviewStore } from '../collaborative-content/artifact-review/store.js';
+} from '../collaborative-content/artifact-review/storage/return-store.js';
+import type { ArtifactReviewStore } from '../collaborative-content/artifact-review/storage/store.js';
 import { isBoundMediaModificationReturn } from '../collaborative-content/modification/bindings/media-return-binding.js';
 import {
   type MediaPublicationReturnIntent,

@@ -4,8 +4,8 @@ import type Database from 'better-sqlite3';
 import { acceptedVersionSchema } from '../artifact-review/accepted-version-response.js';
 import { ArtifactReviewError } from '../artifact-review/errors.js';
 import { assertVersionResponses } from '../artifact-review/reducer.js';
-import type { ArtifactReviewStore } from '../artifact-review/store.js';
-import { receiptReference } from '../artifact-review/store-support.js';
+import type { ArtifactReviewStore } from '../artifact-review/storage/store.js';
+import { receiptReference } from '../artifact-review/storage/store-support.js';
 import type { MediaPublicationReturnIntent } from './media-publication/media-publication-return.js';
 
 export function assertRecoveryResponse(

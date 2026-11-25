@@ -14,7 +14,7 @@ import { type AcceptedVersion, acceptedVersionSchema } from './accepted-version-
 import { ArtifactReviewError } from './errors.js';
 import { assertModificationResponseReference } from './modification-request-reference.js';
 import { appendRespondedVersion, assertVersionResponses } from './reducer.js';
-import type { ArtifactReviewStore, ReviewMutation, ReviewMutationResult } from './store.js';
+import type { ArtifactReviewStore, ReviewMutation, ReviewMutationResult } from './storage/store.js';
 
 type MediaOwner = Pick<
   PublishedMediaService,

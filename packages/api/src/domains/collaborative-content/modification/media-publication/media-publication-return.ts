@@ -1,6 +1,6 @@
 import type { ConnectorSource } from '@cat-cafe/shared';
 import type { CodexNativeImageOrigin } from '../../../cats/services/agents/providers/codex-native-image-origin.js';
-import type { ReviewReturnIntent } from '../../artifact-review/return-store.js';
+import type { ReviewReturnIntent } from '../../artifact-review/storage/return-store.js';
 import type { PublicationResponseRecovery } from '../publication-recovery-contract.js';
 
 /** Platform source, explicitly distinct from the original human decision receipt. */

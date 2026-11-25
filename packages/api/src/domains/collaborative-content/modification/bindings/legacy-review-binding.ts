@@ -2,7 +2,7 @@ import type { ContentModificationRequest } from '@cat-cafe/shared';
 import type { MediaReviewPrincipal } from '../../../video-studio/content-owner/published-media-access.js';
 import { ArtifactReviewError } from '../../artifact-review/errors.js';
 import type { ArtifactReviewService } from '../../artifact-review/service.js';
-import type { ArtifactReviewStore } from '../../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../../artifact-review/storage/store.js';
 import { cancelledModificationReplacement } from '../control/supersession.js';
 
 /** An adapter to the original inline round, never a new ledger or a reinterpretation of a ledgerRef. */

@@ -1,7 +1,7 @@
 import type { ContentModificationRecord, TurnExecutionRecord } from '@cat-cafe/shared';
 import type { IMessageStore } from '../../../cats/services/stores/ports/MessageStore.js';
-import type { ContentReturnIntent, ReviewReturnIntent } from '../../artifact-review/return-store.js';
-import type { ArtifactReviewStore } from '../../artifact-review/store.js';
+import type { ContentReturnIntent, ReviewReturnIntent } from '../../artifact-review/storage/return-store.js';
+import type { ArtifactReviewStore } from '../../artifact-review/storage/store.js';
 import { type ContentModificationJournal, modificationMessageRequestId } from '../journal.js';
 
 /** A media outbox can name Human only through the same committed journal and canonical review receipt. */

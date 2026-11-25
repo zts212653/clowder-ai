@@ -116,6 +116,12 @@ docs/
 
 增量迁移，不做一次性大搬家。
 
+### 2026-11-25：artifact-review 持久化职责分组（#2082）
+
+`domains/collaborative-content/artifact-review/storage/` 收纳现有的审核存储、审计、canonical ledger、publication generation 和 return/outbox，以及它们的存储契约与辅助函数（7 个直属 `.ts`）。父目录保留请求校验、归约和服务编排（27 → 20 个直属 `.ts`），移除对应目录例外。
+
+这是持久化与业务编排的职责分组；不改变存储格式、数据库位置、公开 API 或原有模块依赖关系。仓内消费者直接改用新路径，不增加旧路径 re-export。剩余父目录仍超过 warn=15：请求、版本校验与编排共享同一审核流程，后续再按消费者边界拆分；本次不将其宣称为已完成的架构治理。
+
 ### 执行顺序
 
 1. **先规则门禁**：CLAUDE.md/AGENTS.md 规范 + lint 脚本 + eslint-plugin-boundaries

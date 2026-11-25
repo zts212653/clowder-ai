@@ -8,7 +8,7 @@ import { commitReviewAction } from '../../artifact-review/linked-review-action.j
 import { applyArtifactReviewAction } from '../../artifact-review/reducer.js';
 import { createReviewCandidate } from '../../artifact-review/review-candidate.js';
 import type { ArtifactReviewService } from '../../artifact-review/service.js';
-import type { ArtifactReviewStore, ReviewMutation } from '../../artifact-review/store.js';
+import type { ArtifactReviewStore, ReviewMutation } from '../../artifact-review/storage/store.js';
 import type { WorkspaceContentReviewService } from '../../workspace-review/service.js';
 import { assertModificationSupersession, cancelledModificationReplacement } from '../control/supersession.js';
 import type { ModificationFileLineage } from '../file-lineage.js';

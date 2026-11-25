@@ -7,7 +7,7 @@ import {
   deriveGrowingSourceMessageRevision,
   MessageStore,
 } from '../src/domains/cats/services/stores/ports/MessageStore.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import {
   ProjectMessageCatGrants,
   type ProjectMessageTakeoverGrantPort,

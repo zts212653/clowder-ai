@@ -13,7 +13,7 @@ import type { ITaskStore } from '../../cats/services/stores/ports/TaskStore.js';
 import type { TurnExecutionSourceReadPort } from '../../cats/services/stores/ports/TurnExecutionStore.js';
 import type { EntrustedWorkLifecycleService } from '../../growing/EntrustedWorkLifecycleService.js';
 import type { MediaReviewPrincipal } from '../../video-studio/content-owner/published-media-access.js';
-import type { ArtifactReviewStore } from '../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../artifact-review/storage/store.js';
 import { ContentModificationCancellationService } from './control/cancellation-service.js';
 import { readModificationControl } from './control/control-read.js';
 import { readModificationExecution } from './execution-view.js';

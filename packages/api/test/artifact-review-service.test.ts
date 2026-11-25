@@ -13,7 +13,7 @@ import type {
 import Database from 'better-sqlite3';
 import sharp from 'sharp';
 import { ArtifactReviewService } from '../src/domains/collaborative-content/artifact-review/service.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import type { MediaReviewPrincipal } from '../src/domains/video-studio/content-owner/published-media-access.js';
 import { createReviewFixture, reviewCat, reviewHuman } from './helpers/artifact-review-fixture.js';
 

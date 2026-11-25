@@ -10,21 +10,23 @@ import {
   type WorkVersionRecord,
 } from '@cat-cafe/shared';
 import Database from 'better-sqlite3';
-import { ContentAcceptanceStore } from '../modification/acceptance-store.js';
-import { CollectiveModificationCustody } from '../modification/collective-custody.js';
-import { ContentModificationJournal } from '../modification/journal.js';
-import type { MediaPublicationReturnIntent } from '../modification/media-publication/media-publication-return.js';
-import { registerPublicationRecovery } from '../modification/publication-recovery-registration.js';
-import { ModificationTextStore } from '../modification/text/text-store.js';
-import { acceptedWorkResponseSchema, isWorkResponseIntent } from '../works/review-response-contract.js';
-import { WorkVersionStore } from '../works/version-store.js';
-import { WorkspaceContentReviewError } from '../workspace-review/errors.js';
+import { ContentAcceptanceStore } from '../../modification/acceptance-store.js';
+import { CollectiveModificationCustody } from '../../modification/collective-custody.js';
+import { ContentModificationJournal } from '../../modification/journal.js';
+import type { MediaPublicationReturnIntent } from '../../modification/media-publication/media-publication-return.js';
+import { registerPublicationRecovery } from '../../modification/publication-recovery-registration.js';
+import { ModificationTextStore } from '../../modification/text/text-store.js';
+import { acceptedWorkResponseSchema, isWorkResponseIntent } from '../../works/review-response-contract.js';
+import { WorkVersionStore } from '../../works/version-store.js';
+import { WorkspaceContentReviewError } from '../../workspace-review/errors.js';
 import {
   WorkspaceContentReviewStore,
   type WorkspaceReviewMutation,
   type WorkspaceReviewMutationResult,
-} from '../workspace-review/store.js';
-import { acceptedVersionSchema } from './accepted-version-response.js';
+} from '../../workspace-review/store.js';
+import { acceptedVersionSchema } from '../accepted-version-response.js';
+import { ArtifactReviewError } from '../errors.js';
+import { assertModificationResponseReference } from '../modification-request-reference.js';
 import { ArtifactReviewAuditStore } from './audit-store.js';
 import {
   bindExistingPublicationLedgers,
@@ -32,14 +34,12 @@ import {
   projectLinkedReview,
   serializeLinkedReview,
 } from './canonical-ledger.js';
-import { ArtifactReviewError } from './errors.js';
-import { assertModificationResponseReference } from './modification-request-reference.js';
 import { ArtifactReviewReturnStore } from './return-store.js';
 import type { PendingReviewVersion, ReviewMutation, ReviewMutationResult } from './store-contract.js';
 
 export type { PendingReviewVersion, ReviewMutation, ReviewMutationResult } from './store-contract.js';
 
-import { ArtifactReviewDirectory } from './review-directory.js';
+import { ArtifactReviewDirectory } from '../review-directory.js';
 import {
   assertReservation,
   assertReviewSuccessor,

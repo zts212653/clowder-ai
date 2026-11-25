@@ -1,7 +1,7 @@
 import type { ContentModificationRecord } from '@cat-cafe/shared';
 import { ArtifactReviewError } from '../../artifact-review/errors.js';
 import { mediaEditAnnotationId } from '../../artifact-review/media-edit-selections.js';
-import type { ArtifactReviewStore } from '../../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../../artifact-review/storage/store.js';
 
 export function modificationMediaAnnotationNamespace(requestId: string): string {
   return `modify-${requestId.slice('f309-modification-'.length)}`;

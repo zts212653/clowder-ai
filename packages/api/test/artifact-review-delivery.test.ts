@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import Database from 'better-sqlite3';
 import sharp from 'sharp';
 import { ArtifactReviewService } from '../src/domains/collaborative-content/artifact-review/service.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { ArtifactReviewReturnDispatcher } from '../src/domains/growing/ArtifactReviewReturnDispatcher.js';
 import { createLiveReviewFixture } from './helpers/artifact-review-live-fixture.js';
 

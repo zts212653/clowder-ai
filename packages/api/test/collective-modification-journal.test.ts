@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { CollectiveModificationIntent } from '@cat-cafe/shared';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 
 const intent: CollectiveModificationIntent = {
   ownerUserId: 'real-content-cafe-owner',
