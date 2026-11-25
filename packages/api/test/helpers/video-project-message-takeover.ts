@@ -5,7 +5,7 @@ import { InMemoryTurnExecutionStore } from '../../src/domains/cats/services/stor
 import { MessageStore } from '../../src/domains/cats/services/stores/ports/MessageStore.js';
 import { TaskStore } from '../../src/domains/cats/services/stores/ports/TaskStore.js';
 import { ThreadStore } from '../../src/domains/cats/services/stores/ports/ThreadStore.js';
-import { ArtifactReviewStore } from '../../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { resolveMessageTakeover } from '../../src/domains/collaborative-content/modification/message-takeover.js';
 import { ProjectMessageTakeoverService } from '../../src/domains/collaborative-content/modification/project/service.js';
 import { ContentModificationService } from '../../src/domains/collaborative-content/modification/service.js';

@@ -7,7 +7,7 @@ import {
   deriveGrowingSourceMessageRevision,
   MessageStore,
 } from '../src/domains/cats/services/stores/ports/MessageStore.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { VideoProjectMessageImporter } from '../src/domains/collaborative-content/workspace-review/project-message/import.js';
 import { adaptMessageStore } from './helpers/message-from-fixtures.js';
 import { screeningFixture } from './helpers/video-project-screening.js';

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import type { ImmutableMedia, ReviewedMediaAsset } from '@cat-cafe/shared';
 import Database from 'better-sqlite3';
-import { ArtifactReviewStore } from '../../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { WorkReviewResponseService } from '../../src/domains/collaborative-content/works/review-response.js';
 import { LivingWorkService } from '../../src/domains/collaborative-content/works/service.js';
 import { ProjectContentOwnerService } from '../../src/domains/video-studio/content-owner/service.js';

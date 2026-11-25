@@ -15,8 +15,8 @@ import {
   matchesTurnExecutionSource,
   type TurnExecutionSourceReadPort,
 } from '../../cats/services/stores/ports/TurnExecutionStore.js';
-import type { ContentReturnIntent } from '../artifact-review/return-store.js';
-import type { ArtifactReviewStore } from '../artifact-review/store.js';
+import type { ContentReturnIntent } from '../artifact-review/storage/return-store.js';
+import type { ArtifactReviewStore } from '../artifact-review/storage/store.js';
 import { isBoundMediaModificationReturn } from './bindings/media-return-binding.js';
 import { mediaPublicationProjection } from './media-publication/media-publication-return.js';
 

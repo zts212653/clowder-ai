@@ -1,7 +1,7 @@
 import type { ArtifactReview } from '@cat-cafe/shared';
 import { ArtifactReviewError } from '../../artifact-review/errors.js';
 import { currentReviewModification } from '../../artifact-review/modification-request-reference.js';
-import type { ArtifactReviewStore } from '../../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../../artifact-review/storage/store.js';
 
 export interface ModificationSupersession {
   requestId: string;

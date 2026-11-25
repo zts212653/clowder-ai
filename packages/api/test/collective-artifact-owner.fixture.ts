@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { CollectiveMarkdownOwner } from '../src/domains/collaborative-content/collective-artifact/markdown-owner.js';
 import { WorkspaceContentReviewStore } from '../src/domains/collaborative-content/workspace-review/store.js';
 import { collectiveContentScopeRef } from '../src/domains/video-studio/content-owner/collective-scope.js';
