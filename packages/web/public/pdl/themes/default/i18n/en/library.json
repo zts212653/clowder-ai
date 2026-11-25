@@ -1,6 +1,14 @@
 {
  "fold": {
-  "viewMore": "View more"
+  "viewMore": "View more",
+  "moreHtml": "{0} more"
+ },
+ "threadRow": {
+  "groupAttention": "{0} to see",
+  "meta": {
+   "pending": "Needs decision",
+   "repliedGeneric": "Replied"
+  }
  },
  "queue": {
   "targets": {

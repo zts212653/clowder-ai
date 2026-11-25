@@ -3,7 +3,7 @@ import type { IMessageStore } from '../../../cats/services/stores/ports/MessageS
 import type { ITaskStore } from '../../../cats/services/stores/ports/TaskStore.js';
 import { MediaOwnerError } from '../../../video-studio/content-owner/media-errors.js';
 import type { MediaReviewPrincipal } from '../../../video-studio/content-owner/published-media-access.js';
-import type { ArtifactReviewStore } from '../../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../../artifact-review/storage/store.js';
 import { ContentModificationJournalError } from '../journal-errors.js';
 import { assertModificationSourceAuthority } from '../request-authority.js';
 

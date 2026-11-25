@@ -5,7 +5,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { Readable } from 'node:stream';
-import { ArtifactReviewStore } from '../../dist/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../../dist/domains/collaborative-content/artifact-review/storage/store.js';
 import { LivingWorkService } from '../../dist/domains/collaborative-content/works/service.js';
 import { ProjectContentOwnerService } from '../../dist/domains/video-studio/content-owner/service.js';
 

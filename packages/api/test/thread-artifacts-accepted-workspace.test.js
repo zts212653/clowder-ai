@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import sharp from 'sharp';
 
 await import('tsx/esm');
-const { ArtifactReviewStore } = await import('../src/domains/collaborative-content/artifact-review/store.ts');
+const { ArtifactReviewStore } = await import('../src/domains/collaborative-content/artifact-review/storage/store.ts');
 const { AcceptedWorkspaceArtifactReader, projectAppliedWorkspaceReceipts } = await import(
   '../src/domains/collaborative-content/modification/accepted-workspace-artifacts.ts'
 );

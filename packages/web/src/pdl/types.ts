@@ -1,4 +1,5 @@
 export interface ChatUiState {
+  lang?: 'zh' | 'en';
   draft?: Record<string, string>;
   workspace?: Record<string, unknown>;
   sendScope?: string;
@@ -58,6 +59,8 @@ export interface ChatUiState {
     words?: string;
   } | null;
   f: Record<string, unknown>;
+  homeTitle?: string;
+  homePin?: boolean;
   runtime?: { drafts: Record<string, { values: Record<string, unknown> }> };
   modal?: {
     kind: string;

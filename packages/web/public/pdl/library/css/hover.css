@@ -21,7 +21,7 @@
   [data-swap]:hover .swap-d { opacity: 1; }
 }
 /* 停留期间标题区也晚一点再收回让出的宽度，避免图标压字 */
-.lr-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-hairline); padding-right: var(--sp-s); transition: padding-right 0s linear var(--reveal-hold); }
+.lr-main { flex: 1 1 0%; min-width: min(4em, 100%); display: flex; flex-direction: column; gap: var(--sp-hairline); padding-right: var(--sp-s); transition: padding-right 0s linear var(--reveal-hold); }
 .lr-head:hover > .lr-main { transition-delay: var(--reveal-delay); }
 /* 列表行的次行允许换行（lrow 的 wrap） */
 .lr-sub.clamp { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--sub-lines); }   /* 行模板声明 subLines：副行最多这么多行，超出省略 */

@@ -10,8 +10,8 @@ import type {
   PublishedMediaAccess,
 } from '../../../video-studio/content-owner/published-media-access.js';
 import type { WorkspaceContentSourceService } from '../../../workspace/workspace-content-source.js';
-import type { TextModificationReturnIntent } from '../../artifact-review/return-store.js';
-import type { ArtifactReviewStore } from '../../artifact-review/store.js';
+import type { TextModificationReturnIntent } from '../../artifact-review/storage/return-store.js';
+import type { ArtifactReviewStore } from '../../artifact-review/storage/store.js';
 import { assertModificationSourceAuthority } from '../request-authority.js';
 import { ModificationTextExecution } from './text-execution.js';
 import { applyContentTextEdits, ModificationTextError } from './text-store.js';

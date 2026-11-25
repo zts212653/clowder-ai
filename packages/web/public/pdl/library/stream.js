@@ -72,14 +72,15 @@ ENGINE_PARTS.unitsAll = function () {
   UNITS_FILLING = true; try { render(true); } finally { UNITS_FILLING = false; }
   return true;
 };
-function unitsHtml(id, items, keyOf, draw, root) {
+function unitsHtml(id, items, keyOf, draw, root, opts) {
   const was = UNITS[id] || {}, now = {}, rootNow = {};   /* 页面级的值对每一项都一样：这一次只算一遍 */
   const rootSame = function (r) { if (!(r[0] in rootNow)) rootNow[r[0]] = JSON.stringify(root[r[0]]); return rootNow[r[0]] === r[1]; };
-  const held = unitsHeld(id, items, keyOf, was);
+  const placeholder = !opts || opts.placeholder !== false;
+  const held = placeholder ? unitsHeld(id, items, keyOf, was) : null;
   let heldAt = false;
   const html = items.map(function (it) {
     const key = keyOf(it), u = was[key];
-    if (held && held.has(key)) { if (heldAt) return ''; heldAt = true; return '<div class="units-held" data-units-held>' + viewState('loading', { count: 3 }) + '</div>'; }
+    if (held && held.has(key)) { if (heldAt) return ''; heldAt = true; return '<div class="units-held" data-units-held>' + loadingDots() + '</div>'; }
     if (u && RENDER_CHANGED && u.gen === RENDER_GEN && (u.item === it || u.json === JSON.stringify(it)) && !readsHit(u.reads, RENDER_CHANGED) && u.rootReads.every(rootSame)) {   /* 这一项的数据：同一个对象，或者值一样 */
       readsReplay(u.reads, true); now[key] = u; return u.html ? keptStub('unit:' + id + '|' + key, u.html) : '';
     }
@@ -107,7 +108,12 @@ function unitsOwn(nodeKey, hook) {
       if (o && (n.dataset.kept || NODE_HTML.get(o) === streamVer(n))) { if (hook) hook.kept(o); return o; }   /* 这一项没变（只交了壳，或画出来一样）：原节点留着 */
       if (n.dataset && n.dataset.kept) return n;   /* 只交了壳、这里没有原节点：由 keptFill 换回完整的 */
       if (!k) { const c = loose[li++]; if (c && c.isEqualNode(n)) return c; }
-      if (n.nodeType === 1) { NODE_HTML.set(n, streamVer(n)); if (hook) hook.added(n, o, ctx); }
+      if (n.nodeType === 1) {
+        const version = streamVer(n);
+        /* 正在交互的同键单元逐层对齐，保留焦点和输入法；其余沿用单元版本更新。 */
+        if (o && o.contains(document.activeElement) && patchEl(o, n)) { NODE_HTML.set(o, version); if (hook) hook.kept(o); return o; }
+        NODE_HTML.set(n, version); if (hook) hook.added(n, o, ctx);
+      }
       return n;
     });
     placeKids(live, plan);

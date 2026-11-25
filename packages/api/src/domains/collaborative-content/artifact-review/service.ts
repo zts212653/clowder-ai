@@ -26,7 +26,7 @@ import {
   reviewRetainsArtifact,
 } from './review-authority.js';
 import { createReviewCandidate } from './review-candidate.js';
-import type { ArtifactReviewStore, ReviewMutation, ReviewMutationResult } from './store.js';
+import type { ArtifactReviewStore, ReviewMutation, ReviewMutationResult } from './storage/store.js';
 import { ArtifactVersionResponseService } from './version-response-service.js';
 
 export interface ArtifactReviewServiceDeps {

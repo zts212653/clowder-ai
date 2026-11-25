@@ -3,7 +3,7 @@ import {
   collectiveArtifactModificationRequestCommandSchema,
 } from '@cat-cafe/shared';
 import { collectiveContentScopeRef } from '../../video-studio/content-owner/collective-scope.js';
-import type { ArtifactReviewStore } from '../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../artifact-review/storage/store.js';
 import { WorkspaceContentReviewError } from '../workspace-review/errors.js';
 import type { AdmittedCollectiveMarkdown } from './markdown-authority.js';
 import type { CollectiveMarkdownReviews } from './markdown-reviews.js';

@@ -6,10 +6,10 @@ import type {
   ReviewedMediaAsset,
   WorkspaceContentReview,
 } from '@cat-cafe/shared';
-import { publicationLedgerSource } from '../workspace-review/publication-review-source.js';
-import type { WorkspaceContentReviewStore } from '../workspace-review/store.js';
-import { workspaceReviewIdentity } from '../workspace-review/workspace-review-anchors.js';
-import { ArtifactReviewError } from './errors.js';
+import { publicationLedgerSource } from '../../workspace-review/publication-review-source.js';
+import type { WorkspaceContentReviewStore } from '../../workspace-review/store.js';
+import { workspaceReviewIdentity } from '../../workspace-review/workspace-review-anchors.js';
+import { ArtifactReviewError } from '../errors.js';
 
 export function publicationLedgerId(ownerUserId: string, asset: ReviewedMediaAsset): string {
   return workspaceReviewIdentity(ownerUserId, `${asset.contentRef}#version:${asset.ownerRevision}`);

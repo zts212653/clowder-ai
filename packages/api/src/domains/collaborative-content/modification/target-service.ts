@@ -6,7 +6,7 @@ import {
   type RoutingDispatchPreflightPort,
   unavailableRoutingDispatchDecision,
 } from '../../routing-context/RoutingDispatchPreflightPort.js';
-import type { ContentReturnIntent } from '../artifact-review/return-store.js';
+import type { ContentReturnIntent } from '../artifact-review/storage/return-store.js';
 
 export class ModificationTargetError extends Error {
   constructor(

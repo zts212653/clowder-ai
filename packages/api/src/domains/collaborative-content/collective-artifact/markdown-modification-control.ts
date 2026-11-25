@@ -1,6 +1,6 @@
 import { type CollectiveModificationRecord, collectiveArtifactControlSchema } from '@cat-cafe/shared';
 import type { ProjectContentOwnerService } from '../../video-studio/content-owner/service.js';
-import type { ArtifactReviewStore } from '../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../artifact-review/storage/store.js';
 import { WorkspaceContentReviewError } from '../workspace-review/errors.js';
 import type { AdmittedCollectiveMarkdown } from './markdown-authority.js';
 import { reconcileCollectiveDisposition } from './markdown-modification-apply.js';

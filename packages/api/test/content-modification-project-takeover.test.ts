@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { ProjectMessageCatGrants } from '../src/domains/collaborative-content/workspace-review/project-message/cat-grants.js';
 import { VideoProjectService } from '../src/domains/video-studio/project/service.js';
 import { projectTakeoverFixture as fixture } from './helpers/video-project-message-takeover.js';

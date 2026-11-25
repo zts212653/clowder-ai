@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { messageMediaPublicationSourceSchema } from '@cat-cafe/shared';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { ArtifactVersionResponseService } from '../src/domains/collaborative-content/artifact-review/version-response-service.js';
 import { mediaPublicationFixture } from './helpers/media-publication-fixture.js';
 
