@@ -15,7 +15,7 @@ const index = JSON.parse(
 ) as Record<string, BundledPackageArchive>;
 for (const [key, entry] of Object.entries(index)) {
   if (
-    !/^[a-z][a-z0-9-]*$/.test(key) ||
+    !/^[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)*$/.test(key) ||
     entry.catalogId !== key ||
     typeof entry.pluginId !== 'string' ||
     !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(entry.version) ||
