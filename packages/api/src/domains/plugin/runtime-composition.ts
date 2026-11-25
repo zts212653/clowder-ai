@@ -178,6 +178,9 @@ export interface DormantPluginRuntimeCompositionOptions {
   readonly taskStore?: ITaskStore;
   readonly members?: PluginMembersServices;
   readonly runtimeInfo?: () => import('./host-surface/plugin-neutral-host.js').PluginRuntimeInfo;
+  readonly conversationStorage?: (
+    signal: AbortSignal,
+  ) => Promise<import('./host-surface/conversation-storage-sources.js').ConversationStorageSources>;
   readonly memberSessions?: (
     scope: import('./member-sessions/types.js').MemberSessionScope,
     signal?: AbortSignal,
@@ -637,6 +640,12 @@ export function createDormantPluginRuntimeComposition(
           : {}),
         ...(options.members ? { members: options.members } : {}),
         ...(options.runtimeInfo ? { runtimeInfo: options.runtimeInfo } : {}),
+        ...(options.conversationStorage && options.threadOwnerUserId
+          ? {
+              conversationStorage: options.conversationStorage,
+              conversationStorageOwnerUserId: options.threadOwnerUserId,
+            }
+          : {}),
         ...(options.memberSessions && options.threadOwnerUserId
           ? {
               memberSessions: (assertCurrent: () => Promise<void>) =>

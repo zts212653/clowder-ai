@@ -34,3 +34,27 @@ test('real module captures canonical owner Chat only in the current native actio
   // The module checked the synchronous fence while current; this API-side proxy crosses RPC again.
   await assert.rejects(result.result.assertWriteCurrent(), /no longer current/);
 });
+
+test('conversation inventory requires the storage plugin and a current owner scan request', async (t) => {
+  const empty = { threads: [], files: [], roots: [], nativeSessions: [], omissions: [] };
+  const other = await neutralFixture(t, { conversationStorage: async () => empty });
+  assert.equal(other.host().conversationStorage, undefined);
+
+  let reads = 0;
+  const fixture = await neutralFixture(t, {
+    pluginId: 'official.storage-governance',
+    webhookPath: 'scan',
+    async conversationStorage(signal) {
+      signal.throwIfAborted();
+      reads += 1;
+      return empty;
+    },
+  });
+  await assert.rejects(fixture.host().conversationStorage.startRead(), /authenticated owner scan/);
+  assert.notEqual((await fixture.httpGet('conversationStorage', 'startRead')).statusCode, 200);
+  assert.equal(reads, 0);
+  const response = await fixture.http('conversationStorage', 'startRead');
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(response.json(), { available: true, result: empty });
+  assert.equal(reads, 1);
+});

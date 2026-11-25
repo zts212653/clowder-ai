@@ -703,7 +703,7 @@ class ServiceManager {
 
   _startProcess(name, cmd, args, opts = {}) {
     this.startupAbort?.signal.throwIfAborted();
-    const { instanceRoot, dataRoot } = resolveDesktopRuntime();
+    const { instanceRoot, dataRoot, useInstallDataRoot } = resolveDesktopRuntime();
     const inherited = instanceRoot
       ? Object.fromEntries(
           Object.entries(process.env).filter(([key]) =>
@@ -834,7 +834,10 @@ class ServiceManager {
         if (dataRoot) delete env.GEMINI_CLI_HOME;
       }
       const profileRoot = instanceRoot ?? dataRoot;
-      Object.assign(env, profileRoot ? readClientHomes(profileRoot) : resolveDefaultClientHomes(env));
+      if (!profileRoot || useInstallDataRoot) {
+        Object.assign(env, resolveDefaultClientHomes(useInstallDataRoot ? process.env : env));
+      }
+      if (profileRoot) Object.assign(env, readClientHomes(profileRoot));
     }
 
     log(`[${name}] spawn: ${cmd} ${args.join(' ')}`);

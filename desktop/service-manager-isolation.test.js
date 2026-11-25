@@ -397,3 +397,65 @@ test('persistent profile gives a real API child G-compatible state paths and hos
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+test(
+  'new Windows installation keeps Redis and API state in its per-user folder',
+  {
+    skip: process.platform !== 'win32',
+  },
+  async () => {
+    const install = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-selected-drive-'));
+    const client = path.join(install, 'existing-native-home');
+    const execPath = process.execPath;
+    const previousCodex = process.env.CODEX_HOME;
+    const previousInstance = process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
+    process.execPath = path.join(install, 'desktop-dist', 'Clowder AI.exe');
+    delete process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
+    process.env.CODEX_HOME = client;
+    try {
+      fs.mkdirSync(client);
+      fs.mkdirSync(path.join(install, 'user-state'));
+      fs.writeFileSync(path.join(install, 'desktop-data-root.json'), '{"mode":"install"}');
+      const manager = new ServiceManager(install, { frontendPort: 3003, apiPort: 3004, redisPort: 6399 });
+      const business = manager._getUserDataDir();
+      const base = fs.realpathSync.native(path.join(install, 'user-state'));
+      const profile = path.dirname(business);
+      assert.equal(path.dirname(profile), base);
+      fs.mkdirSync(business, { recursive: true });
+      const capture = path.join(install, 'api.json');
+      const keys = ['CAT_CAFE_DATA_DIR', 'TRANSCRIPT_DATA_DIR', 'UPLOAD_DIR', 'EVIDENCE_DB', 'CODEX_HOME'];
+      manager._startProcess(
+        'api',
+        execPath,
+        [
+          '-e',
+          `const keys = ${JSON.stringify(keys)}; require('node:fs').writeFileSync(${JSON.stringify(capture)}, JSON.stringify(keys.map(key => process.env[key])))`,
+        ],
+        { envOverrides: manager._buildApiEnv(business) },
+      );
+      assert.equal(await new Promise((resolve) => manager.procs.api.once('exit', resolve)), 0);
+      assert.deepEqual(JSON.parse(fs.readFileSync(capture, 'utf8')), [
+        path.join(profile, '.cat-cafe'),
+        path.join(business, 'data', 'transcripts'),
+        path.join(business, 'uploads'),
+        path.join(business, 'evidence.sqlite'),
+        fs.realpathSync.native(client),
+      ]);
+      const starts = [];
+      manager._isPortOpen = async () => false;
+      manager._commandExists = async () => true;
+      manager._waitForPortWithFallback = async () => true;
+      manager._startProcess = (...args) => starts.push(args);
+      await manager._startRedis(business);
+      const [name, , args] = starts[0];
+      assert.equal(name, 'redis');
+      assert.equal(args[args.indexOf('--dir') + 1], path.join(business, 'data', 'redis'));
+    } finally {
+      process.execPath = execPath;
+      if (previousCodex === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previousCodex;
+      if (previousInstance !== undefined) process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT = previousInstance;
+      fs.rmSync(install, { recursive: true, force: true });
+    }
+  },
+);
