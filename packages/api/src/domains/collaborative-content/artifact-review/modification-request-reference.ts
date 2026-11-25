@@ -1,6 +1,6 @@
 import type { ArtifactReview, ArtifactReviewAuditActor } from '@cat-cafe/shared';
 import { ArtifactReviewError } from './errors.js';
-import type { ArtifactReviewStore } from './store.js';
+import type { ArtifactReviewStore } from './storage/store.js';
 
 /** The journal binding committed with the review is the request authority; no second mutable round pointer. */
 export function reviewModificationBindings(

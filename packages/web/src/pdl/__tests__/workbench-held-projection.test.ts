@@ -178,6 +178,28 @@ it('projects workspace task, tree, file and diff data with console-owned present
   expect(models).not.toHaveBeenCalled();
 });
 
+it('projects an explicit DOCX editor target and local plugin preview URLs', () => {
+  const { owners, push, read } = projection();
+  const open = (path: string, mime: string) => {
+    owners.workbench.opened = {
+      worktreeId: 'wt',
+      file: { path, mime, binary: true, content: '', sha256: 'sha' },
+    };
+    push();
+  };
+
+  open('doc & notes.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  expect(read('workbenchModels().filePage.documentEditor')).toBe(true);
+  expect(read('workbenchModels().filePage.documentFrame')).toBe(
+    '/workspace-document?worktreeId=wt&path=doc+%26+notes.docx',
+  );
+
+  open('example.pdf', 'application/pdf');
+  expect(read('workbenchModels().filePage.documentFrame')).toBe('/workspace-document?worktreeId=wt&path=example.pdf');
+  open('image.png', 'image/png');
+  expect(read('workbenchModels().filePage.documentFrame')).toBeNull();
+});
+
 it('projects normalized invocation timeline records without a host read or another transcript parser', () => {
   const { owners, state, models, push, read } = projection();
   owners.workbench.execution.detail = {

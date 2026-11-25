@@ -2,7 +2,7 @@ import { type ArtifactReview, artifactReviewSchema, type WorkspaceContentReview 
 import type Database from 'better-sqlite3';
 import { WorkspaceContentReviewError } from '../workspace-review/errors.js';
 import type { WorkspaceContentReviewStore } from '../workspace-review/store.js';
-import { projectLinkedReview } from './canonical-ledger.js';
+import { projectLinkedReview } from './storage/canonical-ledger.js';
 
 /** Reads the existing owner rows; no secondary index of identities or writable discussion bodies. */
 export class ArtifactReviewDirectory {

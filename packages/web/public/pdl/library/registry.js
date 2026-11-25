@@ -95,7 +95,7 @@ function libActIcon(act, data, fallback) { const k = libActMean(act, data, fallb
 function libActAttr(act, data, declared) { const k = libActMean(act, data, declared); return k ? ' data-mean="' + k + '"' : ''; }
 function libActMeaning(ds) { const f = ds && LIB_ACT_OF[ds.act]; return typeof f === 'function' ? f(ds) || '' : f || ''; }
 /* 工具类：只管布局、截断、读屏、数字等宽，不是组件；带这些类的元素的样子来自它所在的组件（provenance 检查向上找） */
-const LIB_UTIL = ['overlay-host', 'grow', 'num', 'sr', 'hide-sm', 'scroll', 'scroll-x', 'stick-end', 'float-body', 'cafe-ellip', 'table-wrap', 'swap-d', 'stack', 'acts', 'click', 'status-t', 'select-v', 'select-vs', 'select-sz', 'select-t', 'u-v-width', 'u-v-height', 'u-v-background', 'vw-w80', 'vw-w220', 'clamp', 'nolead', 'head-line', 'typing-scope', 'field-add', 'msg-meta-start', 'msg-meta-end', 'pdl-slot', 'ws-noted'];
+const LIB_UTIL = ['overlay-host', 'grow', 'num', 'sr', 'hide-sm', 'scroll', 'scroll-x', 'stick-end', 'float-body', 'cafe-ellip', 'table-wrap', 'swap-d', 'stack', 'acts', 'click', 'status-t', 'select-v', 'select-vs', 'select-sz', 'select-t', 'u-v-width', 'u-v-height', 'u-v-background', 'vw-w80', 'vw-w220', 'clamp', 'nolead', 'head-line', 'typing-scope', 'field-add', 'msg-meta-start', 'msg-meta-end', 'pdl-slot', 'ws-noted', 'units-held'];
 
 /* ───────── 组件清单 ─────────
    每个组件：means 一句含义；of 页面上认它的选择器（只认组件的根）；v 角色变体 { 名: [含义, 选择器] }（按顺序取第一个命中的，'*' 是默认）；
@@ -158,6 +158,7 @@ const LIB_PARTS = {
   table: { means: '表格：界面里的（一行可点，悬停整行）和 Markdown 里的（阅读内容）；整行两端的圆角是行的样子，落在首尾格上（格子在行里的位置，不是变体）', inherit: true, data: ['radius'], of: 'table, td, tr', v: { kind: [['prose', ':is(.md, .msg-body) *', 'Markdown 里的表格（不悬停、顶对齐）'], ['data', '*', '界面里的表格']] } },
   empty: { means: '空状态（只说现在是什么；行内的空是一句次要信息，用文字角色 meta）', of: '.empty, .vw-empty, .cafe-none', v: { kind: [['lead', '.lead', '大号'], ['m', '*', '默认']] } },
   skeleton: { means: '读取中的骨架', of: '.skel', v: { shape: [['row', '.row', '骨架行'], ['prev', '.prev', '预览'], ['short', '.short', '短'], ['line', '*', '一行']] } },
+  loaddots: { means: '数据读取中的三点起伏指示（读取的是数据，不是容器）', of: '.load-dots, .load-dots > i' },
   /* 浮层、提醒 */
   surface: { means: '浮层的面（菜单、弹出层、对话框（主题计算器这类工具窗也是它）、查看器、编辑条、成员卡、队列）', of: '.menu, .pop, .ws-pop, .dialog, .mv-card, .edit-bar, .member-card, .rt-stripe, .qbox, .float-body', v: { kind: [['tool', '.dialog:not([aria-modal])', '没有遮罩的对话框（主题计算器）：普通的面'], ['dialog', '.dialog', '对话框'], ['viewer', '.mv-card', '查看器'], ['bar', '.edit-bar, .rt-stripe', '一条（编辑条、工作台竖条）'], ['queue', '.qbox', '排队浮层'], ['menu', '*', '菜单 / 弹出层']] } },
   'surface.part': { means: '浮层的头、尾、分隔线', of: '.dlg-head, .dialog-body, .divider, .calc-sec, .calc-row, .calc-pair, .inbox' },

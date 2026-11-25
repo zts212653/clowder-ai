@@ -7,7 +7,7 @@ import { createCatId } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { InvocationRegistry } from '../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { deriveGrowingSourceMessageRevision } from '../src/domains/cats/services/stores/ports/MessageStore.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { ModificationPublicationGrants } from '../src/domains/collaborative-content/modification/request-authority.js';
 import { createWorkAuthorizer } from '../src/domains/collaborative-content/works/access.js';
 import { LivingWorkService } from '../src/domains/collaborative-content/works/service.js';

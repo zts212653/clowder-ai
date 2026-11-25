@@ -1,6 +1,6 @@
 import type { TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
 import type { ArtifactReviewService } from '../collaborative-content/artifact-review/service.js';
-import type { ArtifactReviewStore } from '../collaborative-content/artifact-review/store.js';
+import type { ArtifactReviewStore } from '../collaborative-content/artifact-review/storage/store.js';
 import type { ArtifactReviewReturnDispatcher } from './ArtifactReviewReturnDispatcher.js';
 import type { F309ContentReviewProducerAdapter } from './F309ContentReviewProducerAdapter.js';
 

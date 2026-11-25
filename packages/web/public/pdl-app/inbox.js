@@ -2,7 +2,28 @@
 'use strict';
 const MODAL_INIT = {};
 const MODALS = {};
+let inboxPendingCounts = {};
+function inboxDecisionThreadId(r) {
+  if (!r || r.userMention) return '';
+  if (r.approval?.resolution && r.approval.resolution !== 'open') return '';
+  const nav = r.approval?.navigation;
+  return (
+    r.originalApprovalCard?.cardRef?.threadId ||
+    r.runtimeInteraction?.cardRef?.threadId ||
+    r.choiceRequest?.cardRef?.threadId ||
+    (nav?.state === 'anchored'
+      ? nav.approvalCardRef?.threadId || nav.originRef?.threadId || ''
+      : nav?.state === 'legacy_unanchored'
+        ? nav.legacyThreadId || ''
+        : '')
+  );
+}
+function inboxPendingCount(threadId) {
+  if (projectionNeeded) projectionNeeded.add('inbox');
+  return (threadId && inboxPendingCounts[threadId]) || 0;
+}
 function bindInbox() {
+  inboxPendingCounts = {};
   CS.ib = {
     view: 'main',
     time: 'week',
@@ -16,12 +37,59 @@ function bindInbox() {
   };
   let read = null,
     handled = null,
+    allDecisions = [],
     confirmations = [],
     conciergeThread = null,
     lastHandling = null,
     confirmed = false,
     sequence = 0,
     owner;
+  function rebuildPendingCounts() {
+    const next = {};
+    const seen = new Set();
+    allDecisions.forEach(function (r) {
+      if (r && r.decisionRef) {
+        if (seen.has(r.decisionRef)) return;
+        seen.add(r.decisionRef);
+      }
+      const tid = inboxDecisionThreadId(r);
+      if (tid) next[tid] = (next[tid] || 0) + 1;
+    });
+    if (conciergeThread && Array.isArray(confirmations)) {
+      confirmations.forEach(function (c) {
+        if (c && c.status === 'rendered') next[conciergeThread] = (next[conciergeThread] || 0) + 1;
+      });
+    }
+    const changed = !chatDataEqual(inboxPendingCounts, next);
+    inboxPendingCounts = next;
+    return changed;
+  }
+  async function loadAllDecisionItems(ticket, currentPage, currentOffset, opt) {
+    const period = CS.ib.time === 'earlier' ? 'week' : CS.ib.time;
+    const items = [];
+    for (let offset = 0; offset < 1000; offset += 20) {
+      let pageData = null;
+      if (currentPage && CS.ib.time !== 'earlier' && offset === currentOffset) {
+        pageData = currentPage;
+      } else {
+        try {
+          pageData = await api.get(
+            '/api/concierge/work/decisions',
+            { view: 'unified', includeUserMentions: 'true', mentionPeriod: period, limit: 20, offset: offset },
+            opt,
+          );
+        } catch {
+          return null;
+        }
+        if (ticket !== sequence) return null;
+        if (owner !== undefined && pageData?.identity?.ownerUserId !== owner) return null;
+      }
+      if (!pageData || !Array.isArray(pageData.items)) return null;
+      items.push.apply(items, pageData.items);
+      if (!pageData.page?.hasMore || !pageData.items.length) return items;
+    }
+    return items;
+  }
   function requireCurrent() {
     if (!confirmed) throw new Error(tc('inboxRefresh.retained'));
   }
@@ -57,6 +125,7 @@ function bindInbox() {
       ]);
     if (ticket !== sequence) return;
     const diff = { added: [], changed: [], removed: [], orderChanged: false, fields: [] },
+      currentOffset = (CS.ib.page - 1) * 20,
       pages = decisions.status === 'fulfilled' ? decisions.value : null;
     if (
       pages &&
@@ -70,6 +139,12 @@ function bindInbox() {
       confirmations = receiveProjectValue(confirmations, extra.value.confirmations, 'inbox.confirmations', diff);
     if (thread.status === 'fulfilled') conciergeThread = thread.value.threadId;
     if (last.status === 'fulfilled') lastHandling = last.value.receipt;
+    if (confirmed && read) {
+      const collected = await loadAllDecisionItems(ticket, read, currentOffset, opt);
+      if (ticket !== sequence) return;
+      if (Array.isArray(collected)) allDecisions = collected;
+    }
+    if (rebuildPendingCounts()) navStale();
     await chatDataRender();
   }
   api.on('session:changed', function (identity) {

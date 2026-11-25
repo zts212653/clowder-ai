@@ -303,6 +303,14 @@ function bindMembers() {
     return chatAction('memberAvailable', { id: data.id, v: String(next) }).then(read);
   };
 
+  function canFollowAccount(f) {
+    return (
+      ['openai', 'anthropic'].includes(f.clientId) &&
+      f.carrier !== 'acp' &&
+      f.configurationSource !== 'native_tool' &&
+      !!f.accountRef
+    );
+  }
   function selectedRuntime(form) {
     return meta.runtimes.find(function (row) {
       return (
@@ -359,7 +367,7 @@ function bindMembers() {
   // Refresh: read the current catalog again past the server's cache; the list on screen stays until it arrives.
   A.memberCatalogRefresh = function () {
     const state = runtimeCatalogState();
-    if (!state) return;
+    if (!state) return read();
     state.load = 'loading';
     render(true);
     settleHold(
@@ -400,7 +408,25 @@ function bindMembers() {
       });
   });
   function memberPreferences(f, catalogState, poolDefault) {
-    const catalog = catalogState && catalogState.value;
+    let catalog = catalogState && catalogState.value;
+    const account =
+      meta &&
+      meta.accounts.find(function (a) {
+        return a.id === f.accountRef;
+      });
+    if (
+      (!catalog || !catalog.models.length) &&
+      f.configurationSource === 'managed_account' &&
+      account &&
+      account.models &&
+      account.models.length
+    )
+      catalog = Object.assign({}, catalog, {
+        status: catalog ? catalog.status : 'configured',
+        models: account.models.map(function (value) {
+          return { value: value, label: value };
+        }),
+      });
     if (!catalog)
       return {
         catalog: null,
@@ -423,7 +449,7 @@ function bindMembers() {
       });
     return {
       catalog: catalog,
-      catalogLoading: catalogState.load === 'loading',
+      catalogLoading: catalogState ? catalogState.load === 'loading' : !!pending,
       catalogRead: true,
       acpMaxDefault: poolDefault,
       selectedModel: selected,
@@ -715,8 +741,8 @@ function bindMembers() {
         ? null
         : memberPreferences(f, catalogState, runtime ? runtime.acpMaxDefault : client && client.acpMaxDefault),
       identityProtection: cat && cat.identityProtection,
-      follow: f.accountBindingMode === 'follow',
-      overrideAccount: f.accountBindingMode === 'override',
+      follow: canFollowAccount(f) && f.accountBindingMode === 'follow',
+      overrideAccount: canFollowAccount(f) && f.accountBindingMode === 'override',
       required: { provider: f.clientId === 'opencode' },
       noAccount: !meta.accounts.length,
       active: active,
@@ -817,7 +843,7 @@ function bindMembers() {
     if (key === 'name') state.form.displayName = e.target.value;
     if (key === 'accountRef' && e.target.value) {
       state.form.configurationSource = 'managed_account';
-      state.form.accountBindingMode = 'override';
+      if (canFollowAccount(state.form)) state.form.accountBindingMode = 'override';
     } else if (key === 'accountRef') state.form.configurationSource = 'native_tool'; // the client's own login and configuration
     if (key === 'clientId') {
       const client = meta.clients.find(function (row) {
@@ -827,6 +853,7 @@ function bindMembers() {
       state.form.accountRef = '';
       state.form.cliEffort = '';
     }
+    if (!canFollowAccount(state.form)) delete state.form.accountBindingMode;
     render(true);
   }
   SET_AFTER['ss.draft.{k}'] = function (v, d) {
@@ -837,7 +864,7 @@ function bindMembers() {
   A.followAcc = async function () {
     const state = draft(),
       client = state.form.clientId;
-    if (client !== 'openai' && client !== 'anthropic') return;
+    if (!canFollowAccount(state.form)) return;
     if ((await chatAction('settingsFollowRead', { clientId: client })) === false) return;
     const selected = chatDataSnapshot.project.settings.follows[client];
     if (selected.accountRef) {
@@ -865,6 +892,7 @@ function bindMembers() {
       });
     if (!runtime) return;
     Object.assign(state.form, pdlClone(runtime.form));
+    delete state.form.accountBindingMode;
     commitModel(state.form);
     render(true);
   };

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { ArtifactReviewStore } from '../../../api/src/domains/collaborative-content/artifact-review/store.ts';
+import { ArtifactReviewStore } from '../../../api/src/domains/collaborative-content/artifact-review/storage/store.ts';
 import { CollectiveMarkdownOwner } from '../../../api/src/domains/collaborative-content/collective-artifact/markdown-owner.ts';
 import { WorkspaceContentReviewStore } from '../../../api/src/domains/collaborative-content/workspace-review/store.ts';
 import { collectiveContentScopeRef } from '../../../api/src/domains/video-studio/content-owner/collective-scope.ts';

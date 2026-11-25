@@ -6,7 +6,7 @@ import {
   ContentOwnerIdempotencyError,
   type ProjectContentOwnerService,
 } from '../../video-studio/content-owner/service.js';
-import type { ArtifactReviewStore } from '../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../artifact-review/storage/store.js';
 import { ContentModificationJournalError } from '../modification/journal-errors.js';
 import { ModificationTextError } from '../modification/text/text-store.js';
 import { WorkspaceContentReviewError } from '../workspace-review/errors.js';

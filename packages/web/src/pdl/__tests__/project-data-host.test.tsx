@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { getThreadDraft } from '@/components/thread-drafts';
 import type { useWorkspace } from '@/hooks/useWorkspace';
 import { apiFetch } from '@/utils/api-client';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { request } from '../owner-api';
-import { FirstMessageBinding } from '../PdlAppHost';
+import { ComposerInputBinding, FirstMessageBinding } from '../PdlAppHost';
 import { type ProjectBindings, ProjectDataBinding } from '../ProjectDataBinding';
+import type { useServerComposerDraft } from '../useServerComposerDraft';
 import { fixtureData, fixtureUi } from './chat-fixture';
 import { act, cleanup, renderHook, waitFor } from './hook-host';
 import {
@@ -177,6 +179,86 @@ it('hydrates the first-message admission once across 30 parent commits', async (
   expect(changed).toHaveBeenCalledTimes(notifications);
   expect(vi.mocked(apiFetch).mock.calls.filter(([path]) => path === '/api/session')).toHaveLength(1);
   expect(changed.mock.lastCall?.[0].intent.projectPath).toBeUndefined();
+});
+
+it('keeps draft typing in its leaf, persists it, and publishes only a changed routing result', async () => {
+  const ui = { current: fixtureUi() };
+  ui.current.draft!['chat-input'] = 'a';
+  const inputChanged: { current: (() => void) | undefined } = { current: undefined };
+  const serverDraft: { current: ReturnType<typeof useServerComposerDraft> | undefined } = { current: undefined };
+  const changed = vi.fn(),
+    projectChanged = vi.fn();
+  let parentRenders = 0;
+  vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+    if (path === '/api/routing/preview') {
+      const text = JSON.parse(String(init?.body)).content;
+      return Response.json({ targetCats: text.startsWith('@') ? ['codex'] : [], reason: { kind: 'default_cat' } });
+    }
+    if (init?.method === 'PUT') return Response.json({ draft: { revision: 2 } });
+    return Response.json({ draft: { text: 'a' }, revision: 1 });
+  });
+  renderHook(
+    () => {
+      parentRenders++;
+    },
+    () => (
+      <>
+        <ProjectDataBinding
+          data={fixtureData()}
+          workspace={{ worktreeId: null } as ReturnType<typeof useWorkspace>}
+          fields={{}}
+          target={() => ''}
+          ui={ui.current}
+          changed={projectChanged}
+        />
+        <ComposerInputBinding
+          threadId="input-boundary"
+          enabled
+          ui={ui}
+          inputChanged={inputChanged}
+          serverDraft={serverDraft}
+          images={[]}
+          contexts={[]}
+          reply={null}
+          restore={(saved) => {
+            ui.current.draft!['chat-input'] = saved.text;
+            inputChanged.current?.();
+          }}
+          refreshKey=""
+          changed={changed}
+          firstMessage={false}
+          firstMessageChanged={vi.fn()}
+        />
+      </>
+    ),
+  );
+  await waitFor(() => expect(changed.mock.lastCall?.[0].status).toBe('ready'));
+  const parents = parentRenders,
+    projects = projectChanged.mock.calls.length,
+    previews = changed.mock.calls.length;
+  for (const text of ['ab', 'abc', 'abcd', 'abcd ']) {
+    await act(() => {
+      ui.current.draft!['chat-input'] = text;
+      inputChanged.current?.();
+    });
+  }
+  await act(() => new Promise((resolve) => setTimeout(resolve, 750)));
+  expect(parentRenders).toBe(parents);
+  expect(projectChanged).toHaveBeenCalledTimes(projects);
+  expect(changed).toHaveBeenCalledTimes(previews);
+  expect(getThreadDraft('input-boundary')).toBe('abcd ');
+  expect(
+    vi
+      .mocked(apiFetch)
+      .mock.calls.some(([, init]) => init?.method === 'PUT' && JSON.parse(String(init.body)).text === 'abcd '),
+  ).toBe(true);
+  await act(() => {
+    ui.current.draft!['chat-input'] = '@codex hello';
+    inputChanged.current?.();
+  });
+  await waitFor(() => expect(changed.mock.lastCall?.[0].targetCats).toEqual(['codex']));
+  expect(parentRenders).toBe(parents);
+  expect(projectChanged).toHaveBeenCalledTimes(projects);
 });
 
 const trashed = {

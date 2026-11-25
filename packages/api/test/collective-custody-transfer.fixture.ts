@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type CollectiveArtifactCustodyTransfer, collectiveCustodyTransferSchema } from '@cat-cafe/shared';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { CollectiveMarkdownOwner } from '../src/domains/collaborative-content/collective-artifact/markdown-owner.js';
 import type { CollectiveCustodyOwnerAuthority } from '../src/domains/collaborative-content/collective-artifact/owner-port.js';
 import { WorkspaceContentReviewStore } from '../src/domains/collaborative-content/workspace-review/store.js';

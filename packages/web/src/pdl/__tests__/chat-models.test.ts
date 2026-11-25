@@ -467,6 +467,19 @@ describe('chat contract projections', () => {
     ui.whisperTo = ['codex'];
     expect(chatModels(data, ui).chatComposer.send.disabled).toBe(false);
   });
+
+  it('does not send attachments alone: a message needs words or a context attachment', () => {
+    const data = fixtureData();
+    data.images = [new File(['x'], 'shot.png', { type: 'image/png' })];
+    expect(chatModels(data, fixtureUi()).chatComposer.send).toMatchObject({ disabled: true, stop: false });
+    data.executions = [{ threadId: data.threadId } as unknown as (typeof data.executions)[number]];
+    expect(chatModels(data, fixtureUi()).chatComposer.send).toMatchObject({ disabled: true, stop: false });
+    data.input = 'see this';
+    expect(chatModels(data, fixtureUi()).chatComposer.send).toMatchObject({ disabled: false, stop: false });
+    data.input = '';
+    data.images = [];
+    expect(chatModels(data, fixtureUi()).chatComposer.send).toMatchObject({ disabled: false, stop: true });
+  });
 });
 
 it('projects proven final text and ordered commentary/tools, and ignores it after recall or a body change', async () => {
@@ -672,6 +685,51 @@ it('lists only this conversation members when viewing as one member, and everyon
   expect(ids(chatModels(data, ui).chatPop)).toEqual(['codex']);
   ui.pop = { kind: 'target' };
   expect(ids(chatModels(data, ui).chatPop)).toContain('opencode-glm');
+});
+
+it('excludes disabled and historical-only cats from recipient pickers while keeping them in people view', () => {
+  const data = fixtureData(),
+    ui = fixtureUi();
+  data.cats.push(
+    {
+      ...data.cats[0],
+      id: 'enabled-cat',
+      displayName: 'Enabled',
+      mentionPatterns: ['@enabled'],
+      roster: { family: 'test', roles: [], lead: false, available: true, evaluation: '' },
+    },
+    {
+      ...data.cats[0],
+      id: 'disabled-cat',
+      displayName: 'Disabled',
+      mentionPatterns: ['@disabled'],
+      roster: { family: 'test', roles: [], lead: false, available: false, evaluation: '' },
+    },
+  );
+  data.threads[0].participants = ['codex', 'disabled-cat', 'deleted-cat'];
+  data.messages.push({
+    ...data.messages[0],
+    id: 'hist-deleted',
+    type: 'assistant',
+    catId: 'deleted-cat',
+    content: 'from removed cat',
+  });
+
+  const ids = (pop: unknown) => (pop as { members: { id: string }[] }).members.map((m) => m.id);
+
+  for (const pop of [
+    { kind: 'target' },
+    { kind: 'whisper' },
+    { kind: 'plus' },
+    { kind: 'plus', page: 'whisper' },
+    { kind: 'plus', page: 'prefer' },
+  ]) {
+    ui.pop = pop;
+    expect(ids(chatModels(data, ui).chatPop)).toEqual(['codex', 'enabled-cat']);
+  }
+
+  ui.pop = { kind: 'people' };
+  expect(ids(chatModels(data, ui).chatPop)).toEqual(['codex', 'disabled-cat', 'deleted-cat']);
 });
 
 it('gives one composer capsule per member, carrying every run as an entry when there are several', () => {

@@ -358,7 +358,7 @@ function syncAttrs(live, next) {
   }
   let i, a;
   for (i = 0; i < next.attributes.length; i++) { a = next.attributes[i]; if (live.getAttribute(a.name) !== a.value) live.setAttribute(a.name, a.value); }
-  for (i = live.attributes.length - 1; i >= 0; i--) { a = live.attributes[i]; if (a.name !== 'data-aname' && !next.hasAttribute(a.name)) live.removeAttribute(a.name); }
+  for (i = live.attributes.length - 1; i >= 0; i--) { a = live.attributes[i]; if (a.name !== 'data-aname' && a.name !== 'data-typing' && !next.hasAttribute(a.name)) live.removeAttribute(a.name); }
   if (cursor) live.style.cursor = cursor;
 }
 /* 同一个元素就地改属性、再往下比孩子；返回 false 表示结构不同，交给调用处整块换 */
@@ -381,8 +381,8 @@ function patchEl(live, next) {
    消息和孤岛不就地改：内容一样留着，不一样交给 reuseApply 按版本换。最后由 placeKids 摆：留下的顺序没变就一个都不挪 */
 function kidKey(n) {
   if (n.nodeType !== 1) return null;
-  if (n.dataset.layer) return 'layer:' + n.dataset.layer + '|' + (n.dataset.lc || '');
-  if (n.dataset.view) return 'view:' + n.dataset.view;
+  if (n.hasAttribute('data-layer')) return 'layer:' + n.getAttribute('data-layer') + '|' + (n.getAttribute('data-lc') || '');
+  if (n.hasAttribute('data-view')) return 'view:' + n.getAttribute('data-view');
   const id = nodeId(n); return id ? 'id:' + id : null;
 }
 function kidPatch(o, n) {

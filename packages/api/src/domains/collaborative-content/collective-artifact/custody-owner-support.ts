@@ -8,7 +8,7 @@ import {
 import type { CollectiveCustodyFenceBinding } from '../../video-studio/content-owner/collective-custody-fence.js';
 import type { CollectiveContentScopeV1 } from '../../video-studio/content-owner/collective-scope.js';
 import type { ProjectContentOwnerService } from '../../video-studio/content-owner/service.js';
-import type { ArtifactReviewStore } from '../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../artifact-review/storage/store.js';
 import type { WorkspaceContentReviewStore } from '../workspace-review/store.js';
 import type { CollectiveArtifactCustodyBundle } from './custody-bundle.js';
 import { type CollectiveCustodyJournalEntry, transferIdentity } from './custody-journal.js';

@@ -133,7 +133,7 @@ function rtTabActs(r, c, t, ti) {
 function rtChip(r, t) {
   const b = REGION_TABS[r], ts = navTabs(r), on = t.k === navTabCur(r), side = !!ts.split && (ts.split.left === t.k || ts.split.right === t.k), ti = b.title(t.k);
   return '<span class="ws-chip' + (t.preview ? ' preview' : '') + (side ? ' side' : '') + '" role="tab" aria-selected="' + on + '" data-okey="' + h(t.k) + '" data-edit="order">' +
-    '<button type="button" class="ws-chip-t" data-act="tab" data-op="show" data-r="' + r + '" data-k="' + h(t.k) + '" data-rt-tab="' + h(t.k) + '" data-tip="' + h(ti) + (t.preview ? tc('frame.previewTab') : '') + '">' +
+    '<button type="button" class="ws-chip-t" data-drag-surface data-act="tab" data-op="show" data-r="' + r + '" data-k="' + h(t.k) + '" data-rt-tab="' + h(t.k) + '" data-tip="' + h(ti) + (t.preview ? tc('frame.previewTab') : '') + '">' +
     (rtItemPinned(r, t.k) && !on ? icon('pin', 12) : '') + '<span class="ws-chip-l">' + h(ti) + '</span>' + (b.badge(t.k) ? badge(true, { tip: tc('frame.newActivity') }) : '') + '</button>' +
     (on ? rtTabActs(r, rtCfg(r), t, ti) : '') + '</span>';
 }

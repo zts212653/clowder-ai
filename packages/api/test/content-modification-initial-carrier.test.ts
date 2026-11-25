@@ -12,7 +12,7 @@ import { DeliveryCursorStore } from '../src/domains/cats/services/stores/ports/D
 import type { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { canViewMessage } from '../src/domains/cats/services/stores/visibility.js';
 import { ArtifactReviewService } from '../src/domains/collaborative-content/artifact-review/service.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { createContentModificationIntegration } from '../src/domains/collaborative-content/modification/composition.js';
 import { ContentTextModificationService } from '../src/domains/collaborative-content/modification/text/text-service.js';
 import { WorkspaceContentReviewService } from '../src/domains/collaborative-content/workspace-review/service.js';

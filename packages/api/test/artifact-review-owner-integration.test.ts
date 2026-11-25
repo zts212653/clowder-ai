@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import type { ArtifactReviewAction, ArtifactReviewView } from '@cat-cafe/shared';
 import sharp from 'sharp';
 import { ArtifactReviewService } from '../src/domains/collaborative-content/artifact-review/service.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { F309ContentReviewProducerAdapter } from '../src/domains/growing/F309ContentReviewProducerAdapter.js';
 import { MediaOwnerError } from '../src/domains/video-studio/content-owner/media-errors.js';
 import { createReviewFixture, reviewCat, reviewHuman } from './helpers/artifact-review-fixture.js';

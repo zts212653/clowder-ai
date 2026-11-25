@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import type { EvolutionMediaLocator } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import sharp from 'sharp';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { WorkspaceContentReviewError } from '../src/domains/collaborative-content/workspace-review/errors.js';
 import {
   type EvolutionMediaReadPort,

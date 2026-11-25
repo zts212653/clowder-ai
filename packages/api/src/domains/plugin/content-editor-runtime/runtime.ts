@@ -10,7 +10,7 @@ import type { HostBrokerStore } from '../host-broker/ports.js';
 import { StaticFeatureAuthority } from '../host-broker/static-feature-authority.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 import type { ExecutablePluginPackageRecord } from '../host-inventory/types.js';
-import { staticEditorContributions } from './admission.js';
+import { type StaticContentProviderContribution, staticContentProviderContributions } from './admission.js';
 import {
   type EditorFailureObservation,
   EditorHeartbeatDiagnostics,
@@ -29,8 +29,9 @@ interface Options {
   readonly onFailure?: (report: EditorRuntimeFailureReport) => void;
 }
 
-export interface PluginContentEditorHandle {
-  readonly contribution: ContentEditorProviderContribution;
+type SurfaceKind = StaticContentProviderContribution['type'];
+interface PluginContentSurfaceHandle<Kind extends SurfaceKind> {
+  readonly contribution: Extract<StaticContentProviderContribution, { type: Kind }>;
   readonly installationInstanceId: string;
   readonly packageDigest: string;
   readonly providerVersion: string;
@@ -43,6 +44,8 @@ export interface PluginContentEditorHandle {
   readonly entrypointPath: string;
   readonly parentOrigin: string;
 }
+
+export type PluginContentEditorHandle = PluginContentSurfaceHandle<ContentEditorProviderContribution['type']>;
 
 interface ActivePackage {
   readonly packageDigest: string;
@@ -81,7 +84,7 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
   /** This runtime implements any package whose manifest is the narrow static-editor
    * shape — a manifest-derived claim, so no pluginId reaches carrier selection. */
   claims(packageRecord: Pick<ExecutablePluginPackageRecord, 'manifest'>): boolean {
-    return staticEditorContributions(packageRecord.manifest).length > 0;
+    return staticContentProviderContributions(packageRecord.manifest).length > 0;
   }
 
   start(id: string): Promise<void> {
@@ -101,12 +104,27 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
     await this.close(id, reason);
   }
 
-  async resolve(id: string, providerId: string): Promise<PluginContentEditorHandle | undefined> {
+  resolve(id: string, providerId: string): Promise<PluginContentEditorHandle | undefined> {
+    return this.resolveProvider(id, providerId, 'content-editor-provider');
+  }
+
+  resolvePreview(id: string, providerId: string) {
+    return this.resolveProvider(id, providerId, 'content-preview-provider');
+  }
+
+  private async resolveProvider<Kind extends SurfaceKind>(
+    id: string,
+    providerId: string,
+    kind: Kind,
+  ): Promise<PluginContentSurfaceHandle<Kind> | undefined> {
     const run = this.active.get(id);
     if (!run?.ready) return undefined;
     const lease = await this.features.resolve(id, providerId);
     const server = lease && run.servers.get(lease.featureId);
-    const contribution = staticEditorContributions(run.package.manifest).find((c) => c.id === providerId);
+    const contribution = staticContentProviderContributions(run.package.manifest).find(
+      (item): item is Extract<StaticContentProviderContribution, { type: Kind }> =>
+        item.id === providerId && item.type === kind,
+    );
     if (!lease || !server || !contribution || this.active.get(id) !== run) return undefined;
     return {
       contribution,
@@ -131,7 +149,7 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
       const authority = await this.options.inventory.readAuthority(id);
       const instance = authority?.instance?.lifecycleState === 'installed' ? authority.instance : undefined;
       const installed = authority?.packageRecord;
-      if (!instance || !installed?.manifest || staticEditorContributions(installed.manifest).length === 0)
+      if (!instance || !installed?.manifest || staticContentProviderContributions(installed.manifest).length === 0)
         throw new Error('unsupported static editor');
       pkg = await this.options.packages.resolveInstalledPackage(instance.packageDigest);
       if (JSON.stringify(pkg.manifest) !== JSON.stringify(installed.manifest))
@@ -161,7 +179,7 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
         const pending = await this.features.begin(id, feature.id);
         signal.throwIfAborted();
         const ids = new Set((feature.contributions ?? []).map((r) => r.id));
-        const contributions = staticEditorContributions(pkg.manifest).filter((c) => ids.has(c.id));
+        const contributions = staticContentProviderContributions(pkg.manifest).filter((c) => ids.has(c.id));
         const server = await startStaticSurfaceServer({
           package: pkg,
           contributions,

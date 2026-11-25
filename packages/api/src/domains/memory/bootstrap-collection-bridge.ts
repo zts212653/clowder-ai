@@ -24,6 +24,14 @@ export function deriveProjectCollectionId(projectPath: string): string {
   return `project:${name}-${pathHash}`;
 }
 
+function assertProjectCollectionOwner(owner: string, candidates: Array<CollectionManifest | undefined>): void {
+  for (const existing of candidates) {
+    if (!existing) continue;
+    if (!existing.ownerUserId) throw new Error('project_collection_owner_unbound');
+    if (existing.ownerUserId !== owner) throw new Error('project_collection_owner_mismatch');
+  }
+}
+
 export async function ensureProjectCollection(
   projectPath: string,
   catalog: LibraryCatalog,
@@ -31,6 +39,7 @@ export async function ensureProjectCollection(
   dataDir: string,
   ownerUserId: string,
   getEmbeddingService?: () => IEmbeddingService | undefined,
+  getEmbedMode?: () => 'on' | 'shadow' | undefined,
 ): Promise<{ docsIndexed: number; durationMs: number }> {
   const owner = ownerUserId?.trim();
   if (!owner) throw new Error('project_collection_owner_required');
@@ -43,11 +52,7 @@ export async function ensureProjectCollection(
   // Startup may project a legacy owner for reads without persisting that binding.
   // A project rebuild must honor the saved owner as well as the current catalog.
   const persistedManifest = getExternalCollection(dataDir, collectionId);
-  for (const existing of [persistedManifest, manifest]) {
-    if (!existing) continue;
-    if (!existing.ownerUserId) throw new Error('project_collection_owner_unbound');
-    if (existing.ownerUserId !== owner) throw new Error('project_collection_owner_mismatch');
-  }
+  assertProjectCollectionOwner(owner, [persistedManifest, manifest]);
 
   // An unavailable project may have been omitted from the startup catalog.
   // Its saved policy and identity still describe an existing collection.
@@ -102,10 +107,11 @@ export async function ensureProjectCollection(
   try {
     const currentStore = store;
     const scanner = resolveCollectionScanner(manifest);
+    const resolveEmbedMode = () => (getEmbedMode ? getEmbedMode() : 'shadow');
     const builder = new CollectionIndexBuilder(store, manifest, scanner, async () => {
-      if (!getEmbeddingService?.()?.isReady()) return;
+      if (!getEmbeddingService?.()?.isReady() || !resolveEmbedMode()) return;
       vectorAttempted = true;
-      prepared = await prepareCollectionVectorBinding(currentStore, () => getEmbeddingService?.());
+      prepared = await prepareCollectionVectorBinding(currentStore, () => getEmbeddingService?.(), resolveEmbedMode);
       return prepared?.deps;
     });
     result = await builder.rebuild();

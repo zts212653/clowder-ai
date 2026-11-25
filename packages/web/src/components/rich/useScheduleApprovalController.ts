@@ -81,16 +81,24 @@ export function useScheduleApprovalController({
     proposal?.mutation.kind === 'update' ? driftCopy.scheduleUpdateDrift : driftCopy.scheduleDeleteDrift;
   const live = useRef<ScheduleMutationProposal | null>(null),
     mounted = useRef(true),
-    inFlight = useRef(false);
-  live.current = original.value && !checking && !original.failed ? original.value : null;
+    inFlight = useRef(false),
+    refreshSeq = useRef(0);
+  const currentProposal = original.value && !checking && !original.failed ? original.value : null;
+  live.current = currentProposal;
   const guardedWrite = useGuardedWrite(),
     blocked = useWriteBlocked(busy || checking || unknown || !original.value || original.failed);
   const refresh = useCallback(async () => {
+    if (!original.ownerUserId) return null;
+    const seq = ++refreshSeq.current;
     const next = (await original.refresh()) ?? null;
+    if (seq !== refreshSeq.current) return next;
     live.current = next;
     if (mounted.current) setError(next ? null : t.unavailable);
     return next;
-  }, [original.refresh, t.unavailable]);
+  }, [original.ownerUserId, original.refresh, t.unavailable]);
+  useEffect(() => {
+    if (currentProposal && error === t.unavailable) setError(null);
+  }, [currentProposal, error, t.unavailable]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -195,7 +203,12 @@ export function useScheduleApprovalController({
     proposal,
     checking,
     busy,
-    error: drifted && proposal?.status === 'pending' ? driftMessage : error,
+    error:
+      drifted && proposal?.status === 'pending'
+        ? driftMessage
+        : currentProposal && error === t.unavailable
+          ? null
+          : error,
     unknown,
     blocked,
     drifted,
