@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { neutralFixture } from './helpers/neutral-host-fixture.js';
 
 test('production module has no temporary Task artifact publication surface', async (t) => {
@@ -57,4 +58,36 @@ test('conversation inventory requires the storage plugin and a current owner sca
   assert.equal(response.statusCode, 200, response.body);
   assert.deepEqual(response.json(), { available: true, result: empty });
   assert.equal(reads, 1);
+});
+
+test('an admitted inventory keeps reading after the owner scan HTTP response ends', async (t) => {
+  const pending = Promise.withResolvers();
+  const empty = { threads: [], files: [], roots: [], nativeSessions: [], omissions: [] };
+  const fixture = await neutralFixture(t, {
+    pluginId: 'official.storage-governance',
+    webhookPath: 'scan',
+    async conversationStorage(signal) {
+      await pending.promise;
+      signal.throwIfAborted();
+      return empty;
+    },
+  });
+  try {
+    const response = await fixture.http('conversationStorage', 'beginRead');
+    assert.equal(response.statusCode, 200, response.body);
+    assert.deepEqual(response.json(), { available: true, result: { state: 'running' } });
+    const poll = async () => (await fixture.httpGet('conversationStorage', 'getRead')).json().result;
+    assert.deepEqual(await poll(), { state: 'running' });
+    pending.resolve();
+    let result = await poll();
+    for (let attempt = 0; attempt < 20 && result?.state === 'running'; attempt++) {
+      await sleep(10);
+      result = await poll();
+    }
+    assert.deepEqual(result, { state: 'ready', sources: empty });
+    await assert.rejects(fixture.host().conversationStorage.beginRead(), /authenticated owner scan/);
+    await assert.rejects(fixture.host().conversationStorage.getRead(), /authenticated owner scan/);
+  } finally {
+    pending.resolve();
+  }
 });
