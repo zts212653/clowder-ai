@@ -30,6 +30,10 @@ test('storage inventory includes registered native history, databases, and files
       ownerUserId: 'owner',
       threads: {
         list: async () => [{ id: threadId, title: 'Owner', projectPath: root } as Thread],
+        listDeleted: async (userId) => {
+          assert.equal(userId, 'owner');
+          return [{ id: 'retained-thread', title: 'Retained in Trash', projectPath: root } as Thread];
+        },
       },
       messages: { getByThread: async () => [], getByThreadBefore: async () => [] },
       sessions: {
@@ -56,6 +60,10 @@ test('storage inventory includes registered native history, databases, and files
       tempDir: root,
     });
     const sources = await read(AbortSignal.timeout(5000));
+    assert.deepEqual(
+      sources.threads.map(({ id }) => id),
+      [threadId, 'retained-thread'],
+    );
     const roots = sources.roots.map((item) => item.path);
     for (const path of [
       join(root, 'codex', 'attachments'),
