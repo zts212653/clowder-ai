@@ -783,6 +783,8 @@ pdl:
           icon: reply
           open:
             action: reply
+            args:
+              mid: "@mid"
           scope: page
           move: chat.message.actions
         - id: msg.speak
@@ -3042,6 +3044,8 @@ pdl:
     THREAD_SECTION_ITEM:
       key: "@key"
       rows: "@rows"
+      peek: "@peek"
+      peekMore: "@peekMore"
       collapsed:
         of: "@head.kind"
         map:
@@ -3081,6 +3085,7 @@ pdl:
         warn: "@head.warn"
         fixed: "@head.fixed"
         peek: "@head.peek"
+        attention: "@head.attention"
         sort: "@head.sort"
         open:
           of: "@head.kind"
@@ -7982,6 +7987,15 @@ pdl:
                   args:
                     i: "@rich.file.work"
                   when: "@rich.file.work"
+                - type: button
+                  label: t:chatRich.openWork
+                  act: workOpen
+                  args:
+                    mid: "@rich.file.mid"
+                    url: "@rich.file.url"
+                  when:
+                    - "!@rich.file.work"
+                    - "@rich.file.mid"
                 - type: button
                   iconOnly: true
                   icon: download
@@ -16518,7 +16532,6 @@ pdl:
                           label: t:composer.jump
                           tip: t:composer.jumpTip
                           act: streamLatest
-                          hideWhileTyping: true
                         - type: notices
                           items:
                             slot: chat.composer.notice
@@ -16563,7 +16576,7 @@ pdl:
                             args:
                               v: edit
                               i: "@index"
-                            when: "@queued"
+                            when: "@recallable"
                           - label: t:common.delete
                             icon: delete
                             act: cafeQueue
@@ -18859,6 +18872,8 @@ pdl:
           item:
             key: "@key"
             rows: "@rows"
+            peek: "@peek"
+            peekMore: "@peekMore"
             rowDrop:
               of: "@key"
               map:
@@ -18907,6 +18922,7 @@ pdl:
               warn: "@head.warn"
               fixed: "@head.fixed"
               peek: "@head.peek"
+              attention: "@head.attention"
               sort: "@head.sort"
               open:
                 of: "@head.kind"
@@ -21284,31 +21300,33 @@ pdl:
           blocks:
             - type: text
               variant: meta
-              text:
-                t: mediaReview.lightbox.sub
-                args:
-                  - $.author
-                  - $.version
-                  - of: $.at
-                    fmt: at
-                  - of: $.many
-                    map:
-                      "true":
-                        of:
-                          - 0
-                          - 1
-                          - 2
-                          - 3
-                        item:
-                          of: "@"
-                          map:
-                            "0": " · "
-                            "1": $.index
-                            "2": " / "
-                            "3": $.total
-                        sep: ""
-                      "false": ""
-                      _: $.many
+              parts:
+                sep: " · "
+                parts:
+                  - text: $.author
+                    when: $.author
+                  - text:
+                      t: films.version
+                      args:
+                        - $.version
+                    when: $.version
+                  - text:
+                      of: $.at
+                      fmt: at
+                    when: $.at
+                  - text:
+                      of:
+                        - 0
+                        - 1
+                        - 2
+                      item:
+                        of: "@"
+                        map:
+                          "0": $.index
+                          "1": " / "
+                          "2": $.total
+                      sep: ""
+                    when: $.many
               when:
                 of: $.target.kind
                 map:
@@ -22752,7 +22770,7 @@ pdl:
                   control:
                     type: button
                     iconOnly: true
-                    icon: down
+                    icon: chevboth
                     label: t:chat.sidebar.expandProjects
                     act: set
                     args:
@@ -22764,7 +22782,7 @@ pdl:
                   control:
                     type: button
                     iconOnly: true
-                    icon: right
+                    icon: chevin
                     label: t:chat.sidebar.collapseProjects
                     act: set
                     args:
@@ -22842,7 +22860,11 @@ pdl:
                     act: workOpen
                     args:
                       i: "@work"
-                  _: null
+                  _:
+                    act: workOpen
+                    args:
+                      mid: "@mid"
+                      url: "@url"
           blocks:
             - type: component
               use: media
@@ -27322,7 +27344,7 @@ pdl:
               when: $.documentEditor
               items:
                 - type: button
-                  label: 协作编辑
+                  label: t:workbench.file.collabEdit
                   act: fileOffice
                   when: "!$.documentFrame"
                 - type: button
@@ -32799,8 +32821,6 @@ pdl:
             variant: row
             value: "@selected"
             label: "@title"
-            act: "@act"
-            args: "@args"
           when: "@selectable"
       title:
         - parts: "@title"

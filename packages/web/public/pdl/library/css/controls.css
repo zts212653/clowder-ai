@@ -83,7 +83,7 @@ button.chip:hover { color: var(--fg-strong); }
 /* 状态：正常是灰字，只有例外才上色 */
 .status { display: inline-flex; align-items: center; gap: var(--sp-xs); white-space: nowrap; min-width: 0; max-width: 100%; }
 .status-t { min-width: 0; overflow: clip; text-overflow: ellipsis; }
-.status[data-tone] { color: var(--fg-strong); }
+.status[data-tone] { color: var(--fg-strong); min-width: var(--dot); }
 .status[data-tone]::before { content: ""; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--tone-c); flex: none; }
 .status[data-tone] b { color: var(--tone-c); font-weight: 500; }
 .notice { display: flex; gap: var(--notice-gap); align-items: first baseline; padding: var(--notice-pad); border-radius: var(--r-l); background: var(--bg-group); flex-wrap: wrap; }

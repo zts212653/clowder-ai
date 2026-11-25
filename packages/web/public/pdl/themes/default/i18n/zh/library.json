@@ -257,6 +257,7 @@
   "starred": "已收藏",
   "pinned": "已置顶",
   "groupMore": "对话组更多操作",
+  "groupAttention": "{0} 条要看",
   "projectMore": "项目更多操作",
   "fixed": "固定",
   "otherProjects": "其他项目",
@@ -268,7 +269,9 @@
    "bedroom": "猫卧室",
    "run": "{0} 执行中 · {1} 分",
    "running": "{0} 已回复",
-   "replied": "{0} 回复了"
+   "pending": "等你决定",
+   "replied": "{0} 回复了",
+   "repliedGeneric": "已回复"
   },
   "more": "更多操作：{0}",
   "section": {

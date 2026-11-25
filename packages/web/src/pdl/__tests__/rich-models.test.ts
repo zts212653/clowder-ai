@@ -81,8 +81,16 @@ describe('rich blocks projected into the existing component contract', () => {
         { v: 1, id: 'file', kind: 'file', fileName: 'report.pdf', url: '/uploads/report.pdf' },
         'm',
         (s) => `https://api.test${s}`,
-      )?.file?.source,
-    ).toBe('https://api.test/uploads/report.pdf');
+      )?.file,
+    ).toMatchObject({ source: 'https://api.test/uploads/report.pdf', mid: 'm', url: '/uploads/report.pdf' });
+    // an image or file that is not a registered work opens by its message and its stored url
+    expect(
+      richBlockView(
+        { v: 1, id: 'g', kind: 'media_gallery', items: [{ url: '/uploads/a.png', alt: 'a' }] },
+        'm',
+        (s) => `https://api.test${s}`,
+      )?.cards?.items[0],
+    ).toMatchObject({ src: 'https://api.test/uploads/a.png', mid: 'm', url: '/uploads/a.png', work: '' });
   });
 });
 

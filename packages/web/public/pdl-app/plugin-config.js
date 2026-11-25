@@ -749,7 +749,12 @@ function pcfModel(inst, src) {
             };
           }),
         });
-      return Object.assign(row, { value: d[f.key] || '', currentValue: f.currentValue, defaultValue: pcfDefault(f) });
+      return Object.assign(row, {
+        value: d[f.key] || '',
+        currentValue: f.currentValue,
+        defaultValue: pcfDefault(f),
+        cleared: f.kind === 'secret' && d[f.key] === '',
+      });
     });
   return { p: inst, installed: true, steps: steps, rows: rows, fieldCount: fields.length, testable: !!src.testable };
 }
@@ -924,6 +929,10 @@ const PCF_OPS = {
   },
   recBool: function (d) {
     pcfPut(d.p, d.k, pcfGet(d.p, d.k) === 'true' ? 'false' : 'true');
+    markDirty();
+  },
+  clear: function (d) {
+    pcfSet(d.p, d.k, '');
     markDirty();
   },
   discard: function (d) {

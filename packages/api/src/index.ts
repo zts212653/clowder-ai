@@ -1755,6 +1755,10 @@ async function initializeApi(
         memoryServices.dataDir!,
         ownerUserId,
         () => memoryServices.embeddingLifecycle.getService(),
+        () => {
+          const mode = memoryServices.embeddingLifecycle.getMode();
+          return mode === 'off' ? undefined : mode;
+        },
       );
     },
     getFingerprint,

@@ -49,7 +49,11 @@ export function useSidebarBindings(data: ChatData, needed: boolean | number = fa
         hasUserMention,
         presence,
         lastWho:
-          id === data.threadId ? data.messages.findLast((m) => m.type === 'assistant' && m.catId)?.catId || '' : '',
+          id === data.threadId
+            ? data.messages.findLast((m) => m.type === 'assistant' && m.catId)?.catId || ''
+            : presence.status === 'done'
+              ? (presence.cats?.[0] ?? '')
+              : '',
       })),
     [projection, data.threadId, data.messages],
   );

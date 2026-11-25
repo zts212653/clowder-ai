@@ -230,3 +230,31 @@ it.each([
     before + 1,
   );
 });
+
+it('derives lastWho from presence.cats when a non-current thread has status done', async () => {
+  vi.mocked(apiFetch).mockImplementation(async (path) => Response.json(path === '/api/labels' ? [] : preferences));
+  const data = fixtureData();
+  useSidebarProjectionStore.setState({
+    rows: [
+      {
+        id: 'other-done',
+        title: 'Replied elsewhere',
+        participants: ['codex'],
+        pinned: false,
+        favorited: false,
+        labels: [],
+        preferredCats: [],
+        projectPath: '/project',
+        lastActiveAt: 1,
+        systemKind: null,
+        isHubThread: false,
+        unreadCount: 0,
+        hasUserMention: false,
+        presence: { status: 'done', cats: ['codex'] },
+      },
+    ],
+  });
+  const hook = renderHook(() => useSidebarBindings(data, true));
+  await waitFor(() => expect(hook.result.current.data.attention).toHaveLength(1));
+  expect(hook.result.current.data.attention[0].lastWho).toBe('codex');
+});

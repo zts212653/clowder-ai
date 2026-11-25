@@ -186,6 +186,7 @@ function bindProject() {
   });
   S.sys = store.get('sys', { record: 'collapsed' });
   S.lang = store.get('lang', 'zh');
+  CS.lang = S.lang === 'en' ? 'en' : 'zh';
   CS.recordExpanded = S.sys.record === 'expanded';
   S.lastPanel = 'home';
   S.wsQ = '';
@@ -357,6 +358,7 @@ function bindProject() {
     if (key === 'send') return chatAction('systemSend', { v: value });
     if (key === 'lang') {
       S.lang = value === 'en' ? 'en' : 'zh';
+      CS.lang = S.lang;
       store.set('lang', S.lang);
     }
     if (key === 'record') {

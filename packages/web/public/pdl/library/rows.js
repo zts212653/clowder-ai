@@ -90,7 +90,7 @@ function lrow(o) {
   const tone = (o.tone ? ' ' + o.tone : '') + (o.cur ? ' selected' : '');
   return '<div class="lr' + tone + (canOpen || o.act ? ' click' : '') + (o.disabled ? ' off' : '') + (o.hook ? ' ' + o.hook : '') + '"' + ' data-layout="' + L + '"' + (o.swap ? ' data-swap' : '') + (o.rootAttrs || '') + (o.orderable && o.key != null ? ' data-okey="' + h(o.key) + '" data-edit="order"' : '') + (canOpen ? ' data-open="' + !!o.open + '"' + (o.titleWrap && o.titleWrap !== 'auto' ? ' data-title-wrap="' + h(o.titleWrap) + '"' : '') : '') + (o.note ? ' data-note="' + o.note + '"' : '') + ' style="--acts:' + (nActs && !o.swap && !cols.length ? 'calc(' + nActs + ' * var(--ctl-s) + var(--sp-s))' : '0px') + ';--c:' + (o.color || 'initial') + (o.depth != null ? ';--d:' + o.depth : '') + '">' +
     (o.pre ? '<span class="lr-pre' + (o.preLive ? ' live' : '') + '">' + o.pre + '</span>' : '') +
-    '<div class="lr-head"' + click + (o.cur ? ' aria-current="' + (o.cur === true ? 'true' : o.cur) + '"' : '') + (o.sel ? ' aria-selected="true"' : '') + (o.disabled ? ' aria-disabled="true"' : '') + (o.headAttrs || '') + (o.twisty && o.twisty !== 'leaf' && !o.twAct ? ' aria-expanded="' + (o.twisty === 'open') + '"' : '') + '>' + (o.orderable ? '<span class="lr-grip" aria-hidden="true">' + icon('grip', 14) + '</span>' : '') + tw + (o.lead || o.leadSlot ? '<span class="lr-lead">' + o.lead + '</span>' : '') +
+    '<div class="lr-head"' + click + (click ? ' data-drag-surface' : '') + (o.cur ? ' aria-current="' + (o.cur === true ? 'true' : o.cur) + '"' : '') + (o.sel ? ' aria-selected="true"' : '') + (o.disabled ? ' aria-disabled="true"' : '') + (o.headAttrs || '') + (o.twisty && o.twisty !== 'leaf' && !o.twAct ? ' aria-expanded="' + (o.twisty === 'open') + '"' : '') + '>' + (o.orderable ? '<span class="lr-grip" aria-hidden="true">' + icon('grip', 14) + '</span>' : '') + tw + (o.lead || o.leadSlot ? '<span class="lr-lead">' + o.lead + '</span>' : '') +
       '<span class="lr-main"><span class="lr-line"><span class="lr-title">' + o.title + '</span>' + (o.inline || '') + '</span>' + (o.sub ? '<span class="lr-sub' + (o.subLines ? ' clamp" style="--sub-lines:' + o.subLines : '') + '">' + o.sub + '</span>' : '') + (o.meta ? '<span class="lr-sub lr-meta">' + o.meta + '</span>' : '') + '</span>' +
       /* 尾部（行的通用排法：内容 · 空白 · 操作）：数据列（状态、元信息）→ 悬停才出现的操作（改名、删除、⋯：也支持，但少用）→ 常显的控件（开关、主操作：一定支持）在最右。
          有数据列的行（和列表里对齐的行）悬停操作占自己的列轨（看不见也占着，状态不跳）；没有数据列的行，悬停操作浮在常显控件的前面、不占宽度。
@@ -225,15 +225,15 @@ function secCollapsed(key, dflt) { const st = secSt(key); return st && st.c != n
    段 { key, head, rows, peek, collapsed, empty, gid }（所有段的行缩进相同：行内容左边和段表头左边对齐，一条规则，段不能单独缩进）；head：{ kind: 'sec', label, n, note } 段名 + “N 个对话”（点了收起整段）、
    { kind: 'group', id, name, n, open } 对话组、{ kind: 'proj', id, name, tip, open, warn, fixed, n, add } 项目；（行 / 表头的 ⋯ 打开对话区的菜单 cafeMenu）{ other: { open, n } } 是“其他项目”开关 */
 function rowMore(menu, k, label, cls) { return btn(label || tc('common.moreActions'), { sm: true, iconOnly: true, icon: 'more', cls: cls, act: 'menu', data: ' data-menu="' + menu + '"' + MENU_DECL + (k != null ? ' data-k="' + h(k) + '"' : '') }); }
-const TROW_TONE = { run: { cls: 'run', dot: true }, err: { cls: 'cafe-err' } };   /* 行的状态：执行中（圆点按状态表挑节拍预设）、出错 */
+const TROW_TONE = { run: { cls: 'run', dot: 'run' }, err: { cls: 'cafe-err' }, warn: { cls: 'cafe-err', dot: 'warn' } };   /* 行的状态：执行中（圆点按状态表挑节拍预设）、出错、等你决定 */
 /* rn：原地改名的绑定（threads 块声明 rename = { form, path, blur }：回车提交给哪个表单、Esc 关掉哪个状态、失焦执行什么），组件不认识 */
 function threadRow(v, rn, root, movable) {
   if (v.renaming && rn) return ('<form class="cafe-trow renaming" data-form="' + rn.form + '"><label class="sr" for="row-rename">' + h(tc('threadRow.name')) + '</label><input class="input" id="row-rename" value="') + h(v.title) + ('" maxlength="200" data-path="' + h(rn.path) + '" data-on-esc="close" data-on-blur="' + rn.blur + '"></form>');
   /* 一项状态：可以带身份（who，颜色是这一项自己的能力，取不到就是组件的中性默认）和执行状态（status，和头像的圈读同一张表）；
      runs：一条对话里有几只猫同时在执行时，按节拍轮流显示（通用轮换 data-rot，悬停不换） */
   const one = function (m) { const tn = TROW_TONE[m.tone]; const c = m.who ? whoInfo(m.who).color : '', st = c ? '--c:' + c : '';
-    /* 执行中：圆点是唯一的 .dot（run 色调：身份色 + 状态表的颜色和节奏），不再用伪元素画 */
-    const dt = tn && tn.dot ? '<span class="dot" data-tone="run"' + (m.who ? ' data-live="' + h(m.who) + '" data-status="' + h(m.status || '') + '"' : m.status ? ' data-status="' + h(m.status) + '"' : '') + (st ? ' style="' + st + '"' : '') + '></span>' : '';
+    /* 状态圆点是唯一的 .dot（run 色调：身份色 + 状态表的颜色和节奏；warn：琥珀点），不再用伪元素画 */
+    const dt = tn && tn.dot ? '<span class="dot" data-tone="' + tn.dot + '"' + (m.who ? ' data-live="' + h(m.who) + '" data-status="' + h(m.status || '') + '"' : m.status ? ' data-status="' + h(m.status) + '"' : '') + (st ? ' style="' + st + '"' : '') + '></span>' : '';
     return tn ? '<span class="' + tn.cls + '"' + (m.who ? ' data-k="' + h(m.who) + '"' : '') + '>' + dt + h(m.text) + '</span>' : '<span>' + h(m.text) + '</span>'; };   /* data-k：这一项是谁（树键的一段）——轮换里换了顺序，节拍也按成员认，不按位置 */
   const state = [];
   if (v.hub) state.push({ text: tc('threadRow.meta.hub') });
@@ -241,8 +241,10 @@ function threadRow(v, rn, root, movable) {
   if (v.runs && v.runs.length) state.push({ runs: v.runs.map(function (r) { return { who: r.who, status: r.status, tone: 'run', text: tc('threadRow.meta.run', whoInfo(r.who).name, Math.max(1, Math.round((r.secs || 0) / 60))) }; }) });
   else if (v.failed) state.push({ text: tc('common.status.error'), tone: 'err' });
   else if (v.running && v.who) state.push({ text: tc('threadRow.meta.running', whoInfo(v.who).name) });
+  else if (v.pending) state.push({ text: tc('threadRow.meta.pending'), tone: 'warn' });
   else if (v.note || v.restored) state.push({ text: rn && rn.note ? pv(rn.note, v, root) : v.note });
   else if (v.lastWho) state.push({ text: tc('threadRow.meta.replied', whoInfo(v.lastWho).name) });
+  else if (v.replied) state.push({ text: tc('threadRow.meta.repliedGeneric') });
   const meta = (v.fav ? ['<span class="cafe-star" data-tip="' + h(tc('threadRow.starred')) + '">' + icon('star', 12) + '</span>'] : []).concat(state.map(function (m) {
     if (!m.runs || m.runs.length < 2) return one(m.runs ? m.runs[0] : m);
     return rotHtml('span', 'trow-rot', m.runs.map(function (r) { return one(r); })); }));
@@ -277,7 +279,7 @@ function threadSecHead(hd, dc, root) {
   if (hd.kind === 'sec') return secHead({ act: 'fold', data: ' data-f="sec" data-k="' + h(hd.key) + '"' + (hd.dflt ? ' data-dflt="1"' : ''), open: !hd.collapsed, icon: ic, name: tc('threadRow.section', hd.key), n: hd.n, note: hd.note });
   const more = d.more ? rowMore(d.more.items ? menuLive(pvMenu(d.more.items, hd, root)) : d.more.menu, hd.id, pv(d.more.label, hd, root), 'cafe-hov') : '', add = hd.add && d.add ? btn(pv(d.add.label, hd, root), { iconOnly: true, icon: 'plus', sm: true, act: d.add.act, data: pvArgs(d.add.args, hd, root), cls: 'cafe-hov' }) : '';
   return secHead({ act: d.act, data: pvArgs(d.args, hd, root), open: hd.open, icon: ic, name: hd.unassigned ? tc('threadRow.unassigned') : hd.name, tip: hd.tip, n: hd.n,
-    extra: (hd.warn ? lrDot('warn', hd.warn) : '') + (hd.fixed ? '<span class="t-s faint">' + h(tc('threadRow.fixed')) + '</span>' : ''), acts: hd.add ? add + more : more });
+    extra: (hd.warn ? lrDot('warn', hd.warn) : '') + (hd.fixed ? '<span class="t-s faint">' + h(tc('threadRow.fixed')) + '</span>' : '') + (hd.kind === 'group' && !hd.open && hd.attention > 0 ? '<span class="t-s faint">' + h(tc('threadRow.groupAttention', hd.attention)) + '</span>' : ''), acts: hd.add ? add + more : more });
 }
 /* dc：threads 块的声明（groups 每种段的默认、heads 段头的绑定、other「其他项目」那一段的开合、rename 行的原地改名）。
    「其他项目」是同一种段头（名字 · 数量 · 箭头），点了展开的是它下面的几段（other.sections） */
@@ -288,8 +290,10 @@ function threadSections(list, dc, root) {
     if (s.other) { const d = dc.other || {}; return secHead({ act: d.act, data: pvArgs(d.args, s.other, root), open: s.other.open, name: tc('threadRow.otherProjects'), n: s.other.n }) + (s.other.open ? threadSections(s.other.sections, dc, root) : ''); }
     /* move（主题声明的动作）：对话能拖进别的分组、拖出到不分组的段；段是放下的容器（data-move-act + 它是哪一段）；rowDrop（段的数据）：放在这一段的行上是插进先后（insert）还是放到那一行上（onto） */
     const mvAct = dc.move ? pv(dc.move, root, root) : '', mv = !!mvAct;
-    return gsection({ key: s.key, collapsed: s.collapsed, dflt: !!dflt.collapsed, step: dflt.limit, rows: s.rows.map(function (v) { return threadRow(v, dc.rename, root, mv); }), peek: (s.peek || []).map(function (v) { return threadRow(v, dc.rename, root, mv); }), empty: s.empty ? emptyState(tc('threadRow.empty', s.empty)) : '',
-      attrs: (s.gid ? ' data-gid="' + h(s.gid) + '"' : '') + (mv ? ' data-move="threads" data-move-act="' + h(mvAct) + '" data-to="' + h(s.gid || '') + '"' + (s.rowDrop ? ' data-move-rows="' + h(s.rowDrop) + '"' : '') : ''), head: threadSecHead(Object.assign({ key: s.key, collapsed: s.collapsed != null ? s.collapsed : secCollapsed(s.key, !!dflt.collapsed), dflt: !!dflt.collapsed }, s.head), dc, root) });
+    const hd = Object.assign({ key: s.key, collapsed: s.collapsed != null ? s.collapsed : secCollapsed(s.key, !!dflt.collapsed), dflt: !!dflt.collapsed }, s.head);
+    const d = (dc.heads || {})[hd.kind] || {};
+    return gsection({ key: s.key, collapsed: s.collapsed, dflt: !!dflt.collapsed, step: dflt.limit, rows: s.rows.map(function (v) { return threadRow(v, dc.rename, root, mv); }), peek: (s.peek || []).map(function (v) { return threadRow(v, dc.rename, root, mv); }), peekMore: s.peekMore || 0, peekAct: d.act || '', peekData: d.args ? pvArgs(d.args, hd, root) : '', empty: s.empty ? emptyState(tc('threadRow.empty', s.empty)) : '',
+      attrs: (s.gid ? ' data-gid="' + h(s.gid) + '"' : '') + (mv ? ' data-move="threads" data-move-act="' + h(mvAct) + '" data-to="' + h(s.gid || '') + '"' + (s.rowDrop ? ' data-move-rows="' + h(s.rowDrop) + '"' : '') : ''), head: threadSecHead(hd, dc, root) });
   }).join('');
 }
 function gsection(o) {
@@ -298,9 +302,10 @@ function gsection(o) {
   /* 所有行都画出来，收起 / “还有 N 条”只改段上的属性（data-collapsed / data-more），点开关是本地更新、不重画：
      展开时露 .gsec-rows（多出的几条在 .gsec-x 里，data-more 时才露）；收起时只露 .gsec-peek（需要注意的那几行） */
   const fold = rows.length > n ? secMoreTg(key, more, rows.length - n) : '';
+  const peekFold = o.peekMore > 0 && o.peekAct ? '<button type="button" class="fold-tg" data-act="' + h(o.peekAct) + '"' + (o.peekData || '') + '>' + tc('fold.moreHtml', '<span class="num">' + o.peekMore + '</span>') + '</button>' : '';
   return '<section class="gsec" data-sec="' + h(key) + '"' + (collapsed ? ' data-collapsed' : '') + (more ? ' data-more' : '') + (o.attrs || '') + '><div class="gsec-h">' + o.head + '</div><div class="gsec-b">' +
     '<div class="gsec-rows">' + (rows.slice(0, n).join('') || (o.empty || '')) + (rows.length > n ? '<div class="gsec-x">' + rows.slice(n).join('') + '</div>' : '') + fold + '</div>' +
-    '<div class="gsec-peek">' + (o.peek || []).join('') + '</div></div></section>';
+    '<div class="gsec-peek">' + (o.peek || []).join('') + peekFold + '</div></div></section>';
 }
 function secMoreTg(key, more, extra) { return foldTg(more, 'fold', ' data-f="more" data-k="' + h(key) + '"', more ? '' : tc('fold.moreHtml', '<span class="num">' + extra + '</span>'), more ? tc('common.collapse') : '', 'bottom'); }
 /* 段的收起 / 展开：本地更新（段的属性 + 表头箭头），不重画整页。对话组、项目的表头也走它（状态各自存，DOM 一样改） */

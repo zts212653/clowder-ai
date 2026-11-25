@@ -30,6 +30,7 @@
 @keyframes mo-row-error { 0%, 35%, 50%, 85%, 100% { opacity: 1; transform: scale(1); } 17.5%, 67.5% { opacity: .35; transform: scale(.7); } 0%, 100% { background: var(--danger); } }
 @keyframes mo-rec { 0%, 35%, 50%, 85%, 100% { opacity: 1; } 17.5%, 67.5% { opacity: .35; } }
 @keyframes mo-skel { 0%, 100% { opacity: 1; animation-timing-function: cubic-bezier(.4, 0, .6, 1); } 50% { opacity: .4; animation-timing-function: cubic-bezier(.4, 0, .6, 1); } }
+@keyframes mo-dot { 0%, 50%, 100% { opacity: 1; transform: translateY(var(--dot-lift, calc(-1 * var(--sp-xs)))); } 15%, 35%, 65%, 85% { opacity: .35; transform: none; } }
 @keyframes mo-caret { 0%, 50% { opacity: 1; } 25%, 75%, 100% { opacity: 0; } }
 /* 待发出托盘：在输入框正上方，和输入框贴在一起 */
 /* Skill / MCP 卡片布局 */

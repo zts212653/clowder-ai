@@ -483,6 +483,7 @@ function chatRead(name) {
     }
     return chatSpeechAvailable;
   }
+  CS.lang = S.lang === 'en' ? 'en' : 'zh';
   return projectChat(projectChatData(), CS, chatDataSnapshot, name)[name];
 }
 /* A reply still in progress: streaming, or the response an active run is writing (before its first output) */
@@ -726,7 +727,17 @@ window.clowderChat = {
       };
     };
     VM.chatComposer = function () {
-      return Object.assign({}, chatRead('chatComposer'), { homePin: !!CS.homePin });
+      const base = chatRead('chatComposer');
+      if (chatPort.threadId !== 'default') {
+        CS.homePin = null;
+        CS.homeTitle = null;
+      }
+      return Object.assign({}, base, {
+        homePin: CS.homePin != null ? !!CS.homePin : !!base.homePin,
+        input: Object.assign({}, base.input, {
+          title: CS.homeTitle != null ? CS.homeTitle : (base.input && base.input.title) || '',
+        }),
+      });
     };
     VM.chatPop = function () {
       return chatRead('chatPop');
@@ -810,6 +821,13 @@ window.clowderChat = {
     A.renameCommit = function (d, el) {
       A.rename({ entity: 'title', v: el.value });
     };
+    INPUTS.cafeHomeTitle = function (e) {
+      CS.homeTitle = e.target.value;
+      return chatPort.action('homeTitle', { v: e.target.value });
+    };
+    SET_AFTER['cs.homePin'] = function (value) {
+      return chatPort.action('homePin', { pinned: String(!!value) });
+    };
     INPUTS.cafeCompose = function (e) {
       const ta = e.target,
         before = CS.draft[ta.id] || '',
@@ -870,6 +888,7 @@ window.clowderChat = {
       'cafeTypedPick',
       'cloudRecoveryRead',
       'bindRetry',
+      'reply',
     ].forEach(function (name) {
       A[name] = function (d, el) {
         if (name === 'send') {
@@ -1140,9 +1159,6 @@ window.clowderChat = {
     };
     A.streamOlder = function () {
       return STREAM_OLDER.load(function () {});
-    };
-    A.reply = function (d) {
-      return chatAction('reply', d);
     };
     SET_AFTER['cs.reply'] = function () {
       chatAction('reply', { mid: CS.reply || '' });
@@ -1450,8 +1466,9 @@ window.clowderChat = {
       return true;
     };
     INPUTS.cafeField = function (e) {
+      const before = CS.f[e.target.id] || '';
       CS.f[e.target.id] = e.target.value;
-      if (e.target.id.indexOf('pick-') === 0) render(true);
+      if (e.target.id.indexOf('pick-') === 0 && !before.trim() !== !e.target.value.trim()) render(true);
     };
     A.cafeAskSubmit = function (d) {
       return chatAction('runtimeRespond', d);
@@ -1468,7 +1485,7 @@ window.clowderChat = {
       draft.values[key] = e.target.value;
     };
     INPUTS.runtimeCustom = function (e) {
-      return chatAction('runtimeCustom', { id: e.target.dataset.id, v: e.target.value });
+      return chatPort.action('runtimeCustom', { id: e.target.dataset.id, v: e.target.value });
     };
     CHANGES.runtimeSet = function (e) {
       const id = e.target.dataset.id,

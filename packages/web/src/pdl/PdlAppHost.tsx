@@ -92,6 +92,7 @@ import { useTts } from '@/hooks/useTts';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { fetchApprovalProducerBody } from '@/lib/approval-producer-read';
+import { readApprovalResultOwner } from '@/lib/approval-result-owner';
 import { isDshMember } from '@/lib/member-model-display';
 import { useApprovalResult } from '@/lib/use-approval-result';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
@@ -479,7 +480,9 @@ function ChatBinding({
   const pluginTargets = usePluginTargets(need('chat.pluginTargets'));
   // One draft per conversation, kept in browser storage (thread-drafts): read when it opens, written as it changes.
   const drafting = exportMids === undefined;
-  const [input, writeInput] = useState(() => (drafting ? getThreadDraft(threadId) : ''));
+  const inputChanged = useRef<() => void>();
+  const serverDraft = useRef<ReturnType<typeof useServerComposerDraft>>();
+  const leaving = useRef(false);
   const [images, setImages] = useState<File[]>(() => threadImageDrafts.get(threadId) ?? []);
   const [replyNotices, setReplyNotices] = useState<ChatData['replyNotices']>([]);
   const [sendingThreads, setSendingThreads] = useState<Record<string, true>>({});
@@ -494,7 +497,7 @@ function ChatBinding({
   );
   const [preparingImages, setPreparingImages] = useState(false);
   const ui = useRef<ChatUiState>({
-    draft: { 'chat-input': input },
+    draft: { 'chat-input': drafting ? getThreadDraft(threadId) : '' },
     target: '',
     navHidden: false,
     viewCat: null,
@@ -514,17 +517,27 @@ function ChatBinding({
     clock: Date.now(),
     f: {},
   });
-  const setInput = useCallback((value: React.SetStateAction<string>) => {
-    const text = typeof value === 'function' ? value(ui.current.draft!['chat-input']) : value;
+  const writeInput = useCallback((text: string) => {
     ui.current.draft!['chat-input'] = text;
-    writeInput(text);
-    if (window.clowderChat) window.clowderChat.emit('composer:changed', undefined);
+    leaving.current = !!(
+      text.trim() ||
+      current.current.images.length ||
+      current.current.contexts.length ||
+      current.current.reply
+    );
+    inputChanged.current?.();
   }, []);
+  const setInput = useCallback(
+    (value: React.SetStateAction<string>) => {
+      writeInput(typeof value === 'function' ? value(ui.current.draft!['chat-input']) : value);
+      if (window.clowderChat) window.clowderChat.emit('composer:changed', undefined);
+    },
+    [writeInput],
+  );
   const [conversation, setConversation] = useState(threadId);
   if (conversation !== threadId) {
     const text = drafting ? getThreadDraft(threadId) : '';
     setConversation(threadId);
-    writeInput(text);
     setImages(threadImageDrafts.get(threadId) ?? []);
     setContexts(drafting ? [...getContextAttachmentDraft(threadId)] : []);
     setContextQuery('');
@@ -552,40 +565,29 @@ function ChatBinding({
   const reply = store.replyToMessage;
   useEffect(() => {
     if (!drafting) return;
-    syncDraftToStorage(threadId, input);
     syncContextAttachmentDraftToStorage(threadId, contexts);
     syncReplyDraftToStorage(threadId, reply);
-  }, [drafting, threadId, input, contexts, reply]);
+  }, [drafting, threadId, contexts, reply]);
   // The same draft is kept on the server, so a refresh or another device continues it.
-  const serverDraft = useServerComposerDraft({
-    threadId,
-    enabled: drafting && threadId !== 'default',
-    draft: {
-      text: input,
-      images: images.flatMap((file) => draftFile.get(file) ?? []),
-      contexts,
-      ...(reply ? { replyTo: reply.id } : {}),
-    },
-    restore: (saved, current) => {
-      setInput(saved.text);
-      setContexts(saved.contexts);
-      const message = saved.replyTo && useChatStore.getState().messages.find((m) => m.id === saved.replyTo);
-      if (message)
-        useChatStore
-          .getState()
-          .setReplyTo({ id: message.id, content: message.content, senderCatId: message.catId ?? null, threadId });
-      else useChatStore.getState().clearReplyTo();
-      return downloadImages(
-        saved.images.map((block) => block.url),
-        saved.images.filter((block) => block.type === 'file'),
-      ).then((files) => {
-        if (!current()) return;
-        files.forEach((file, i) => draftFile.set(file, saved.images[i]));
-        // Files picked here and not yet uploaded are not in any saved draft: they stay beside it.
-        setImages((all) => [...files, ...all.filter((file) => !draftFile.has(file))].slice(0, 5));
-      });
-    },
-  });
+  const restoreDraft: Parameters<typeof useServerComposerDraft>[0]['restore'] = (saved, current) => {
+    setInput(saved.text);
+    setContexts(saved.contexts);
+    const message = saved.replyTo && useChatStore.getState().messages.find((m) => m.id === saved.replyTo);
+    if (message)
+      useChatStore
+        .getState()
+        .setReplyTo({ id: message.id, content: message.content, senderCatId: message.catId ?? null, threadId });
+    else useChatStore.getState().clearReplyTo();
+    return downloadImages(
+      saved.images.map((block) => block.url),
+      saved.images.filter((block) => block.type === 'file'),
+    ).then((files) => {
+      if (!current()) return;
+      files.forEach((file, i) => draftFile.set(file, saved.images[i]));
+      // Files picked here and not yet uploaded are not in any saved draft: they stay beside it.
+      setImages((all) => [...files, ...all.filter((file) => !draftFile.has(file))].slice(0, 5));
+    });
+  };
   // Words, places and a quote handed to this conversation's input from elsewhere (a file, a work, a recall).
   const pendingInsert = useChatStore((s) => s.pendingChatInsert);
   useEffect(() => {
@@ -633,8 +635,12 @@ function ChatBinding({
   }, [pendingInsert, threadId, setInput]);
   // The thread list marks a conversation with a draft when you leave it — typing never touches the list.
   const setThreadHasDraft = useChatStore((s) => s.setThreadHasDraft);
-  const leaving = useRef(false);
-  leaving.current = !!(input.trim() || images.length || contexts.length || store.replyToMessage);
+  leaving.current = !!(
+    ui.current.draft!['chat-input'].trim() ||
+    images.length ||
+    contexts.length ||
+    store.replyToMessage
+  );
   useLayoutEffect(() => {
     const left = threadId;
     return () => setThreadHasDraft(left, leaving.current);
@@ -766,15 +772,7 @@ function ChatBinding({
   const project = useRef<ProjectBindings>();
   const [newProjectId, setNewProjectId] = useState<string>();
   const prospectivePreview = useRef<RoutingPreviewState>({ status: 'idle', targetCats: [], reason: null });
-  const routingPreview = useRoutingPreview({
-    enabled: exportMids === undefined && threadId !== 'default',
-    content: input,
-    scope: { scope: 'thread', threadId },
-    refreshKey: JSON.stringify([
-      history.messages.at(-1)?.id,
-      store.threads.find((t) => t.id === threadId)?.preferredCats,
-    ]),
-  });
+  const routingPreview = useRef<RoutingPreviewState>({ status: 'idle', targetCats: [], reason: null });
   const recoveryData = useMemo(
     () =>
       Object.fromEntries(
@@ -803,7 +801,7 @@ function ChatBinding({
       newProjectId,
       // A new conversation's routing comes from its admission binding, which reports after this render.
       get routingPreview() {
-        return threadId === 'default' ? prospectivePreview.current : routingPreview;
+        return threadId === 'default' ? prospectivePreview.current : routingPreview.current;
       },
       threads: store.threads,
       threadsLoading: store.threadsLoading,
@@ -850,7 +848,6 @@ function ChatBinding({
     [
       threadId,
       newProjectId,
-      routingPreview,
       store.threads,
       store.threadsLoading,
       history.messages,
@@ -904,6 +901,11 @@ function ChatBinding({
   current.current = data;
   // A send the server took clears the draft of the conversation it came from, wherever the owner is now.
   const clearSentDraft = (sent: string) => {
+    if (sent === 'default') {
+      homeDirtyRef.current = { title: false, pinned: false };
+      ui.current.homeTitle = '';
+      ui.current.homePin = false;
+    }
     if (current.current.threadId === sent) {
       setInput('');
       setImages([]);
@@ -912,7 +914,7 @@ function ChatBinding({
       return;
     }
     syncDraftToStorage(sent, '');
-    serverDraft.clear(sent);
+    serverDraft.current!.clear(sent);
     threadImageDrafts.delete(sent);
     syncContextAttachmentDraftToStorage(sent, []);
     syncReplyDraftToStorage(sent, null);
@@ -947,6 +949,7 @@ function ChatBinding({
 
   const forwardRetryRef = useRef<{ fingerprint: string; key: string } | null>(null);
   const admissionRef = useRef<NewConversationAdmission | null>(null);
+  const homeDirtyRef = useRef({ title: false, pinned: false });
 
   useLayoutEffect(() => {
     const state = useChatStore.getState(),
@@ -979,17 +982,12 @@ function ChatBinding({
     // thread's, and until its first page is read there is nothing to judge.
     const own = useChatStore.getState().getThreadState(threadId);
     if (own.isLoadingHistory || !own.messages.length) return;
-    if (own.messages.some((m) => m.id === target.mid)) {
-      pendingJump.current = null;
-      ui.current.pendingMid = target.mid;
-      ui.current.pendingBlock = target.block;
-      if (engineMounted) window.clowderChat.update();
-    } else if (own.hasMore) {
-      void loadEarlier();
-    } else {
-      pendingJump.current = null;
-    }
-  }, [threadId, history.messages, history.isLoadingHistory, history.hasMore, pendingJump, loadEarlier, engineMounted]);
+    // The engine owns both history paging and arrival, so a user's scroll cancels the whole jump.
+    pendingJump.current = null;
+    ui.current.pendingMid = target.mid;
+    ui.current.pendingBlock = target.block;
+    if (engineMounted) window.clowderChat.update();
+  }, [threadId, history.messages, history.isLoadingHistory, pendingJump, engineMounted]);
 
   const [documentVisible, setDocumentVisible] = useState(
     () => typeof document === 'undefined' || document.visibilityState !== 'hidden',
@@ -1256,11 +1254,20 @@ function ChatBinding({
       case 'newProject':
         admissionRef.current!.updateProject(args.id || undefined);
         return;
+      case 'homeTitle':
+        ui.current.homeTitle = args.v ?? '';
+        homeDirtyRef.current.title = true;
+        admissionRef.current?.updateTitle(ui.current.homeTitle);
+        return;
+      case 'homePin':
+        ui.current.homePin = args.pinned === 'true';
+        homeDirtyRef.current.pinned = true;
+        admissionRef.current?.updatePinned(ui.current.homePin);
+        return;
       case 'compose': {
         const pop = composerTrigger(args.v, Number(args.pos));
         if (pop || ui.current.pop?.typed) ui.current.pop = pop;
         if (pop?.kind === 'ctx') setContextQuery(pop.q!);
-        ui.current.draft!['chat-input'] = args.v;
         writeInput(args.v);
         return;
       }
@@ -1271,6 +1278,7 @@ function ChatBinding({
         pushThreadRouteWithHistory(args.id, window);
         return;
       case 'send': {
+        const input = ui.current.draft!['chat-input'];
         if (runtimeAnswerContext.current) {
           const id = runtimeAnswerContext.current,
             binding = questions[id];
@@ -1294,9 +1302,18 @@ function ChatBinding({
         if (connection.isReadonly) throw new Error('当前连接或页面版本不允许发送');
         const admission = admissionRef.current;
         if (threadId === 'default' && !admission?.ready) throw new Error('对话尚未就绪');
-        if (!input.trim() && !images.length && !contexts.length) return;
+        // A message needs words or a context attachment; attachments alone are not one (the server refuses them).
+        if (!input.trim() && !contexts.length) return;
         if (input.trim()) inputHistory.addEntry(input);
         const sentThread = threadId;
+        if (sentThread === 'default' && admission) {
+          if (homeDirtyRef.current.title && (admission.intent?.title ?? '') !== (ui.current.homeTitle ?? '')) {
+            admission.updateTitle(ui.current.homeTitle ?? '');
+          }
+          if (homeDirtyRef.current.pinned && !!admission.intent?.pinned !== !!ui.current.homePin) {
+            admission.updatePinned(!!ui.current.homePin);
+          }
+        }
         await sendHeldDraft({
           threadId: sentThread,
           signature: JSON.stringify([
@@ -1445,8 +1462,7 @@ function ChatBinding({
         return;
       }
       case 'older':
-        await loadEarlier();
-        return;
+        return (await loadEarlier()) === true;
       case 'messageDelete':
         await request(`/api/messages/${encodeURIComponent(args.mid)}${args.v === 'false' ? '/restore' : ''}`, {
           method: args.v === 'false' ? 'PATCH' : 'DELETE',
@@ -1928,12 +1944,6 @@ function ChatBinding({
           pushThreadRouteWithHistory(args.thread, window);
           return;
         }
-        while (
-          !state.getThreadState(threadId).messages.some((m) => m.id === args.mid) &&
-          state.getThreadState(threadId).hasMore
-        ) {
-          if ((await loadEarlier()) !== true) break;
-        }
         ui.current.pendingMid = args.mid;
         ui.current.pendingBlock = args.block;
         return;
@@ -2079,6 +2089,8 @@ function ChatBinding({
         ready: admissionRef.current.ready,
         optionsLocked: admissionRef.current.optionsLocked,
         preferredCats: admissionRef.current.intent?.preferredCats ?? [],
+        title: admissionRef.current.intent?.title ?? '',
+        pinned: !!admissionRef.current.intent?.pinned,
         homeState: { busy: admissionRef.current.optionsLocked, state: admissionRef.current.phase },
       },
     };
@@ -2240,6 +2252,18 @@ function ChatBinding({
   const firstMessageChanged = useCallback(
     (admission: NewConversationAdmission, preview: RoutingPreviewState) => {
       admissionRef.current = admission;
+      if (admission.intent && !admission.intent.creationStarted) {
+        if (homeDirtyRef.current.title && (admission.intent.title ?? '') !== (ui.current.homeTitle ?? '')) {
+          admission.updateTitle(ui.current.homeTitle ?? '');
+        } else if (!homeDirtyRef.current.title) {
+          ui.current.homeTitle = admission.intent.title ?? '';
+        }
+        if (homeDirtyRef.current.pinned && !!admission.intent.pinned !== !!ui.current.homePin) {
+          admission.updatePinned(!!ui.current.homePin);
+        } else if (!homeDirtyRef.current.pinned) {
+          ui.current.homePin = !!admission.intent.pinned;
+        }
+      }
       setNewProjectId(admission.intent?.projectPath);
       prospectivePreview.current = preview;
       current.current = { ...current.current, newProjectId: admission.intent?.projectPath, routingPreview: preview };
@@ -2247,8 +2271,34 @@ function ChatBinding({
     },
     [publishData],
   );
+  const routingPreviewChanged = useCallback(
+    (preview: RoutingPreviewState) => {
+      routingPreview.current = preview;
+      current.current = { ...current.current, routingPreview: preview };
+      publishData();
+    },
+    [publishData],
+  );
   return (
     <>
+      <ComposerInputBinding
+        threadId={threadId}
+        enabled={drafting}
+        ui={ui}
+        inputChanged={inputChanged}
+        serverDraft={serverDraft}
+        images={images}
+        contexts={contexts}
+        reply={reply}
+        restore={restoreDraft}
+        refreshKey={JSON.stringify([
+          history.messages.at(-1)?.id,
+          store.threads.find((t) => t.id === threadId)?.preferredCats,
+        ])}
+        changed={routingPreviewChanged}
+        firstMessage={threadId === 'default' && drafting && !!need('chat.input')}
+        firstMessageChanged={firstMessageChanged}
+      />
       {exportMids === undefined ? (
         <ProjectDataBinding
           data={data}
@@ -2319,11 +2369,80 @@ function ChatBinding({
             <RuntimeRecordBinding key={id} id={id} generation={readGeneration} changed={questionChanged} />
           ))
         : null}
-      {threadId === 'default' && exportMids === undefined && need('chat.input') ? (
-        <FirstMessageBinding content={input} onChange={firstMessageChanged} />
-      ) : null}
     </>
   );
+}
+
+export function ComposerInputBinding({
+  threadId,
+  enabled,
+  ui,
+  inputChanged,
+  serverDraft,
+  images,
+  contexts,
+  reply,
+  restore,
+  refreshKey,
+  changed,
+  firstMessage,
+  firstMessageChanged,
+}: {
+  threadId: string;
+  enabled: boolean;
+  ui: MutableRefObject<ChatUiState>;
+  inputChanged: MutableRefObject<(() => void) | undefined>;
+  serverDraft: MutableRefObject<ReturnType<typeof useServerComposerDraft> | undefined>;
+  images: File[];
+  contexts: ContextAttachment[];
+  reply: ChatData['reply'];
+  restore: Parameters<typeof useServerComposerDraft>[0]['restore'];
+  refreshKey: string;
+  changed: (preview: RoutingPreviewState) => void;
+  firstMessage: boolean;
+  firstMessageChanged: (admission: NewConversationAdmission, preview: RoutingPreviewState) => void;
+}) {
+  const subscribe = useCallback(
+    (notify: () => void) => {
+      inputChanged.current = notify;
+      return () => {
+        inputChanged.current = undefined;
+      };
+    },
+    [inputChanged],
+  );
+  const input = useSyncExternalStore(
+    subscribe,
+    () => ui.current.draft!['chat-input'],
+    () => '',
+  );
+  useEffect(() => {
+    if (enabled) syncDraftToStorage(threadId, input);
+  }, [enabled, threadId, input]);
+  const draft = useServerComposerDraft({
+    threadId,
+    enabled: enabled && threadId !== 'default',
+    draft: {
+      text: input,
+      images: images.flatMap((file) => draftFile.get(file) ?? []),
+      contexts,
+      ...(reply ? { replyTo: reply.id } : {}),
+    },
+    restore,
+  });
+  useLayoutEffect(() => {
+    serverDraft.current = draft;
+  });
+  const preview = useRoutingPreview({
+    enabled: enabled && threadId !== 'default',
+    content: input,
+    scope: { scope: 'thread', threadId },
+    refreshKey,
+  });
+  useLayoutEffect(() => {
+    if (threadId !== 'default') changed(preview);
+  }, [threadId, changed, preview]);
+  return firstMessage ? <FirstMessageBinding content={input} onChange={firstMessageChanged} /> : null;
 }
 
 function CloudRecoveryOwnerBinding({
@@ -2557,6 +2676,10 @@ function ScheduleRecordBinding({
   const reread = useRef(source.reread);
   reread.current = source.reread;
   useEffect(() => {
+    if (!source.ownerUserId) {
+      void readApprovalResultOwner();
+      return;
+    }
     reread.current();
   }, [generation, source.ownerUserId]);
   useLayoutEffect(() => {

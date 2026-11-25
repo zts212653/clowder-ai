@@ -1343,8 +1343,11 @@ export class IndexBuilder implements IIndexBuilder {
     });
     try {
       await this.store.refreshEntityMentions([docAnchor]);
+      // The SQLite transaction above already deleted the passage, sanitized the
+      // document title/summary, and invalidated both passage and document vectors.
+      // Mark the thread dirty for the background flusher instead of blocking the
+      // recall HTTP request on full dirty-thread reindexing and embedding.
       this.markThreadDirty(threadId);
-      await this.flushDirtyThreads();
       return lease;
     } catch (error) {
       try {
