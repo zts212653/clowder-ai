@@ -9,6 +9,7 @@ import {
   type CollectiveMaterialSourceHolder,
   createCollectiveMaterialSourceProxy,
 } from './collective-material-source.js';
+import type { ConversationStorageSources } from './conversation-storage-sources.js';
 import { createPluginMembersHost, type PluginMembersHost, type PluginMembersServices } from './plugin-members-host.js';
 
 export interface PluginRuntimeInfo {
@@ -22,6 +23,9 @@ export interface PluginRuntimeInfo {
 export interface PluginNeutralHost {
   readonly ownerChat?: import('./plugin-owner-chat.js').PluginOwnerChatHost;
   readonly runtimeInfo?: { get(): Promise<PluginRuntimeInfo> };
+  readonly conversationStorage?: {
+    startRead(): Promise<ConversationStorageSources>;
+  };
   readonly memberSessions?: import('../member-sessions/host.js').PluginMemberSessionsHost;
   readonly collectiveMaterialSource?: CollectiveMaterialSourcePort;
   readonly collectiveArtifactOwner?: CollectiveArtifactOwnerPort;
@@ -30,6 +34,9 @@ export interface PluginNeutralHost {
 interface Deps {
   readonly ownerChat?: (assertCurrent: () => Promise<void>) => PluginNeutralHost['ownerChat'];
   readonly runtimeInfo?: () => PluginRuntimeInfo;
+  readonly conversationStorage?: (
+    signal: AbortSignal,
+  ) => Promise<import('./conversation-storage-sources.js').ConversationStorageSources>;
   readonly memberSessions?: (assertCurrent: () => Promise<void>) => PluginNeutralHost['memberSessions'];
   readonly collectiveMaterialSource?: CollectiveMaterialSourceHolder;
   readonly collectiveArtifactOwner?: CollectiveArtifactOwnerHolder;
@@ -75,6 +82,7 @@ export async function createPluginNeutralHost(deps: Deps): Promise<PluginNeutral
     );
   }
   const collective = pkg.pluginId === 'official.collective-connector' && instance.pluginId === pkg.pluginId;
+  const conversationStorage = conversationStorageFor(pkg.pluginId, deps, current);
   return Object.freeze({
     ...(deps.ownerChat ? { ownerChat: deps.ownerChat(current) } : {}),
     ...(deps.runtimeInfo
@@ -92,6 +100,7 @@ export async function createPluginNeutralHost(deps: Deps): Promise<PluginNeutral
         }
       : {}),
     ...(deps.memberSessions ? { memberSessions: deps.memberSessions(current) } : {}),
+    ...(conversationStorage ? { conversationStorage } : {}),
     ...(collective && deps.collectiveMaterialSource
       ? {
           collectiveMaterialSource: createCollectiveMaterialSourceProxy({
@@ -113,5 +122,23 @@ export async function createPluginNeutralHost(deps: Deps): Promise<PluginNeutral
           }),
         }
       : {}),
+  });
+}
+
+function conversationStorageFor(pluginId: string, deps: Deps, assertCurrent: () => Promise<void>) {
+  const read = deps.conversationStorage;
+  if (pluginId !== 'official.storage-governance' || !read || !deps.activationSignal) return undefined;
+  return Object.freeze({
+    async startRead() {
+      const owner = currentPluginOwnerRequestContext(deps.pluginInstanceId);
+      if (owner?.requestIdentity?.method !== 'POST' || owner.requestIdentity.declaredPath !== 'scan')
+        refuse('Conversation storage requires an authenticated owner scan request');
+      await assertCurrent();
+      await owner.assertCurrent();
+      const sources = await read(owner.signal);
+      await owner.assertCurrent();
+      await assertCurrent();
+      return sources;
+    },
   });
 }
