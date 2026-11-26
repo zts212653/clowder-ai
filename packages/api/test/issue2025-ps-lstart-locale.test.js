@@ -198,30 +198,53 @@ function preFixIdentityUnder(pid, locale) {
   return { pid, ppid: Number(parts[1]), pgid: Number(parts[2]), startedAt: parts.slice(3, 8).join(' ') };
 }
 
+const MANAGED_JOB_ID_ENV = 'CAT_CAFE_MANAGED_JOB_ID';
+const CARRIER = 'console.log(process.pid); setInterval(() => {}, 1000)';
+
 /**
- * Production shape: the recorded owner is the durable worker, and the attempt token lives on the command it
- * spawned. `tokenOn: 'owner'` is the reviewer's fixture, where the owner itself carries the token.
+ * A faithful two-process scene of the real topology: the recorded owner is the durable worker, started with
+ * this job's id in its environment, and the attempt token is only on the command it spawns. `shape` is the
+ * command: a direct `node` child, a compound shell command (worker → sh → node, so the token carrier is a
+ * grandchild), or a system binary whose environment `ps eww` may not show. `none` is an unrelated process
+ * standing in for a reused PID: no job id and no command.
  */
-async function startOwner(t, attemptToken, tokenOn) {
-  const tokenEnv = { ...process.env, [ATTEMPT_TOKEN_ENV]: attemptToken };
+async function startOwner(t, { jobId, attemptToken, shape }) {
+  const commands = {
+    node: [process.execPath, ['-e', CARRIER]],
+    compound: ['/bin/sh', ['-c', `"${process.execPath}" -e '${CARRIER}'; echo done`]],
+    system: ['/bin/sleep', ['600']],
+  };
   const script =
-    tokenOn === 'owner'
-      ? 'console.log(process.pid); setInterval(() => {}, 1000)'
-      : `const c = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { env: { ...process.env, ${ATTEMPT_TOKEN_ENV}: ${JSON.stringify(attemptToken)} }, stdio: 'ignore' }); process.on('exit', () => c.kill('SIGKILL')); console.log(c.pid); setInterval(() => {}, 1000)`;
-  const owner = cp.spawn(process.execPath, ['-e', script], {
-    env: tokenOn === 'owner' ? tokenEnv : process.env,
-    stdio: ['ignore', 'pipe', 'ignore'],
+    shape === 'none'
+      ? 'setInterval(() => {}, 1000); console.log(process.pid)'
+      : `const [cmd, args] = ${JSON.stringify(commands[shape])};
+         const child = require('node:child_process').spawn(cmd, args, {
+           env: { ...process.env, ${ATTEMPT_TOKEN_ENV}: ${JSON.stringify(attemptToken)} },
+           stdio: ['ignore', 'inherit', 'ignore'],
+         });
+         delete process.env.${ATTEMPT_TOKEN_ENV};
+         console.log(child.pid);
+         setInterval(() => {}, 1000);`;
+  const env = { ...process.env };
+  delete env[ATTEMPT_TOKEN_ENV];
+  if (shape !== 'none') env[MANAGED_JOB_ID_ENV] = jobId;
+  else delete env[MANAGED_JOB_ID_ENV];
+  const owner = cp.spawn(process.execPath, ['-e', script], { env, stdio: ['ignore', 'pipe', 'ignore'] });
+  const pids = new Set();
+  owner.stdout.on('data', (chunk) => {
+    for (const n of String(chunk).match(/\d+/g) ?? []) pids.add(Number(n));
   });
-  const [chunk] = await once(owner.stdout, 'data', { signal: AbortSignal.timeout(5000) });
-  const carrierPid = Number(String(chunk).trim());
+  await once(owner.stdout, 'data', { signal: AbortSignal.timeout(5000) });
+  await delay(shape === 'compound' ? 600 : 150);
+  pids.delete(owner.pid);
   t.after(() => {
-    for (const pid of new Set([owner.pid, carrierPid])) {
+    for (const pid of [owner.pid, ...pids]) {
       try {
         process.kill(pid, 'SIGKILL');
       } catch {}
     }
   });
-  return { owner, carrierPid };
+  return { owner, commandPids: [...pids] };
 }
 
 function isAlive(pid) {
@@ -233,7 +256,7 @@ function isAlive(pid) {
   }
 }
 
-async function reconcileScene(t, { written, apiNow, tokenOn = 'child', ownerDies = false }) {
+async function reconcileScene(t, { written, apiNow, shape, ownerDies = false }) {
   if (process.platform === 'win32') return t.skip('Unix process table only');
   const root = mkdtempSync(join(tmpdir(), 'issue2025-legacy-owner-'));
   const priorDataRoot = process.env.CAT_CAFE_DATA_DIR;
@@ -243,15 +266,7 @@ async function reconcileScene(t, { written, apiNow, tokenOn = 'child', ownerDies
     else process.env.CAT_CAFE_DATA_DIR = priorDataRoot;
     rmSync(root, { recursive: true, force: true });
   });
-  const attemptToken = `issue2025-${written}-${apiNow}-${tokenOn}-${ownerDies ? 'dead' : 'live'}`;
-  const { owner, carrierPid } = await startOwner(t, attemptToken, tokenOn);
-  const legacy = preFixIdentityUnder(owner.pid, LOCALES[written]);
-  const reference = preFixIdentityUnder(owner.pid, LOCALES[apiNow]);
-  if (written !== 'en_US' && C_LSTART.test(legacy.startedAt)) return t.skip(`${written} locale is not installed`);
-  if (written !== apiNow && legacy.startedAt === reference.startedAt)
-    return t.skip(`${apiNow} formats like ${written}`);
-  withLocale(t, LOCALES[apiNow]);
-
+  const attemptToken = `issue2025-${written}-${apiNow}-${shape}-${ownerDies ? 'dead' : 'live'}`;
   const service = new ManagedJobService(root);
   const principal = { userId: 'fixture-user', threadId: 'fixture-thread', catId: 'codex-astra' };
   const job = await service.submit(principal, {
@@ -264,48 +279,67 @@ async function reconcileScene(t, { written, apiNow, tokenOn = 'child', ownerDies
     wakeTarget: principal,
   });
   service.admit(principal, job.jobId, 'fixture-visible-admission');
+
+  const { owner, commandPids } = await startOwner(t, { jobId: job.jobId, attemptToken, shape });
+  const legacy = preFixIdentityUnder(owner.pid, LOCALES[written]);
+  const reference = preFixIdentityUnder(owner.pid, LOCALES[apiNow]);
+  if (written !== 'en_US' && C_LSTART.test(legacy.startedAt)) return t.skip(`${written} locale is not installed`);
+  if (written !== apiNow && legacy.startedAt === reference.startedAt)
+    return t.skip(`${apiNow} formats like ${written}`);
+  withLocale(t, LOCALES[apiNow]);
+
   recordManagedJobAttempt(job, attemptToken);
   assert.equal(recordDurableManagedGateProcess(job, legacy), true);
   if (ownerDies) {
-    const exited = once(owner, 'exit');
-    owner.kill('SIGKILL');
-    await exited;
-    try {
-      process.kill(carrierPid, 'SIGKILL');
-    } catch {}
-    await delay(100);
+    for (const pid of [owner.pid, ...commandPids]) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {}
+    }
+    await delay(150);
   }
 
   await reconcileManagedJobDescriptor(job, Date.now(), job.supervisorEpoch);
   await delay(300);
-  return { job, owner, carrierPid, legacy };
+  return { job, owner, commandPids, legacy };
 }
 
 for (const [written, apiNow] of [
   ['zh_CN', 'zh_CN'],
+  ['en_GB', 'en_GB'],
   ['en_GB', 'zh_CN'],
   ['zh_CN', 'en_GB'],
   ['zh_CN', 'de_DE'],
   ['zh_CN', 'en_US'],
 ]) {
-  for (const tokenOn of ['child', 'owner']) {
-    test(`reconcile leaves a live worker alone: identity written under ${written}, API now ${apiNow}, token on ${tokenOn}`, async (t) => {
-      const scene = await reconcileScene(t, { written, apiNow, tokenOn });
+  for (const shape of ['node', 'compound', 'system']) {
+    test(`reconcile leaves a live job alone: written under ${written}, API now ${apiNow}, ${shape} command`, async (t) => {
+      const scene = await reconcileScene(t, { written, apiNow, shape });
       if (!scene) return;
-      const { job, owner, carrierPid, legacy } = scene;
+      const { job, owner, commandPids, legacy } = scene;
+      assert.ok(commandPids.length > 0, 'the scene started a command');
       assert.equal(isAlive(owner.pid), true, 'the live worker was not signalled');
-      assert.equal(isAlive(carrierPid), true, 'the live attempt command was not signalled');
-      assert.equal(rawDurableGateRecord(job).cleanupProven, false, 'cleanup is not marked proven');
-      assert.notEqual(rawDurableGateRecord(job).state, 'terminal');
-      assert.deepEqual(rawDurableGateRecord(job).ownerIdentity, legacy, 'ownership evidence is preserved as recorded');
+      for (const pid of commandPids) assert.equal(isAlive(pid), true, `command process ${pid} was not signalled`);
+      const record = rawDurableGateRecord(job);
+      assert.equal(record.cleanupProven, false, 'cleanup is not marked proven');
+      assert.notEqual(record.state, 'terminal', 'the job is not settled');
+      assert.deepEqual(record.ownerIdentity, legacy, 'ownership evidence is preserved as recorded');
     });
   }
 }
 
-test('reconcile still proves cleanup once a pre-fix owner and its attempt are really gone', async (t) => {
-  const scene = await reconcileScene(t, { written: 'zh_CN', apiNow: 'en_GB', ownerDies: true });
+test('reconcile still proves cleanup once a pre-fix owner and its command are really gone', async (t) => {
+  const scene = await reconcileScene(t, { written: 'zh_CN', apiNow: 'en_GB', shape: 'node', ownerDies: true });
   if (!scene) return;
   const { job, legacy } = scene;
   assert.equal(rawDurableGateRecord(job).cleanupProven, true, 'an absent owner with no attempt members is proven');
   assert.deepEqual(rawDurableGateRecord(job).ownerIdentity, legacy, 'ownership evidence is preserved as recorded');
+});
+
+test('a reused owner PID without this job id is still treated as gone, and is never signalled', async (t) => {
+  const scene = await reconcileScene(t, { written: 'zh_CN', apiNow: 'en_GB', shape: 'none' });
+  if (!scene) return;
+  const { job, owner } = scene;
+  assert.equal(rawDurableGateRecord(job).cleanupProven, true, 'no live owner runs this job, so cleanup is proven');
+  assert.equal(isAlive(owner.pid), true, 'the unrelated process carries no attempt token and is not signalled');
 });

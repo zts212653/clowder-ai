@@ -91,24 +91,24 @@ async function attemptMembers(attemptToken: string): Promise<UnixProcessIdentity
 }
 
 /**
- * Format-independent liveness for a recorded owner whose start-time comparison failed. The owner still
- * holds the attempt when its PID is present and either carries the attempt token itself or is the parent
- * of a live process that does. A dead owner's children are re-parented and a reused PID carries nothing,
- * so neither passes; a changed locale alone (#2025) cannot turn a live owner into "gone". Null is unknown.
+ * Format-independent liveness for a recorded owner whose start-time comparison failed. The owner is the
+ * durable worker, which ManagedRunner starts with this job's id in its environment. Its PID being present
+ * with that marker shows it still runs the job whatever the command's shape or binary; a dead owner is
+ * absent and a reused PID lacks the marker, so a changed locale alone (#2025) never reads as "gone".
+ * Null is unknown.
  */
-export async function durableGateOwnerStillHoldsAttempt(
+export async function durableGateOwnerStillRunsJob(
   owner: Pick<UnixProcessIdentity, 'pid'>,
-  attemptToken: string,
+  jobId: string,
 ): Promise<boolean | null> {
-  const environmentMarkers = [`${DURABLE_GATE_ATTEMPT_TOKEN_ENV}=${attemptToken}`];
-  const snapshot = await readUnixProcessSnapshot({ includeEnvironment: true, environmentMarkers });
+  const marker = `CAT_CAFE_MANAGED_JOB_ID=${jobId}`;
+  const snapshot = await readUnixProcessSnapshot({
+    pids: [owner.pid],
+    includeEnvironment: true,
+    environmentMarkers: [marker],
+  });
   if (snapshot === null) return null;
-  const ownerEntry = snapshot.get(owner.pid);
-  if (!ownerEntry) return false;
-  if (hasAttemptToken(ownerEntry.commandAndEnvironment, attemptToken)) return true;
-  return [...snapshot.values()].some(
-    (entry) => entry.ppid === owner.pid && hasAttemptToken(entry.commandAndEnvironment, attemptToken),
-  );
+  return snapshot.get(owner.pid)?.commandAndEnvironment?.split(/\s+/u).includes(marker) ?? false;
 }
 
 function signalMembers(

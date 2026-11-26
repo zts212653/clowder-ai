@@ -1,6 +1,6 @@
 import {
   cleanupDurableManagedGateAttempt,
-  durableGateOwnerStillHoldsAttempt,
+  durableGateOwnerStillRunsJob,
 } from '../../infrastructure/managed-runner-durable-attempt.js';
 import { readUnixProcessSnapshotSync, sameUnixProcess } from '../../utils/cli-process-ownership.js';
 import { inspectDurableManagedGateJob } from './durable-managed-gate-job.js';
@@ -25,8 +25,8 @@ export async function reconcileManagedJobDescriptor(
     if (
       snapshot !== null &&
       !sameUnixProcess(record.ownerIdentity, snapshot.get(record.ownerIdentity.pid)) &&
-      // A start-time mismatch is not proof of death: a live owner still holding its attempt is never cleaned up.
-      (await durableGateOwnerStillHoldsAttempt(record.ownerIdentity, record.attemptToken)) === false
+      // A start-time mismatch is not proof of death: a live owner still running this job is never cleaned up.
+      (await durableGateOwnerStillRunsJob(record.ownerIdentity, job.jobId)) === false
     ) {
       const cleanup = await cleanupDurableManagedGateAttempt(record.attemptToken, 3000, 100);
       if (cleanup.proven)
