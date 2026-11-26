@@ -18,6 +18,12 @@ import { debuglog, isDeepStrictEqual } from 'node:util';
 import { macProcessEnvironmentCommand } from '#process-environment-snapshot';
 import { persistCliExecutionStopEvidence } from './cli-execution-stop-evidence.js';
 import { CLI_PROCESS_OWNER_ENV, processTableEnvironment } from './cli-process-environment.js';
+import {
+  isCLocaleProcessStart,
+  legacyProcessStartOf,
+  withLegacyProcessStarts,
+  withLegacyProcessStartsSync,
+} from './cli-process-legacy-start.js';
 
 export { CLI_PROCESS_OWNER_ENV } from './cli-process-environment.js';
 export const CLI_EXECUTION_ID_ENV = 'CAT_CAFE_EXECUTION_ID';
@@ -36,6 +42,9 @@ export interface UnixProcessIdentity {
   pgid: number;
   startedAt: string;
 }
+
+/** Anything carrying a recorded process start; only `startedAt` decides identity. */
+export type ProcessStartIdentity = Pick<UnixProcessIdentity, 'startedAt'> & Partial<UnixProcessIdentity>;
 
 export interface UnixProcessSnapshotEntry extends UnixProcessIdentity {
   commandAndEnvironment?: string;
@@ -155,6 +164,10 @@ function attachLinuxProcEnvironment(entry: UnixProcessSnapshotEntry, includeEnvi
   const environment = readLinuxProcEnvironmentSync(entry.pid);
   if (environment === undefined) delete entry.commandAndEnvironment;
   else entry.commandAndEnvironment = environment;
+}
+
+function parseLegacyStartLine(line: string): UnixProcessSnapshotEntry | null {
+  return parseSnapshotLine(line, false);
 }
 
 function parseSnapshotLine(line: string, includeEnvironment: boolean): UnixProcessSnapshotEntry | null {
@@ -393,7 +406,7 @@ export function readUnixProcessSnapshotSync(
     attachLinuxProcEnvironment(entry, options.includeEnvironment === true);
     snapshot.set(entry.pid, entry);
   }
-  return snapshot;
+  return withLegacyProcessStartsSync(snapshot, options.includeEnvironment === true, pids, parseLegacyStartLine);
 }
 
 /** Non-blocking process-table read for request paths. Reapers keep the sync form. */
@@ -448,14 +461,22 @@ export function readUnixProcessSnapshot(
           }
           snapshot.set(entry.pid, entry);
         }
-        resolveSnapshot(snapshot);
+        resolveSnapshot(
+          await withLegacyProcessStarts(snapshot, options.includeEnvironment === true, pids, parseLegacyStartLine),
+        );
       },
     );
   });
 }
 
-export function sameUnixProcess(expected: UnixProcessIdentity, actual: UnixProcessIdentity | undefined): boolean {
-  return actual?.startedAt === expected.startedAt;
+/**
+ * Exact PID/start identity. A start recorded before the #2025 locale fix is compared only with the same
+ * process read the way that build read it, so the format change alone never makes a live owner look gone.
+ */
+export function sameUnixProcess(expected: ProcessStartIdentity, actual: ProcessStartIdentity | undefined): boolean {
+  if (!actual) return false;
+  if (actual.startedAt === expected.startedAt) return true;
+  return !isCLocaleProcessStart(expected.startedAt) && legacyProcessStartOf(actual) === expected.startedAt;
 }
 
 function containsOwnerToken(text: string | undefined, ownerId: string): boolean {
