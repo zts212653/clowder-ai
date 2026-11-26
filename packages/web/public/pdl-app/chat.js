@@ -840,29 +840,27 @@ window.clowderChat = {
           pos: String(ta.selectionStart),
           composing: composing ? '1' : '0',
         }),
-      ).then(
-        function () {
-          if (CS.pop && CS.pop.typed) {
-            const pop = CS.pop,
-              same = previousPop && previousPop.typed && previousPop.kind === pop.kind;
-            spotOpen('caret', ta.parentElement, caretRect(ta), function (spot) {
-              popAnchor('chat.pop', spot);
-              CS.pop = Object.assign(pop, {
-                typed: true,
-                input: ta.id,
-                i: same ? Math.min(previousPop.i, 30) : 0,
-                up: true,
-                span: 5,
-              });
-              const count = cafeTypedItems().length;
-              if (CS.pop.i >= count) CS.pop.i = 0;
-              render(true);
+      ).then(function () {
+        if (CS.pop && CS.pop.typed) {
+          const pop = CS.pop,
+            same = previousPop && previousPop.typed && previousPop.kind === pop.kind;
+          spotOpen('caret', ta.parentElement, caretRect(ta), function (spot) {
+            popAnchor('chat.pop', spot);
+            CS.pop = Object.assign(pop, {
+              typed: true,
+              input: ta.id,
+              i: same ? Math.min(previousPop.i, 30) : 0,
+              up: true,
+              span: 5,
             });
-          } else if ((previousPop && previousPop.typed) || !before.trim() !== !ta.value.trim()) {
+            const count = cafeTypedItems().length;
+            if (CS.pop.i >= count) CS.pop.i = 0;
             render(true);
-          }
-        },
-      );
+          });
+        } else if ((previousPop && previousPop.typed) || !before.trim() !== !ta.value.trim()) {
+          render(true);
+        }
+      });
     };
     /* Some IMEs end composition without a following input event. Hand the final text to the host
        without scheduling another render; the input that normally follows still owns the redraw. */
