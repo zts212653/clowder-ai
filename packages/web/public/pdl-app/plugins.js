@@ -1066,27 +1066,42 @@ function bindPluginRequests() {
     clearTimeout(refreshTimers.get(key));
     // a source that already has a value keeps drawing it while it is read again; only a first read is loading
     if (!cur || cur.value === undefined) pushProjectData({ [key]: Object.assign({}, cur, { load: 'loading' }) });
-    return call(s.plugin, s.request, s.input).then(
-      function (v) {
-        const before = projectData(key) || {};
-        pushProjectData({ [key]: { load: '', value: merge(before.value, v) } });
-      },
-      function () {
-        pushProjectData({ [key]: { load: 'error' } });
-      },
-    ).finally(function () { scheduleRefresh(key); });
+    return call(s.plugin, s.request, s.input)
+      .then(
+        function (v) {
+          const before = projectData(key) || {};
+          pushProjectData({ [key]: { load: '', value: merge(before.value, v) } });
+        },
+        function () {
+          pushProjectData({ [key]: { load: 'error' } });
+        },
+      )
+      .finally(function () {
+        scheduleRefresh(key);
+      });
   }
   // Only visible, projected GET sources can request periodic refresh.
   function scheduleRefresh(key) {
     clearTimeout(refreshTimers.get(key));
     refreshTimers.delete(key);
     if (!projected.has(key)) return;
-    const s = held[key], r = PDL_PLUGIN_REQ[s.plugin]?.[s.request];
-    if (!r || (r.method && r.method !== 'GET') || !Number.isInteger(r.refreshMs) || r.refreshMs < 5000 || r.refreshMs > 60000) return;
-    refreshTimers.set(key, setTimeout(function () {
-      if (document.hidden) scheduleRefresh(key);
-      else void read(key);
-    }, r.refreshMs));
+    const s = held[key],
+      r = PDL_PLUGIN_REQ[s.plugin]?.[s.request];
+    if (
+      !r ||
+      (r.method && r.method !== 'GET') ||
+      !Number.isInteger(r.refreshMs) ||
+      r.refreshMs < 5000 ||
+      r.refreshMs > 60000
+    )
+      return;
+    refreshTimers.set(
+      key,
+      setTimeout(function () {
+        if (document.hidden) scheduleRefresh(key);
+        else void read(key);
+      }, r.refreshMs),
+    );
   }
   function reread(pk) {
     return Promise.all(
