@@ -6626,6 +6626,14 @@ it.each(['sys:1', 'sys:2'])('selects DeepSeek Harness and checks the saved bindi
   const savedEnv = { DSH_HOME: 'C:/isolated/member', OTHER: 'kept' };
   const model = JSON.stringify(['deepseek-official', 'deepseek-flash']);
   const calls = vi.fn<FixtureApi['action']>();
+  const partner = {
+    id: 'dsh',
+    selected: true,
+    selectable: true,
+    creationRequestKey: 'new-dsh',
+    runtime: { id: 'dsh', dshDesktop: true, installed: true, label: 'DSH Desktop' },
+    form: { ...initialState(), clientId: 'acp', carrier: 'acp', acpCommand: command },
+  };
   meta.runtimes = [
     {
       id: 'dsh',
@@ -6669,7 +6677,9 @@ it.each(['sys:1', 'sys:2'])('selects DeepSeek Harness and checks the saved bindi
       port.action = (name, args, element) => {
         calls(name, args, element);
         if (name === 'membersRead') return meta;
-        if (name === 'nativeDetect') return [];
+        if (name === 'nativeDetect') return [structuredClone(partner)];
+        if (name === 'nativePrepare') return partner.form;
+        if (name === 'nativeCreate') return { id: 'new-dsh' };
         if (name === 'memberRuntimeModels') return { status: 'configured', models: [{ value: model, label: 'Flash' }] };
         if (name === 'memberDshRead') return { state: 'unchecked' };
         if (name === 'memberDshCheck') return { state: 'passed' };
@@ -6733,6 +6743,13 @@ it.each(['sys:1', 'sys:2'])('selects DeepSeek Harness and checks the saved bindi
     detect?.click();
     await w.__settled();
     expect(calls.mock.calls.some(([name]) => name === 'nativeDetect')).toBe(true);
+    const create = w.document.querySelector('[data-act="nativeCreate"]') as HTMLButtonElement;
+    expect(create).not.toBeNull();
+    expect(create.disabled).toBe(false);
+    create.click();
+    await w.__settled();
+    const creation = calls.mock.calls.find(([name]) => name === 'nativeCreate')?.[1];
+    expect(JSON.parse(creation?.value ?? '{}').creationForm).toMatchObject({ clientId: 'acp', acpCommand: command });
   } finally {
     dom.window.close();
   }

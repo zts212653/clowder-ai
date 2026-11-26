@@ -689,6 +689,9 @@ function bindMembers() {
       runtime = selectedRuntime(f),
       desktop = meta.runtimes.find((row) => row.dshDesktop),
       isDsh = isDshDraft(state, runtime),
+      savedLaunch = savedDshBinding(state) ? f : state.dshBinding,
+      legacyDsh =
+        savedLaunch && !/\/resources\/runtime\/cli\/bin\/dsh\.cmd$/i.test(savedLaunch.acpCommand.replaceAll('\\', '/')),
       shared = clientSettingsState();
     const d = Object.fromEntries(
       Object.keys(memberFields).map(function (key) {
@@ -753,7 +756,7 @@ function bindMembers() {
       cloud: cloud,
       configurationSource: f.configurationSource,
       accountRef: f.accountRef,
-      clientName: isDsh ? dshClientName : client && client.label,
+      clientName: isDsh ? (legacyDsh ? 'DeepSeek Harness' : dshClientName) : client && client.label,
       nativeLogin: runtime && runtime.readiness,
       d: d,
       clientChoice: isDsh ? 'dsh' : f.clientId,
@@ -764,7 +767,11 @@ function bindMembers() {
         })
         .concat({
           value: 'dsh',
-          name: desktop?.installed ? dshClientName : dshClientName + ' · ' + tc('common.status.notInstalled'),
+          name: legacyDsh
+            ? 'DeepSeek Harness'
+            : desktop?.installed
+              ? dshClientName
+              : dshClientName + ' · ' + tc('common.status.notInstalled'),
           type: 'name',
           why: desktop?.installed || state.dshBinding || isDsh ? '' : tc('common.status.notInstalled'),
         }),
