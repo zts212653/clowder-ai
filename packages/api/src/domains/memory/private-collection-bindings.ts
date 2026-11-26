@@ -258,14 +258,18 @@ async function registerOneExternalCollection(
       const targetGenerationId = resolveActiveGenerationId(options.activeGenerationId);
       if (existsSync(manifest.root)) {
         const startMs = Date.now();
-        const vectorStateBefore = inspectExternalVectorState(db, targetGenerationId);
+        const hadPhysicalVectors = hasVectorGeneration(db);
         const docsBefore = (db.prepare('SELECT count(*) AS n FROM evidence_docs').get() as { n: number }).n;
         const builder = new CollectionIndexBuilder(store, manifest, resolveCollectionScanner(manifest));
         const result = await builder.rebuild();
         const docsAfter = (db.prepare('SELECT count(*) AS n FROM evidence_docs').get() as { n: number }).n;
         const lexicalChanged = result.indexed > 0 || docsAfter !== docsBefore;
         const vectorStateAfter = inspectExternalVectorState(db, targetGenerationId);
-        const vectorsStale = vectorStateAfter === 'stale' || (vectorStateBefore !== 'none' && lexicalChanged);
+        // Separate selected-generation SQLite coverage from physical-vector lexical mutation isolation:
+        // MemoryEmbeddingLifecycle.enabledStores() selects cohort members via physical hasVectorGeneration(db),
+        // so any lexical mutation on a store carrying physical vector tables (including an inactive G1 shadow)
+        // must isolate the store as stale, while zero-change boots honor activeId intent alone.
+        const vectorsStale = vectorStateAfter === 'stale' || (hadPhysicalVectors && lexicalChanged);
         finalStatus = result.blocked ? 'blocked' : vectorsStale ? 'stale' : 'active';
         console.info('[memory] external collection startup autoRebuild', {
           id: manifest.id,

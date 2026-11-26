@@ -956,13 +956,34 @@ describe('private-collection-bindings: corpus indexing (INV-9)', () => {
     assert.equal(service3.collectionStores.get('research:g1-2085')?.searchEmbedding(), undefined);
     closeService(service3);
 
-    // Phase 3b: Even if manifest.root becomes temporarily unavailable between load and registration
-    // while collections.json still claims 'active', stale recovery stays intact and heals collections.json.
+    // Phase 3b: Temporarily unavailable manifest.root — verify BOTH real paths honestly:
+    // (1) Real cold boot while root is already offline: loadExternalCollections skips non-existent roots
+    //     (per external-collections.test.js contract), so the offline store is excluded from cohort and
+    //     main-store activate('on') stays green; once root returns online on a later boot (with disk
+    //     collections.json still 'active'), SQLite coverage immediately recovers 'stale' and heals disk.
+    // (2) Load->registration window / direct registerPrivateAndExternalCollections when root disappears
+    //     after load: the offline recovery branch in registerOneExternalCollection still marks 'stale'
+    //     and heals collections.json.
     updateExternalCollection(extDataDir, 'research:g1-2085', { status: 'active' });
     const loadedBeforeOffline = getExternalCollection(extDataDir, 'research:g1-2085');
     assert.ok(loadedBeforeOffline);
     renameSync(extRoot, extRootMoved);
     try {
+      // (1a) Real cold boot while root is already offline before loadExternalCollections
+      const coldOffline = await makeMemoryService();
+      prepareMainG1(coldOffline);
+      assert.equal(
+        coldOffline.catalog.get('research:g1-2085'),
+        undefined,
+        'loadExternalCollections skips already-offline root per existing loader contract',
+      );
+      assert.equal(coldOffline.collectionStores.has('research:g1-2085'), false);
+      const actOffline = await coldOffline.embeddingLifecycle.activate('on');
+      assert.equal(actOffline.ok, true, 'main-store G1 activation must remain green while external root is offline');
+      assert.equal(coldOffline.store.searchEmbedding()?.getModelInfo().generationId, 'g1');
+      closeService(coldOffline);
+
+      // (2) Load->registration window (manifest loaded before root became unavailable)
       const { LibraryCatalog } = await import('../../dist/domains/memory/LibraryCatalog.js');
       const { registerPrivateAndExternalCollections } = await import(
         '../../dist/domains/memory/private-collection-bindings.js'
@@ -979,7 +1000,7 @@ describe('private-collection-bindings: corpus indexing (INV-9)', () => {
       assert.equal(
         offlineCatalog.get('research:g1-2085')?.status,
         'stale',
-        'stale recovery must remain intact even when manifest.root is temporarily unavailable',
+        'load->registration offline window must still recover stale from SQLite coverage',
       );
       for (const s of offlineStores.values()) s.close();
     } finally {
@@ -988,8 +1009,24 @@ describe('private-collection-bindings: corpus indexing (INV-9)', () => {
     assert.equal(
       getExternalCollection(extDataDir, 'research:g1-2085')?.status,
       'stale',
-      'collections.json must also be healed to stale when root is temporarily unavailable',
+      'collections.json must also be healed to stale in the load->registration offline window',
     );
+
+    // (1b) Real cold boot after root returns online with collections.json reset to 'active'
+    updateExternalCollection(extDataDir, 'research:g1-2085', { status: 'active' });
+    const coldReturned = await makeMemoryService();
+    prepareMainG1(coldReturned);
+    assert.equal(
+      coldReturned.catalog.get('research:g1-2085')?.status,
+      'stale',
+      'cold boot after offline root returns must recover stale from SQLite coverage even if disk stayed active',
+    );
+    assert.equal(getExternalCollection(extDataDir, 'research:g1-2085')?.status, 'stale');
+    const actReturned = await coldReturned.embeddingLifecycle.activate('on');
+    assert.equal(actReturned.ok, true);
+    assert.equal(coldReturned.store.searchEmbedding()?.getModelInfo().generationId, 'g1');
+    assert.equal(coldReturned.collectionStores.get('research:g1-2085')?.searchEmbedding(), undefined);
+    closeService(coldReturned);
 
     // Opt-in boundary check: autoRebuild=false and archived manifests must not be altered by stale recovery.
     {
@@ -1240,5 +1277,153 @@ describe('private-collection-bindings: corpus indexing (INV-9)', () => {
       'stale',
       'explicit activeGenerationId=g1 must mark paused building G1 store stale',
     );
+  });
+
+  test('Issue #2085 P2-1 regression: inactive building G1 shadow (no G0) with startup lexical change is isolated as stale so ready main G0 activation succeeds', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { createMemoryServices } = await import('../../dist/domains/memory/factory.js');
+    const { embeddingRecipeFingerprint, readEmbeddingDeployment } = await import(
+      '../../dist/domains/memory/embedding-generation-config.js'
+    );
+    const { ShadowVectorGenerationBuilder } = await import(
+      '../../dist/domains/memory/ShadowVectorGenerationBuilder.js'
+    );
+    const { libraryRoutes } = await import('../../dist/routes/library.js');
+
+    const root = join(tmp, 'issue-2085-shadow-lexical-activation');
+    const docs = join(root, 'docs');
+    const vault = join(root, 'vault');
+    const extDataDir = join(root, 'data');
+    mkdirSync(docs, { recursive: true });
+    mkdirSync(vault, { recursive: true });
+    mkdirSync(extDataDir, { recursive: true });
+    writeFileSync(join(vault, 'a.md'), '# A\n\nAlpha doc.');
+    writeFileSync(join(vault, 'b.md'), '# B\n\nBeta doc.');
+
+    const deployment = readEmbeddingDeployment();
+    assert.equal(deployment.activeId, 'g0');
+    const g0Model = { modelId: 'fixture-g0-main', modelRev: '1', dim: 4, generationId: 'g0' };
+    const g0Encoder = {
+      load: async () => {},
+      reprobeIfNeeded: async () => {},
+      dispose() {},
+      isReady: () => true,
+      getModelInfo: () => g0Model,
+      embed: async (texts) => texts.map(() => new Float32Array([1, 0, 0, 0])),
+    };
+    const g1Recipe = { ...deployment.generations.g1.recipe, modelId: 'fixture-g1-shadow-lex', dim: 6 };
+    const g1Model = {
+      modelId: 'fixture-g1-shadow-lex',
+      modelRev: g1Recipe.modelRevision,
+      dim: 6,
+      generationId: 'g1',
+      representationFingerprint: embeddingRecipeFingerprint(g1Recipe),
+    };
+    const g1Encoder = {
+      load: async () => {},
+      reprobeIfNeeded: async () => {},
+      dispose() {},
+      isReady: () => true,
+      getModelInfo: () => g1Model,
+      embed: async (texts) => texts.map(() => new Float32Array([0, 1, 0, 0, 0, 0])),
+    };
+
+    const boot = () =>
+      createMemoryServices({
+        type: 'sqlite',
+        sqlitePath: join(root, 'main.sqlite'),
+        globalDbPath: join(root, 'global.sqlite'),
+        dataDir: extDataDir,
+        docsRoot: docs,
+        markersDir: join(root, 'markers'),
+        skillsRoot: join(root, 'skills'),
+        memoryRoot: join(root, 'memory'),
+        includeRosterEntitySeeds: false,
+        embed: { embedMode: 'off', embedDim: 4 },
+      });
+
+    // Phase 1: Register opt-in lexical external collection + start paused G1 shadow (no external G0).
+    const svc1 = await boot();
+    const app1 = Fastify();
+    await app1.register(libraryRoutes, { catalog: svc1.catalog, stores: svc1.collectionStores, dataDir: extDataDir });
+    const reg = await app1.inject({
+      method: 'POST',
+      url: '/api/library/register',
+      payload: {
+        id: 'research:shadow-lex',
+        kind: 'research',
+        name: 'shadow-lex',
+        displayName: 'Shadow Lex',
+        root: vault,
+        sensitivity: 'internal',
+        scannerLevel: 0,
+        indexPolicy: { autoRebuild: true },
+      },
+    });
+    assert.equal(reg.statusCode, 200, reg.body);
+    assert.equal(
+      (await app1.inject({ method: 'POST', url: '/api/library/research:shadow-lex/rebuild' })).statusCode,
+      200,
+    );
+    await app1.close();
+    const extStore1 = svc1.collectionStores.get('research:shadow-lex');
+    const paused = await new ShadowVectorGenerationBuilder(extStore1, g1Encoder, false).build({
+      deadlineAt: Date.now() + 5000,
+      maxBatches: 1,
+      batchSize: 1,
+    });
+    assert.equal(paused.status, 'paused');
+    for (const s of new Set([svc1.store, ...svc1.collectionStores.values()])) s.close();
+
+    // Phase 2: Add a new external doc on disk, restart via createMemoryServices, build ready main G0,
+    // and activate('on') with an encoder that throws on any subsequent embed() call.
+    writeFileSync(join(vault, 'c.md'), '# C\n\nNewly added doc after paused G1 shadow.');
+    const svc2 = await boot();
+    for (const s of new Set([svc2.store, ...svc2.collectionStores.values()])) storesToClose.push(s);
+    assert.equal(
+      svc2.catalog.get('research:shadow-lex')?.status,
+      'stale',
+      'lexical change on store carrying physical G1 shadow tables must isolate external store as stale',
+    );
+
+    await svc2.store.upsert([
+      {
+        anchor: 'main-ready-g0',
+        kind: 'note',
+        title: 'Main G0 Doc',
+        summary: 'Already encoded main G0 content.',
+        status: 'active',
+        sourceHash: 'main-g0-v1',
+        updatedAt: new Date().toISOString(),
+      },
+    ]);
+    const mainBuilt = await new ShadowVectorGenerationBuilder(svc2.store, g0Encoder, false).build({
+      deadlineAt: Date.now() + 5000,
+      maxBatches: 8,
+      batchSize: 2,
+    });
+    assert.equal(mainBuilt.status, 'ready');
+    svc2.embeddingLifecycle.getDeployment = () => deployment;
+    svc2.embeddingLifecycle.createEmbeddingService = () => ({
+      ...g0Encoder,
+      embed: async () => {
+        throw new Error('External-only vectors must not withdraw ready main G0');
+      },
+    });
+
+    const activation = await svc2.embeddingLifecycle.activate('on');
+    assert.equal(activation.ok, true, 'ready main G0 activation must succeed without encoding isolated external store');
+    assert.equal(svc2.store.searchEmbedding()?.getModelInfo().generationId, 'g0');
+    assert.equal(svc2.collectionStores.get('research:shadow-lex')?.searchEmbedding(), undefined);
+    assert.equal(
+      svc2.collectionStores
+        .get('research:shadow-lex')
+        .getDb()
+        .prepare("SELECT 1 FROM sqlite_master WHERE name='evidence_vectors'")
+        .get(),
+      undefined,
+      'isolated external store must not have an unexpected G0 vector table created during main activation',
+    );
+    svc2.embeddingLifecycle.deactivate();
   });
 });
