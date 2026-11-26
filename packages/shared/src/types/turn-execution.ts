@@ -7,6 +7,8 @@ export type TurnExecutionTerminalStatus = Exclude<TurnExecutionStatus, 'running'
 export interface TurnExecutionCausalRefs {
   /** Observation provenance; never a work Queue or Task carrier. */
   watcherSourceInvocationId?: string;
+  /** F335 panel round that owns this watcher run; the bounded single-watcher recovery never adopts it. */
+  watcherPanelRoundId?: string;
   /** Server-produced C provenance only; private execution binding/credentials never enter this ledger. */
   routingPreflight?: {
     stage: 'execution_preflight';

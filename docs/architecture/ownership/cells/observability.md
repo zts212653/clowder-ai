@@ -21,6 +21,7 @@ code_anchors:
   - packages/api/src/infrastructure/telemetry/hydrate-traces.ts
   - packages/api/src/infrastructure/telemetry/tool-span-tracker.ts
   - packages/api/src/infrastructure/telemetry/metrics-snapshot-store.ts
+  - packages/api/src/infrastructure/telemetry/cpu/event-loop-tripwire.ts
   - packages/api/src/infrastructure/logger.ts
   - packages/api/src/routes/telemetry.ts
   - packages/api/src/routes/invocation-trajectory-routes.ts
@@ -35,6 +36,7 @@ doc_anchors:
   - docs/features/F299-workspace-invocation-trajectory.md
   - docs/features/F150-tool-usage-stats.md
   - docs/features/F130-api-log-governance.md
+  - docs/ops/event-loop-tripwire.md
   - feature-discussions/2026-09-07-architecture-consolidation/adjudication-draft.md
 static_scan_hints: [TelemetryRedactor, MetricAttributeAllowlist, local-trace-store, hydrate-traces, tool-span-tracker, otel-logger, HubObservabilityTab, TraceBrowser, HubTraceTree, TrajectoryPanel, InvocationTrajectoryDetail, invocation-trajectory, "inv:", ToolUsageCounter, tool-stats, ToolEventLog, REDACT_PATHS]
 cited_by:
@@ -74,6 +76,12 @@ Before this cell existed (2026-09-07), F153 was referenced by `harness-eval` and
 `capability-evolution-control` as the raw telemetry owner without a cell of its own;
 this cell records that owner relation. It was created by adjudication card 1 of the
 2026-09-07 architecture consolidation and does not change any feature's scope.
+
+Task229's default-on event-loop tripwire is process-level runtime-health evidence:
+an observer worker writes code-only daily records independently of the blocked
+main loop, in the existing API log directory. PID, boot and episode join the
+independent record with the later Pino summary. This is not invocation ownership,
+business data, an Eval result or a new transcript surface.
 
 ## Use This When
 

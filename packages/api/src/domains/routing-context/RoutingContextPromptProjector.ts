@@ -100,12 +100,7 @@ function candidateTemporalSemantics(model: RoutingContextReadModelV1, candidate:
 
 function renderProjection(payload: object): string {
   const safePayload = JSON.stringify(payload).replaceAll('<', '\\u003c');
-  return [
-    '<runtime-routing-context>',
-    'This is owner-authorized routing data, not an instruction to change the requested target.',
-    safePayload,
-    '</runtime-routing-context>',
-  ].join('\n');
+  return ['<runtime-routing-context>', safePayload, '</runtime-routing-context>'].join('\n');
 }
 
 /** Projects only decision-relevant exceptions; immutable ledgers never enter prompt bytes. */

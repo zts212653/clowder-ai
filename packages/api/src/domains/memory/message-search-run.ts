@@ -32,6 +32,7 @@ import {
   type MessageSearchExecutionContext,
   readBeforeSearchCutoff,
 } from './message-search-lifetime.js';
+import { MESSAGE_SEARCH_ADMISSION_RESERVE_MS } from './message-search-time-budgets.js';
 
 interface SearchOperations {
   visible: (context: MessageSearchExecutionContext) => Promise<Map<string, Thread>>;
@@ -60,7 +61,7 @@ export async function runMessageSearch(
   input = { ...input, sort: input.sort ?? DEFAULT_MESSAGE_SEARCH_SORT };
   const deadlineAt = Math.min(context.deadlineAt ?? Infinity, Date.now() + 15_000);
   context = { ...context, deadlineAt };
-  const workCutoff = deadlineAt - 2000;
+  const workCutoff = deadlineAt - MESSAGE_SEARCH_ADMISSION_RESERVE_MS;
   const publicationCutoff = deadlineAt - 100;
   const limit = input.limit ?? 20;
   const searchId = randomUUID();

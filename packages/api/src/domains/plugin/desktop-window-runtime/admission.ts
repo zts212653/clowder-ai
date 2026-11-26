@@ -62,7 +62,6 @@ export function desktopWindowContribution(manifest: PluginManifest): DesktopWind
   if (
     manifest.runtime?.transport !== 'builtin' ||
     manifest.runtime.entrypoint !== undefined ||
-    (manifest.configuration?.length ?? 0) !== 0 ||
     (manifest.data?.length ?? 0) !== 0 ||
     manifest.signals !== undefined ||
     contributions.length !== 1 ||

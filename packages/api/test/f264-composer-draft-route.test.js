@@ -118,6 +118,8 @@ describe('F264 Gap F owner composer draft API', () => {
     for (const contentBlocks of [
       [{ type: 'tool_call', toolName: 'oops', toolId: 'unsafe', input: {} }],
       [{ type: 'image', url: '/uploads/../secret.png' }],
+      [{ type: 'file', url: '/uploads/../secret.txt', fileName: 'secret.txt', mimeType: 'text/plain', fileSize: 1 }],
+      [{ type: 'file', url: '/uploads/f264-notes.txt' }],
       Array.from({ length: 6 }, (_, index) => ({ type: 'image', url: `/uploads/too-many-${index}.png` })),
     ]) {
       const invalid = await app.inject({
@@ -143,9 +145,13 @@ describe('F264 Gap F owner composer draft API', () => {
     assert.equal(valid.json().draft.revision, 1);
   });
 
-  it('round-trips canonical ContextAttachment blocks with text and images', async () => {
+  it('round-trips canonical ContextAttachment blocks with text, images and files', async () => {
     const app = createApp();
-    const contentBlocks = [{ type: 'image', url: '/uploads/f264-durable.png' }, QUOTE_ATTACHMENT_BLOCK];
+    const contentBlocks = [
+      { type: 'image', url: '/uploads/f264-durable.png' },
+      { type: 'file', url: '/uploads/f264-notes.txt', fileName: 'notes.txt', mimeType: 'text/plain', fileSize: 12 },
+      QUOTE_ATTACHMENT_BLOCK,
+    ];
     const put = await app.inject({
       method: 'PUT',
       url: `/api/threads/${THREAD_ID}/composer-draft`,

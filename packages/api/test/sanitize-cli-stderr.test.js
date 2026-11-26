@@ -141,7 +141,7 @@ test('redacts URL queries immediately following a log or HTTP header colon', () 
 test('keeps Chinese question boundaries while redacting the URL that follows', () => {
   [
     ['为什么？https://x.test/a?token=1', '为什么？https://x.test/a?[QUERY_REDACTED]'],
-    ['？localhost:3002/x?token=1', '？localhost:3002/x?[QUERY_REDACTED]'],
+    ['？localhost:3004/x?token=1', '？localhost:3004/x?[QUERY_REDACTED]'],
     ['为什么？api/v1/users?sid=deadbeef12', '为什么？api/v1/users?[QUERY_REDACTED]'],
     ['(见)https://x.test/a?token=1', '(见)https://x.test/a?[QUERY_REDACTED]'],
     ['为什么？https://x.test/a?token=1？后面', '为什么？https://x.test/a?[QUERY_REDACTED]？后面'],
@@ -169,13 +169,13 @@ test('redacts URL queries inside parentheses and after literal path parentheses'
       ['GET https://en.example.org/wiki/Foo_(bar)', ' ok'],
       ['GET https://x.test/a)', ' ok'],
       ['GET /api/Foo_(bar)', ' ok'],
-      ['ERR ?(localhost:3002/x', ')'],
-      ['Why?(localhost:3002/x', ')'],
+      ['ERR ?(localhost:3004/x', ')'],
+      ['Why?(localhost:3004/x', ')'],
       ['ERR ?https://x.test/a', ''],
       ['Why?https://x.test/a', ''],
       ['ERR ??https://x.test/a', ''],
       ['GET https://x.test/a(b(c))', ' ok'],
-      ['ERR ?(localhost:3002/x', ''],
+      ['ERR ?(localhost:3004/x', ''],
       ['https://x.test/a)', ''],
     ].forEach(([prefix, suffix]) => {
       assert.equal(sanitizeCliStderr(`${prefix}?${key}=abcd1234${suffix}`), `${prefix}?[QUERY_REDACTED]${suffix}`);

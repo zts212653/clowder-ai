@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { extname } from 'node:path';
-import type { ContentEditorProviderContribution, DesktopWindowContribution } from '@clowder-ai/plugin-contract';
+import type { DesktopWindowContribution } from '@clowder-ai/plugin-contract';
+import type { StaticContentProviderContribution } from '../content-editor-runtime/admission.js';
 import { snapshotPluginSurfaceAssets } from './package-surface-assets.js';
 import type { VerifiedPluginPackage } from './types.js';
 
@@ -31,7 +32,7 @@ const MIME_TYPES: Readonly<Record<string, string>> = {
 
 export async function startStaticSurfaceServer(options: {
   readonly package: VerifiedPluginPackage;
-  readonly contributions: readonly (ContentEditorProviderContribution | DesktopWindowContribution)[];
+  readonly contributions: readonly (StaticContentProviderContribution | DesktopWindowContribution)[];
   readonly containment:
     | { readonly kind: 'editor'; readonly parentOrigin: string }
     | { readonly kind: 'desktop-companion' };

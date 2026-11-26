@@ -18,15 +18,27 @@ const PUBLISHED_MANIFESTS: Partial<
   '0.3.3-candidate.0': { validate: validateDeskManifest, bridgeVersion: '1.7.0' },
 };
 
-/** Keep the generic manifest ABI unchanged; admit only the delivered companion's
- * new bridge literal. Installation and runtime still authenticate its exact SRI.
+/** The package manifest as the contract reads it; a plugin's console is its console/pdl.yaml, not the manifest.
+ * Existing companion bridge admission and exact archive SRI verification stay unchanged.
  */
 export function validateHostPluginManifest(value: unknown): ReturnType<typeof validateManifest> {
+  return validateBaseManifest(value);
+}
+
+function validateBaseManifest(value: unknown): ReturnType<typeof validateManifest> {
   let legacy = validateManifest(value);
-  // A newer general schema must not widen the Host's pinned desktop bridge ABI.
+  const version = value && typeof value === 'object' && 'version' in value ? value.version : undefined;
+  // This Host supports up to bridge 1.7.0. The shared schema also describes livingBody in 1.8.0.
+  // Keep the published reader for pinned 1.7.0 releases and the generic reader for local 1.7.0 builds.
   if (legacy.valid) {
-    if (!legacy.manifest.contributions?.some((c) => c.type === 'desktop-window' && c.bridgeVersion === '1.7.0'))
-      return legacy;
+    const bridgeVersion = legacy.manifest.contributions
+      ?.filter((c) => c.type === 'desktop-window')
+      .find(
+        (c) =>
+          c.bridgeVersion === '1.8.0' ||
+          (c.bridgeVersion === '1.7.0' && COMPANION_ARCHIVE_CONTRACTS.some((row) => row.version === version)),
+      )?.bridgeVersion;
+    if (!bridgeVersion) return legacy;
     legacy = {
       valid: false,
       errors: [
@@ -34,12 +46,14 @@ export function validateHostPluginManifest(value: unknown): ReturnType<typeof va
           instancePath: '/contributions',
           schemaPath: '#/desktop-window/bridgeVersion',
           keyword: 'enum',
-          message: 'Bridge 1.7.0 requires a pinned companion release',
+          message:
+            bridgeVersion === '1.8.0'
+              ? 'Bridge 1.8.0 is not supported by this Host'
+              : 'Bridge 1.7.0 requires a pinned companion release',
         },
       ],
     };
   }
-  const version = value && typeof value === 'object' && 'version' in value ? value.version : undefined;
   const release = COMPANION_ARCHIVE_CONTRACTS.find(
     (row) => row.version === version && PUBLISHED_MANIFESTS[row.contract] !== undefined,
   );

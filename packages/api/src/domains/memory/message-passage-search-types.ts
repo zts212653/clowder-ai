@@ -11,6 +11,8 @@ export interface MessagePassageSearchOptions
   /** Host ordinary-search policy: return a shared relevance queue; omitted preserves legacy ordering. */
   candidateOrder?: 'relevance';
   candidateLimit?: number;
+  /** Parent-owned original request deadline; deadlineAt may be a shorter execution/repeat window. */
+  requestDeadlineAt?: number;
   /** Private observers, stripped before IPC; never part of public search metadata. */
   onReadSnapshot?: (snapshot: MemoryReadSnapshot) => void;
   onCjkRead?: (snapshot: CjkReadSnapshot) => void;

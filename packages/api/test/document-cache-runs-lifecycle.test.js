@@ -41,45 +41,49 @@ describe('F279 server-owned full-document cache runs — lifecycle and stale fen
     });
     harnesses.push(harness);
 
-    const identity = { projectPath: '/repo', relativePath: 'race.md', contentDigest: 'digest-a' };
-    const start = async (synthesis) => {
-      const previousGateCount = gates.length;
-      const response = await harness.app.inject({
-        method: 'POST',
-        url: '/api/tts/listen/document/cache',
+    try {
+      const identity = { projectPath: '/repo', relativePath: 'race.md', contentDigest: 'digest-a' };
+      const start = async (synthesis, phase) => {
+        const previousGateCount = gates.length;
+        const response = await harness.app.inject({
+          method: 'POST',
+          url: '/api/tts/listen/document/cache',
+          headers: headers('operator'),
+          payload: { identity, synthesis, sentences: [{ anchor: 'anchor-a', text: '会晚到的正文。' }] },
+        });
+        assert.equal(response.statusCode, 200, response.body);
+        await waitFor(() => assert.equal(gates.length, previousGateCount + 1, `${phase}: ${response.body}`));
+      };
+
+      await saveDocument(harness.app, 'operator', identity, ['anchor-a'], { voice: 'voice-a' });
+      await start({ voice: 'voice-a' }, 'initial run');
+      const clear = await harness.app.inject({
+        method: 'DELETE',
+        url: '/api/tts/listen/document/audio',
         headers: headers('operator'),
-        payload: { identity, synthesis, sentences: [{ anchor: 'anchor-a', text: '会晚到的正文。' }] },
+        payload: { projectPath: identity.projectPath, relativePath: identity.relativePath },
       });
-      assert.equal(response.statusCode, 200, response.body);
-      await waitFor(() => assert.equal(gates.length, previousGateCount + 1));
-    };
+      assert.equal(clear.statusCode, 200, clear.body);
+      gates.shift().resolve();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      assert.equal((await loadDocument(harness.app, 'operator', identity)).cache.cachedSentences, 0);
 
-    await saveDocument(harness.app, 'operator', identity, ['anchor-a'], { voice: 'voice-a' });
-    await start({ voice: 'voice-a' });
-    const clear = await harness.app.inject({
-      method: 'DELETE',
-      url: '/api/tts/listen/document/audio',
-      headers: headers('operator'),
-      payload: { projectPath: identity.projectPath, relativePath: identity.relativePath },
-    });
-    assert.equal(clear.statusCode, 200, clear.body);
-    gates.shift().resolve();
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    assert.equal((await loadDocument(harness.app, 'operator', identity)).cache.cachedSentences, 0);
+      await start({ voice: 'voice-a' }, 'after clear');
+      const edited = { ...identity, contentDigest: 'digest-b' };
+      await saveDocument(harness.app, 'operator', edited, ['anchor-a'], { voice: 'voice-a' });
+      gates.shift().resolve();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      assert.equal((await loadDocument(harness.app, 'operator', edited)).cache.cachedSentences, 0);
 
-    await start({ voice: 'voice-a' });
-    const edited = { ...identity, contentDigest: 'digest-b' };
-    await saveDocument(harness.app, 'operator', edited, ['anchor-a'], { voice: 'voice-a' });
-    gates.shift().resolve();
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    assert.equal((await loadDocument(harness.app, 'operator', edited)).cache.cachedSentences, 0);
-
-    await saveDocument(harness.app, 'operator', identity, ['anchor-a'], { voice: 'voice-a' });
-    await start({ voice: 'voice-a' });
-    await saveDocument(harness.app, 'operator', identity, ['anchor-a'], { voice: 'voice-b' });
-    gates.shift().resolve();
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    assert.equal((await loadDocument(harness.app, 'operator', identity)).cache.cachedSentences, 0);
+      await saveDocument(harness.app, 'operator', identity, ['anchor-a'], { voice: 'voice-a' });
+      await start({ voice: 'voice-a' }, 'before voice edit');
+      await saveDocument(harness.app, 'operator', identity, ['anchor-a'], { voice: 'voice-b' });
+      gates.shift().resolve();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      assert.equal((await loadDocument(harness.app, 'operator', identity)).cache.cachedSentences, 0);
+    } finally {
+      for (const gate of gates) gate.resolve();
+    }
   });
 
   it('cancels only the active remainder and preserves already-linked cache progress', async () => {
@@ -93,40 +97,44 @@ describe('F279 server-owned full-document cache runs — lifecycle and stale fen
       yield { type: 'final', result: { audio: Buffer.from(request.text), format: 'wav', durationSec: 1 } };
     });
     harnesses.push(harness);
-    const identity = { projectPath: '/repo', relativePath: 'cancel.md', contentDigest: 'digest' };
-    await saveDocument(harness.app, 'operator', identity, ['first', 'second']);
-    const started = await harness.app.inject({
-      method: 'POST',
-      url: '/api/tts/listen/document/cache',
-      headers: headers('operator'),
-      payload: {
-        identity,
-        sentences: [
-          { anchor: 'first', text: '第一句。' },
-          { anchor: 'second', text: '第二句。' },
-        ],
-      },
-    });
-    assert.equal(started.statusCode, 200, started.body);
-    await secondStarted.promise;
-    const synthesisFingerprint = started.json().synthesisFingerprint;
-    assert.equal(typeof synthesisFingerprint, 'string');
+    try {
+      const identity = { projectPath: '/repo', relativePath: 'cancel.md', contentDigest: 'digest' };
+      await saveDocument(harness.app, 'operator', identity, ['first', 'second']);
+      const started = await harness.app.inject({
+        method: 'POST',
+        url: '/api/tts/listen/document/cache',
+        headers: headers('operator'),
+        payload: {
+          identity,
+          sentences: [
+            { anchor: 'first', text: '第一句。' },
+            { anchor: 'second', text: '第二句。' },
+          ],
+        },
+      });
+      assert.equal(started.statusCode, 200, started.body);
+      await secondStarted.wait('second cache sentence did not start');
+      const synthesisFingerprint = started.json().synthesisFingerprint;
+      assert.equal(typeof synthesisFingerprint, 'string');
 
-    const cancelled = await harness.app.inject({
-      method: 'DELETE',
-      url: '/api/tts/listen/document/cache',
-      headers: headers('operator'),
-      payload: { ...identity, synthesisFingerprint },
-    });
-    assert.equal(cancelled.statusCode, 200, cancelled.body);
-    assert.equal(cancelled.json().cancelled, true);
-    assert.equal(cancelled.json().cache.cachedSentences, 1);
-    releaseSecond.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 30));
+      const cancelled = await harness.app.inject({
+        method: 'DELETE',
+        url: '/api/tts/listen/document/cache',
+        headers: headers('operator'),
+        payload: { ...identity, synthesisFingerprint },
+      });
+      assert.equal(cancelled.statusCode, 200, cancelled.body);
+      assert.equal(cancelled.json().cancelled, true);
+      assert.equal(cancelled.json().cache.cachedSentences, 1);
+      releaseSecond.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 30));
 
-    const state = await loadDocument(harness.app, 'operator', identity);
-    assert.equal(state.cache.cachedSentences, 1);
-    assert.equal(state.cacheRun.active, false);
+      const state = await loadDocument(harness.app, 'operator', identity);
+      assert.equal(state.cache.cachedSentences, 1);
+      assert.equal(state.cacheRun.active, false);
+    } finally {
+      releaseSecond.resolve();
+    }
   });
 
   it('projects partial cache after an API restart without resuming synthesis', async () => {
@@ -159,10 +167,10 @@ describe('F279 server-owned full-document cache runs — lifecycle and stale fen
       },
     });
     assert.equal(started.statusCode, 200, started.body);
-    await secondStarted.promise;
+    await secondStarted.wait('second cache sentence did not start');
     await harness.app.close();
     harness.appClosed = true;
-    await secondAborted.promise;
+    await secondAborted.wait('second cache sentence did not observe abort');
 
     const restarted = Fastify({ logger: false });
     await restarted.register(ttsRoutes, {
@@ -208,7 +216,7 @@ describe('F279 server-owned full-document cache runs — lifecycle and stale fen
       },
     });
     assert.equal(oldStart.statusCode, 200, oldStart.body);
-    await oldStarted.promise;
+    await oldStarted.wait('old cache run did not start');
 
     const replacement = { ...original, contentDigest: 'digest-b' };
     await saveDocument(harness.app, 'operator', replacement, ['anchor'], { voice: 'voice-b' });
@@ -223,7 +231,7 @@ describe('F279 server-owned full-document cache runs — lifecycle and stale fen
       },
     });
     assert.equal(newStart.statusCode, 200, newStart.body);
-    await newStarted.promise;
+    await newStarted.wait('replacement cache run did not start');
 
     const staleCancel = await harness.app.inject({
       method: 'DELETE',

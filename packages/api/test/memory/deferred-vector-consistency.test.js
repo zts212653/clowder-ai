@@ -301,3 +301,52 @@ test('late activation cannot expose an old model before catch-up and a mode-only
   await lifecycle.activate('on');
   assert.equal((await search(f)).meta.degraded, false, 'unchanged capabilities do not retire a trusted projection');
 });
+
+for (const disk of [false, true])
+  test(`${disk ? 'worker' : 'local'} same-dimension model change while preparation is queued cannot reopen old geometry`, async (t) => {
+    const f = await fixture(t, 'model-A', disk);
+    assert.equal((await search(f)).meta.degraded, false);
+    let entered, release, queued;
+    const started = new Promise((resolve) => {
+      entered = resolve;
+    });
+    const held = new Promise((resolve) => {
+      release = resolve;
+    });
+    const admitted = new Promise((resolve) => {
+      queued = resolve;
+    });
+    const originalExclusive = f.store.runExclusive.bind(f.store);
+    const blocker = originalExclusive(async () => {
+      entered();
+      await held;
+    });
+    await started;
+    f.store.runExclusive = (action) => {
+      const pending = originalExclusive(action);
+      queued();
+      return pending;
+    };
+    const preparation = f.builder.embedMissingDocumentVectors();
+    try {
+      await admitted;
+      f.setModel('model-B');
+      const queuedSearch = await search(f);
+      assert.equal(
+        queuedSearch.meta.degraded,
+        true,
+        'a model change must be fenced before the preparation gets its turn',
+      );
+      assert.deepEqual(queuedSearch.items, []);
+    } finally {
+      release();
+      await blocker;
+      assert.equal((await preparation).docsEmbedded, 0);
+      f.store.runExclusive = originalExclusive;
+    }
+    const heldBack = await search(f);
+    assert.equal(heldBack.meta.degraded, true);
+    assert.deepEqual(heldBack.items, [], 'model-B query must not rank retained model-A vectors');
+    assert.equal((await f.builder.embedMissingDocumentVectors()).docsEmbedded, 2);
+    assert.equal((await search(f)).items[0].anchor, 'alpha-doc');
+  });

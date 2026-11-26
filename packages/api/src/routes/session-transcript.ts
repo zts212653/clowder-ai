@@ -13,6 +13,7 @@ import type { FastifyInstance } from 'fastify';
 import { resolveCanonicalInvocationSummaries } from '../domains/cats/services/session/CanonicalInvocationTrajectoryResolver.js';
 import { projectInvocationPromptInput } from '../domains/cats/services/session/InvocationPromptInputProjector.js';
 import { resolveScopedSessionTrajectory } from '../domains/cats/services/session/scoped-session-trajectory.js';
+import { catMayReadSession } from '../domains/cats/services/session/session-scope.js';
 import { formatEventsChat } from '../domains/cats/services/session/TranscriptFormatter.js';
 import {
   canReadThreadRecord,
@@ -137,7 +138,7 @@ export async function sessionTranscriptRoutes(
       return reply.status(403).send(threadRecordAccessDeniedBody());
     }
 
-    const callerCatIdErr = checkTranscriptCatAccess(request, session.catId);
+    const callerCatIdErr = checkTranscriptCatAccess(request, session);
     if (callerCatIdErr) {
       reply.status(403);
       return { error: callerCatIdErr };
@@ -266,7 +267,7 @@ export async function sessionTranscriptRoutes(
       return reply.status(403).send(threadRecordAccessDeniedBody());
     }
 
-    const callerCatIdErr2 = checkTranscriptCatAccess(request, session.catId);
+    const callerCatIdErr2 = checkTranscriptCatAccess(request, session);
     if (callerCatIdErr2) {
       reply.status(403);
       return { error: callerCatIdErr2 };
@@ -335,7 +336,7 @@ export async function sessionTranscriptRoutes(
       return reply.status(403).send(threadRecordAccessDeniedBody());
     }
 
-    const callerCatIdErr3 = checkTranscriptCatAccess(request, session.catId);
+    const callerCatIdErr3 = checkTranscriptCatAccess(request, session);
     if (callerCatIdErr3) {
       reply.status(403);
       return { error: callerCatIdErr3 };
@@ -410,11 +411,14 @@ export async function sessionTranscriptRoutes(
     const callerCatId = request.headers['x-cat-id'] as string | undefined;
     const catsArr = callerCatId ? [callerCatId] : cats?.split(',').filter(Boolean);
     const requestedSessionIds = sessionIds?.split(',').filter(Boolean);
-    const accessibleSessions = filterThreadRecords(access, await sessionChainStore.getChainByThread(threadId));
+    const accessibleSessions = filterThreadRecords(access, await sessionChainStore.getChainByThread(threadId)).filter(
+      (session) => catMayReadSession(callerCatId, session),
+    );
     const accessibleSessionIds = new Set(accessibleSessions.map((session) => session.id));
+    // A cat's search is pinned to its own readable sessions, so panel-watcher transcripts never match.
     const sessionIdsArr = requestedSessionIds
       ? requestedSessionIds.filter((sessionId) => accessibleSessionIds.has(sessionId))
-      : access.scope === 'user'
+      : access.scope === 'user' || callerCatId
         ? [...accessibleSessionIds]
         : undefined;
 

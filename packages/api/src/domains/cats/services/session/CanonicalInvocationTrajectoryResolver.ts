@@ -4,6 +4,7 @@ import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
 import type { ITurnExecutionStore } from '../stores/ports/TurnExecutionStore.js';
 import { projectInvocationTerminalEvidence } from './InvocationTrajectoryProjector.js';
+import { catMayReadSession } from './session-scope.js';
 import type { TranscriptEvent } from './TranscriptReader.js';
 import { filterThreadRecords, resolveThreadAccess, threadAccessDeniedBody } from './thread-access-policy.js';
 import { projectRequestGenerations } from './transcript-index/RequestGenerationProjector.js';
@@ -183,9 +184,7 @@ export async function resolveCanonicalInvocationTrajectory(
     await dependencies.sessionChainStore.getChainByThread(execution.threadId),
   );
   const executionSessions = readableSessions.filter((session) => session.catId === execution.catId);
-  const scopedSessions = input.callerCatId
-    ? executionSessions.filter((session) => session.catId === input.callerCatId)
-    : executionSessions;
+  const scopedSessions = executionSessions.filter((session) => catMayReadSession(input.callerCatId, session));
   const eventsBySession = await dependencies.readInvocationEvents(scopedSessions, input.invocationId, input.signal);
   const matches = scopedSessions
     .map((session) => ({ session, events: eventsBySession.get(session.id) ?? [] }))

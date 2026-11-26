@@ -14,7 +14,7 @@ import {
 import type { PersistedQueueDeliveryPort } from '../../cats/services/agents/invocation/PersistedQueueDelivery.js';
 import type { IMessageStore, StoredMessage } from '../../cats/services/stores/ports/MessageStore.js';
 import type { WorkspaceWritebackService, WorkspaceWritebackView } from '../../workspace/writeback/service.js';
-import type { ArtifactReviewStore } from '../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../artifact-review/storage/store.js';
 import type { ModificationReceiptEvent } from './media-message/media-chat-events.js';
 
 type ReceiptState = ContentModificationReceiptV1['state'];

@@ -131,6 +131,34 @@ export class VideoProjectMessageImporter {
     };
   }
 
+  async syncStatus(input: { principal: VideoProjectPrincipal; contentRef: string; threadId: string }) {
+    await this.deps.projects.authorize({ ...input, permission: 'read' });
+    await this.deps.authority.authorizeSource({ ...input, permission: 'read' });
+    const review = this.deps.store.getByContent(input.principal.userId, input.contentRef);
+    let cursor = this.deps.store.projectMessageImports.get(input.principal.userId, input.contentRef, input.threadId);
+    let pending = 0;
+    let page: StoredMessage[];
+    do {
+      page = await this.deps.authority.messages.getByThreadAfter(input.threadId, cursor, 100, input.principal.userId);
+      for (const message of page) {
+        if (!isDeliveredProjectHuman(message, input.principal.userId)) continue;
+        const messageRevision = deriveGrowingSourceMessageRevision(message);
+        for (const attachment of projectMessageAttachments(message).filter((a) => a.contentRef === input.contentRef))
+          for (const selection of attachment.selections) {
+            const operationId = projectMessageImportOperation({
+              messageId: message.id,
+              messageRevision,
+              attachmentId: attachment.id,
+              selectionId: selection.id,
+            });
+            if (!review || !this.deps.store.operationReceipt(review.reviewId, operationId)) pending++;
+          }
+      }
+      if (page.length) cursor = cursorFor(page[page.length - 1]);
+    } while (page.length === 100);
+    return { pending };
+  }
+
   /** A failed page stays pending; successful earlier rows replay idempotently on restart. */
   async synchronize(input: { principal: VideoProjectPrincipal; contentRef: string; threadId: string; limit?: number }) {
     if (input.principal.actor.kind !== 'human' || input.principal.actor.actorId !== input.principal.userId)

@@ -94,6 +94,10 @@ export function messageSearchNotice(input: { results: readonly unknown[]; meta?:
 function sourceNotice(shown: number, meta: Record<string, unknown>): MessageSearchNotice {
   const window = record(meta.timeWindow);
   let coverage = '索引覆盖范围尚未确认。最近消息可能尚未入索引，延迟暂无法确认。';
+  if (meta.degradeReason === 'passage_vector_budget_exhausted')
+    coverage += '语义检索未在时限内完成，本次只列字面匹配的原文。';
+  if (meta.degradeReason === 'passage_vector_admission_budget_insufficient')
+    coverage += '剩余时间不足，未启动语义检索，本次只列字面匹配的原文。';
   if (meta.sort === 'time' && isCount(window.limit) && isCount(window.admitted)) {
     coverage += window.complete
       ? `按相关度取得前 ${window.limit} 条可读来源，再按时间排列；窗口外可能有更早的原文。`

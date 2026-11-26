@@ -9,6 +9,24 @@ import {
 import { ConciergeKeys } from '../dist/domains/concierge/concierge-keys.js';
 import { ownedRedisFixture } from './helpers/owned-redis-fixture.js';
 
+// The claim of the host before the companion's on/off became its plugin switch (8e3462f60e), to read the same data
+// after a rollback.
+const OLDER_HOST_CLAIM = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 'disabled' end
+local config = cjson.decode(raw)
+if config.appAssistEnabled ~= true or config.enabled == false or config.muted == true then return 'disabled' end
+local rawDay = redis.call('GET', KEYS[2])
+local current = rawDay and cjson.decode(rawDay) or {day=ARGV[1], keys={}}
+if ARGV[1] < current.day then return 'clock_rollback' end
+if ARGV[1] > current.day then current = {day=ARGV[1], keys={}} end
+for _, key in ipairs(current.keys) do if key == ARGV[2] then return 'already_claimed' end end
+if #current.keys >= 256 then return 'capacity' end
+table.insert(current.keys, ARGV[2])
+redis.call('SET', KEYS[2], cjson.encode(current))
+return 'claimed'
+`;
+
 const fixture = ownedRedisFixture('f317-app-assist');
 const key = (n) => createHash('sha256').update(`fixture-${n}`).digest('hex');
 for (const adapter of ['memory', 'redis']) {
@@ -24,9 +42,9 @@ for (const adapter of ['memory', 'redis']) {
     assert.equal(claims.filter((v) => v === 'already_claimed').length, 11);
     await Promise.all([
       store.patch('owner', { appAssistEnabled: false }),
-      store.patch('owner', { personaTone: 'Fixture' }),
+      store.patch('owner', { householdReadsAllowed: false }),
     ]);
-    assert.equal((await store.getSaved('owner')).appAssistEnabled, false);
+    assert.equal((await store.get('owner')).appAssistEnabled, false);
     assert.equal(await store.claimAppAssistDay('owner', key(2), '2030-01-02'), 'disabled');
     await store.patch('owner', { appAssistEnabled: true });
     assert.equal(await store.claimAppAssistDay('owner', key(1), '2030-01-02'), 'already_claimed');
@@ -36,8 +54,6 @@ for (const adapter of ['memory', 'redis']) {
     assert.equal(await store.claimAppAssistDay('owner', key(1), '2030-01-01'), 'clock_rollback');
     assert.equal(await store.claimAppAssistDay('owner', key(1), '2030-01-03'), 'claimed');
     assert.equal(await store.claimAppAssistDay('other', key(1), '2030-01-03'), 'disabled');
-    await store.patch('owner', { muted: true });
-    assert.equal(await store.claimAppAssistDay('owner', key(2), '2030-01-03'), 'disabled');
     await assert.rejects(store.claimAppAssistDay('owner', 'org.fixture.raw', '2030-01-03'));
     if (client) {
       const saved = JSON.parse(await client.get(ConciergeKeys.appAssistDay('owner')));
@@ -45,7 +61,7 @@ for (const adapter of ['memory', 'redis']) {
       assert.equal(await client.ttl(ConciergeKeys.config('owner')), -1);
       assert.equal(await client.ttl(ConciergeKeys.appAssistDay('owner')), -1);
       const restarted = new RedisConciergeConfigStore(fixture.client('day:'));
-      await restarted.patch('owner', { muted: false });
+      await restarted.patch('owner', { householdReadsAllowed: true });
       assert.equal(await restarted.claimAppAssistDay('owner', key(1), '2030-01-03'), 'already_claimed');
       assert.deepEqual((await client.keys('day:*')).sort(), [
         'day:concierge:app-assist-day:owner',
@@ -86,3 +102,47 @@ test('two real Redis adapters propagate opt-out and subscription loss without wa
   await update;
   assert.equal(changes.at(-1), null);
 });
+
+for (const adapter of ['memory', 'redis']) {
+  test(`${adapter}: an older record turned off or hidden keeps app assistance off until the owner turns it on`, async () => {
+    const client = adapter === 'redis' ? fixture.client('legacy:') : null;
+    const store = client ? new RedisConciergeConfigStore(client) : new MemoryConciergeConfigStore();
+    const saved = {
+      off: { enabled: false, muted: false, appAssistEnabled: true, ballPosition: null },
+      hidden: { enabled: true, muted: true, appAssistEnabled: true, ballPosition: null },
+      on: { enabled: true, muted: false, appAssistEnabled: true, ballPosition: null },
+    };
+    for (const [owner, record] of Object.entries(saved)) {
+      if (client) await client.set(ConciergeKeys.config(owner), JSON.stringify(record));
+      else await store.put(owner, record);
+    }
+    for (const owner of ['off', 'hidden']) {
+      assert.equal((await store.get(owner)).appAssistEnabled, false, owner);
+      assert.equal(await store.claimAppAssistDay(owner, key(1), '2030-01-02'), 'disabled', owner);
+      // another runtime change keeps the older choice
+      await store.patch(owner, { householdReadsAllowed: false });
+      assert.equal(await store.claimAppAssistDay(owner, key(1), '2030-01-02'), 'disabled', owner);
+      await store.patch(owner, { appAssistEnabled: true });
+      assert.equal((await store.get(owner)).appAssistEnabled, true, owner);
+      assert.equal(await store.claimAppAssistDay(owner, key(1), '2030-01-02'), 'claimed', owner);
+      if (client) {
+        // rolled back: the older host reads its own off / hidden choice from the same record and still refuses
+        const record = JSON.parse(await client.get(ConciergeKeys.config(owner)));
+        assert.equal(record.enabled, saved[owner].enabled, owner);
+        assert.equal(record.muted, saved[owner].muted, owner);
+        const older = (k) =>
+          client.eval(
+            OLDER_HOST_CLAIM,
+            2,
+            ConciergeKeys.config(owner),
+            ConciergeKeys.appAssistDay(owner),
+            '2030-01-03',
+            k,
+          );
+        assert.equal(await older(key(2)), 'disabled', owner);
+      }
+    }
+    assert.equal((await store.get('on')).appAssistEnabled, true);
+    assert.equal(await store.claimAppAssistDay('on', key(1), '2030-01-02'), 'claimed');
+  });
+}

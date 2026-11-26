@@ -19,7 +19,7 @@ const log = createModuleLogger('context-capacity');
 const DEFAULT_OUTPUT_RESERVE = 16_000;
 const UNRESOLVED_PROMPT_INPUT_CEILING = 100_000;
 
-export type ContextCapacitySource = 'reported' | 'manual' | 'catalog' | 'unresolved';
+export type ContextCapacitySource = 'reported' | 'observed' | 'manual' | 'catalog' | 'unresolved';
 
 export interface ResolvedContextCapacity {
   /** Effective context window tokens (total capacity). */

@@ -43,7 +43,6 @@ describe('F322 persistent pre-thread intent', () => {
         creationStarted: true,
         createdThreadId: 'thread-created',
         messageAccepted: true,
-        composerDraftAdmission: { threadId: 'default', expectedRevision: 7 },
       },
       files: [file],
       contextAttachments: [{ v: 1, id: 'ctx-1', kind: 'thread', threadId: 'source-thread', title: 'Source thread' }],
@@ -62,7 +61,6 @@ describe('F322 persistent pre-thread intent', () => {
         creationStarted: true,
         createdThreadId: 'thread-created',
         messageAccepted: true,
-        composerDraftAdmission: { threadId: 'default', expectedRevision: 7 },
       },
       updatedAt: 42,
     });

@@ -45,18 +45,22 @@ import { LOG_DIR_PATH } from '../infrastructure/logger.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
 import { saveSpan } from '../utils/member-save-diagnostics.js';
+import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { resolveHeaderUserId, resolveStrictUserId } from '../utils/request-identity.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { configCatOrderRoutes } from './config-cat-order.js';
 import { configChatBackgroundRoutes } from './config-chat-background.js';
+import { configConsoleThemeRoutes } from './config-console-themes.js';
 import { configConversationViewRoutes } from './config-conversation-view.js';
 import { configIgnoredItemRoutes } from './config-ignored-items.js';
 import { configLiveProjectRoutes } from './config-live-projects.js';
 import { configMessageDispositionRoutes } from './config-message-disposition.js';
 import { configOnboardingRoutes } from './config-onboarding.js';
 import { configProcessTalkRoutes } from './config-process-talk.js';
+import { configQuotaPinRoutes } from './config-quota-pin.js';
 import { configThreadAttentionRoutes } from './config-thread-attention.js';
+import { consoleThemePackageRoutes } from './console-theme-packages.js';
 
 const patchSchema = z.object({
   key: z.string().min(1),
@@ -142,6 +146,8 @@ interface ConfigRoutesOptions {
   };
   envFilePath?: string;
   projectRoot?: string;
+  /** Built-in console theme packages (shipped with the web console). */
+  builtinThemesRoot?: string;
   threadStore?: Pick<IThreadStore, 'get' | 'list' | 'getThreadMetadata' | 'atomicMergeThreadMetadata'>;
 }
 
@@ -217,9 +223,15 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
   await app.register(configConversationViewRoutes, { projectRoot, threadStore: opts.threadStore });
   await app.register(configChatBackgroundRoutes, { projectRoot, threadStore: opts.threadStore });
   await app.register(configIgnoredItemRoutes, { projectRoot });
+  await app.register(configConsoleThemeRoutes, { projectRoot });
+  await app.register(consoleThemePackageRoutes, {
+    projectRoot,
+    builtinRoot: opts.builtinThemesRoot ?? resolve(findMonorepoRoot(process.cwd()), 'packages/web/public/pdl/themes'),
+  });
   await app.register(configProcessTalkRoutes, { projectRoot });
   await app.register(configMessageDispositionRoutes, { projectRoot });
   await app.register(configOnboardingRoutes, { projectRoot });
+  await app.register(configQuotaPinRoutes, { projectRoot });
   await app.register(configThreadAttentionRoutes, { projectRoot, threadStore: opts.threadStore });
 
   app.get('/api/config', async () => ({

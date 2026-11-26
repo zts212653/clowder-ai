@@ -20,8 +20,8 @@ import type {
   PendingReviewVersion,
   ReviewMutation,
   ReviewMutationResult,
-} from '../artifact-review/store.js';
-import { fingerprint } from '../artifact-review/store-support.js';
+} from '../artifact-review/storage/store.js';
+import { fingerprint } from '../artifact-review/storage/store-support.js';
 import {
   acceptedWorkResponseSchema,
   isWorkResponseIntent,

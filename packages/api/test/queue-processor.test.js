@@ -2397,6 +2397,209 @@ describe('F117 soak: a waiting entry does not stop its thread’s queue', () => 
     await waitFor(() => queuedIds(harness).length === 0);
   });
 
+  it('retries eight preflight timeouts within a minute each and reports retry waits separately from busy slots', async (t) => {
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 1_790_000_000_000 });
+    const attempts = [];
+    const harness = createHarness({
+      processorOptions: {},
+      routeExecution: async function* (...args) {
+        const [, content, , , targetCats] = args;
+        attempts.push(content);
+        if (content === 'preflight' && attempts.filter((value) => value === content).length <= 8) {
+          // routeSerial/routeParallel surface binding failures as events before any child is admitted.
+          yield {
+            type: 'error',
+            catId: targetCats[0],
+            errorCode: 'execution_binding_unavailable',
+            error: 'preflight_timeout: service.captureInvocationOptions:execution-binding',
+            timestamp: Date.now(),
+          };
+          return;
+        }
+        await startLifecycle(args, `recovered-${attempts.length}`);
+        yield { type: 'done', catId: targetCats[0], isFinal: true, timestamp: Date.now() };
+      },
+    });
+    const failed = await admitMessage(harness, {
+      content: 'preflight',
+      targetCats: ['opus'],
+      kind: 'message_wake',
+      sourceCategory: 'a2a',
+      from: { kind: 'agent', catId: 'codex' },
+    });
+    await harness.queue.enqueueDurable({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      sourceId: 'scheduled-follow-up',
+      kind: 'private_input',
+      from: { kind: 'system', service: 'scheduler' },
+      sourceCategory: 'scheduled',
+      content: 'scheduled follow-up',
+      targetCats: ['opus'],
+      intent: 'execute',
+      ownerAuthProvenance: 'unknown',
+    });
+    await admitMessage(harness, { content: 'other cat', targetCats: ['codex'] });
+    const deferrals = () =>
+      harness.log.warn.mock.calls
+        .filter((call) => String(call.arguments[1]).includes('waits for its retry time'))
+        .map((call) => call.arguments[0]);
+    const reach = async (predicate) => {
+      for (let turn = 0; turn < 200 && !predicate(); turn++) await new Promise(setImmediate);
+      assert.ok(predicate(), 'the Queue must reach its next observable transition');
+    };
+    t.after(async () => {
+      const pending = harness.queue.list('thread-1', 'user-1');
+      for (const entry of pending) {
+        await harness.queue.terminalizeEntryDurable('thread-1', 'user-1', entry.id, 'withdrawn');
+      }
+      await harness.processor.onInvocationComplete('thread-1', 'opus', 'canceled', undefined, [], {
+        attemptedQueueEntryIds: pending.map((entry) => entry.id),
+      });
+    });
+
+    await harness.processor.requestDrain('thread-1');
+    for (let failure = 1; failure <= 8; failure++) {
+      await reach(
+        () =>
+          deferrals().length === failure &&
+          !harness.processor.hasProcessingSlotReservation('thread-1', 'opus') &&
+          !harness.processor.hasProcessingSlotReservation('thread-1', 'codex'),
+      );
+      assert.equal(harness.invocationTracker.has('thread-1', 'opus'), false, 'no provider owns the failed slot');
+      const retry = deferrals().at(-1);
+      assert.equal(retry.entryId, failed.entry.id);
+      assert.equal(retry.retryReason, 'preflight_timeout');
+      assert.ok(retry.retryAt - Date.now() <= 60_000, `failure ${failure} must not defer for minutes`);
+      const diagnostics = harness.log.info.mock.calls.map((call) => call.arguments[0]);
+      const diagnostic = diagnostics.find(
+        (payload) => payload.outcome === 'waiting_for_retry' && payload.retryAt === retry.retryAt,
+      );
+      assert.ok(diagnostic);
+      assert.equal(diagnostic.deferredForBusySlot, 0, 'an idle slot must not be diagnosed as occupied');
+      assert.ok(attempts.includes('other cat'), 'another member drains while this one waits');
+      assert.equal(attempts.includes('scheduled follow-up'), false, 'later work keeps its recipient order');
+      t.mock.timers.tick(retry.retryAt - Date.now());
+    }
+    await reach(
+      () =>
+        harness.queue.list('thread-1', 'user-1').length === 0 &&
+        !harness.processor.hasProcessingSlotReservation('thread-1', 'opus'),
+    );
+    assert.equal(attempts.filter((content) => content === 'preflight').length, 9);
+    assert.equal(attempts.filter((content) => content === 'scheduled follow-up').length, 1);
+    assert.equal(harness.messageStore.getById(failed.message.id).lifecycle.dispatchRefs.length, 1);
+  });
+
+  for (const remainingReason of ['preflight_timeout', 'backend_failure']) {
+    it(`keeps the remaining target's ${remainingReason} policy after a sibling recovers`, async (t) => {
+      t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 1_790_000_000_000 });
+      let sharedAttempts = 0;
+      const deliveries = [];
+      const harness = createHarness({
+        processorOptions: {},
+        routeExecution: async function* (...args) {
+          const [, content, , , targets] = args;
+          if (content === 'shared source') sharedAttempts++;
+          for (const catId of targets) {
+            const error =
+              content === 'shared source' && (sharedAttempts <= 8 || (sharedAttempts === 9 && catId === 'codex'));
+            if (error) {
+              yield {
+                type: 'error',
+                catId,
+                errorCode: 'execution_binding_unavailable',
+                error:
+                  sharedAttempts <= 8 || remainingReason === 'preflight_timeout'
+                    ? 'preflight_timeout: service.captureInvocationOptions:execution-binding'
+                    : 'backend failed before accepting the source',
+                timestamp: Date.now(),
+              };
+              continue;
+            }
+            const perCatArgs = [...args];
+            perCatArgs[4] = [catId];
+            await startLifecycle(perCatArgs, `partial-${deliveries.length}-${catId}`);
+            deliveries.push({ content, catId });
+            if (content === 'shared source' && sharedAttempts === 9 && remainingReason === 'backend_failure') {
+              // A retired target can itself time out after admission. Its error cannot
+              // shorten the still-unaccepted sibling's genuine backend retry wait.
+              yield { type: 'error', catId, error: 'preflight_timeout: post-admission-read', timestamp: Date.now() };
+            }
+            yield { type: 'done', catId, isFinal: true, timestamp: Date.now() };
+          }
+        },
+      });
+      const source = await admitMessage(harness, { content: 'shared source', targetCats: ['opus', 'codex'] });
+      for (const catId of ['opus', 'codex']) {
+        await harness.queue.enqueueDurable({
+          threadId: 'thread-1',
+          userId: 'user-1',
+          sourceId: `after-shared-${catId}`,
+          kind: 'private_input',
+          from: { kind: 'system', service: 'scheduler' },
+          sourceCategory: 'scheduled',
+          content: `follow-up ${catId}`,
+          targetCats: [catId],
+          intent: 'execute',
+          ownerAuthProvenance: 'unknown',
+        });
+      }
+      const retryLogs = () =>
+        harness.log.warn.mock.calls
+          .filter((call) => String(call.arguments[1]).includes('waits for its retry time'))
+          .map((call) => call.arguments[0]);
+      const idle = () =>
+        ['opus', 'codex'].every((catId) => !harness.processor.hasProcessingSlotReservation('thread-1', catId));
+      const reach = async (predicate) => {
+        for (let turn = 0; turn < 300 && !predicate(); turn++) await new Promise(setImmediate);
+        assert.ok(predicate(), 'the Queue must reach the next target-local transition');
+      };
+      t.after(async () => {
+        const pending = harness.queue.list('thread-1', 'user-1');
+        for (const entry of pending)
+          await harness.queue.terminalizeEntryDurable('thread-1', 'user-1', entry.id, 'withdrawn');
+        await harness.processor.onInvocationComplete('thread-1', 'opus', 'canceled', undefined, [], {
+          attemptedQueueEntryIds: [source.entry.id, ...pending.map((entry) => entry.id)],
+        });
+      });
+
+      await harness.processor.requestDrain('thread-1');
+      for (let failure = 1; failure <= 8; failure++) {
+        await reach(() => retryLogs().length === failure && idle());
+        assert.ok(retryLogs().at(-1).retryDelayMs <= 60_000);
+        t.mock.timers.tick(retryLogs().at(-1).retryAt - Date.now());
+      }
+      await reach(() => retryLogs().length === 9 && idle() && deliveries.some((d) => d.content === 'follow-up opus'));
+      assert.deepEqual((await harness.queue.getDurableEntry('thread-1', source.entry.id)).targets, ['codex']);
+      assert.equal(harness.invocationTracker.has('thread-1'), false);
+      const remainingRetry = retryLogs().at(-1);
+      assert.equal(remainingRetry.retryReason, remainingReason);
+      assert.equal(remainingRetry.retryDelayMs, remainingReason === 'preflight_timeout' ? 60_000 : 2_560_000);
+      assert.equal(
+        deliveries.some((d) => d.content === 'follow-up codex'),
+        false,
+      );
+      t.mock.timers.tick(remainingRetry.retryAt - Date.now());
+      await reach(() => harness.queue.list('thread-1', 'user-1').length === 0 && idle());
+      assert.deepEqual(
+        deliveries.filter((d) => d.catId === 'opus').map((d) => d.content),
+        ['shared source', 'follow-up opus'],
+      );
+      assert.deepEqual(
+        deliveries.filter((d) => d.catId === 'codex').map((d) => d.content),
+        ['shared source', 'follow-up codex'],
+      );
+      assert.deepEqual(
+        harness.messageStore
+          .getById(source.message.id)
+          .lifecycle.dispatchRefs.map((ref) => ref.targetId)
+          .sort(),
+        ['codex', 'opus'],
+      );
+    });
+  }
+
   // Preserve the published input/response and failure-carrier combinations from
   // clowder-ai#1842, using the real idempotency store and canonical History facts.
   const publishedHandoffCases = ['a2a', 'a2a_failure'].flatMap((sourceCategory) =>

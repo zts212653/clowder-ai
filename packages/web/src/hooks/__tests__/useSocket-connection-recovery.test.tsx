@@ -240,18 +240,25 @@ describe('chat connection recovery without a page reload', () => {
     expect(requestCatchUp).not.toHaveBeenCalled();
   });
 
-  it('recovers a disconnected active socket, rejoins rooms and catches up the missed tail', async () => {
-    mount();
-    loseAutomaticRetry();
+  it('recovers a disconnected active socket, rejoins rooms and reappears the needed sources once', async () => {
+    const reappeared = vi.fn();
+    window.addEventListener('cat-cafe:socket-reconnected', reappeared);
+    try {
+      mount();
+      loseAutomaticRetry();
 
-    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
 
-    expect(socket.connect).toHaveBeenCalledTimes(1);
-    expect(socket.emit).toHaveBeenCalledWith('join_room', 'thread:thread-main', expect.any(Function));
-    expect(requestCatchUp).toHaveBeenCalledWith('thread-main');
+      expect(socket.connect).toHaveBeenCalledTimes(1);
+      expect(socket.emit).toHaveBeenCalledWith('join_room', 'thread:thread-main', expect.any(Function));
+      expect(reappeared).toHaveBeenCalledTimes(1);
+      expect(requestCatchUp).toHaveBeenCalledExactlyOnceWith('thread-main');
 
-    await act(async () => vi.advanceTimersByTimeAsync(10_000));
-    expect(socket.connect).toHaveBeenCalledTimes(1);
+      await act(async () => vi.advanceTimersByTimeAsync(10_000));
+      expect(socket.connect).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener('cat-cafe:socket-reconnected', reappeared);
+    }
   });
 
   it('does not reopen an intentionally disconnected or rejected socket', async () => {

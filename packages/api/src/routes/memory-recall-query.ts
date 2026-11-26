@@ -6,7 +6,8 @@ import type { RecallSourceReaders } from './recall-candidate-view.js';
 
 export const recallPageQuery = z
   .object({
-    days: z.enum(['7', '14', '30']).default('7'),
+    days: z.enum(['0', '7', '14', '30']).default('7'),
+    threadId: z.string().trim().min(1).max(4000).optional(),
     source: z.enum(['all', 'pull', 'push']).default('all'),
     catId: z.string().trim().min(1).max(120).optional(),
     limit: z.coerce.number().int().min(1).max(100).default(50),
@@ -24,7 +25,7 @@ export function recallPageCursors() {
   const secret = randomBytes(32);
   const signature = (body: string, owner: string, query: RecallPageQuery) =>
     createHmac('sha256', secret)
-      .update(JSON.stringify([owner, query.days, query.source, query.catId ?? '', body]))
+      .update(JSON.stringify([owner, query.days, query.source, query.catId ?? '', query.threadId ?? '', body]))
       .digest();
   return {
     encode(cursor: RecallPageCursor, owner: string, query: RecallPageQuery) {
@@ -40,7 +41,11 @@ export function recallPageCursors() {
         const expected = signature(body, owner, query);
         if (bytes.length !== expected.length || !timingSafeEqual(bytes, expected)) return 'invalid';
         const cursor = cursorSchema.parse(JSON.parse(Buffer.from(body, 'base64url').toString()));
-        if (cursor.to > Date.now() || cursor.at > cursor.to || cursor.at < cursor.to - Number(query.days) * 86400000)
+        if (
+          cursor.to > Date.now() ||
+          cursor.at > cursor.to ||
+          cursor.at < (query.days === '0' ? 0 : cursor.to - Number(query.days) * 86400000)
+        )
           return 'invalid';
         return cursor;
       } catch {
@@ -79,7 +84,7 @@ export function recallTimeline(
   cursor: RecallPageCursor | null,
   to: number,
 ) {
-  const from = to - Number(query.days) * 86400000;
+  const from = query.days === '0' ? 0 : to - Number(query.days) * 86400000;
   return db
     .prepare(`WITH visible AS (SELECT value AS id FROM json_each(@threads)), timeline AS (
     SELECT 'recall:' || recall_id AS key, timestamp AS at, thread_id, invocation_id, NULL AS cue_id, recall_id

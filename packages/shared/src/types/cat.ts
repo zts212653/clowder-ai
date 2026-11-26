@@ -53,6 +53,10 @@ export interface AgyProfileConfig {
   readonly homeRoot?: string;
   readonly model?: string;
   readonly autoApprove?: boolean;
+  /** Allow safe in-workspace file edits under request-review without enabling autoApprove. */
+  readonly allowWorkspaceWrites?: boolean;
+  /** Explicitly trust workspace .agents executable hooks/MCP/plugins in operator-admitted repos. */
+  readonly allowWorkspaceExecutableConfig?: boolean;
   readonly trustedWorkspaces?: readonly string[];
 }
 

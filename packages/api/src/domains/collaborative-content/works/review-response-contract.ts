@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { immutableMediaSchema, submitWorkSchema, workReviewResponseSchema } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { ArtifactReviewError } from '../artifact-review/errors.js';
-import type { PendingReviewVersion } from '../artifact-review/store.js';
+import type { PendingReviewVersion } from '../artifact-review/storage/store.js';
 
 /** Internal server-accepted input. Neither the public command nor a source path can supply these facts. */
 export const acceptedWorkResponseSchema = z

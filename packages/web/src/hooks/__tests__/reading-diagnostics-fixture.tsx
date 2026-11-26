@@ -165,11 +165,11 @@ export async function open(cold: boolean, messagesTransport?: typeof apiFetch) {
 export async function beginBridge(messagesTransport?: typeof apiFetch) {
   syncDraftToStorage('origin', 'unsent original draft');
   syncDraftToStorage('other', 'a different thread draft');
-  const draftMirror = sessionStorage.getItem('cat-cafe:thread-drafts');
+  const draftMirror = localStorage.getItem('cat-cafe:thread-drafts');
   const checkDrafts = () => {
     expect(getThreadDraft('origin')).toBe('unsent original draft');
     expect(getThreadDraft('other')).toBe('a different thread draft');
-    expect(sessionStorage.getItem('cat-cafe:thread-drafts')).toBe(draftMirror);
+    expect(localStorage.getItem('cat-cafe:thread-drafts')).toBe(draftMirror);
   };
   const state = await open(false, messagesTransport);
   const pushes: string[] = [];

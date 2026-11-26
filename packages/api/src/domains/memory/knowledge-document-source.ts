@@ -54,6 +54,8 @@ export function combineSearchMeta(metas: readonly SearchExecutionMeta[]): Search
   const priorities = {
     evidence_store_error: 4,
     passage_vector_search_error: 3,
+    passage_vector_budget_exhausted: 3,
+    passage_vector_admission_budget_insufficient: 3,
     passage_embedding_unavailable: 2,
     raw_lexical_only: 1,
   };

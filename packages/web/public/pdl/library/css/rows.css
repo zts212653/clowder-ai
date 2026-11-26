@@ -1,0 +1,180 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 列表行：对齐、行高、悬停操作、展开、树、身份 */
+/* ───────── 列表行 lrow：对齐、行高、悬停操作、展开只在这里定义 ───────── */
+.lr-list { display: flex; flex-direction: column; gap: 0; }
+.lr { position: relative; border-radius: var(--r-m); }
+.lr.click > .lr-head { cursor: pointer; }
+.lr.click:hover, .lr[data-open="true"] { background: var(--bg-hover); }
+.lr.run { background: var(--wash); }
+.lr.past { color: var(--fg-faint); }
+.lr-lead { flex: none; min-width: var(--lr-lead); display: grid; place-items: center; }   /* 至少一格前导宽（各行对齐）；更大的前导（大头像）撑开，不溢出 */
+.lr-line { display: flex; align-items: center; gap: var(--sp-s); min-width: 0; }
+.lr-line > :not(.lr-title) { flex: none; }
+.lr-sub { overflow: clip; white-space: nowrap; text-overflow: ellipsis; }
+.lr-main :is(.mono, code) { line-height: 1; }   /* 行里的等宽片段字体度量不同：不撑高这一行（行高只由行的档位决定） */
+.lr-cols { flex: 0 1 auto; min-width: 0; display: flex; margin-inline-start: calc(-1 * var(--sp-s)); }   /* 每格左边带一个列间距（格子的内边距）：第一格的那份和行里的间距抵掉 */
+.lr-ctls { flex: none; display: flex; }
+.lr-col > .btn { margin-inline: var(--sp-hair); }   /* 列里的按钮按格子缩一点：相邻两格的按钮不贴在一起 */
+/* 数据列对齐（subgrid，一条规则）：列表容器（data-cols）按行模板声明的列铺列轨（--lr-cols，rows.js lrCols：宽度档 = token --col-*，ctl / auto = 整列最宽的内容，整列空 = 0）；
+   行、行头、行尾一层层 subgrid 到容器的列上，所以每一列上下对齐。前导部分是命名列轨（tw lead main aside），没有的项占 0 宽；间距是项自己的起始外边距（不用列间距，免得空轨也占间距）。
+   不在列表里的单行（嵌在别处的一行）照旧是弹性排开，格子按内容宽 */
+[data-cols] { display: grid; grid-template-columns: [tw] auto [lead] auto [main] minmax(min(var(--col-label), 100%), 1fr) [aside] auto calc(var(--lr-gap) - var(--sp-s)) [cols] var(--lr-cols) [acts] minmax(0, auto) [ctls] var(--lr-ctls, 0px) [end] var(--lr-pad); column-gap: 0; }   /* 末尾一条行内边距宽的轨：子网格的行内边距不会挤动父网格定宽的最后一轨，没有它数据列会贴到行的右边缘，和左边、分隔线的内缩不一致 */   /* 数据列 → 悬停操作（acts，整列按最宽的一组，没有 = 0）→ 常显的控件列（ctls）在最右 */
+[data-cols] > * { grid-column: 1 / -1; }
+[data-cols] > .lr:not([data-layout="tree"]), [data-cols] > .lr:not([data-layout="tree"]) > .lr-head { display: grid; grid-template-columns: subgrid; }
+[data-cols] > .lr:not([data-layout="tree"]) > * { grid-column: 1 / -1; }
+[data-cols] > .lr:not([data-layout="tree"]) > .lr-head { column-gap: 0; align-items: center; }
+[data-cols] > .lr:not([data-layout="tree"]) > .lr-head > * + *:not(.lr-end) { margin-inline-start: var(--lr-gap); }
+[data-cols] > .lr:not([data-layout="tree"]) > .lr-head > .tw { grid-column: tw; } [data-cols] > .lr:not([data-layout="tree"]) > .lr-head > .lr-lead { grid-column: lead; } [data-cols] > .lr:not([data-layout="tree"]) > .lr-head > .lr-main { grid-column: main; padding-right: 0; } [data-cols] > .lr:not([data-layout="tree"]) > .lr-head > .lr-aside { grid-column: aside; }
+[data-cols] > .lr:not([data-layout="tree"]) > .lr-head > .lr-end { grid-column: cols / end; display: grid; grid-template-columns: subgrid; column-gap: 0; }
+[data-cols] > .lr:not([data-layout="tree"]) > .lr-head > .lr-end > :is(.lr-cols, .lr-ctls) { display: contents; }
+[data-cols] > .lr:not([data-layout="tree"]) > .lr-head > .lr-end > .lr-ctls > :first-child { grid-column-start: ctls; }
+[data-cols] > .lr:not([data-layout="tree"]) > .lr-head > .lr-end .lr-col { min-width: 0; }
+/* 展开内容沿同一份列轨接在标题下，不按前导的默认宽度另算缩进。 */
+[data-cols] > .lr:not([data-layout="tree"]) > .lr-exp { grid-column: main / -1; padding-inline-start: var(--lr-gap); }
+[data-cols] > .lr:not([data-layout="tree"]) > .lr-exp.nolead { padding-inline-start: 0; }
+[data-cols] > .lr:not([data-layout="tree"]) > .lr-exp:has(> .group, > .lr-inline > .lr) { grid-column: 1 / -1; padding-inline-start: 0; }   /* 展开里是列表（卡片或一列行）：已经在卡片里了，和卡片内边左对齐，不再让出头像那一列 */
+/* 行尾顺序：数据列（状态、元信息）在前，操作永远在最后。有数据列的行，操作在流里占最后一列（看不见时也占着位置，状态不会跳）；
+   列表里的行（data-cols）操作落在 acts 列轨上下对齐。没有数据列的单行照旧浮在行尾 */
+.lr-end > .lr-cols ~ .lr-acts, .lr-end > .lr-acts:has(~ .lr-ctls), [data-cols] > .lr:not([data-layout="tree"]) > .lr-head > .lr-end > .lr-acts { position: static; transform: none; flex: none; padding-inline-start: var(--sp-s); }
+[data-cols] > .lr:not([data-layout="tree"]) > .lr-head > .lr-end > .lr-acts { grid-column: acts; justify-self: end; }
+.lr-col { flex: 0 1 auto; min-width: 0; padding-inline-start: var(--sp-s); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: clip; text-overflow: ellipsis; }
+.lr-colbtn { font: inherit; font-size: var(--fs-s); background: none; border: 0; padding-block: 0; padding-inline-end: 0; cursor: pointer; }
+.lr-col:empty { padding: 0; }
+.lr-colbtn:hover { color: var(--accent-fg); }
+.lr-end { position: relative; flex: 0 1 auto; min-width: 0; display: flex; align-items: center; align-self: stretch; }   /* 行窄时数据列让出宽度（格子里省略），标题保住它的最小宽（.lr-title min-width） */
+.lr-acts { position: absolute; top: 50%; right: calc(100% + 8px); transform: translateY(-50%); display: flex; opacity: 0; }
+.lr-acts > .btn-icon { width: var(--ctl-xs); }   /* 行的悬停操作是一排紧凑的小图标（删除、更多……），比一般图标按钮窄一档 */
+.lr-ctl { width: auto; overflow: visible; display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--sp-s); }   /* 列里的内容贴尾端：同一列的控件在每一行落在同一个 x */
+.lr-acts .lr-dis, .lr-acts .lr-dis:hover { color: var(--fg-faint); cursor: default; }
+.lr-bar { position: absolute; left: var(--lr-pad); right: var(--lr-pad); bottom: 2px; height: 2px; border-radius: var(--r-xs); background: var(--line); }
+.lr-bar::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--p); border-radius: var(--r-xs); background: var(--c, var(--identity-fallback)); opacity: var(--op-wash); }
+.lr-bar.warn::after { background: var(--warn); opacity: 1; }
+.lr-more { padding: var(--sp-xs) var(--lr-pad) var(--sp-s) calc(var(--lr-pad) + var(--lr-lead) + var(--lr-gap)); font-size: var(--fs-m); color: var(--fg-muted); }
+.lr-more.nolead { padding-left: var(--lr-pad); }
+.lr-more > :is(.lr, .lr-inline > .lr) { margin-left: calc(-1 * var(--lr-pad)); margin-right: calc(-1 * var(--lr-pad)); }   /* 只有直接放在展开区里的行（就地的紧凑列表）外伸对齐；放在列表容器（.group）里的行不外伸，悬停的底色不超出列表 */
+.lr:is([data-layout="record"], [data-layout="tree"]) > .lr-head { min-height: var(--row-h-sm); padding-top: var(--sp-hair); padding-bottom: var(--sp-hair); }
+/* 紧凑列表（执行记录这类一行一条的明细）：行高用小行，行仍然可以展开 */
+/* 轮换的一行（片段 roll）：先显示当前动作，停 --roll-hold 后向上滚成累计数；减弱动效时直接换 */
+.roll { display: inline-block; height: var(--av-s); line-height: 18px; overflow: hidden; vertical-align: bottom; max-width: min(42ch, 100%); }
+.roll-in { display: flex; flex-direction: column; animation: roll-up calc(var(--roll-hold) + .3s) ease forwards; }
+.roll-in > span { height: var(--av-s); white-space: nowrap; overflow: clip; text-overflow: ellipsis; }
+.roll-in > span > .ic { display: inline-block; vertical-align: middle; margin-left: var(--sp-hair); }   /* 行尾的箭头紧跟这一行的文字 */
+@keyframes roll-up { 0%, 90.9% { transform: none; } 100% { transform: translateY(-18px); } }
+.roll-a { animation: roll-gone calc(var(--roll-hold) + .3s) step-end forwards; }   /* 滚完以后当前动作那一行不再占宽：轮换的宽度跟着看得见的那一行（累计数），后面不留空白 */
+@keyframes roll-gone { to { max-width: 0; } }   /* 0–90.9% = --roll-hold（3s / 3.3s）停着；诞生时按 data-at 接上进度 */
+:root[data-motion="reduce"] .roll-in { animation-timing-function: step-end; }
+.lr-text { padding: var(--sp-hair) 0; line-height: 1.6; }
+.dot { display: inline-block; flex: none; width: var(--dot); height: var(--dot); border-radius: 50%; vertical-align: middle; background: var(--fg-disabled); }   /* 唯一的圆点：色调走 data-tone，身份走 --c */
+.dot:is([data-tone="ok"], [data-tone="warn"], [data-tone="danger"], [data-tone="info"]) { background: var(--tone-c); }
+.dot[data-tone="id"] { background: var(--c, var(--identity-fallback)); }
+.dot[data-tone="live"] { background: var(--danger); animation: mo-rec var(--loop) ease-out infinite backwards; }   /* 录音中：每拍一次 */
+.dot[data-tone="run"] { background: var(--c, var(--identity-fallback)); animation: var(--mo-hold, var(--mo-row, mo-row)) var(--loop) ease-in-out infinite backwards; }   /* 执行中：身份色；异常时状态表挑的预设自己带颜色 */
+.dot[data-tone="info"] { animation: mo-row var(--loop) ease-in-out infinite backwards; }
+.lr-head { position: relative; display: flex; align-items: center; gap: var(--lr-gap); padding: var(--sp-xs) var(--lr-pad) var(--sp-xs) calc(var(--lr-pad) + var(--row-indent, 0px)); border-radius: var(--r-m); min-height: var(--row-h-1); }
+.lr-head:has(.lr-sub) { min-height: var(--row-h); }   /* 有副行才是两行高 */
+.lr.done .lr-title { color: var(--fg-muted); }
+/* 展开区里的子行：前导图标悬挂在左侧留白里，文字和上面的说明对齐 */
+.lr-more > :is(.lr, .lr-inline > .lr)[data-layout="record"] .lr-lead { min-width: var(--ic-m); margin-left: calc(-1 * var(--sp-xl)); margin-right: calc(-1 * var(--sp-xs)); }
+/* 悬停时标题区让出操作图标的宽度：标题省略，数据列不动 */
+.lr-head:hover > .lr-main, .lr-head:focus-within > .lr-main { padding-right: calc(var(--sp-s) + var(--acts, 0)); }
+/* 前导图标默认是淡色；完成项才是绿色 */
+.lr-lead > .ic { color: var(--fg-faint); }
+.lr.done .lr-lead > .ic { color: var(--ok); }
+/* 行内标记可以收缩；标题至少留 4 个字 */
+.lr-title { overflow: clip; white-space: nowrap; text-overflow: ellipsis; flex: 0 1 auto; min-width: min(4em, 100%); }
+.lr[data-open="true"]:is(:not(:has(> .lr-exp)), [data-title-wrap="open"]) > .lr-head > .lr-main > .lr-line > .lr-title { white-space: normal; text-overflow: clip; overflow-wrap: anywhere; }   /* 打开时标题换行看全：默认只在只为看全标题时（展开区有内容时标题保持一行，详情在展开区）；行声明 titleWrap: open 时打开就换行（展开区接着标题往下写的，比如思考） */
+.lr-line > :not(.lr-title):not(.dot):not(.status) { flex: 0 1 auto; min-width: 0; overflow: clip; white-space: nowrap; text-overflow: ellipsis; }
+.lr-line > .status { flex: none; max-width: min(var(--col-state), max(var(--dot), 100% - 4em - var(--sp-s))); }   /* 行内状态先于标题保住完整展示，过长时按状态列上限省略，不裁圆点 */
+/* 当前对话之类的“这里”：比普通行高一层底色 */
+.lr.here { background: var(--accent-wash); }
+/* 没有前导的父行：子行前导不悬挂，避免伸出列表边缘 */
+.lr-more.nolead .lr[data-layout="record"] .lr-lead { min-width: var(--ic-m); margin-left: 0; margin-right: 0; }
+/* 小标题：固定高度，可以带操作 */
+/* 小组标题：一种字号、一种颜色（弱），各处只管自己的间距 */
+.lr-section-label { display: flex; align-items: center; gap: var(--sp-xs); height: var(--ctl-s); margin: var(--sp-m) var(--sp-xs) var(--sp-xs); }
+.lr-section-label > .grow { min-width: 0; }
+.lr-section-label .btn-icon { margin-right: calc(-1 * var(--sp-xs)); }
+.lr-section-label[data-v="nav"] { height: auto; margin: 0; padding: var(--sp-l) var(--sp-s) var(--sp-xs); }   /* 侧栏的分组：和下面的导航项同一条左边，上面隔开上一组 */
+.lr-section-label:has(> .lr-q) { height: auto; }   /* 列表的本地筛选框（searchable）在列表头的行尾；没有组标签时它就是整行头 */
+/* 选中：当前正在看的那一项 */
+.lr.selected { background: var(--bg-selected); }
+/* 行的几项通用能力（所有“一行一项”都走 lrow，这里是唯一的样子） */
+.lr-grip { flex: none; display: grid; place-items: center; color: var(--fg-faint); cursor: grab; margin-inline-end: var(--sp-xs); }   /* 可以拖动排序的行：行首的把手（整行都能拖，把手只是表达） */
+.lr-pre { position: absolute; left: var(--sp-hair); top: var(--sp-hair); z-index: var(--z-raised); display: grid; place-items: center; pointer-events: none; color: var(--accent); }
+.lr-pre .ic { width: calc(2.5 * var(--unit)); height: calc(2.5 * var(--unit)); }
+.lr-pre.live { pointer-events: auto; }
+.lr-pin { display: grid; place-items: center; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; }
+.lr-pin[aria-pressed="false"] { color: var(--fg-muted); opacity: 0; }
+.lr:hover .lr-pin, .lr:focus-within .lr-pin, .lr-pin:focus-visible { opacity: 1; }
+.lr-aside { position: relative; flex: none; align-self: stretch; display: flex; align-items: center; justify-content: flex-end; }
+.lr-head:has(.lr-sub) > .lr-aside { align-items: flex-start; }   /* 提示总和标题同一行：两行时在上面一行，选中多出副行也不跳 */
+.lr-aside-d { display: flex; align-items: center; justify-content: flex-end; column-gap: var(--sp-xs); min-height: 1lh; }
+.lr-aside-b { display: flex; align-items: center; max-width: var(--col-state); }   /* 状态有上限：长的省略（悬停看全文），不挤标题 */
+.lr-aside-t { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lr-aside > .lr-acts.swap { right: 0; top: 0; transform: none; height: 100%; align-items: flex-start; padding-top: var(--sp-hair); }
+.lr:has(> .lr-head[aria-selected="true"]) { background: var(--bg-hover); }
+.color-wrap { display: inline-flex; align-items: center; gap: var(--sp-s); }
+.color-name { color: var(--sw); font-weight: var(--fw-strong, 600); }   /* 取色旁边的预览：名字用选中的颜色（固定值，原样） */
+/* 头像就是上传：悬停时头像上盖一层上传图标，点了选文件 */
+.ava-up { position: relative; display: inline-flex; border-radius: var(--r-full); cursor: pointer; }
+.ava-up-ic { position: absolute; inset: 0; display: grid; place-items: center; border-radius: inherit; background: var(--bg-scrim); color: var(--fg-on-accent); opacity: 0; transition: opacity var(--dur-fast) ease; }
+.ava-up:hover > .ava-up-ic, .ava-up:focus-within > .ava-up-ic { opacity: 1; }
+.color-sw { width: var(--ctl-s); height: var(--ctl-xs); padding: 0; border: 0; border-radius: var(--r-s); background: var(--sw); box-shadow: inset 0 0 0 1px var(--line-strong); cursor: pointer; }
+.color-sw[aria-current="true"] { box-shadow: 0 0 0 2px var(--bg-raised), 0 0 0 3px var(--fg-strong); }
+/* 取色浮层（色轮）：浮层上只有 --h（度）/ --s / --l（0–1）三个变量，色轮、圆点、明度条、预览都由它们推出。
+   色轮 = 一圈色相（conic，0° 在正上方顺时针）+ 圆心的同明度灰往外渐隐（radial），所以半径就是饱和度；圆点的位置是 sin / cos 推出来的 */
+.color-pop { --lp: calc(var(--l) * 100%); --pick: hsl(calc(var(--h) * 1deg) calc(var(--s) * 100%) var(--lp)); display: flex; flex-direction: column; gap: var(--sp-s); width: calc(52 * var(--unit)); padding: var(--sp-s); }
+.color-wheel { position: relative; flex: none; width: 100%; aspect-ratio: 1; border-radius: var(--r-full); cursor: crosshair; touch-action: none; box-shadow: inset 0 0 0 1px var(--line);
+  background: radial-gradient(closest-side, hsl(0 0% var(--lp)), transparent), conic-gradient(hsl(0 100% var(--lp)), hsl(60 100% var(--lp)), hsl(120 100% var(--lp)), hsl(180 100% var(--lp)), hsl(240 100% var(--lp)), hsl(300 100% var(--lp)), hsl(360 100% var(--lp))); }
+.color-dot { position: absolute; left: calc(50% + sin(var(--h) * 1deg) * var(--s) * 50%); top: calc(50% - cos(var(--h) * 1deg) * var(--s) * 50%); width: var(--ic-m); height: var(--ic-m); translate: -50% -50%; border-radius: var(--r-full); background: var(--pick); box-shadow: 0 0 0 2px var(--bg-raised), 0 0 0 3px var(--fg-strong); pointer-events: none; }
+.color-l { flex: none; appearance: none; -webkit-appearance: none; width: 100%; height: calc(3 * var(--unit)); margin: 0; border-radius: var(--r-full); box-shadow: inset 0 0 0 1px var(--line);
+  background: linear-gradient(to right, hsl(calc(var(--h) * 1deg) calc(var(--s) * 100%) 0%), hsl(calc(var(--h) * 1deg) calc(var(--s) * 100%) 50%), hsl(calc(var(--h) * 1deg) calc(var(--s) * 100%) 100%)); }
+.color-l::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: var(--ic-m); height: var(--ic-m); border-radius: var(--r-full); background: var(--pick); box-shadow: 0 0 0 2px var(--bg-raised), 0 0 0 3px var(--fg-strong); cursor: pointer; }
+.color-l::-moz-range-thumb { width: var(--ic-m); height: var(--ic-m); border: 0; border-radius: var(--r-full); background: var(--pick); box-shadow: 0 0 0 2px var(--bg-raised), 0 0 0 3px var(--fg-strong); cursor: pointer; }
+.color-out { display: flex; align-items: center; gap: var(--sp-s); }
+.color-out > .color-name { --sw: var(--pick); flex: 1 1 auto; min-width: 0; overflow: clip; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-l); }
+.color-now { flex: 1 1 auto; height: var(--ctl-xs); border-radius: var(--r-s); background: var(--pick); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.color-out > .input { flex: none; width: calc(22 * var(--unit)); }
+.color-row { display: grid; grid-template-columns: repeat(8, var(--ctl-xs)); gap: var(--sp-xs); }
+.color-pop .color-sw, .color-pop .color-sw:is(:hover, [aria-current="true"]) { display: block; width: var(--ctl-xs); height: var(--ctl-xs); padding: 0; background: var(--sw); }   /* 浮层是菜单的面：色块不吃菜单项（.menu button）的底色和尺寸 */
+.lr-sub .run { display: inline-block; max-inline-size: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }   /* 执行中那一行：放不下时省略，不撑出行 */
+.lr-sub :is(.run, .cafe-err) > .dot { display: inline-block; vertical-align: middle; margin-inline-end: var(--sp-xs); }
+.lr.off > .lr-head { opacity: var(--op-disabled); cursor: default; }
+.lr.off:hover { background: none; }
+.lr-title mark { background: var(--accent-soft); color: var(--fg-strong); border-radius: var(--r-xs); }
+.lr.selected .lr-title { color: var(--fg-strong); }
+
+/* 树（ltree）：每层缩进 16px，箭头在前导前面 */
+.lr[data-layout="tree"] > .lr-head { padding-left: calc(var(--lr-pad) - var(--sp-xs) + var(--d, 0) * var(--sp-l)); gap: var(--sp-xs); }
+.tw { flex: none; width: var(--ic-s); height: var(--ic-s); display: inline-grid; place-items: center; color: var(--fg-faint); transition: transform var(--dur-fast); }   /* 展开指示（twisty），全站一个 */
+.tw[data-open="true"] { transform: rotate(90deg); }
+button.tw { border: 0; background: none; padding: 0; cursor: pointer; }
+button.tw:is(:hover, :focus-visible) { color: var(--accent-fg); }   /* 行本身点了是选中时，展开指示是自己的开合按钮 */
+[aria-expanded="false"] > .tw { transform: none; }
+[aria-expanded="true"] > .tw, [aria-expanded="true"] > .cafe-gbtn > .tw, .lr-node[data-open="true"] > .lr > .lr-head > .tw { transform: rotate(90deg); }
+.lr[data-layout="tree"] .lr-lead { min-width: var(--av-s); }
+.lr[data-layout="tree"] .lr-lead > .ic { color: var(--fg-muted); }
+.lr-tree { padding-top: var(--sp-xs); padding-bottom: var(--sp-xs); }
+.lr-tree:not(.lined) > * + *::before { display: none; }   /* 树缺省不画分隔线（文件树）；声明 divider 的树每一行之间都画，子级的第一行和父行之间也画 */
+
+/* 悬停操作：鼠标悬停或键盘聚焦时出现；鼠标点过之后不常驻 */
+.lr-head:focus-within:not(:hover) > .lr-end > .lr-acts { opacity: 0; pointer-events: none; }
+.lr-head:focus-within:not(:hover):not(:focus-visible) > .lr-main { padding-right: var(--sp-s); }
+/* 身份（identity.js）：同一份渲染的几种形态 */
+/* 形状只有一个属性：人（成员、你）圆形，其余来源圆角方 + 发送者颜色的 1px 环 */
+.avatar[data-shape="square"] { border-radius: var(--r-m); box-shadow: inset 0 0 0 1px var(--c, var(--identity-line)); }
+.who-name { font-weight: 500; color: var(--c, var(--identity-fallback)); }
+.who-line { display: inline-flex; align-items: center; gap: var(--sp-xs); min-width: 0; }
+
+.who-demo { padding: var(--sp-s) var(--sp-m); }
+.who-demo-r { display: grid; grid-template-columns: calc(16 * var(--unit)) repeat(5, 1fr); align-items: center; gap: var(--sp-s); min-height: var(--row-h-1); }
+/* 颜色（--c，颜色解析写在组件自己的根元素上）和背景透明度（--bg-veil）挂在元素上，所以它们的推导写在同一个元素上 */
+.lr, .rp-cat, .msg, .scap { --wash: color-mix(in oklab, var(--c, var(--identity-fallback)) var(--d-wash), transparent); }
+.app.bg-shell > .main, .main-col, .cover { --glass-page: color-mix(in srgb, var(--bg-page) var(--bg-veil, 92%), transparent); }
+/* 独立底面和显式设置的用户容器从同一张全局图绘制，不受后方表面浓度影响。 */
+.rail, .nav, .panel, .main, .main-col, .cover, .ct-box { --surface-paint: none; --surface-content: none; }
+.app.bg-shell :is([data-c], [data-bg-owner]) { backdrop-filter: var(--surface-filter, none); -webkit-backdrop-filter: var(--surface-filter, none); }
+.app.bg-shell :is(.rail, .nav, .panel, .main:not(.split-host), .main-col, .cover, .ct-box)::before { content: var(--surface-content); position: absolute; inset: calc(-1 * var(--surface-blur)); background: var(--surface-paint) center / cover fixed; filter: blur(var(--surface-blur)); clip-path: inset(var(--surface-blur)); z-index: -1; pointer-events: none; }
+.main, .main-col, .cover, .ct-box { --glass-surface: var(--glass-page); }
+/* 选中的东西再悬停：在选中上再叠一层悬停（推导，不另配颜色） */
+[aria-current="page"]:hover, .lr.selected > .lr-head:hover { background-image: linear-gradient(var(--bg-hover), var(--bg-hover)); }

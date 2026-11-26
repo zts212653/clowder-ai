@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { headers, matterCallbackFixture } from './helpers/matter-callback-fixture.js';
+import { headers, matterCallbackFixture, source } from './helpers/matter-callback-fixture.js';
 
 describe('F332 normalized content provenance through real entrypoints', () => {
   let fixture;
@@ -57,6 +57,115 @@ describe('F332 normalized content provenance through real entrypoints', () => {
     return response.json();
   };
 
+  for (const [kind, select] of [
+    ['thread', ({ threadA }) => ({ threadId: threadA.id })],
+    ['message', ({ original }) => ({ threadId: original.threadId, messageId: original.id })],
+    ['quotation', ({ original }) => source(original)],
+  ]) {
+    it(`summary-only correction keeps the exact ${kind} source across invocations and in its receipt`, async () => {
+      const created = await write({
+        operation: 'create',
+        title: 'Preserve source',
+        summary: '原来的归纳。',
+        sources: [select(fixture)],
+      });
+      const matterId = created.matter.matterId;
+      const initial = await read(matterId);
+      fixture.credentials.get('call-b').originTriggerMessageId = fixture.correction.id;
+      const corrected = await write(
+        {
+          operation: 'correct',
+          matterId,
+          expectedRevision: 1,
+          entryId: initial.entries[0].entryId,
+          summary: '另一只猫只改归纳。',
+        },
+        'call-b',
+      );
+      const current = await read(matterId);
+      assert.deepEqual(current.entries[0].source, initial.entries[0].source);
+      assert.equal(current.entries[0].summary, '另一只猫只改归纳。');
+      assert.deepEqual(current.entries[0].summaryAuthor, { kind: 'agent', catId: 'codex61-sol' });
+      const snapshot = await receipt(corrected);
+      assert.deepEqual(snapshot.entries[0].source, initial.entries[0].source);
+      assert.deepEqual(snapshot.previousEntries[0].source, initial.entries[0].source);
+      const history = await read(matterId, true);
+      assert.equal(history.entries.find((entry) => entry.entryId === initial.entries[0].entryId).status, 'superseded');
+    });
+  }
+
+  it('rejects an obsolete correction with stale_revision before looking up its superseded entry', async () => {
+    const created = await write({ operation: 'create', title: 'Concurrent correction', summary: '旧归纳。' });
+    const matterId = created.matter.matterId;
+    const initial = await read(matterId);
+    await write({
+      operation: 'correct',
+      matterId,
+      expectedRevision: 1,
+      entryId: initial.entries[0].entryId,
+      summary: '第一只猫已改。',
+    });
+    const current = await read(matterId);
+    for (const [expectedRevision, entryId, statusCode, error] of [
+      [1, initial.entries[0].entryId, 409, 'stale_revision'],
+      [1, current.entries[0].entryId, 409, 'stale_revision'],
+      [2, 'entry_missing', 404, 'not_available'],
+      [2, initial.entries[0].entryId, 404, 'not_available'],
+    ]) {
+      const response = await fixture.app.inject({
+        method: 'POST',
+        url: '/api/callbacks/remember',
+        headers: headers('call-b'),
+        payload: {
+          clientRequestId: `concurrent-${sequence++}`,
+          items: [
+            {
+              itemId: 'one',
+              target: 'matter',
+              payload: {
+                operation: 'correct',
+                matterId,
+                expectedRevision,
+                entryId,
+                summary: '第二只猫的更正。',
+              },
+            },
+          ],
+        },
+      });
+      assert.equal(response.statusCode, 200, response.body);
+      const result = response.json().results[0];
+      assert.equal(result.statusCode, statusCode, JSON.stringify(result));
+      assert.equal(result.result.error, error);
+      assert.deepEqual(await read(matterId), current, 'Rejected changes must not mutate the current page');
+    }
+  });
+
+  it('source-only quotation correction retains the interpretation in both the page and write receipt', async () => {
+    const created = await write({ operation: 'create', title: 'Selected source', summary: '保留这句归纳。' });
+    const matterId = created.matter.matterId;
+    const initial = await read(matterId);
+    const corrected = await write(
+      {
+        operation: 'correct',
+        matterId,
+        expectedRevision: 1,
+        entryId: initial.entries[0].entryId,
+        source: source(fixture.correction),
+      },
+      'call-b',
+    );
+    const current = await read(matterId);
+    assert.equal(current.entries[0].source.segment, 'body');
+    assert.equal(current.entries[0].source.messageId, fixture.correction.id);
+    assert.equal(current.entries[0].quote, fixture.correction.content);
+    assert.equal(current.entries[0].summary, initial.entries[0].summary);
+    assert.deepEqual(current.entries[0].summaryAuthor, initial.entries[0].summaryAuthor);
+    const snapshot = await receipt(corrected);
+    assert.equal(snapshot.entries[0].summary, initial.entries[0].summary);
+    assert.deepEqual(snapshot.entries[0].summaryAuthor, initial.entries[0].summaryAuthor);
+  });
+
   it('description-only compatibility creates a real seed: correcting it updates directory search and retiring clears it', async () => {
     const created = await write({ operation: 'create', title: '会议时间', description: '旧结论：会议周一举行' });
     const matterId = created.matter.matterId;
@@ -96,12 +205,13 @@ describe('F332 normalized content provenance through real entrypoints', () => {
         matterId,
         expectedRevision: 1,
         entryId: initial.entries[0].entryId,
-        summary: initial.entries[0].summary,
         source: { threadId: fixture.threadB.id },
       },
       'call-b',
     );
     const moved = await read(matterId);
+    assert.equal(moved.entries[0].summary, initial.entries[0].summary);
+    assert.equal(moved.entries[0].source.threadId, fixture.threadB.id);
     assert.equal(moved.matter.description, description);
     assert.deepEqual(moved.matter.descriptionAuthor, initial.matter.descriptionAuthor);
     assert.deepEqual(moved.entries[0].summaryAuthor, initial.entries[0].summaryAuthor);
@@ -179,12 +289,13 @@ describe('F332 normalized content provenance through real entrypoints', () => {
             matterId,
             expectedRevision: 1,
             entryId: initial.entries[0].entryId,
-            summary: initial.entries[0].summary,
             source: { threadId: fixture.threadB.id },
           },
           caller,
         );
         const moved = await read(matterId);
+        assert.equal(moved.entries[0].summary, initial.entries[0].summary);
+        assert.equal(moved.entries[0].source.threadId, fixture.threadB.id);
         const author = unknown ? undefined : { kind: 'agent', catId: 'codex-astra' };
         assert.deepEqual(moved.entries[0].summaryAuthor, author);
         assert.deepEqual(moved.matter.descriptionAuthor, author);

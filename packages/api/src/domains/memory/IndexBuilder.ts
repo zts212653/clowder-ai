@@ -48,7 +48,7 @@ import { buildSearchableMessageContent } from './message-search-content.js';
 import { type PassageVectorStore, passageVectorKey } from './PassageVectorStore.js';
 import { readPassageEmbeddingPage } from './passage-embedding-page.js';
 import { PassageWarmupDiagnostics } from './passage-warmup-diagnostics.js';
-import { type PassageWarmupState, readPassageWarmupState } from './passage-warmup-state.js';
+import { countPassagesAfter, type PassageWarmupState, readPassageWarmupState } from './passage-warmup-state.js';
 import { prepareDocumentVectors } from './prepare-document-vectors.js';
 import { type DocumentPassageSource, replaceDocumentPassages } from './replace-document-passages.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
@@ -105,6 +105,38 @@ const KIND_PRIORITY: Record<EvidenceKind, number> = {
 
 const PASSAGE_EMBED_SCAN_BATCH_SIZE = 256;
 const PASSAGE_WRITE_BATCH_SIZE = 16;
+/**
+ * How often the warmup walks every passage again although nothing says it must. The cheap signals
+ * cover new rows and vectors that vanish; this covers what they cannot show, such as a vector lost
+ * in the same interval in which another one was added.
+ */
+const PASSAGE_FULL_WALK_INTERVAL_MS = 10 * 60_000;
+/** More rows than this waiting to become embeddable, and the next warmup walks everything instead. */
+const PASSAGE_RECHECK_LIMIT = 4096;
+
+/**
+ * Where the last warmup that finished cleanly left off.
+ *
+ * Passage ids only grow. A row is inserted, deleted, or keeps its id while its body is rewritten:
+ * thread messages are upserted in place, and the canonical writer's trigger then removes the
+ * row's vector. After a complete walk, a passage without a vector is therefore one of three: a
+ * row above `watermark`; a row the walk could not embed at the time (`recheckIds`); or an older
+ * row whose vector went away while the row stayed, such as a rewritten message, a parent whose
+ * visibility changed, or a cleared table. The third shows as fewer vectors than the rows deleted
+ * since can account for, and then everything is walked again at once. Vectors added in the same
+ * interval can hide that difference; the periodic full walk is for those.
+ */
+interface PassageWalk {
+  deps: object;
+  model: string;
+  watermark: number;
+  /** Rows at or below the watermark when the walk finished. */
+  passagesBelow: number;
+  vectorCount: number;
+  recheckIds: number[];
+  /** When every passage was last walked. */
+  walkedAt: number;
+}
 
 /**
  * Minimal thread snapshot for indexing — avoids coupling to full IThreadStore interface.
@@ -207,7 +239,9 @@ export class IndexBuilder implements IIndexBuilder {
   private dirtyFlushInFlight: Promise<number> | null = null;
 
   private passageEmbeddingWarmupInFlight: Promise<void> | null = null;
-  private completedPassageWarmup?: { deps: object; state: PassageWarmupState };
+  /** `fullWalk` says whether the run that earned it looked at every passage or only at new rows. */
+  private completedPassageWarmup?: { deps: object; state: PassageWarmupState; fullWalk: boolean };
+  private passageWalk?: PassageWalk;
 
   /** F152 Phase A: pluggable scanner — defaults to CatCafeScanner */
   private readonly scanner: RepoScanner & {
@@ -722,13 +756,21 @@ export class IndexBuilder implements IIndexBuilder {
       completed &&
       completed.deps === deps &&
       completed.state.source === before.source &&
-      completed.state.vectorCount === before.vectorCount
+      completed.state.vectorCount === before.vectorCount &&
+      // A run that looked only at new rows vouches for nothing below them. Its certificate lapses
+      // when the next full walk is due, also when nothing has been written since.
+      (completed.fullWalk ||
+        (this.passageWalk !== undefined && Date.now() - this.passageWalk.walkedAt < PASSAGE_FULL_WALK_INTERVAL_MS))
     )
       return Promise.resolve();
     this.completedPassageWarmup = undefined;
 
+    const model = deps ? JSON.stringify(deps.embedding.getModelInfo()) : '';
+    const prior = this.resumablePassageWalk(deps, model, before);
+    const startedAt = Date.now();
     const observation = new PassageWarmupDiagnostics();
-    const warmup = this.embedMissingPassages(undefined, observation)
+    observation.scope = prior ? 'incremental' : 'full';
+    const warmup = this.embedMissingPassages(undefined, observation, prior)
       .catch(() => {
         observation.stop('rejected', 'unexpected-error');
         /* fail-open: passage vectors are an accelerator; passage_fts remains canonical */
@@ -744,7 +786,10 @@ export class IndexBuilder implements IIndexBuilder {
           observation.sourceChanged === 0
         ) {
           const after = state();
-          if (after?.source === before.source) this.completedPassageWarmup = { deps, state: after };
+          if (after?.source === before.source) this.completedPassageWarmup = { deps, state: after, fullWalk: !prior };
+          this.passageWalk = after
+            ? this.finishedPassageWalk(deps, model, after, observation, prior, startedAt)
+            : undefined;
         }
         if (this.passageEmbeddingWarmupInFlight === warmup) {
           this.passageEmbeddingWarmupInFlight = null;
@@ -753,6 +798,51 @@ export class IndexBuilder implements IIndexBuilder {
       });
     this.passageEmbeddingWarmupInFlight = warmup;
     return warmup;
+  }
+
+  /** The last clean walk, if this warmup may start where it ended instead of at the first passage. */
+  private resumablePassageWalk(
+    deps: object | undefined,
+    model: string,
+    now: PassageWarmupState | undefined,
+  ): PassageWalk | undefined {
+    const walk = this.passageWalk;
+    if (!walk || !now || walk.deps !== deps || walk.model !== model) return undefined;
+    if (Date.now() - walk.walkedAt >= PASSAGE_FULL_WALK_INTERVAL_MS) return undefined;
+    try {
+      const below = now.passageCount - countPassagesAfter(this.store.getDb(), walk.watermark);
+      const deleted = Math.max(0, walk.passagesBelow - below);
+      // A deleted row takes its vector with it. Fewer vectors than that explains means a row kept its
+      // place and lost its vector: a parent's visibility changed, a table was cleared, a repair ran.
+      return now.vectorCount >= walk.vectorCount - deleted ? walk : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private finishedPassageWalk(
+    deps: object,
+    model: string,
+    after: PassageWarmupState,
+    observation: PassageWarmupDiagnostics,
+    prior: PassageWalk | undefined,
+    startedAt: number,
+  ): PassageWalk | undefined {
+    if (observation.skippedIds.size > PASSAGE_RECHECK_LIMIT) return undefined;
+    try {
+      const watermark = Math.max(observation.lastScannedId, prior?.watermark ?? 0);
+      return {
+        deps,
+        model,
+        watermark,
+        passagesBelow: after.passageCount - countPassagesAfter(this.store.getDb(), watermark),
+        vectorCount: after.vectorCount,
+        recheckIds: [...observation.skippedIds],
+        walkedAt: prior?.walkedAt ?? startedAt,
+      };
+    } catch {
+      return undefined;
+    }
   }
 
   incrementalUpdate(changedPaths: string[]): Promise<void> {
@@ -1253,8 +1343,11 @@ export class IndexBuilder implements IIndexBuilder {
     });
     try {
       await this.store.refreshEntityMentions([docAnchor]);
+      // The SQLite transaction above already deleted the passage, sanitized the
+      // document title/summary, and invalidated both passage and document vectors.
+      // Mark the thread dirty for the background flusher instead of blocking the
+      // recall HTTP request on full dirty-thread reindexing and embedding.
       this.markThreadDirty(threadId);
-      await this.flushDirtyThreads();
       return lease;
     } catch (error) {
       try {
@@ -1587,7 +1680,12 @@ export class IndexBuilder implements IIndexBuilder {
   }
 
   /** F209 Phase A: embed newly indexed raw passages without blocking lexical recall. */
-  private async embedMissingPassages(docAnchors?: string[], observation?: PassageWarmupDiagnostics): Promise<void> {
+  private async embedMissingPassages(
+    docAnchors?: string[],
+    observation?: PassageWarmupDiagnostics,
+    /** Start after this walk's watermark, looking first at the rows it could not embed. */
+    resume?: Pick<PassageWalk, 'watermark' | 'recheckIds'>,
+  ): Promise<void> {
     const deps = this.embedDeps;
     const passageVectors = deps?.passageVectorStore;
     if (!passageVectors) {
@@ -1604,7 +1702,8 @@ export class IndexBuilder implements IIndexBuilder {
     const db = this.store.getDb();
     const model = structuredClone(deps.embedding.getModelInfo());
     const modelSignature = JSON.stringify(model);
-    let lastId = 0;
+    let lastId = resume?.watermark ?? 0;
+    const recheck = [...(resume?.recheckIds ?? [])];
     let consecutiveErrors = 0;
 
     for (;;) {
@@ -1615,9 +1714,17 @@ export class IndexBuilder implements IIndexBuilder {
         observation?.stop('retired', 'dependencies-unavailable');
         return;
       }
+      const kept = recheck.splice(0, PASSAGE_EMBED_SCAN_BATCH_SIZE);
       let page: ReturnType<typeof readPassageEmbeddingPage>;
       try {
-        page = readPassageEmbeddingPage(db, passageVectors, lastId, PASSAGE_EMBED_SCAN_BATCH_SIZE, docAnchors);
+        page = kept.length
+          ? (readPassageEmbeddingPage(db, passageVectors, 0, PASSAGE_EMBED_SCAN_BATCH_SIZE, docAnchors, kept) ?? {
+              lastId,
+              metadataRows: 0,
+              passages: [],
+              skippedIds: [],
+            })
+          : readPassageEmbeddingPage(db, passageVectors, lastId, PASSAGE_EMBED_SCAN_BATCH_SIZE, docAnchors);
       } catch {
         observation?.stop('rejected', 'metadata-read-error');
         // Structural read errors cannot be repaired by scanning the next page.
@@ -1627,12 +1734,14 @@ export class IndexBuilder implements IIndexBuilder {
         if (observation) observation.scanExhausted = true;
         return;
       }
+      if (!kept.length) lastId = page.lastId;
       if (observation) {
         observation.pagesRead++;
         observation.metadataRows += page.metadataRows;
         observation.missingBodies += page.passages.length;
+        observation.lastScannedId = lastId;
+        for (const id of page.skippedIds) observation.skippedIds.add(id);
       }
-      lastId = page.lastId;
 
       try {
         await embedPassages({

@@ -84,9 +84,20 @@ describe('F332 unified find: narrowing matrix, explicit inputs, since and contin
       const route = routes[parsed.pathname];
       if (!route) throw new Error(`unexpected ${parsed.pathname}`);
       const body = await route(parsed.searchParams, init);
+      if (body instanceof Response) return body;
       return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
     };
   });
+
+  /** Answers after `ms`, or rejects when the caller aborts first (like a real slow route). */
+  const slow = (ms, body) => (_params, init) =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(() => resolve(body), ms);
+      init?.signal?.addEventListener('abort', () => {
+        clearTimeout(timer);
+        reject(new Error('aborted'));
+      });
+    });
 
   afterEach(() => {
     for (const file of keyFiles) unlinkSync(file);
@@ -340,5 +351,270 @@ describe('F332 unified find: narrowing matrix, explicit inputs, since and contin
     );
     assert.equal(requests[0].headers.get('x-agent-key-secret'), 'claude-secret');
     assert.equal(block(continued, 'messages').status, 'ok');
+  });
+
+  // ── unfinished groups keep a way back (plan: every group gives its complete continuation) ──────
+
+  // Astra 0001794910967669-000742 + plan line 24: the usual find needs no mode choice, and an equal journey may not add
+  // calls. Live 2026-11-17: the original message route answered in 3.7–9.2s while the old 3s wait after docs cut it,
+  // turning one explicit message search into find + continuation. Groups are no longer cut when docs settle.
+  for (const [label, route, group] of [
+    ['messages', MESSAGES, 'messages'],
+    ['the matter directory', MATTERS, 'matters'],
+  ]) {
+    test(`a ${label} answer that takes 9s still arrives in the same default find (no extra call)`, async (t) => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      const body = route === MESSAGES ? messagesResponse([message(1)]) : { items: [] };
+      routes[route] = slow(9_000, body);
+      const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
+      const pending = handleSearchEvidence({ query: '守望猫' });
+      for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve));
+      t.mock.timers.tick(9_000);
+      const result = await pending;
+      const answered = block(result, group);
+      assert.notEqual(answered.status, 'timeout', JSON.stringify(answered));
+      assert.equal(requests.filter((entry) => entry.path === route).length, 1);
+    });
+  }
+
+  test('a group reopened alone is not cut by the shared ceiling: it waits for its own route like the old tool', async () => {
+    // Live 2026-11-17: the message route answered in 9.1s and 11.4s; the reopened group was cut at 10.0s, so the
+    // default find could never return messages that the old explicit message search did.
+    routes[MESSAGES] = slow(10_500, messagesResponse([message(1)]));
+    const reopened = await find({ query: '守望猫', continueGroup: 'messages', limit: 5 });
+    assert.deepEqual(
+      requests.map((entry) => entry.path),
+      [MESSAGES],
+    );
+    assert.equal(block(reopened, 'messages').status, 'ok');
+    assert.equal(block(reopened, 'messages').items.length, 1);
+  });
+
+  // codex61-sol #7215 R1: the watcher's own query also moved from 10s to the 16s shared ceiling.
+  test('a watcher query gets the 16s shared ceiling: a directory answering at 12s arrives in one call', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    routes[MATTERS] = slow(12_000, { items: [] });
+    const { withMemoryReadPolicy } = await import('../dist/tools/memory-read-access.js');
+    const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
+    const pending = withMemoryReadPolicy({ watcher: true, readonly: false }, () =>
+      handleSearchEvidence({ query: '守望猫' }),
+    );
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(12_000);
+    assert.equal(block(await pending, 'matters').status, 'no_results');
+    assert.equal(requests.filter((entry) => entry.path === MATTERS).length, 1);
+  });
+
+  // Plan owner's ruling thread_mwixqbezq81zubdw#0001794918820465-001068-e0cb853b: only a group that really outlasts the
+  // shared waiting budget may report timeout with its complete next. The continuation still counts in the journey (the
+  // original graph tool: one call; the default find: two) — a boundary of the budget, not evidence of no added calls.
+  test('a graph route answering after the 16s budget reports timeout with its continuation (counted as a second call)', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    routes[GRAPH] = slow(17_000, {
+      status: 'no_match',
+      queryKind: 'search',
+      query: 'F186',
+      message: 'no node',
+      examples: [],
+    });
+    const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
+    const pending = handleSearchEvidence({ query: 'F186' });
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(16_000);
+    const graph = block(await pending, 'graph');
+    assert.equal(graph.status, 'timeout');
+    assert.equal(graph.cause, 'deadline');
+    assert.deepEqual(graph.next.arguments, { query: 'F186', continueGroup: 'graph' });
+  });
+
+  // Same ruling, item 3: a caller that already knows only one group is needed may read it alone on its first call, with
+  // the same query and that group's parameters. Like the original tool it is not cut by the shared budget.
+  test('a first call with continueGroup reads one group alone: a 17s graph route answers in one call', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const readRef = { kind: 'file', path: 'docs/features/F186.md', startLine: 1 };
+    routes[GRAPH] = slow(17_000, {
+      status: 'graph',
+      queryKind: 'exact',
+      resolvedAnchor: 'F186',
+      graph: {
+        center: 'F186',
+        depth: 1,
+        nodes: [
+          {
+            anchor: 'F186',
+            title: 'F186',
+            kind: 'feature',
+            collectionId: 'project',
+            sensitivity: 'internal',
+            redacted: false,
+            readRef,
+          },
+        ],
+        edges: [],
+      },
+    });
+    const pending = find({ query: 'F186', continueGroup: 'graph', graphDepth: 1 });
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(17_000);
+    const result = await pending;
+    assert.deepEqual(
+      requests.map((entry) => entry.path),
+      [GRAPH],
+    );
+    assert.equal(requests[0].params.get('query'), 'F186');
+    assert.equal(requests[0].params.get('depth'), '1');
+    const graph = block(result, 'graph');
+    assert.equal(graph.status, 'ok', JSON.stringify(graph));
+    assert.deepEqual(graph.nodes[0].readRef, readRef);
+  });
+
+  test('beside another group the 16s shared ceiling still bounds a slow group, and it can be reopened alone', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    routes[RECENT] = slow(16_500, {
+      items: [{ anchor: 'docs/a.md', title: 'A', kind: 'plan', updatedAt: '2026-11-17T00:00:00Z', source: 'docs' }],
+    });
+    const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
+    const flush = async () => {
+      for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    };
+    const pending = handleSearchEvidence({ scope: 'all' });
+    await flush();
+    t.mock.timers.tick(16_000);
+    const browse = await pending;
+    const recent = block(browse, 'recent');
+    assert.equal(recent.status, 'timeout');
+    assert.equal(recent.cause, 'deadline');
+    assert.match(recent.detail, /16s wait budget/);
+    assert.equal(block(browse, 'matters').status, 'no_results');
+    const reopenedPending = handleSearchEvidence(recent.next.arguments);
+    await flush();
+    t.mock.timers.tick(16_500);
+    assert.equal(block(await reopenedPending, 'recent').status, 'ok');
+  });
+
+  // Watcher (#7205 review note): its directory retry/next page (matterCursor) is also a lone continuation, so it too
+  // waits for its route like the pre-F1 list_memory_matters tool did, bounded by the caller's signal.
+  // codex61-sol / watcher after #7205: every stop source records its own cause and the first one wins. A caller's
+  // cancellation (or the caller's own time limit) is never reported as a shared ceiling the group did not have.
+  const findWithSignal = async (input, signal) =>
+    (await import('../dist/tools/evidence-tools.js')).handleSearchEvidence(input, { signal });
+  const never = (_params, init) =>
+    new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(new Error('aborted'))));
+
+  for (const [label, input, group, route, policy] of [
+    ['messages continuation', { query: '守望猫', continueGroup: 'messages', limit: 5 }, 'messages', MESSAGES, null],
+    [
+      'watcher directory continuation',
+      { query: '守望猫', matterCursor: 'first', limit: 12 },
+      'matters',
+      MATTERS,
+      'watcher',
+    ],
+    ['default find beside docs', { query: '守望猫' }, 'messages', MESSAGES, null],
+  ]) {
+    test(`a caller cancellation of a ${label} is reported as cancelled, not as a ceiling`, async () => {
+      const { withMemoryReadPolicy } = await import('../dist/tools/memory-read-access.js');
+      routes[route] = never;
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 50);
+      const started = Date.now();
+      const run = () => findWithSignal(input, controller.signal);
+      const result = policy ? await withMemoryReadPolicy({ watcher: true, readonly: false }, run) : await run();
+      assert.ok(Date.now() - started < 2_000, `${Date.now() - started}ms`);
+      const stopped = block(result, group);
+      assert.equal(stopped.status, 'timeout');
+      assert.equal(stopped.cause, 'cancelled');
+      assert.doesNotMatch(stopped.detail, /wait budget|ceiling|shared find deadline/);
+      assert.ok(stopped.next.arguments, 'still offers the arguments to retry');
+    });
+  }
+
+  test('the first stop source wins: a later caller cancellation does not overwrite the shared ceiling', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { GroupRun } = await import('../dist/tools/memory-find-group.js');
+    const { buildFindContext } = await import('../dist/tools/memory-find.js');
+    const { createMessagesGroup } = await import('../dist/tools/memory-find-messages.js');
+    routes[MESSAGES] = never;
+    const controller = new AbortController();
+    const run = new GroupRun(createMessagesGroup(buildFindContext({ query: '守望猫' })), controller.signal);
+    t.mock.timers.tick(16_000);
+    controller.abort();
+    const render = await run.render({ budgetChars: 10_000, alone: false });
+    run.close();
+    assert.equal(JSON.parse(render.text).cause, 'deadline');
+  });
+
+  test('a watcher directory continuation is a lone continuation and is not cut by the shared ceiling', async () => {
+    const { withMemoryReadPolicy } = await import('../dist/tools/memory-read-access.js');
+    routes[MATTERS] = slow(10_500, { items: [] });
+    const result = await withMemoryReadPolicy({ watcher: true, readonly: false }, () =>
+      find({ query: '守望猫', matterCursor: 'first', limit: 12 }),
+    );
+    assert.equal(block(result, 'matters').status, 'no_results');
+  });
+
+  test('a failed group carries the arguments that retry it alone', async () => {
+    routes[GRAPH] = () => new Response('boom', { status: 500 });
+    const result = await find({ query: 'F186', graphDepth: 2 });
+    const graph = block(result, 'graph');
+    assert.equal(graph.status, 'failed');
+    assert.deepEqual(graph.next, {
+      tool: 'cat_cafe_search_evidence',
+      arguments: { query: 'F186', continueGroup: 'graph', graphDepth: 2 },
+    });
+  });
+
+  test('the smallest form of an unfinished group still carries its continuation', async () => {
+    const { groupLadder } = await import('../dist/tools/memory-find-group.js');
+    const { buildFindContext } = await import('../dist/tools/memory-find.js');
+    const { createMessagesGroup } = await import('../dist/tools/memory-find-messages.js');
+    const group = createMessagesGroup(buildFindContext({ query: '守望猫' }));
+    for (const outcome of [
+      { status: 'timeout', cause: 'cancelled' },
+      { status: 'timeout' },
+      { status: 'failed', error: 'x' },
+    ]) {
+      const ladder = groupLadder(group, outcome, { budgetChars: 0, alone: false });
+      const smallest = JSON.parse(ladder[ladder.length - 1].text);
+      assert.equal(smallest.next.arguments.continueGroup, 'messages', JSON.stringify(outcome));
+    }
+  });
+
+  // kimi31-pro #7200 R1: a later page that fails or times out must continue from its own cursor, not page 1.
+  for (const watcher of [false, true]) {
+    test(`a later directory page that fails or times out keeps its own cursor (${watcher ? 'watcher' : 'cats'})`, async () => {
+      const { withMemoryReadPolicy } = await import('../dist/tools/memory-read-access.js');
+      const { groupLadder } = await import('../dist/tools/memory-find-group.js');
+      const { buildFindContext } = await import('../dist/tools/memory-find.js');
+      const { createMattersGroup } = await import('../dist/tools/memory-find-matters.js');
+      const policy = { watcher, readonly: false };
+      const input = { query: '守望猫', matterCursor: 'cursor-2', limit: 5 };
+      const expected = { query: '守望猫', matterCursor: 'cursor-2', limit: 5 };
+      routes[MATTERS] = () => new Response('down', { status: 503 });
+      const result = await withMemoryReadPolicy(policy, () => find(input));
+      assert.equal(requests.find((entry) => entry.path === MATTERS).params.get('cursor'), 'cursor-2');
+      const failed = block(result, 'matters');
+      assert.equal(failed.status, 'failed');
+      assert.deepEqual(failed.next.arguments, expected);
+      const group = withMemoryReadPolicy(policy, () => createMattersGroup(buildFindContext(input)));
+      for (const outcome of [
+        { status: 'timeout', cause: 'deadline' },
+        { status: 'failed', error: 'x' },
+      ]) {
+        const ladder = groupLadder(group, outcome, { budgetChars: 0, alone: true });
+        assert.deepEqual(JSON.parse(ladder[ladder.length - 1].text).next.arguments, expected, JSON.stringify(outcome));
+      }
+    });
+  }
+
+  test('the watcher directory continuation stays inside the watcher contract', async () => {
+    const { withMemoryReadPolicy } = await import('../dist/tools/memory-read-access.js');
+    const { searchEvidenceWatcherContract } = await import('../dist/tools/memory-find-watcher.js');
+    routes[MATTERS] = () => new Response('down', { status: 503 });
+    const result = await withMemoryReadPolicy({ watcher: true, readonly: false }, () => find({ query: '守望猫' }));
+    const matters = block(result, 'matters');
+    assert.equal(matters.status, 'failed');
+    assert.deepEqual(matters.next.arguments, { query: '守望猫', matterCursor: 'first', limit: 12 });
+    assert.equal(searchEvidenceWatcherContract.inputSchema.safeParse(matters.next.arguments).success, true);
   });
 });

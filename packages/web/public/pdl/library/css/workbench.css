@@ -1,0 +1,54 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 工作台面板：竖条、拉手、菜单条、铺开、插件嵌入位、键值 */
+/* ── 主页右侧的工作台面板 ── */
+.main.split-host { overflow: hidden; }
+.split { display: grid; grid-template-columns: minmax(0, 1fr); height: 100%; overflow: clip; position: relative; }
+.split.has-panel { grid-template-columns: minmax(0, 1fr) min(var(--span-7), 44%); }
+.split.has-panel.panel-first { grid-template-columns: min(var(--span-7), 44%) minmax(0, 1fr); }
+/* 标签式区域收起时的竖条（组件库）：不是一列，是浮在主窗口右边缘上的一条（和消息导航一样不占布局宽度、没有底板），在消息导航的左边。
+   网格位置：消息导航占最右一个网格单位（--g-mod），竖条在它左边那一列（右边让出一个网格单位），两者不重叠。显示与否只看菜单固定没有，不看工作台开没开、旁边空不空。
+   每一项 = 图标 + 约两个字宽的名字（横向滚动原件：溢出那边渐隐）；悬停不展开，全名是普通的提示。整条可上下拖：--u-dy 是相对声明位置的偏移 */
+.rt-stripe { position: absolute; z-index: var(--z-raised); right: var(--g-mod); top: calc(var(--row-h) + var(--ctl-l) + var(--sp-m)); translate: 0 var(--u-dy, 0px); display: flex; flex-direction: column; padding: var(--sp-xs); background: var(--surf-float); border-radius: var(--r-l); box-shadow: var(--shadow-float); }   /* 菜单条：固定着的菜单 = 一个浮层的面（和菜单同一种面 + 阴影），里面一列滚动 */
+.rt-stripe > .float-body { display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-hair); max-height: calc(var(--stripe-rows) * (var(--ctl-s) + var(--sp-hair))); }   /* 约 --stripe-rows 项高，更多的在条里滚动 */
+.rt-stripe-i { position: relative; flex: none; display: inline-flex; align-items: center; gap: var(--sp-xs); height: var(--ctl-s); padding: 0 var(--sp-s); border: 0; border-radius: var(--r-m); background: none; font-family: var(--font-text); cursor: pointer; }
+.rt-stripe-i:hover, .rt-stripe-i:focus-visible { color: var(--fg-strong); background: var(--bg-hover); }
+.rt-stripe-l { max-width: 2.4em; white-space: nowrap; }   /* 名字只露约两个字（溢出渐隐）；悬停不展开，全名在组件库的提示里 */
+/* 抽屉拉手：对话主窗口右边缘线上、上下居中的一个小凸起，没有图标；大半在边缘外（被主窗口裁掉），只露出一窄条能点；悬停微微拉出。
+   位置只相对主窗口的边（right / top 50%），露出的那一窄条在最右网格单位的边上，不压消息导航居中的刻度，也不碰菜单条 */
+/* 抽屉拉手：侧边抽屉标签——浮层的面（和菜单条同一种面、阴影），外侧圆角、贴边那侧齐平；只占刻度右边那一窄条，不压刻度。
+   图标是普通的小图标（墨色，悬停强调色）；悬停 / 聚焦向左展出（变宽），右边一直贴着窗口边 */
+/* 菜单项 + 末尾的操作：一整行是一项——和输入框里末尾的 ✓ 一样，操作在行里面；悬停整行高亮（项和操作一起），操作图标悬停时自己变色 */
+.menu-row { display: flex; align-items: center; border-radius: var(--r-s); }
+.menu-row:hover { background: var(--bg-hover); }
+.menu-row > [role="menuitem"] { flex: 1; min-width: 0; background: none; }
+.menu-row > .help-q { flex: none; margin-inline: var(--sp-s); }
+.menu .menu-row > button:hover { background: none; }
+.menu-row > .btn-icon { flex: none; width: var(--ctl-m); justify-content: center; padding: 0; }
+.rt-handle { position: absolute; z-index: var(--z-raised); right: 0; top: 50%; translate: 0 -50%; width: calc(3 * var(--unit)); height: calc(10 * var(--unit)); padding: 0; border: 0; border-radius: var(--r-m) 0 0 var(--r-m); background: var(--surf-float); box-shadow: var(--shadow-float); color: var(--fg-muted); cursor: pointer; overflow: hidden; transition: width var(--dur-fast) ease, color var(--dur-fast) ease; }
+.rt-handle .ic { position: absolute; left: 50%; top: 50%; translate: -50% -50%; }   /* 高箭头 12px 高（标签里留出空白） */
+.rt-handle:hover, .rt-handle:focus-visible { width: calc(5 * var(--unit)); color: var(--accent); }
+/* 铺开的工作台是盖在主区上的投影：主区留在原位（被盖住、点不到），挂在主区的弹层和被聚光灯抬起的输入框照样按主区的位置出现 */
+.split.wide > .panel { position: absolute; inset: 0; }
+.split.wide > .main-col { visibility: hidden; }   /* 工作台铺满：主窗口还在（滚动、草稿、状态都留着），只是不画；要用到的部分（批注时的输入框）靠聚光单独露出来 */
+.main-col { min-width: 0; min-height: 0; position: relative; }   /* 主窗口是网格容器（data-grid）：页里的部件按主窗口的网格排 */
+.panel-head { height: var(--row-h); display: flex; align-items: center; gap: var(--sp-xs); padding: 0 var(--sp-s) 0 var(--sp-s); flex-shrink: 0; }
+.panel-head .grow { flex: 1; }
+.panel-body { flex: 1; min-height: 0; padding: var(--sp-xs) var(--gutter-panel) calc(24 * var(--unit)); display: flex; flex-direction: column; gap: var(--sp-l); }
+.split.wide .panel-body > :not(.vw-page-split, .vw-split, .frame.tall, .vw-widget[src].tall, .page:has(> .vw-split), .page:has(> .frame.tall), .page:has(> .vw-widget[src].tall)) { inline-size: 100%; max-inline-size: var(--g-w); margin-inline: auto; }   /* 铺开的工作台：阅读内容占满工作台的网格（和主窗口一样的模数）居中；分栏与整页框按自身规则铺满 */
+.menu button[aria-current="true"] { font-weight: var(--fw-medium); color: var(--fg-strong); }   /* 当前的那一项：字重标出，不默认铺底（底色只给悬停） */
+/* 插件嵌入位：插件提供界面，控制台只给一个框 */
+.frame { border-radius: var(--r-l); background: var(--bg-field); min-height: calc(7 * var(--row-h-1)); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-s); color: var(--fg-muted); text-align: center; padding: var(--sp-xl); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.frame.tall, .vw-widget[src].tall { min-height: round(down, 100vh - 5 * var(--row-h-1), var(--row-h-1)); }   /* 插件的整页空间：占位和插件自己的界面同一个高度 */
+.plugin-float .frame { min-height: calc(6 * var(--row-h-1)); }
+.kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--tile-min), 1fr)); gap: var(--sp-s); }   /* 数字块：格宽、数字字号是区域 token（工作台里更紧） */
+.kv > div { background: var(--tile-bg); border-radius: var(--r-l); padding: var(--tile-pad); display: flex; flex-direction: var(--tile-dir); align-items: baseline; gap: var(--tile-gap); }
+.kv b { font: 500 var(--tile-num)/1.2 var(--font-text); color: var(--fg-strong); font-variant-numeric: tabular-nums; }
+/* 键值（page.js 的 kvGrid）：一块一列标签，宽度按这块最宽的标签取档；值左对齐、可换行 */
+.kvg { display: grid; grid-template-columns: fit-content(var(--kv-k-max)) minmax(0, 1fr); gap: var(--sp-xs) var(--sp-m); margin: 0; font-size: var(--fs-m); line-height: 1.5; align-items: baseline; }
+/* 标签列按这一块里最宽的标签取宽（网格的 fit-content，不估算字数），最多 --kv-k-max，更长的省略 */
+.kvg dt { min-width: 0; overflow: clip; text-overflow: ellipsis; white-space: nowrap; }
+.kvg dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.kvg-group { padding: var(--sp-m); border-radius: var(--r-l); background: var(--bg-group); }
+.prose { max-width: 66ch; }
+.prose p { margin: 0 0 var(--sp-m); }
+.panel { background: var(--bg-nav); display: flex; flex-direction: column; min-width: 0; min-height: 0; }   /* 工作台只是一个容器：里面的组件和别处同一个尺寸（不按所在区域换密度） */

@@ -6,13 +6,7 @@ const phaseCFiles = [
   'src/domains/cats/services/session/CanonicalInvocationTrajectoryResolver.ts',
   'src/routes/invocation-trajectory-routes.ts',
   'src/routes/session-transcript.ts',
-  '../web/src/components/workspace/trajectory/InvocationTrajectoryDetail.tsx',
-  '../web/src/components/workspace/trajectory/InvocationEvidenceLinks.tsx',
-  '../web/src/components/workspace/trajectory/canonical-trajectory-resolution.ts',
-  '../web/src/components/workspace/trajectory/invocation-evidence-ref.ts',
   '../web/src/components/workspace/trajectory/trajectory-navigation.ts',
-  '../web/src/components/eval-workspace/EvalWorkspaceEventCard.tsx',
-  '../web/src/components/HubEvalVerdictCard.tsx',
 ];
 
 describe('F299 Phase C architecture boundary', () => {

@@ -259,6 +259,14 @@ export class MatterMemoryService {
         throw new MatterMemoryError('not_available');
       }
       if (retry) return retry;
+      const previous =
+        input.operation === 'correct'
+          ? before?.entries.find((entry) => entry.entryId === input.entryId && entry.status === 'active')
+          : undefined;
+      if (input.operation === 'correct' && !previous)
+        throw new MatterMemoryError(
+          before && before.matter.revision !== input.expectedRevision ? 'stale_revision' : 'not_available',
+        );
       const inputs =
         input.operation === 'create' || input.operation === 'append'
           ? input.sources
@@ -268,15 +276,21 @@ export class MatterMemoryService {
               : undefined
             : [];
       const content = normalizeMatterWriteContent(input);
+      // Corrections patch the admitted entry; only new entries default to this invocation.
+      if (input.operation === 'correct' && input.summary === undefined) content.summary = previous?.summary;
       const writingEntry =
         input.operation === 'create' || input.operation === 'append' || input.operation === 'correct';
-      if (writingEntry && !content.summary && (!inputs?.length || inputs.some((source) => !('segment' in source))))
+      const requiresSummary = inputs?.length
+        ? inputs.some((source) => !('segment' in source))
+        : !previous || 'kind' in previous.source;
+      if (writingEntry && !content.summary && requiresSummary)
         throw new MatterMemoryError('invalid_source', {
           reason: 'summary_required',
           hint: 'Provide summary (your interpretation); a thread/message pointer is optional. Exact quotations remain optional and keep their original selection fields.',
         });
       const sources: MatterSourceReference[] = [];
-      if (writingEntry && !inputs) sources.push(await captureMatterInvocation(this.deps, actor));
+      if (previous && !inputs) sources.push(previous.source);
+      else if (writingEntry && !inputs) sources.push(await captureMatterInvocation(this.deps, actor));
       for (const source of inputs ?? [])
         sources.push(
           await ('segment' in source

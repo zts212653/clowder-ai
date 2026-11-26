@@ -9,7 +9,7 @@ import {
 import { WorkspaceContentSourceError } from '../../workspace/workspace-content-source.js';
 import { ArtifactReviewError } from '../artifact-review/errors.js';
 import type { ArtifactReviewService } from '../artifact-review/service.js';
-import type { ArtifactReviewStore } from '../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../artifact-review/storage/store.js';
 import { WorkspaceContentReviewError } from '../workspace-review/errors.js';
 import type { WorkspaceContentReviewService } from '../workspace-review/service.js';
 import { assertModificationSourceAuthority } from './request-authority.js';

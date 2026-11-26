@@ -1,7 +1,7 @@
 import type { ArtifactReviewView, ContentModificationProgress } from '@cat-cafe/shared';
 import { MediaOwnerError } from '../../video-studio/content-owner/media-errors.js';
-import type { ReviewReturnIntent } from './return-store.js';
-import type { ArtifactReviewStore } from './store.js';
+import type { ReviewReturnIntent } from './storage/return-store.js';
+import type { ArtifactReviewStore } from './storage/store.js';
 
 /** A saved Human judgment follows its exact result, independently of a later unreviewed owner head. */
 export function responseJudgmentIsCurrent(view: ArtifactReviewView, intent: ReviewReturnIntent): boolean {

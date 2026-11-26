@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import Fastify from 'fastify';
 import sharp from 'sharp';
 import { InvocationRegistry } from '../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { createWorkAuthorizer } from '../src/domains/collaborative-content/works/access.js';
 import { WorkCatalogue } from '../src/domains/collaborative-content/works/catalogue.js';
 import { WorkReviewResponseService } from '../src/domains/collaborative-content/works/review-response.js';

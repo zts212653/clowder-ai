@@ -1,20 +1,26 @@
 import { type AccountConfig, accountQuotaOwnerMatches, builtinAccountFamilyForRef } from '@cat-cafe/shared';
 import { readAccountStoreSnapshot } from '../config/account-store-snapshot.js';
 import { agyLoginCommand, inspectAgyLogin } from '../config/agy-account.js';
+import type { AgyKeychainIdentityInspector } from '../config/agy-quota-identity.js';
+import { type AgyAccountQuotaObservationView, readAgyQuotaView } from '../config/agy-quota-store.js';
 import { readClaudeQuotaView } from '../config/claude-quota-store.js';
 import { claudeTokenStatus } from '../config/claude-token-account.js';
 import { codexManagedStatus } from '../config/codex-account-identity.js';
+import { readKimiQuotaView } from '../config/kimi-quota-store.js';
 import { readNativeCodexQuota } from '../config/native-codex-quota.js';
 import { nativeCodexAccountView } from './accounts-native-view.js';
 import { projectQuotaRenewal } from './accounts-quota-feedback.js';
 // clowder-ai#340: Derive client identity from well-known account IDs, not stored protocol.
-/** Synthesize a ProviderProfileView-compatible object from AccountConfig. */
+/** Synthesize a ProviderProfileView-compatible object from AccountConfig (purely non-blocking; AGY quota view is pre-resolved by accountToViewAsync). */
 export function accountToView(
   id: string,
   account: AccountConfig,
   apiKeyPresent: boolean,
   projectRoot?: string,
   nativeDefault = false,
+  options?: {
+    agyQuotaView?: { agyQuotaReady: boolean; agyQuota?: AgyAccountQuotaObservationView };
+  },
 ) {
   const isBuiltin = account.authType === 'oauth' && !!builtinAccountFamilyForRef(id);
   const builtinClient = builtinAccountFamilyForRef(id);
@@ -35,6 +41,9 @@ export function accountToView(
     projectRoot && clientId === 'anthropic' && account.authType === 'oauth'
       ? readClaudeQuotaView(projectRoot, id)
       : undefined;
+  const kimiView =
+    projectRoot && clientId === 'kimi' && account.authType === 'oauth' ? readKimiQuotaView(projectRoot, id) : undefined;
+  const agyQuotaView = options?.agyQuotaView;
   const quota =
     (account.codex || nativeDefault) &&
     (observed?.status === 'ok' || observed?.lastSuccess) &&
@@ -57,6 +66,18 @@ export function accountToView(
     ...(!isBuiltin ? { displayName: account.displayName ?? id } : {}),
     authType: account.authType,
     ...(claudeQuota ? { claudeQuota } : {}),
+    ...(kimiView
+      ? {
+          kimiLoginReady: kimiView.kimiLoginReady,
+          ...(kimiView.kimiQuota ? { kimiQuota: kimiView.kimiQuota } : {}),
+        }
+      : {}),
+    ...(agyQuotaView
+      ? {
+          agyQuotaReady: agyQuotaView.agyQuotaReady,
+          ...(agyQuotaView.agyQuota ? { agyQuota: agyQuotaView.agyQuota } : {}),
+        }
+      : {}),
     builtin: isBuiltin,
     ...(quota
       ? {
@@ -100,6 +121,24 @@ export function accountToView(
     createdAt: '',
     updatedAt: '',
   };
+}
+
+export async function accountToViewAsync(
+  id: string,
+  account: AccountConfig,
+  apiKeyPresent: boolean,
+  projectRoot?: string,
+  nativeDefault = false,
+  options?: { agyKeychainIdentityInspector?: AgyKeychainIdentityInspector },
+) {
+  const isBuiltin = account.authType === 'oauth' && !!builtinAccountFamilyForRef(id);
+  const builtinClient = builtinAccountFamilyForRef(id);
+  const clientId = account.clientId ?? (isBuiltin ? builtinClient : undefined);
+  const agyQuotaView =
+    projectRoot && clientId === 'google' && account.authType === 'oauth' && !account.googleCloud
+      ? await readAgyQuotaView(projectRoot, id, { keychainIdentityInspector: options?.agyKeychainIdentityInspector })
+      : undefined;
+  return accountToView(id, account, apiKeyPresent, projectRoot, nativeDefault, { agyQuotaView });
 }
 
 /** Derive a slug-like ID from display name, avoiding collisions with existing accounts. */

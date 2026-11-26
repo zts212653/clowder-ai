@@ -1,0 +1,180 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 控件：按钮、开关、输入、状态、头像、锚点、浮层与弹窗的面 */
+/* ── Controls ──────────────────────────── */
+.btn { --btn-bg: var(--btn-soft); --btn-fg: var(--fg-strong); --btn-bg-hover: var(--btn-soft-hover); --btn-ring-hover: none; height: var(--btn-h, var(--ctl-m)); padding: 0 var(--sp-m); border-radius: var(--r-m); border: 0; display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-xs); font: 500 var(--fs-m)/1 var(--font-text); cursor: pointer; white-space: nowrap; }
+/* 按钮的样式（组件库声明，只有这四种）：solid 强调色底 · soft 半透明的墨色浅底 + 墨色字（中性，不像删除 / 弱提示；底色在任何背景上都看得见）· danger solid · danger soft。每种是一组值（--btn-*），按钮只读这组值。
+   所有操作槽默认都是 soft（标题行、小节标题、空状态、列表行、底栏、按钮组）；只有声明了 primary 的那一个是 solid（页面的主创建操作、对话框 / 表单的确认）；
+   danger 是 danger soft；danger + primary（最后一步的破坏性确认）是 danger solid。不在运行时数按钮。开关、只有图标、文中的链接各有自己的规则（下面），不读这组值 */
+.btn[data-primary] { --btn-bg: var(--accent); --btn-fg: var(--fg-on-accent); --btn-bg-hover: var(--accent-hover); --btn-ring-hover: none; }
+.btn.danger { --btn-bg: var(--danger-soft); --btn-fg: var(--danger); --btn-bg-hover: var(--danger-soft); --btn-ring-hover: inset 0 0 0 1px var(--danger); }
+.btn.danger[data-primary] { --btn-bg: var(--danger); --btn-fg: var(--fg-on-accent); --btn-bg-hover: var(--danger); --btn-ring-hover: none; }
+.btn:not(.btn-icon, .btn-text, [aria-pressed]) { background: var(--btn-bg); color: var(--btn-fg); }
+.btn:not(.btn-icon, .btn-text, [aria-pressed]):hover { background: var(--btn-bg-hover); box-shadow: var(--btn-ring-hover); }
+/* 只有图标：墨色、没底（图标本身就说明能点），悬停变强调色；危险的悬停变危险色 */
+.btn-icon:not([aria-pressed]) { background: transparent; color: var(--fg-strong); }
+.btn-icon:not([aria-pressed]):is(:hover, :focus-visible) { background: none; color: var(--accent-fg); }
+.btn-icon.danger:not([aria-pressed]):is(:hover, :focus-visible) { color: var(--danger); }
+.btn-text { background: none; padding: 0; height: auto; color: var(--accent-fg); font-weight: 500; min-width: 0; max-width: 100%; }   /* 文字链接：行窄时字省略（btnLinkText），不把同一行的别的东西挤掉 */
+.btn-text:hover { text-decoration: underline; }
+.btn-icon { width: var(--ctl-m); padding: 0; flex-shrink: 0; }   /* 图标按钮是一个固定的方块：一排放不下时让文字省略，不把按钮挤窄 */
+.btn-sm { height: var(--ctl-s); padding: 0 var(--sp-s); }
+.btn-sm.btn-icon { width: var(--ctl-s); padding: 0; }
+.btn-xs { height: var(--ctl-xs); padding: 0 var(--sp-xs); }
+.btn-xs.btn-icon { width: var(--ctl-xs); padding: 0; }
+/* 开关（声明了 pressed 的东西：按钮、图标按钮、筛选胶囊、筛选下拉）：底色永远不变（按钮没底，胶囊是自己的底）；
+   悬停和开着都只把文字 / 图标变成强调色——和图标按钮悬停同一个颜色，开着的再悬停也不变 */
+.btn[aria-pressed] { background: none; box-shadow: none; color: var(--fg-strong); }
+:is(.btn, .chip, .cafe-drop)[aria-pressed]:is(:hover, :focus-visible), :is(.btn, .chip, .cafe-drop)[aria-pressed="true"] { color: var(--accent-fg); }
+.btn[disabled], .btn[aria-disabled="true"] { opacity: var(--op-disabled); cursor: default; }
+.input { width: 100%; }
+.input, .select { height: var(--field-h); border: 1px solid transparent; border-radius: var(--r-m); background: var(--bg-field); color: var(--fg-strong); padding: 0 var(--sp-s); font: inherit; font-size: var(--field-fs, var(--fs-l)); }   /* 字号是字段自己的一档，不跟外层；面板密度矮一档（--field-fs） */
+.input.mono, .select.mono { font-family: var(--font-mono); font-size: var(--fs-m); }   /* 等宽的输入框：font: inherit 不能盖掉等宽 */
+textarea.input { height: auto; min-height: calc(3lh + 2 * var(--sp-s)); padding: var(--sp-s) var(--sp-s); resize: vertical; line-height: 1.6; }
+.input::placeholder, textarea::placeholder { color: var(--fg-faint); }
+.input:focus, .select:focus { outline: 2px solid var(--focus); outline-offset: -2px; }   /* 焦点描边画在控件内侧：贴着面或滚动层的边也不会被裁 */
+.input[readonly] { color: var(--fg-muted); }
+.select-wrap { position: relative; display: inline-block; max-width: 100%; color: var(--fg-strong); }   /* 下拉只有一个样子：宽度跟内容（不按所在的表单 / 设置行 / 筛选换样子） */
+.select { max-width: 100%; appearance: none; -webkit-appearance: none; padding-right: var(--page-gap); cursor: pointer; display: flex; align-items: center; text-align: left; }
+.select-v, .select-sz { min-width: 0; display: flex; align-items: center; gap: var(--sp-xs); white-space: nowrap; }   /* 下拉的值 / 选项：不管里面是什么（头像、图标、文字），一行、垂直居中；省略只在文字上（.select-t） */
+.select-vs { display: grid; min-width: 0; }   /* 值和每个选项叠在同一格：格子宽 = 最宽的选项，放不下时一起省略 */
+.select-vs > * { grid-area: 1 / 1; }
+.select-t { min-width: 0; overflow: clip; text-overflow: ellipsis; }
+.select-sz { visibility: hidden; }
+.select-p { flex: none; }   /* 下拉的前缀（「分类：」）：文字角色 value（次要墨色），值本身仍是正文墨色 */
+.select-wrap .ic { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--fg-muted); }
+.switch { width: var(--ctl-l); height: var(--ctl-xs); border-radius: var(--r-full); border: 0; background: var(--line-strong); position: relative; cursor: pointer; flex-shrink: 0; padding: 0; transition: background var(--dur-fast); }
+.switch span { position: absolute; top: calc((var(--ctl-xs) - var(--av-s)) / 2); left: calc((var(--ctl-xs) - var(--av-s)) / 2); width: var(--av-s); height: var(--av-s); border-radius: var(--r-full); background: var(--bg-group); box-shadow: var(--shadow-thumb); transition: transform var(--dur-fast); }
+.tag-ed { min-width: 0; padding-top: var(--sp-hair); }   /* 标签编辑器：一排标签 + 同一排里加一项的输入 */
+.switch[aria-checked="true"] { background: var(--switch-on); }   /* 开着 = 强调色（--switch-on 由 --accent 来） */
+.switch[aria-checked="true"] span { background: var(--fg-on-accent); transform: translateX(calc(var(--ctl-l) - var(--ctl-xs))); }
+.seg { display: inline-flex; width: fit-content; background: var(--bg-field); border-radius: var(--r-m); padding: var(--sp-hair); gap: var(--sp-hair); flex-wrap: var(--seg-wrap); max-width: 100%; }
+.seg button { height: var(--ctl-s); padding: 0 var(--sp-s); font-size: var(--seg-fs); font-weight: var(--fw-normal); border: 0; border-radius: var(--r-s); background: none; color: var(--fg-muted); cursor: pointer; display: inline-flex; gap: var(--sp-xs); align-items: center; }
+.seg button:hover { color: var(--fg-strong); }
+.seg button[aria-pressed="true"] { background: var(--bg-group); color: var(--fg-strong); font-weight: 500; box-shadow: var(--shadow-pressed); }
+.c { white-space: nowrap; flex: none; }   /* 数量（qty）：唯一的样式 */
+
+.toolbar { display: flex; gap: var(--sp-s); align-items: center; flex-wrap: wrap; }   /* 一排控件：和上下的块同一条左右边 */
+.toolbar::before { content: ''; flex: none; width: 0; height: var(--field-h); margin-right: calc(-1 * var(--sp-s)); }   /* 撑住一个字段高（不用 min-height：竖排弹性盒里写了 min-height 这一排会被压扁）：按条件出现的字段（排序下拉……）来去时这一排不变高矮 */
+.toolbar .grow { flex: 1; }
+.search { position: relative; min-width: var(--span-3); flex: 1 1 var(--span-4); max-width: var(--search-max, var(--span-4)); }   /* 宽度是容器给的 token（列表栏、弹窗行里铺满），不是各页自己补 */
+.search > .search-go { position: absolute; left: var(--sp-xs); top: 50%; transform: translateY(-50%); width: var(--ctl-xs); height: var(--ctl-xs); display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--r-s); background: none; color: var(--fg-faint); cursor: pointer; }
+.search > .search-go:hover, .search > .search-go:focus-visible { color: var(--accent-fg); }   /* 纯图标按钮：墨色，悬停 / 聚焦变强调色 */
+.field-add { display: inline-flex; align-items: center; gap: var(--sp-s); min-width: 0; }
+.field-add[data-open="false"] > .ifield { display: none; }
+/* 一个输入框（goField）：看起来是一个输入框；框里的几个输入共用一个底，提交是框里最后一个图标（墨色，悬停变强调色），框里可以有一个选色小件 */
+.ifield { display: flex; align-items: center; gap: var(--sp-xs); flex: 1; min-width: 0; max-width: 100%; height: var(--ctl-m); padding-right: var(--sp-hair); border-radius: var(--r-m); background: var(--bg-field); }
+.ifield:focus-within { outline: 2px solid var(--focus); outline-offset: -2px; }
+.ifield > .input { flex: 1; min-width: 0; height: 100%; background: none; }
+.ifield > .input:focus { outline: none; }
+.ifield-sep { display: inline-flex; color: var(--fg-faint); flex: none; }
+.ifield > .cafe-tints { flex: none; }
+.opt { display: flex; gap: var(--sp-m); align-items: flex-start; padding: var(--sp-s) var(--sp-m); border-radius: var(--r-m); cursor: pointer; }
+.opt:hover { background: var(--bg-hover); }
+.opt .radio { width: var(--ic-m); height: var(--ic-m); border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--line-strong); margin-top: var(--sp-hair); flex-shrink: 0; }
+.opt[aria-checked="true"] .radio, .opt input:checked + .radio { box-shadow: inset 0 0 0 5px var(--switch-on); }
+.opts { display: flex; flex-direction: column; gap: var(--sp-xs); }
+.opt .row-sub { white-space: normal; }
+.chips { display: flex; gap: var(--sp-xs); flex-wrap: wrap; align-items: center; }
+.tag-ed > .chip { margin-block: calc((var(--ctl-m) - var(--ctl-s)) / 2); }   /* 标签外占一个输入控件的行高；新增框换行时已有标签不随行高跳动。 */
+.chip { height: var(--ctl-s); padding: 0 var(--sp-s); border-radius: var(--r-full); background: var(--bg-field); color: var(--fg-strong); display: inline-flex; align-items: center; gap: var(--sp-xs); font-size: var(--fs-m); border: 0; white-space: nowrap; flex-shrink: 0; max-width: 100%; overflow: hidden; }   /* 一行高：文字不在标签里折行（窄栏里折行会压到下一行上）；不被挤窄，放不下整个换行 */
+.chip-thumb { width: var(--ctl-xs); height: var(--ctl-xs); object-fit: cover; border-radius: var(--r-s); flex: none; }
+button.chip { cursor: pointer; color: var(--fg-muted); }
+button.chip:hover { color: var(--fg-strong); }
+/* 状态：正常是灰字，只有例外才上色 */
+.status { display: inline-flex; align-items: center; gap: var(--sp-xs); white-space: nowrap; min-width: 0; max-width: 100%; }
+.status-t { min-width: 0; overflow: clip; text-overflow: ellipsis; }
+.status[data-tone] { color: var(--fg-strong); min-width: var(--dot); }
+.status[data-tone]::before { content: ""; width: var(--dot); height: var(--dot); border-radius: 50%; background: var(--tone-c); flex: none; }
+.status[data-tone] b { color: var(--tone-c); font-weight: 500; }
+.notice { display: flex; gap: var(--notice-gap); align-items: first baseline; padding: var(--notice-pad); border-radius: var(--r-l); background: var(--bg-group); flex-wrap: wrap; }
+.notice .grow { flex: 1; min-width: calc(50 * var(--unit)); }
+.notice[data-tone] { background: var(--tone-soft); }
+.notice .ic { color: var(--fg-muted); }
+.notice[data-tone] .ic { color: var(--tone-c); }
+.empty { padding: var(--empty-pad-y, var(--sp-xl)) var(--empty-pad-x, var(--sp-l)); font-size: var(--empty-fs, inherit); text-align: center; color: var(--fg-muted); display: flex; flex-direction: column; align-items: center; gap: var(--sp-m); }
+.empty.lead { padding: calc(16 * var(--unit)) var(--sp-l); color: var(--fg-faint); }   /* "选一项"的占位：大图标 */
+.empty:only-child { margin: auto; }   /* 空状态在它所在的容器里居中：容器是弹性盒时上下左右都居中（分栏没选中时的详情栏），块容器里左右居中 */
+.avatar { width: var(--av-m); height: var(--av-m); border-radius: 50%; display: grid; place-items: center; font: 500 var(--fs-s)/1 var(--font-text); color: var(--av-ink, var(--fg-strong)); background: var(--av-bg, var(--bg-field)); flex-shrink: 0; }
+button.avatar { border: 0; padding: 0; cursor: pointer; }
+/* 头像：一个组件，五档（PDL 只写档位）——xs 跟所在那行文字一样高（引用、提及），s 消息下方的状态胶囊，m 列表行的前导（默认），l 消息作者和输入框上的状态胶囊，xl 页面头部。
+   动效和状态在每一档都一样，扩散圈按比例 */
+.avatar.av-s { width: var(--av-s); height: var(--av-s); font-size: var(--fs-xs); }
+.avatar.av-l { width: var(--av-l); height: var(--av-l); font-size: var(--fs-m); }
+.avatar.av-xl { width: var(--av-xl); height: var(--av-xl); font-size: var(--fs-title); }
+.avatar.av-xs { font-size: .7em; width: calc(1.25em / .7); height: calc(1.25em / .7); }
+.avatar[data-img] { position: relative; }
+.avatar[data-img]::before { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--av-img) center / cover no-repeat; }   /* 有图时只画图（首字和图二选一，who.js）；::after 是执行圈 */
+.stack { display: inline-flex; }
+.stack .avatar { box-shadow: 0 0 0 2px var(--bg-group); }
+.stack .avatar + .avatar { margin-left: calc(-1 * var(--sp-xs)); }
+/* 看不见的锚点（点击处、选中的文字、光标）：放在所在容器里，按相对容器的偏移摆（engine/anchor.js 的 spotAt），浮层像锚在元素上一样锚在它上面 */
+/* 锚点名（engine/anchor.js 的锚定）：节点的身份推出的名字写在 data-aname 上，这一条规则把它变成 anchor-name；浮层用 position-anchor: var(--u-anchor) 引用 */
+[data-aname]:not([data-grid]) { anchor-name: attr(data-aname type(<custom-ident>)); }   /* 网格保留 --ct-box 与运行时名；其他结构锚点也各自保留两个名字。 */
+.anchor-spot { position: absolute; left: var(--u-dx, 0px); top: var(--u-dy, 0px); width: var(--u-sw, var(--sp-hairline)); height: var(--u-sh, var(--sp-hairline)); pointer-events: none; visibility: hidden; }
+.menu { position: fixed; z-index: var(--z-menu); min-width: calc(45 * var(--unit)); position-anchor: var(--u-anchor); position-visibility: always; position-area: bottom span-right; margin-block: var(--sp-xs); position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline; }   /* 锚定：贴着打开它的元素，放不下翻到上方 / 左边 */
+.select-wrap[data-span] { max-inline-size: min(100%, var(--u-span)); }
+.menu[data-span] { inline-size: var(--u-span); max-inline-size: calc(100vw - 2 * var(--sp-s)); }
+.menu[data-span] [role="menuitem"] { min-inline-size: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 浮层的表面（菜单、选择浮层、工作台启动面板……组件库一种）：同一个底、圆角、阴影、内边距 */
+.menu, .pop, .ws-pop, .member-card { background: var(--surf-float); border-radius: var(--r-l); }
+.menu, .member-card { padding: var(--sp-xs); }
+/* 弹出层的面：面本身不留边，里面每一层（头、滚动层）各有同一份内边距——焦点描边在滚动层里面，不会被面或滚动裁掉；里面的搜索框占满一行（区域 token --search-max） */
+.pop, .ws-pop { --search-max: none; }
+.pop > *, .ws-pop > * { padding: var(--sp-s); }
+.pop > * + *, .ws-pop > * + * { padding-top: 0; }
+/* 浮层的抬起（一个 token）：边上一圈 1px 的阴影环 + 近处的紧阴影 + 远处的柔阴影，浮层压在差不多同色的面上（输入框）也分得开；深色有自己的值 */
+.menu, .pop, .ws-pop, .member-card, .dialog, .inbox, .edit-bar, .mv-card { box-shadow: var(--shadow-float); }
+/* 浮层里的一组标题、分隔线、一行：同一套 */
+.lr-section-label[data-v="float"] { height: auto; margin: 0; padding: var(--sp-s) var(--sp-s) var(--sp-xs); }   /* 组标签放在浮层列表里（菜单、弹出层、启动面板）：贴着面的内边距，和项同一条左边 */
+.menu button:hover { background: var(--bg-hover); color: var(--fg-strong); }
+.menu button { display: flex; width: 100%; height: var(--ctl-m); align-items: center; gap: var(--sp-s); padding: 0 var(--sp-s); border: 0; background: none; border-radius: var(--r-s); cursor: pointer; text-align: left; }
+.menu button.danger:not(.btn-icon) { color: var(--danger); }
+.menu button:has(.menu-sub) { height: auto; min-height: var(--ctl-m); padding-block: var(--sp-xs); }   /* 带第二行说明的项（下拉选项的 sub）：两行，说明是次要文字 */
+.menu-t { display: flex; flex-direction: column; min-width: 0; }
+.list-next { display: flex; justify-content: center; }
+.trow-draft { color: var(--accent-fg); }   /* 对话行的“草稿”：和时间同一格，主题色 */   /* 列表的续读尾标：还有下一批时居中一个 ⋯ */
+.combo { display: flex; align-items: center; gap: var(--sp-xs); min-width: 0; }   /* 带候选的输入框：框 + 框尾的下拉按钮 */
+.combo > .input { flex: 1; min-width: 0; }
+.menu-sub { color: var(--fg-muted); font-size: var(--fs-s); }   /* 危险的菜单项是危险色；项末尾的删除图标照图标按钮的规则：平时墨色，悬停危险色 */
+/* 遮罩（区域模型里唯一的一个）：所有模态——对话框、模态窗、预览窗、查看器、剧场、区域占用——都画它；弹层之外的一切都铺遮罩色并模糊 */
+/* 弹窗栈（引擎画）：每个弹窗包在 .pop-host 里，层级 = 栈位置；外壳不接点击，只有框架接。锚点决定外壳怎么摆框架 */
+.pop-host { position: fixed; inset: 0; pointer-events: none; z-index: calc(var(--z-menu) + var(--u-pz, 0) * 2); }
+.pop-host > * { pointer-events: auto; }
+.pop-center { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); justify-items: center; align-items: start; padding: min(calc(2 * var(--g-mod)), 10vh) var(--sp-l) var(--sp-l); }   /* 对话框贴窗口网格的顶（固定的上边距，往下长；内容多了在正文里滚动）：内容变化时标题不跟着重新居中而跳动 */
+.pop-fill { display: grid; padding: var(--sp-l); }
+.pop-top { display: grid; justify-items: center; align-content: start; padding: var(--sp-s); }
+.pop-inline { display: contents; }
+/* 唯一的遮罩：在最上面一个声明了 focus 的东西下面一层（弹窗：--u-sz 是它的栈位置；区域占用：在占用内容下面；就地聚焦的节点：在它下面）。出现、消失只淡入淡出 */
+#scrim { position: fixed; inset: 0; z-index: calc(var(--z-menu) + var(--u-sz, 0) * 2 - 1); background: var(--bg-scrim); -webkit-backdrop-filter: blur(var(--blur-scrim)); backdrop-filter: blur(var(--blur-scrim)); opacity: 0; pointer-events: none; transition: opacity var(--dur-med) ease; }
+#scrim.on { opacity: 1; pointer-events: auto; }
+#scrim.occ, #scrim.spot { z-index: calc(var(--z-float-top) - 1); }
+[data-focus] { position: relative; z-index: var(--z-float-top); visibility: visible; }   /* 就地聚焦（聚光灯）：布局不动，只把层抬到遮罩上面 */
+.vw-focus-slot { anchor-name: --spot; anchor-scope: --spot; min-width: 0; }
+.vw-focus-slot:has(> [data-focus]:popover-open) { height: var(--u-focus-h); }
+[data-focus][popover] { inset: auto; margin: 0; border: 0; padding: 0; color: inherit; background: none; overflow: visible; max-width: none; max-height: none; }
+[data-focus]:popover-open { position: fixed; position-anchor: --spot; position-visibility: always; top: anchor(top); left: anchor(left); width: anchor-size(width); }   /* 原位置可能在不画的容器里（铺满的工作台下面），照样按原位置出现 */
+[data-focus][popover]:not(:popover-open) { display: block; }
+:where(.pop-host, #scrim)[popover] { margin: 0; border: 0; color: inherit; overflow: visible; width: auto; height: auto; max-width: none; max-height: none; }
+.pop-host[popover] { background: none; }
+.pop-center[data-within] { position-anchor: var(--u-within); position-visibility: always; inset: auto; top: anchor(top); left: anchor(left); width: anchor-size(width); bottom: anchor(--dock top, anchor(bottom)); padding: var(--sp-l); align-items: center; container-type: size; }   /* 区域里有停靠在底部的一块（落地页预览作品时沉下去的输入框）：弹窗只占它上面的空间，不压住它 */
+/* 弹窗（组件库，所有弹窗一套）：外边距是 --dlg-g；正文区是唯一的滚动区（.scroll），左右伸到弹窗边缘、内容仍对齐到 --dlg-g，
+   所以滚动渐隐和滚动条贴着弹窗边；正文里的列表也伸到边缘，行内容对齐到同一条边——没有“弹窗边距 + 列表边距”的双重留白 */
+.dialog { --dlg-g: 24px; --dlg-chrome: calc(200px + min(calc(2 * var(--g-mod)), 10vh) - var(--sp-l)); background: var(--surf-anchor); border-radius: var(--r-xl); width: var(--span-6); padding: var(--dlg-g); display: flex; flex-direction: column; gap: var(--sp-m); max-height: 100%; overflow: clip; }
+.dialog-body { --sf-size: calc(var(--row-h-1) * .5); display: flex; flex-direction: column; gap: var(--sp-m); min-height: 0; flex: 0 1 auto; max-height: calc(round(down, 100vh - var(--dlg-chrome), var(--row-h-1)) + .5 * var(--row-h-1)); margin: 0 calc(-1 * var(--dlg-g));   /* 切在半行：整数行（放得下的那么多，最多 --dlg-rows）+ 半行；窗口矮时整数行变少，仍然切在半行（声明，不量） */ padding: var(--sp-hair) var(--dlg-g); }
+.dialog[style*="--dlg-rows"] > .dialog-body { max-height: calc(round(down, min(var(--dlg-rows) * var(--row-h-1), 100vh - var(--dlg-chrome)), var(--row-h-1)) + .5 * var(--row-h-1)); }   /* 容器声明了最多几行：取它和页面里较小的 */
+.dialog-body > .group { margin: 0 calc(-1 * var(--dlg-g)); padding-inline: 0; border-radius: 0; background: none; }   /* 弹窗正文的构成：列表伸到弹窗边缘，行的内容和正文对齐到同一条边（没有双重留白） */
+.dialog-body > * { flex-shrink: 0; }
+.dialog-body > .group > .row, .dialog-body > .group > .field, .dialog-body > .group > .lr > .lr-head { padding-inline: var(--dlg-g); }
+.dialog-body > .lr-list[data-rows] { flex-shrink: 1; min-height: calc(2 * var(--row-step)); }   /* 限行的列表先让出高度（最少两行），它后面的字段不被挤出视野、正文不整体滚 */
+.dlg-head { display: flex; align-items: center; gap: var(--sp-s); }
+.dlg-head h3 { flex: 1; }
+/* 弹窗打开时落下的默认焦点：总是画出标准焦点环，看得出回车会按哪个 */
+.dialog h3 { margin: 0; font-family: var(--font-display); line-height: 1.3; }
+.dialog p { margin: 0; }
+.dialog[data-tone] h3::before { content: ""; display: inline-block; width: var(--dot); height: var(--dot); margin-right: var(--sp-s); border-radius: var(--r-full); background: var(--tone-c); vertical-align: middle; }
+.dialog .acts { display: flex; justify-content: flex-end; gap: var(--sp-s); margin-top: var(--sp-s); }
+.toast { position: fixed; left: 50%; bottom: calc(var(--sp-xl) + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: var(--z-toast); background: linear-gradient(var(--btn-soft), var(--btn-soft)), var(--surf-float); color: var(--fg-strong); padding: var(--sp-s) var(--sp-l); border-radius: var(--r-m); font-size: var(--fs-m); box-shadow: var(--shadow-float); display: flex; align-items: center; gap: var(--sp-m); max-width: calc(100vw - 2 * var(--sp-l)); }   /* 普通的结果提示：中性灰底（默认按钮的那层墨色叠在浮层的面上，压在内容上也读得清），不用反色黑底 */
+.toast.raised { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }   /* 撤销条：让开底部的轻提示 */
+.toast[data-tone]::before { content: ""; display: inline-block; width: var(--dot); height: var(--dot); margin-right: var(--sp-s); border-radius: 50%; background: var(--tone-c); vertical-align: middle; }
+.savebar { position: sticky; bottom: 16px; margin-top: calc(-1 * var(--sp-s)); display: flex; align-items: center; gap: var(--sp-s); padding: var(--sp-s) var(--sp-m) var(--sp-s) var(--sp-l); border-radius: var(--r-l); background: var(--bg-raised); box-shadow: var(--shadow-raised); }
+.savebar .grow { flex: 1; color: var(--fg-strong); }

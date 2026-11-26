@@ -1,4 +1,5 @@
-import type { CatConfig, ConciergeConfig } from '@cat-cafe/shared';
+import type { CatConfig } from '@cat-cafe/shared';
+import type { CompanionSettings } from '../companion-settings.js';
 
 type Candidate = Pick<CatConfig, 'id' | 'displayName' | 'nickname' | 'clientId' | 'provider' | 'isDefaultVariant'>;
 // Same cloud-only distinction as the ordinary invocation router; clientId alone is not a native transport.
@@ -7,7 +8,7 @@ export interface LiveCompanionSelection {
   readonly duty: { readonly catId: CatConfig['id']; readonly displayName: string };
   readonly carrier: { readonly catId: CatConfig['id']; readonly displayName: string };
   readonly displayName: string;
-  readonly skin: ConciergeConfig['skin'];
+  readonly skin: CompanionSettings['skin'];
   readonly personaTone: string;
 }
 
@@ -20,7 +21,7 @@ export class LiveCompanionSelectionError extends Error {
 
 /** Reuse the catalog's explicit breed default; array order and the surface grant no identity. */
 export function resolveLiveCompanionSelection(
-  config: Pick<ConciergeConfig, 'dutyCatProfileId' | 'displayName' | 'skin' | 'personaTone'>,
+  config: Pick<CompanionSettings, 'dutyCatProfileId' | 'displayName' | 'skin' | 'personaTone'>,
   cats: readonly Candidate[],
 ): LiveCompanionSelection {
   const duty = cats.find((cat) => cat.id === config.dutyCatProfileId);
@@ -38,6 +39,16 @@ export function resolveLiveCompanionSelection(
     skin: config.skin,
     personaTone: config.personaTone,
   };
+}
+
+/** Whether this member can be the companion's duty with a single Live carrier among these cats. */
+export function liveSelectable(dutyCatProfileId: string, cats: readonly Candidate[]): boolean {
+  try {
+    resolveLiveCompanionSelection({ dutyCatProfileId, displayName: '', skin: 'xianxian-codex', personaTone: '' }, cats);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function sameLiveExecutionSelection(a: LiveCompanionSelection, b: LiveCompanionSelection): boolean {

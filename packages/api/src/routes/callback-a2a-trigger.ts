@@ -8,6 +8,10 @@ import { resolveFailedResponseReturn } from './a2a-failure-callers.js';
 
 import type { CatId, RoutingQueueAdmissionReceiptV1 } from '@cat-cafe/shared';
 import type { ActionSuccessorFence } from '../domains/ball-custody/ActionSuccessorAdmissionService.js';
+import {
+  crossThreadFailureReturnInput,
+  isCrossThreadSource,
+} from '../domains/cats/services/agents/invocation/cross-thread-failure-return.js';
 import type { InvocationQueue, QueueEntry } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import {
   normalizeOwnerAuthProvenance,
@@ -82,6 +86,7 @@ export interface A2ATriggerDeps {
   invocationQueue?: Pick<
     InvocationQueue,
     | 'enqueueExistingMessageDurable'
+    | 'enqueueDurable'
     | 'send'
     | 'terminalizeResponseAndEnqueueDurable'
     | 'countAgentEntriesForThread'
@@ -431,7 +436,9 @@ async function commitFailedResponsePatchAndEnqueueA2ACaller(
   const current = await deps.messageStore.getById(opts.responseMessageId);
   if (!current || current.lifecycle?.kind !== 'response' || current.lifecycle.invocationId !== opts.invocationId)
     throw new Error('failed response identity mismatch');
-  const { targetCats, ownerAuthProvenance } = await resolveFailedResponseReturn(
+  const failedTargetId = current.lifecycle.targetId;
+  const invocationQueue = deps.invocationQueue;
+  const { targetCats, crossThreadSources, ownerAuthProvenance } = await resolveFailedResponseReturn(
     deps.messageStore,
     current,
     opts.ownerAuthProvenance === undefined
@@ -453,55 +460,63 @@ async function commitFailedResponsePatchAndEnqueueA2ACaller(
         : {}),
     },
   };
-  if (targetCats.length === 0)
+  const failureReturns = crossThreadSources.map((source) =>
+    crossThreadFailureReturnInput(source, current.id, [failedTargetId], ownerAuthProvenance),
+  );
+  if (targetCats.length === 0 && failureReturns.length === 0) {
     return commitLifecycleResponseFromTerminalPatch(deps.messageStore, current.id, terminalPatch);
+  }
   const parentInvocationId = targetCats.length === 1 ? opts.parentInvocationId : undefined;
   const admission = await deps.invocationQueue.terminalizeResponseAndEnqueueDurable(
     deps.messageStore,
     opts.responseMessageId,
     terminalPatch,
-    {
-      from: { kind: 'agent', catId: opts.reporterCatId },
-      threadId: opts.threadId,
-      userId: opts.userId,
-      kind: 'message_wake',
-      ownerAuthProvenance,
-      content: opts.terminalPatch.content,
-      messageId: opts.responseMessageId,
-      sourceId: opts.responseMessageId,
-      sourceCategory: 'a2a_failure',
-      targetCats,
-      intent: 'execute',
-      autoExecute: true,
-      a2aParentInvocationId: parentInvocationId,
-      callerTraceContext: opts.callerTraceContext
-        ? wrapWithDispatchSpan(opts.callerTraceContext, targetCats.length, opts.reporterCatId)
-        : undefined,
-      a2aTriggerMessageId: opts.responseMessageId,
-    },
+    targetCats.length > 0
+      ? {
+          from: { kind: 'agent', catId: opts.reporterCatId },
+          threadId: opts.threadId,
+          userId: opts.userId,
+          kind: 'message_wake',
+          ownerAuthProvenance,
+          content: opts.terminalPatch.content,
+          messageId: opts.responseMessageId,
+          sourceId: opts.responseMessageId,
+          sourceCategory: 'a2a_failure',
+          targetCats,
+          intent: 'execute',
+          autoExecute: true,
+          a2aParentInvocationId: parentInvocationId,
+          callerTraceContext: opts.callerTraceContext
+            ? wrapWithDispatchSpan(opts.callerTraceContext, targetCats.length, opts.reporterCatId)
+            : undefined,
+          a2aTriggerMessageId: opts.responseMessageId,
+        }
+      : undefined,
+    failureReturns,
   );
   if (admission.outcome === 'full') throw new Error('failed response A2A report Queue admission is full');
   const stored = admission.message;
   await settleLifecycleResponseInputs(deps.messageStore, stored, opts.responseMessageId);
 
-  await enqueueA2ATargets(deps, {
-    targetCats,
-    content: opts.terminalPatch.content,
-    userId: opts.userId,
-    ownerAuthProvenance,
-    threadId: opts.threadId,
-    triggerMessage: stored,
-    callerCatId: opts.reporterCatId,
-    ...(parentInvocationId ? { parentInvocationId } : {}),
-    ...(opts.callerTraceContext ? { callerTraceContext: opts.callerTraceContext } : {}),
-    preplannedAdmission: {
-      requestedTargetCats: targetCats,
-      acceptedTargetCats: targetCats,
-      streakTargetCats: [],
-    },
-    preAdmittedEntries: admission.entries,
-    preAdmittedReplayed: admission.deduped,
-  });
+  if (targetCats.length > 0)
+    await enqueueA2ATargets(deps, {
+      targetCats,
+      content: opts.terminalPatch.content,
+      userId: opts.userId,
+      ownerAuthProvenance,
+      threadId: opts.threadId,
+      triggerMessage: stored,
+      callerCatId: opts.reporterCatId,
+      ...(parentInvocationId ? { parentInvocationId } : {}),
+      ...(opts.callerTraceContext ? { callerTraceContext: opts.callerTraceContext } : {}),
+      preplannedAdmission: {
+        requestedTargetCats: targetCats,
+        acceptedTargetCats: targetCats,
+        streakTargetCats: [],
+      },
+      preAdmittedEntries: admission.entries.filter((entry) => entry.threadId === opts.threadId),
+      preAdmittedReplayed: admission.deduped,
+    });
   return (await deps.messageStore.getById(stored.id)) ?? stored;
 }
 
@@ -561,7 +576,7 @@ export async function commitRecoveredFailedResponse(
   // The original Queue admission classification survives retirement and restart; no body/status inference.
   if (
     receipt.isFailureReport ||
-    trigger.from.catId === response.from.catId ||
+    (!isCrossThreadSource(trigger) && trigger.from.catId === response.from.catId) ||
     trigger.deliveryStatus === 'canceled' ||
     trigger.visibility === 'whisper' ||
     trigger.recall ||
@@ -864,6 +879,7 @@ export async function enqueueA2ATargets(
     newExecutionTargets.length > 0
       ? await observeRoutingQueueAdmission(deps.routingDispatchPreflight, {
           ownerId: opts.userId,
+          threadId,
           targetCatIds: [...new Set(newExecutionTargets)],
           ...(intent ? { intent } : {}),
         })

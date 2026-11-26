@@ -4,11 +4,12 @@ import { dirname, join } from 'node:path';
 import { profileUserRelativePath } from '@cat-cafe/shared/profile-contract';
 import { CollectionIndexBuilder } from './CollectionIndexBuilder.js';
 import type { CollectionManifest } from './collection-types.js';
-import { resolveCollectionStorePath } from './external-collections.js';
+import { resolveCollectionStorePath, updateExternalCollection } from './external-collections.js';
 import type { IEvidenceStore } from './interfaces.js';
 import type { LibraryCatalog } from './LibraryCatalog.js';
 import { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import { resolveCollectionScanner } from './scanner-resolver.js';
+import { hasVectorGeneration } from './vector-generation-readiness.js';
 
 interface PersonalStoreOptions {
   dataDir: string;
@@ -81,21 +82,63 @@ export async function registerPrivateAndExternalCollections(options: PrivateBind
   }
 
   for (const externalManifest of options.externalManifests) {
-    try {
-      const manifest = bindLegacyPrivateOwner(externalManifest, privateUserId);
+    await registerOneExternalCollection(externalManifest, options);
+  }
+}
+
+async function registerOneExternalCollection(
+  externalManifest: CollectionManifest,
+  options: PrivateBindingsOptions,
+): Promise<void> {
+  const { catalog, stores, dataDir, privateUserId } = options;
+  let store: SqliteEvidenceStore | undefined;
+  try {
+    const manifest = bindLegacyPrivateOwner(externalManifest, privateUserId);
+    if (manifest.status === 'archived') {
       catalog.register(manifest);
-      if (manifest.status === 'archived') continue;
-      const storePath = resolveCollectionStorePath(dataDir, manifest.id);
-      mkdirSync(dirname(storePath), { recursive: true });
-      const store = new SqliteEvidenceStore(storePath, undefined, {
-        sourceRoot: manifest.root,
-        sourceRef: manifest.id,
-      });
-      await store.initialize();
-      stores.set(manifest.id, store);
-    } catch {
-      // fail-open: skip broken external collections
+      return;
     }
+    const storePath = resolveCollectionStorePath(dataDir, manifest.id);
+    mkdirSync(dirname(storePath), { recursive: true });
+    store = new SqliteEvidenceStore(storePath, undefined, {
+      sourceRoot: manifest.root,
+      sourceRef: manifest.id,
+    });
+    await store.initialize();
+    let finalStatus = manifest.status;
+    if (manifest.indexPolicy?.autoRebuild === true && existsSync(manifest.root)) {
+      const startMs = Date.now();
+      const db = store.getDb();
+      const hadVectors = hasVectorGeneration(db);
+      const docsBefore = (db.prepare('SELECT count(*) AS n FROM evidence_docs').get() as { n: number }).n;
+      const builder = new CollectionIndexBuilder(store, manifest, resolveCollectionScanner(manifest));
+      const result = await builder.rebuild();
+      const docsAfter = (db.prepare('SELECT count(*) AS n FROM evidence_docs').get() as { n: number }).n;
+      const lexicalChanged = result.indexed > 0 || docsAfter !== docsBefore;
+      finalStatus = result.blocked
+        ? 'blocked'
+        : hadVectors && (lexicalChanged || manifest.status === 'stale')
+          ? 'stale'
+          : 'active';
+      console.info('[memory] external collection startup autoRebuild', {
+        id: manifest.id,
+        indexed: result.indexed,
+        skipped: result.skipped,
+        blocked: result.blocked,
+        status: finalStatus,
+        durationMs: Date.now() - startMs,
+      });
+      try {
+        updateExternalCollection(dataDir, manifest.id, { status: finalStatus });
+      } catch {
+        // in-memory or unsaved manifest in tests
+      }
+    }
+    catalog.register(finalStatus ? { ...manifest, status: finalStatus } : manifest);
+    stores.set(manifest.id, store);
+  } catch {
+    store?.close();
+    // fail-open: skip broken external collections
   }
 }
 

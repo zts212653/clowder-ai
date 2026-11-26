@@ -3,6 +3,39 @@ import { test } from 'node:test';
 import { generateScriptViaThread } from '../dist/domains/signals/services/podcast-generator.js';
 import { stopFixture, waitFor } from './helpers/stop-private-fixture.js';
 
+test('#2008 private claim failures still reject the real podcast request without retrying', async (t) => {
+  const h = await stopFixture(t, { idle: true, retryDeferral: { baseDelayMs: 20 } });
+  const failure = new Error('owned transient private claim failure');
+  const claim = h.ledger.claimPrefix.bind(h.ledger);
+  let privateEntryId;
+  h.ledger.claimPrefix = async (...args) => {
+    const entry = await h.ledger.get(args[0], args[1][0]);
+    if (entry?.kind === 'private_input') {
+      privateEntryId = entry.id;
+      throw failure;
+    }
+    return claim(...args);
+  };
+  await assert.rejects(
+    generateScriptViaThread(
+      {
+        articleId: 'fixture-article',
+        articleFilePath: 'unused-fixture.md',
+        articleTitle: 'Fixture article',
+        articleContent: 'Fixture input',
+        mode: 'essence',
+        requestedBy: 'owner',
+      },
+      'thread',
+      { invocationQueue: h.queue, queueProcessor: h.processor },
+    ),
+    (error) => error === failure,
+  );
+  assert.ok(privateEntryId, 'the failure reaches the real private claim');
+  assert.equal(h.processor.retryDeferrals.retryAt(privateEntryId), undefined);
+  assert.deepEqual(h.starts, []);
+});
+
 test('#2008 a private retirement failure completes the real podcast request', async (t) => {
   const h = await stopFixture(t, { idle: true, retryDeferral: { baseDelayMs: 20 } });
   h.processor.deps.router.resolveExplicitTargets = async () => [];

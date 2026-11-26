@@ -79,6 +79,7 @@ function alertFor(threadId: string, message: ChatMessage): Toast | null {
       title: `${name} 完成`,
       message: message.content || '已完成处理',
       threadId,
+      ...(message.catId ? { reply: { catId: message.catId, messageId: message.id } } : {}),
       duration: 5000,
     };
   }

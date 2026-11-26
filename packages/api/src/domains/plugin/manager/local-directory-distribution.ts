@@ -12,7 +12,6 @@ import { resolveNpmInvocation } from './npm-invocation.js';
 
 const execFileAsync = promisify(execFile);
 const RECEIPT = '.clowder-local-source.json';
-const MAX_INSTANCES = 512;
 
 interface Member {
   readonly path: string;
@@ -26,10 +25,6 @@ interface Node {
   members: readonly Member[];
   snapshot?: string;
   packDigest?: string;
-}
-interface Budget {
-  files: number;
-  bytes: number;
 }
 interface PackSourceEntry {
   readonly size: number;
@@ -79,14 +74,6 @@ function pathOf(root: string, member: string): string {
     invalid('DEPENDENCY_SOURCE_INVALID', 'invalid publication member path');
   return resolve(root, member);
 }
-function count(budget: Budget, size: number): void {
-  budget.files++;
-  budget.bytes += size;
-  if (budget.files > PLUGIN_ARCHIVE_BUDGET.regularFiles || budget.bytes > PLUGIN_ARCHIVE_BUDGET.expandedBytes) {
-    invalid('DEPENDENCY_PREPARATION_LIMIT', 'prepared publication members exceed Host archive budget');
-  }
-}
-
 function assertPublishedMain(
   snapshot: string,
   manifest: Record<string, unknown> | undefined,
@@ -124,8 +111,8 @@ async function memberBytes(root: string, member: string, lifetime: LocalDirector
   const handle = await lifetime.open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = await lifetime.io(() => handle.stat());
-    if (!before.isFile() || before.size > PLUGIN_ARCHIVE_BUDGET.singleFileBytes) {
-      invalid('DEPENDENCY_PREPARATION_LIMIT', 'publication member is not a bounded regular file');
+    if (!before.isFile()) {
+      invalid('DEPENDENCY_PREPARATION_LIMIT', 'publication member is not a regular file');
     }
     const bytes = Buffer.alloc(before.size + 1);
     let length = 0;
@@ -217,25 +204,18 @@ async function walkPackSource(
 }
 
 /**
- * Build the bounded npm view of the current source package. Only the package
+ * Build the npm view of the current source package. Only the package
  * root's dependency directory and Git store are omitted; every other member is
- * accounted for before it is read, and the traversal observes cancellation.
+ * sealed before packing, and the traversal observes cancellation.
  */
 async function copyForPack(
   sourceRoot: string,
   destination: string,
   lifetime: LocalDirectoryOperation,
-  budget: Budget,
 ): Promise<PackSourceManifest> {
   await lifetime.io(() => mkdir(destination, { recursive: true, mode: 0o700 }));
   const manifest: PackSourceManifest = new Map();
   await walkPackSource(sourceRoot, lifetime, async (member, stat) => {
-    if (stat.size > PLUGIN_ARCHIVE_BUDGET.singleFileBytes) {
-      invalid('DEPENDENCY_PREPARATION_LIMIT', 'pack source member exceeds Host archive budget');
-    }
-    // Charge the candidate view, including unpublished files, before reading.
-    // A huge ignored cache is rejected instead of being copied unboundedly.
-    count(budget, stat.size);
     const sealed = await memberBytes(sourceRoot, member, lifetime);
     if (sealed.metadata.size !== stat.size) invalid('DEPENDENCY_SOURCE_CHANGED', 'pack source member changed');
     await writeMember(destination, sealed.metadata, sealed.bytes, lifetime);
@@ -261,9 +241,6 @@ async function assertPackSourceCurrent(
 ): Promise<void> {
   const current: PackSourceManifest = new Map();
   await walkPackSource(sourceRoot, lifetime, async (member, stat) => {
-    if (stat.size > PLUGIN_ARCHIVE_BUDGET.singleFileBytes) {
-      invalid('DEPENDENCY_PREPARATION_LIMIT', 'pack source member exceeds Host archive budget');
-    }
     let digest: string | undefined;
     if (SELECTION_FILES.has(basename(member))) {
       const sealed = await memberBytes(sourceRoot, member, lifetime);
@@ -312,8 +289,6 @@ function packResult(text: string): { files: { path: string; size: number }[]; fi
     }
     names.add(file.path);
     files.push({ path: file.path, size: file.size });
-    if (files.length > PLUGIN_ARCHIVE_BUDGET.regularFiles)
-      invalid('DEPENDENCY_PREPARATION_LIMIT', 'publication member count exceeded');
   }
   if (!names.has('package.json')) invalid('DEPENDENCY_PACK_FAILED', 'publication package.json is missing');
   return { files: files.sort((a, b) => a.path.localeCompare(b.path)), filename: result[0].filename };
@@ -335,7 +310,6 @@ async function sourceGraph(root: LocalDirectorySourceCoordinates): Promise<Map<s
     lifetime.step();
     const source = pending[cursor];
     if (!source || nodes.has(source.root)) continue;
-    if (nodes.size >= MAX_INSTANCES) invalid('DEPENDENCY_PREPARATION_LIMIT', 'source package count exceeded');
     if (!source.manifest) invalid('DEPENDENCY_SOURCE_INVALID', 'runtime package.json is missing');
     if (source.manifest.bundledDependencies || source.manifest.bundleDependencies) {
       invalid('DEPENDENCY_SPEC_UNSUPPORTED', 'bundled dependencies require an explicit attested topology');
@@ -406,11 +380,6 @@ export async function prepareLocalDirectoryDistribution(
       `--globalconfig=${globalConfig}`,
       `--cache=${resolve(operation, 'cache')}`,
     ];
-    const selectionBudget: Budget = { files: 0, bytes: 0 };
-    // Copy budgets are operation-scoped: every pack-sources/<id> view stays
-    // alive until this operation's finally block, so per-node budgets would
-    // multiply the disk/I/O allowance by the dependency-graph size.
-    const packCopyBudget: Budget = { files: 0, bytes: 0 };
     const packSources = new Map<number, string>();
     const packSourceManifests = new Map<number, PackSourceManifest>();
     // Admission source defines content provenance. Lock SRI remains coordinate
@@ -420,7 +389,7 @@ export async function prepareLocalDirectoryDistribution(
     for (const node of nodes.values()) {
       const packSource = resolve(operation, 'pack-sources', String(node.id));
       packSources.set(node.id, packSource);
-      packSourceManifests.set(node.id, await copyForPack(node.source.root, packSource, lifetime, packCopyBudget));
+      packSourceManifests.set(node.id, await copyForPack(node.source.root, packSource, lifetime));
       const selected = packResult((await run(['pack', '--dry-run', '--json', ...npmArgs, packSource])).stdout);
       const snapshot = resolve(operation, `node-${node.id}`);
       const packDirectory = resolve(operation, 'packs', String(node.id));
@@ -430,7 +399,6 @@ export async function prepareLocalDirectoryDistribution(
       for (const file of selected.files) {
         const sealed = await memberBytes(node.source.root, file.path, lifetime);
         if (sealed.metadata.size !== file.size) invalid('DEPENDENCY_SOURCE_CHANGED', 'publication selection changed');
-        count(selectionBudget, sealed.metadata.size);
         await writeMember(snapshot, sealed.metadata, sealed.bytes, lifetime);
         members.push(sealed.metadata);
       }
@@ -448,8 +416,8 @@ export async function prepareLocalDirectoryDistribution(
       const archive = resolve(packDirectory, packed.filename);
       await preflightPluginArchive(archive, signal);
       const stat = await lifetime.io(() => lstat(archive));
-      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > PLUGIN_ARCHIVE_BUDGET.compressedBytes) {
-        invalid('DEPENDENCY_PACK_FAILED', 'npm archive is not a bounded regular file');
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        invalid('DEPENDENCY_PACK_FAILED', 'npm archive is not a regular file');
       }
       node.members = members;
       node.snapshot = snapshot;
@@ -459,7 +427,6 @@ export async function prepareLocalDirectoryDistribution(
 
     const preparedRoot = resolve(operation, 'package');
     const mounted = new Map<string, string>([[preparedRoot, source.root]]);
-    const outputBudget: Budget = { files: 0, bytes: 0 };
     const pending = [preparedRoot];
     function ancestorTarget(destination: string, name: string): string | undefined {
       let cursor = destination;
@@ -486,8 +453,6 @@ export async function prepareLocalDirectoryDistribution(
         if (ancestor && mounted.get(ancestor) === edge.root) continue;
         const target = resolve(destination, 'node_modules', edge.name);
         if (mounted.has(target)) invalid('DEPENDENCY_LOCK_MISMATCH', 'conflicting installed resolution');
-        if (mounted.size >= MAX_INSTANCES)
-          invalid('DEPENDENCY_PREPARATION_LIMIT', 'installed package instance count exceeded');
         mounted.set(target, edge.root);
         pending.push(target);
       }
@@ -513,7 +478,6 @@ export async function prepareLocalDirectoryDistribution(
       }
       await lifetime.io(() => mkdir(destination, { recursive: true, mode: 0o700 }));
       for (const member of node.members) {
-        count(outputBudget, member.size);
         if (!node.snapshot) invalid('DEPENDENCY_PREPARATION_LIMIT', 'missing private publication snapshot');
         const sealed = await memberBytes(node.snapshot, member.path, lifetime);
         if (JSON.stringify(sealed.metadata) !== JSON.stringify(member))
@@ -583,7 +547,6 @@ export async function prepareLocalDirectoryDistribution(
     const receiptBytes = Buffer.from(
       `${JSON.stringify({ ...receipt, sourceGraphDigest: hash(JSON.stringify(receipt)) })}\n`,
     );
-    count(outputBudget, receiptBytes.length);
     await writeMember(
       preparedRoot,
       { path: RECEIPT, size: receiptBytes.length, mode: 0o600, digest: hash(receiptBytes) },

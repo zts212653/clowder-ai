@@ -4,10 +4,11 @@
  * Separate from cat-catalog.json (configuration, not preference).
  */
 
-import type { ChatBackgroundPreferences } from '../chat-background.js';
+import type { AppearanceImage, ChatBackgroundPreferences } from '../chat-background.js';
 import type { ConversationViewPreferences } from '../conversation-view-preference.js';
 import type { IgnoredItemPreferences } from '../ignored-item-preference.js';
 import type { ProcessTalkMode } from '../process-talk-preference.js';
+import type { QuotaPinPreference } from '../quota-pin-preference.js';
 import type { MessageWorkDisposition } from './queue-receipt.js';
 
 export type MessageDispositionPreferenceSource = 'thread' | 'global' | 'product';
@@ -56,6 +57,8 @@ export interface BubbleDefaultPreferences {
 }
 
 export interface UserPreferences {
+  /** Uploaded image catalogue only. Existing UI preference fields on disk are intentionally unread. */
+  appearance?: { background: { images: AppearanceImage[] } };
   /** F322: private whole-window image preferences. No TTL, message or export content. */
   chatBackgrounds?: ChatBackgroundPreferences;
   /** F322: personal display only, per authenticated user, no TTL and no thread override. */
@@ -68,6 +71,8 @@ export interface UserPreferences {
   deploymentWaitFolds?: Record<string, boolean>;
   /** F322: owner-private ignored work/request coordinates. No TTL or canonical lifecycle effect. */
   ignoredItems?: IgnoredItemPreferences;
+  /** The console's custom themes per owner: the theme documents and which one is active. No TTL. */
+  consoleThemes?: Record<string, unknown>;
   /** F321: background curation preference and its durable first-enable boundary. */
   memoryCuration?: { enabled: boolean; startedAt?: number; curatorCatId?: string };
   /** F166: Custom display order of cats. catIds not in this list fall back to cat-template.json order. */
@@ -80,4 +85,6 @@ export interface UserPreferences {
   bubbleDefaults?: BubbleDefaultPreferences;
   /** F322: owner-only per-thread conversation presentation. No TTL. */
   conversationViews?: ConversationViewPreferences;
+  /** F051: owner-only sidebar quota ring visibility and selected account refs. No TTL. */
+  quotaPin?: QuotaPinPreference;
 }

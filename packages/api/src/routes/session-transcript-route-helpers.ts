@@ -1,4 +1,6 @@
+import type { SessionRecord } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { catMayReadSession } from '../domains/cats/services/session/session-scope.js';
 
 export const VALID_TRANSCRIPT_VIEWS = new Set(['raw', 'chat', 'handoff']);
 
@@ -17,8 +19,11 @@ export const transcriptSearchSchema = z.object({
 
 export function checkTranscriptCatAccess(
   request: { headers: Record<string, unknown> },
-  sessionCatId: string,
+  session: Pick<SessionRecord, 'catId' | 'sessionPurpose' | 'chainKey'>,
 ): string | null {
   const callerCatId = request.headers['x-cat-id'] as string | undefined;
-  return callerCatId && sessionCatId !== callerCatId ? 'Access denied: session belongs to a different cat' : null;
+  if (catMayReadSession(callerCatId, session)) return null;
+  return session.catId === callerCatId
+    ? 'Access denied: watcher panel sessions are not readable by cats'
+    : 'Access denied: session belongs to a different cat';
 }

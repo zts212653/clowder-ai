@@ -138,8 +138,8 @@ describe('CallerDispatchObservationRegistry selection and generation state', () 
     const registry = new CallerDispatchObservationRegistry();
     const first = registry.projectProcessStartNotice(scope, 'api:123:7');
     assert.match(first.prompt, /process_start processGeneration=api:123:7/);
-    assert.match(first.prompt, /仅覆盖本 API 进程登记的 dispatch/);
-    assert.match(first.prompt, /canonical History/);
+    assert.match(first.prompt, /只含本次 API 进程启动后登记的派发/);
+    assert.match(first.prompt, /更早的派发结果在线程历史里/);
     assert.doesNotMatch(first.prompt, /runtime_restart|recoveryRequired|丢失/);
 
     registry.acknowledgeProcessStartNotice(scope, 'api:wrong:8');

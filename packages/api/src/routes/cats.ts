@@ -1,4 +1,5 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { auditL0Budget } from '../domains/cats/services/context/l0-budget-audit.js';
 import type { MemberCanonService } from '../domains/collaborative-content/asset-canon/member-service.js';
 import { withTargetAliasMutation } from '../domains/plugin/manager/addressing/target-alias-mutation.js';
 import { registerDshSetupRoutes } from './dsh-setup-route.js';
@@ -981,6 +982,16 @@ interface CatsRoutesOptions {
 }
 
 export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opts) => {
+  app.get('/api/cats/l0-budget', async (request, reply) => {
+    const userId = resolveHeaderUserId(request);
+    if (!userId) return reply.code(401).send({ error: 'Identity required' });
+    try {
+      return await auditL0Budget({ projectRoot: resolveProjectRoot(), userId });
+    } catch {
+      // Sources can contain private member data. Do not put errors or prompt bytes in the response.
+      return reply.code(503).send({ error: 'L0 budget audit unavailable' });
+    }
+  });
   if (opts.memberAssets) registerMemberCanonResponse(app, opts.memberAssets);
   registerRuntimeCatalogRoute(app);
   registerDshSetupRoutes(app);

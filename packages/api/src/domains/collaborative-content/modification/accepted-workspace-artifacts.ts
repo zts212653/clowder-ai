@@ -10,7 +10,7 @@ import type { IMessageStore, StoredMessage } from '../../cats/services/stores/po
 import { MediaOwnerError } from '../../video-studio/content-owner/media-errors.js';
 import { WorkspaceContentSourceError } from '../../workspace/workspace-content-source.js';
 import type { WorkspaceWritebackService } from '../../workspace/writeback/service.js';
-import type { ArtifactReviewStore } from '../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../artifact-review/storage/store.js';
 import { assertModificationSourceAuthority } from './request-authority.js';
 
 export interface AppliedWorkspaceReceiptMessage {

@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { ArtifactReviewStore } from '../src//domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { VideoProjectReviewService } from '../src//domains/collaborative-content/workspace-review/video-project-review-service.js';
 import { ProjectContentOwnerService } from '../src//domains/video-studio/content-owner/service.js';
 import { VideoProjectAssetIndex } from '../src//domains/video-studio/project/asset-index.js';

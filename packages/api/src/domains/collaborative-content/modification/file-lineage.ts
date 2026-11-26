@@ -3,7 +3,7 @@ import type { IMessageStore } from '../../cats/services/stores/ports/MessageStor
 import { MediaOwnerError } from '../../video-studio/content-owner/media-errors.js';
 import type { MediaReviewPrincipal } from '../../video-studio/content-owner/published-media-access.js';
 import type { PublishedMediaService } from '../../video-studio/content-owner/published-media-service.js';
-import type { ArtifactReviewStore } from '../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../artifact-review/storage/store.js';
 import { assertModificationSourceAuthority } from './request-authority.js';
 
 type FileRecord = ContentModificationRecord & {

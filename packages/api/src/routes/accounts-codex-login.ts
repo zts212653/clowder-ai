@@ -5,7 +5,7 @@ import { CodexLoginManager } from '../config/codex-login-manager.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { resolveAccountProjectRoot } from './accounts-project-root.js';
-import { accountToView } from './accounts-view.js';
+import { accountToViewAsync } from './accounts-view.js';
 
 const bodySchema = z
   .object({
@@ -42,12 +42,12 @@ export function registerCodexLoginRoutes(app: FastifyInstance, manager: CodexLog
           changeSetId: createChangeSetId(),
           timestamp: Date.now(),
         });
-        const profiles = [accountToView(profileId, manager.read(root, profileId), false, root)];
+        const profiles = [await accountToViewAsync(profileId, manager.read(root, profileId), false, root)];
         if (resultRef !== profileId) {
           const target = readAccountStoreSnapshot(root).resolve(resultRef);
           if (target.account)
             profiles.push(
-              accountToView(
+              await accountToViewAsync(
                 resultRef,
                 target.account.codex ? manager.read(root, resultRef) : target.account,
                 !!target.credential,

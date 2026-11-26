@@ -187,7 +187,11 @@ export async function prepareClaudeSdkLaunch(input: {
   const entrypoint = process.env.CAT_CAFE_CLAUDE_SDK_ENTRYPOINT?.trim();
   if (entrypoint && entrypoint !== 'cat-cafe' && entrypoint !== 'sdk-ts')
     throw new Error('claude_sdk_entrypoint_invalid: use cat-cafe or sdk-ts');
-  if (entrypoint) env.CLAUDE_CODE_ENTRYPOINT = entrypoint;
+  // The label is a subscription-metering experiment. With an Anthropic API key the
+  // platform rejected every request under `cat-cafe` as "Credit balance is too low"
+  // (2026-11-17, same key fine under sdk-ts), so API-key accounts keep the SDK default.
+  if (entrypoint && options?.callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] !== 'api_key')
+    env.CLAUDE_CODE_ENTRYPOINT = entrypoint;
   // SDK 0.3.285 otherwise hides session_state_changed as sdk_host_only. Native
   // idle is the drain receipt for background agents AND their report turns.
   env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS = '1';

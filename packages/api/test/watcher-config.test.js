@@ -15,13 +15,13 @@ test('watcher defaults are on, owner scoped, and independent of the front desk s
 
 test('a watcher preference CAS preserves other settings and rejects stale tabs', async () => {
   const store = new MemoryConciergeConfigStore();
-  await store.patch('owner', { displayName: '前台猫' });
+  await store.patch('owner', { ballPosition: { x: 1, y: 2 } });
   const first = await store.updateWatcherConfig('owner', 0, { doNotDisturbLabelIds: ['private'] });
   assert.equal(first.revision, 1);
   assert.equal(await store.updateWatcherConfig('owner', 0, { enabled: false }), null);
-  await store.patch('owner', { muted: true });
-  assert.equal((await store.getSaved('owner')).displayName, '前台猫');
-  assert.equal((await store.getSaved('owner')).muted, true);
+  await store.patch('owner', { householdReadsAllowed: false });
+  assert.deepEqual((await store.get('owner')).ballPosition, { x: 1, y: 2 });
+  assert.equal((await store.get('owner')).householdReadsAllowed, false);
   const snapshot = await store.readWatcherConfig('owner');
   snapshot.doNotDisturbLabelIds.push('reader-mutation');
   assert.deepEqual((await store.readWatcherConfig('owner')).doNotDisturbLabelIds, ['private']);

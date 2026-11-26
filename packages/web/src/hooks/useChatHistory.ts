@@ -30,7 +30,6 @@ import {
   isBeforeHistoryPageCursor,
 } from '@/stores/message-timeline';
 import { withQueuedInputPreviews } from '@/stores/queued-input-preview';
-import { withSendAttempts } from '@/stores/send-attempt-projection';
 import { ownsStreamedBody, withStreamedBodyOf } from '@/stores/streamed-body';
 import type { TaskItem } from '@/stores/taskStore';
 import { useTaskStore } from '@/stores/taskStore';
@@ -58,12 +57,8 @@ import {
   type SavedScrollState,
   saveChatScrollState,
 } from '@/utils/chat-scroll-memory';
-import { type ChatUserScrollGesture, registerChatScrollOwner } from '@/utils/chat-scroll-owner';
-import {
-  findCrossPostTargetMessageId,
-  peekPendingCrossPostScroll,
-  resolveCrossPostScrollTarget,
-} from '@/utils/crosspost-scroll-target';
+import { peekPendingCrossPostScroll, resolveCrossPostScrollTarget } from '@/utils/crosspost-scroll-target';
+import { completeMessageSource, retireMessageSource, sourceMessageElement } from '@/utils/entrusted-message-source';
 import {
   loadThreadMessages as loadCachedMessages,
   loadThreadActiveState,
@@ -85,6 +80,7 @@ import {
   captureMessageScrollAnchor,
   captureMessageScrollAnchorForElement,
   captureMessageScrollAnchorForMessage,
+  captureMessageScrollAnchorForRichBlock,
   highlightMessage,
   MESSAGE_VIEWPORT_MOUNTED_EVENT,
   type MessageScrollAnchor,
@@ -107,7 +103,6 @@ import {
 } from '@/utils/teleport';
 import { hydrateQueueActiveInvocationSlots, type QueueActiveInvocationSlot } from './queue-active-invocation-hydration';
 import { acknowledgeThreadHistoryWatermark, readThreadHistoryWatermark } from './thread-history-watermark';
-import { useSendAttempts } from './useSendAttempts';
 import { useViewportMessageTimeline } from './useViewportMessageTimeline';
 
 type RestoreFrameKind = 'restore' | 'navigation' | 'correction';
@@ -165,7 +160,10 @@ function bindReadingAbort<T>(receipt: Promise<T>, signal: AbortSignal | undefine
   return receipt.finally(() => signal.removeEventListener('abort', cancel));
 }
 
-export type { ChatUserScrollGesture } from '@/utils/chat-scroll-owner';
+export interface ChatUserScrollGesture {
+  scrollTo(top: number): boolean;
+  end(): void;
+}
 
 const taskCacheByThread = new Map<string, TaskItem[]>();
 // Sparse publication recovery must not move the ordinary older-page boundary.
@@ -305,13 +303,23 @@ function readingSettlementStillMatches(el: HTMLElement, position: SavedScrollSta
   return matchesMessageScrollAnchor(el, position.messageAnchor);
 }
 
-function captureNavigationSettleSample(el: HTMLElement, messageId: string): NavigationSettleSample | undefined {
-  const messageAnchor = captureMessageScrollAnchorForMessage(el, messageId);
-  const target = resolveMessageElements([messageId], el)[0];
+function captureNavigationSettleSample(
+  el: HTMLElement,
+  messageId: string,
+  blockId?: string,
+): NavigationSettleSample | undefined {
+  const target = blockId ? sourceMessageElement(el, messageId, blockId) : resolveMessageElements([messageId], el)[0];
+  const messageAnchor =
+    blockId && target
+      ? captureMessageScrollAnchorForRichBlock(el, target)
+      : captureMessageScrollAnchorForMessage(el, messageId);
   if (!messageAnchor || !target) return undefined;
-  const rect = (target.closest<HTMLElement>('[data-message-viewport-id]') ?? target).getBoundingClientRect();
+  const rect = (
+    blockId ? target : (target.closest<HTMLElement>('[data-message-viewport-id]') ?? target)
+  ).getBoundingClientRect();
   const targetRect = target.getBoundingClientRect();
   const viewport = el.getBoundingClientRect();
+  if (blockId && (targetRect.height <= 0 || viewport.bottom <= viewport.top)) return undefined;
   return {
     top: el.scrollTop,
     messageAnchor,
@@ -328,7 +336,9 @@ function isStableNavigationSample(previous: NavigationSettleSample, current: Nav
   // Smooth scrolling still moves by one pixel near its end. Treating those
   // frames as stationary saves an obsolete offset that later scrolls preserve.
   return (
-    current.top === previous.top && current.messageAnchor.viewportOffsetPx === previous.messageAnchor.viewportOffsetPx
+    current.top === previous.top &&
+    current.messageAnchor.viewportOffsetPx === previous.messageAnchor.viewportOffsetPx &&
+    current.messageAnchor.richBlockViewportOffsetPx === previous.messageAnchor.richBlockViewportOffsetPx
   );
 }
 
@@ -337,11 +347,12 @@ function advanceNavigationSettle(
   el: HTMLElement | null,
   messageId: string,
   stale: boolean,
+  blockId?: string,
 ): NavigationSettleResult {
   if (stale) return { kind: 'expired' };
 
   if (performance.now() >= state.expiresAt) return { kind: 'expired' };
-  let sample = el ? captureNavigationSettleSample(el, messageId) : undefined;
+  let sample = el ? captureNavigationSettleSample(el, messageId, blockId) : undefined;
   // Deferred messages/images can shift the target after the first smooth scroll.
   // A stationary offscreen offset is not a completed navigation. Every reply
   // needs its header: earlier rows can shrink after native start/center alignment
@@ -355,8 +366,9 @@ function advanceNavigationSettle(
     isStableNavigationSample(state.previousSample, sample) &&
     (sample.fullyOffscreen || sample.clippedStart || sample.clippedFittingEnd)
   ) {
-    restoreMessageScrollAnchor(el, { ...sample.messageAnchor, viewportOffsetPx: 0 });
-    sample = captureNavigationSettleSample(el, messageId);
+    if (blockId) sourceMessageElement(el, messageId, blockId)?.scrollIntoView({ behavior: 'instant', block: 'center' });
+    else restoreMessageScrollAnchor(el, { ...sample.messageAnchor, viewportOffsetPx: 0 });
+    sample = captureNavigationSettleSample(el, messageId, blockId);
   }
   if (!sample) return { kind: 'retry' };
 
@@ -370,13 +382,6 @@ const HISTORY_PAGE_SIZE = 50;
 // In export mode (?export=true), load all messages in one request for screenshot capture.
 // Normal browsing still uses 50-per-page pagination.
 const EXPORT_LIMIT = 10000;
-/** Stream output was live when it was cached, so the cache may trail the server: reload the thread whole. */
-function cacheHoldsStreamOutput(messages: readonly ChatMessageData[]): boolean {
-  return messages.some(
-    (message) => message.type === 'assistant' && (message.origin === 'stream' || message.isStreaming === true),
-  );
-}
-
 function isAbortError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && 'name' in err && (err as { name?: string }).name === 'AbortError';
 }
@@ -815,7 +820,10 @@ function keepsOlderPagesLoaded(
  *
  * @param threadId - The active thread ID (from URL route param).
  */
-export function useChatHistory(threadId: string) {
+export function useChatHistory(
+  threadId: string,
+  { tasks: tasksNeeded = true, needed = true }: { tasks?: boolean; needed?: boolean | number } = {},
+) {
   const historyAdmission = useThreadChatHistoryAdmission();
   const historyConsumerIdRef = useRef<symbol | null>(null);
   historyConsumerIdRef.current ??= Symbol('thread-chat-history-consumer');
@@ -855,16 +863,9 @@ export function useChatHistory(threadId: string) {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const sendAttempts = useSendAttempts(threadId, rawMessages, pendingQueue ?? []);
   const presentedMessages = useMemo(
-    () =>
-      withSendAttempts(
-        withQueuedInputPreviews(rawMessages, pendingQueue, threadId),
-        sendAttempts,
-        threadId,
-        pendingQueue,
-      ),
-    [rawMessages, pendingQueue, threadId, sendAttempts],
+    () => withQueuedInputPreviews(rawMessages, pendingQueue, threadId),
+    [rawMessages, pendingQueue, threadId],
   );
   const messages = useViewportMessageTimeline(threadId, presentedMessages);
 
@@ -893,6 +894,7 @@ export function useChatHistory(threadId: string) {
   const navigationReceiptRef = useRef<{
     threadId: string;
     messageId: string;
+    source?: PendingTeleport;
     teleport?: PendingTeleport;
     resolve: (receipt: ChatMessageNavigationReceipt) => void;
   } | null>(null);
@@ -900,6 +902,16 @@ export function useChatHistory(threadId: string) {
     const pending = navigationReceiptRef.current;
     if (!pending || pending.threadId !== forThread || pending.messageId !== messageId) return;
     navigationReceiptRef.current = null;
+    const el = scrollContainerRef.current;
+    if (
+      position &&
+      pending.source &&
+      el &&
+      threadIdRef.current === forThread &&
+      useChatStore.getState().currentThreadId === forThread
+    )
+      completeMessageSource(pending.source, el);
+    else if (!position && pending.source) retireMessageSource(pending.source);
     pending.resolve(
       position ? { status: 'settled', threadId: forThread, messageId, position } : { status: 'unavailable' },
     );
@@ -1009,10 +1021,16 @@ export function useChatHistory(threadId: string) {
       }
       if (!preserveNavigationReceipt && navigationReceiptRef.current) {
         const pending = navigationReceiptRef.current;
+        if (pending.source) retireMessageSource(pending.source);
         if (pending.teleport && peekPendingTeleport(pending.threadId) === pending.teleport)
           consumePendingTeleport(pending.threadId);
         pending.resolve({ status: 'interrupted' });
         navigationReceiptRef.current = null;
+      }
+      const pendingSource = peekPendingTeleport(threadId);
+      if (USER_READING_CANCELLATIONS.has(cancelSource) && pendingSource?.sourceAction) {
+        retireMessageSource(pendingSource);
+        consumePendingTeleport(threadId);
       }
       if (!preserveUserGesture) {
         userScrollGestureRef.current = null;
@@ -1020,7 +1038,7 @@ export function useChatHistory(threadId: string) {
       }
       cancelPendingFrame();
     },
-    [cancelPendingFrame, clearUserScrollIntent, readingDiagnosticState],
+    [cancelPendingFrame, clearUserScrollIntent, readingDiagnosticState, threadId],
   );
 
   const followBottomAnchor = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -1171,7 +1189,32 @@ export function useChatHistory(threadId: string) {
           el,
           useChatStore.getState().getThreadState(scheduledForThread).messages,
         );
-        const restored = tryRestoreSavedScrollState(el, saved);
+        let restored = tryRestoreSavedScrollState(el, saved);
+        // Ordinary revisits retain the surviving message when a former source
+        // card no longer renders. Explicit source/return receipts remain exact.
+        if (
+          !restored &&
+          framesRemaining === 1 &&
+          savedAnchor?.richBlockId &&
+          !readingReceiptRef.current &&
+          !peekPendingTeleport(scheduledForThread)?.sourceAction &&
+          !phase.isLoadingHistory &&
+          !phase.isOfflineSnapshot
+        ) {
+          const card = sourceMessageElement(el, savedAnchor.messageId, savedAnchor.richBlockId);
+          if (!card || card.getBoundingClientRect().height <= 0) {
+            saved = {
+              top: saved.top,
+              anchor: 'offset',
+              messageAnchor: describeChatReadingAnchor(
+                { messageId: savedAnchor.messageId, viewportOffsetPx: savedAnchor.viewportOffsetPx },
+                useChatStore.getState().getThreadState(scheduledForThread).messages,
+              ),
+            };
+            if (readingRestoreRef.current?.threadId === scheduledForThread) readingRestoreRef.current.saved = saved;
+            restored = tryRestoreSavedScrollState(el, saved);
+          }
+        }
         restoreWritesRef.current.record(el, beforeRestore, el.scrollTop, chatReadingClock());
         if (restored) {
           const settledPosition = { ...saved, top: el.scrollTop };
@@ -1378,6 +1421,7 @@ export function useChatHistory(threadId: string) {
       const pending = navigationReceiptRef.current;
       const preserve =
         preserveMessageReceipt && pending?.threadId === threadIdRef.current && pending.messageId === messageId;
+      const blockId = preserve ? pending.source?.sourceAction?.blockId : undefined;
       cancelPendingRestore('message_navigation', false, false, preserve);
       restoreFrameKindRef.current = 'navigation';
       readingRestoreRef.current = null;
@@ -1403,7 +1447,9 @@ export function useChatHistory(threadId: string) {
         }
         // An explicit reading receipt must describe the final position, not a
         // paused intermediate frame of native smooth scrolling.
-        if (scrollToMessage(messageId, el, preserve ? 'instant' : behavior, !highlightOnArrival)) {
+        const located = blockId ? sourceMessageElement(el, messageId, blockId) : undefined;
+        if (located) located.scrollIntoView({ behavior: 'instant', block: 'center' });
+        if (blockId ? located : scrollToMessage(messageId, el, preserve ? 'instant' : behavior, !highlightOnArrival)) {
           const settleState: NavigationSettleState = {
             expiresAt: performance.now() + MAX_NAVIGATION_SETTLE_MS,
             stableFrames: 0,
@@ -1419,12 +1465,17 @@ export function useChatHistory(threadId: string) {
               scrollContainerRef.current,
               messageId,
               threadIdRef.current !== scheduledForThread,
+              blockId,
             );
             if (result.kind === 'retry') {
               restoreFrameRef.current = requestAnimationFrame(settle);
               return;
             }
             if (result.kind === 'settled') {
+              if (preserve && pending.source && result.sample.fullyOffscreen) {
+                finishNavigation();
+                return;
+              }
               if (highlightOnArrival && !result.sample.fullyOffscreen && scrollContainerRef.current) {
                 navigationHighlightRef.current = highlightMessage(messageId, scrollContainerRef.current);
               }
@@ -1487,7 +1538,7 @@ export function useChatHistory(threadId: string) {
 
   /** Exact arrival receipt; unloaded targets use the existing teleport/history resolver. */
   const beginMessageNavigation = useCallback(
-    (messageId: string, signal?: AbortSignal): Promise<ChatMessageNavigationReceipt> => {
+    (messageId: string, signal?: AbortSignal, source?: PendingTeleport): Promise<ChatMessageNavigationReceipt> => {
       if (signal?.aborted) return Promise.resolve({ status: 'interrupted' });
       if (
         !messageId ||
@@ -1503,7 +1554,13 @@ export function useChatHistory(threadId: string) {
           .getThreadState(threadId)
           .messages.some((message) => message.id === messageId);
         const teleport = { threadId, messageId };
-        navigationReceiptRef.current = { threadId, messageId, teleport: loaded ? undefined : teleport, resolve };
+        navigationReceiptRef.current = {
+          threadId,
+          messageId,
+          source,
+          teleport: loaded ? undefined : teleport,
+          resolve,
+        };
         if (loaded) {
           scheduleScrollToMessage(messageId, true);
           return;
@@ -1591,7 +1648,6 @@ export function useChatHistory(threadId: string) {
           .map(
             (m: {
               id: string;
-              clientMessageId?: string;
               type: string;
               from?: import('@cat-cafe/shared').MessageFrom;
               catId?: string;
@@ -1648,7 +1704,6 @@ export function useChatHistory(threadId: string) {
                           ? 'assistant'
                           : 'user')) as 'user' | 'assistant' | 'system' | 'summary' | 'connector',
                 ...(m.from ? { from: m.from } : {}),
-                ...(m.clientMessageId ? { clientMessageId: m.clientMessageId } : {}),
                 catId: m.catId,
                 content: (() => {
                   if (!m.extra?.semanticEvent) return m.content;
@@ -2113,6 +2168,7 @@ export function useChatHistory(threadId: string) {
   // Admit the incoming history before its initial layout restore. The asynchronous
   // fetch stays nonblocking; outgoing restore cleanup must precede incoming paint.
   useLayoutEffect(() => {
+    if (!needed || threadId === 'default') return;
     // The surface already projects the incoming thread before this layout effect.
     // Its geometry cannot update the departing thread; handleScroll owns that save.
     // Reset retained refs so the incoming messages take the initial restore path.
@@ -2127,8 +2183,7 @@ export function useChatHistory(threadId: string) {
     const controller = abortRef.current;
 
     const startBootstrap = async (registrationGeneration: symbol) => {
-      // Check if this thread has cached messages in the threadStates map.
-      // If so, the store's setCurrentThread already restored them — skip API fetch.
+      // Keep held messages visible while the full state is read again.
       const state = useChatStore.getState();
       const workspaceStateAtLoadStart = captureThreadWorkspaceState(state, threadId);
       const cached = state.threadStates[threadId];
@@ -2148,31 +2203,12 @@ export function useChatHistory(threadId: string) {
           // Best-effort local view restore; normal workspace navigation remains available.
         }
       })();
-      // #80 fix-A: If the thread has an active invocation, force-refresh from API
-      // so that DraftStore drafts are merged into the response. Without this,
-      // switching away and back shows stale cached messages (no streaming draft).
-      const hasActiveInvocation = cached?.hasActiveInvocation === true;
-      const hasCachedStreamOutput = cached ? cacheHoldsStreamOutput(cached.messages) : false;
-      const pendingTeleport = peekPendingTeleport(threadId);
-      const pendingCrossPost = peekPendingCrossPostScroll(threadId);
-      const hasMissingTeleportTarget = Boolean(
-        cached && pendingTeleport && !cached.messages.some((message) => message.id === pendingTeleport.messageId),
-      );
-      const hasMissingCrossPostTarget = Boolean(
-        cached &&
-          pendingCrossPost &&
-          !findCrossPostTargetMessageId(
-            cached.messages,
-            pendingCrossPost.sourceInvocationId,
-            pendingCrossPost.senderCatId,
-          ),
-      );
       let secondaryHydrationStarted = false;
       const hydrateSecondaryPanels = async () => {
         if (secondaryHydrationStarted) return false;
         secondaryHydrationStarted = true;
         if (isStaleThreadRequest(controller, threadId)) return false;
-        const outcomes = await Promise.all([fetchTasks(), fetchTaskProgress(), fetchQueue()]);
+        const outcomes = await Promise.all([...(tasksNeeded ? [fetchTasks()] : []), fetchTaskProgress(), fetchQueue()]);
         return outcomes.every((succeeded) => succeeded);
       };
 
@@ -2239,27 +2275,8 @@ export function useChatHistory(threadId: string) {
             useChatStore.getState().setOfflineSnapshot(false);
           }
           return fetchOk === true;
-        } else if (
-          hasActiveInvocation ||
-          (cached && cached.unreadCount > 0) ||
-          hasCachedStreamOutput ||
-          hasMissingTeleportTarget ||
-          hasMissingCrossPostTarget
-        ) {
-          // #80 fix-A P1: Force-refresh with replace mode — the async response handler
-          // will clear stale cache after setCurrentThread has run, then set fresh data
-          // including DraftStore drafts in correct timestamp order.
-          // F069-R4: Also force-refresh when the thread has unread messages. Without this,
-          // the cached message list may lack the server's latest real messages, causing
-          // the read-ack in ChatContainer to send an old sortable ID — the server still
-          // counts messages after that ID as unread, and the badge reappears.
-          // F123: If the cached snapshot already contains unstable bubble identity
-          // (duplicate same-invocation bubbles or local-only draft/stream state),
-          // thread switch must reconcile against authoritative history instead of
-          // trusting the cached timeline until a later F5.
-          return (await fetchHistory(undefined, { replace: true })) === true;
         }
-        return true;
+        return (await fetchHistory(undefined, { replace: true })) === true;
       };
 
       // AC-4: secondary panels hydrate in parallel with message history. The
@@ -2311,6 +2328,8 @@ export function useChatHistory(threadId: string) {
     fetchQueue,
     fetchTaskProgress,
     fetchTasks,
+    tasksNeeded,
+    needed,
     isStaleThreadRequest,
     queueFetchedControllers,
     replaceThreadMessages,
@@ -2330,7 +2349,7 @@ export function useChatHistory(threadId: string) {
   const catchUpVersion = useChatStore((s) => s.streamCatchUpVersionByThread[threadId] ?? 0);
   const consumedCatchUpVersion = useChatStore((s) => s.lastConsumedCatchUpVersionByThread[threadId] ?? 0);
   useEffect(() => {
-    if (catchUpVersion === 0) return; // Skip initial render
+    if (!needed || catchUpVersion === 0) return; // Skip initial render
     // Cloud R3 P2 fix (2026-05-02): only fire if version has advanced beyond
     // last consumed. Without this, thread-switch re-mounts re-fire fetchHistory
     // on stale catchUpVersion (already-handled trigger) → unnecessary full-history
@@ -2407,7 +2426,7 @@ export function useChatHistory(threadId: string) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [catchUpVersion, consumedCatchUpVersion, threadId, fetchHistory]);
+  }, [needed, catchUpVersion, consumedCatchUpVersion, threadId, fetchHistory]);
 
   useLayoutEffect(() => {
     if (useChatStore.getState().currentThreadId !== threadId) return;
@@ -2574,6 +2593,12 @@ export function useChatHistory(threadId: string) {
       return;
     if (restoreFrameKindRef.current === 'navigation' && !navigationReceiptRef.current) return;
     const pending = peekPendingTeleport(threadId);
+    if (pending?.sourceAction) {
+      if (isOfflineSnapshot) return;
+      consumePendingTeleport(threadId);
+      void beginMessageNavigation(pending.messageId, undefined, pending);
+      return;
+    }
     const targetId = resolvePendingTeleport(
       threadId,
       messages.map((m) => m.id),
@@ -2607,12 +2632,15 @@ export function useChatHistory(threadId: string) {
     messages,
     rawMessages,
     threadId,
+    // Store-only routing eligibility must wake this resolver; its callback reads the freshest state.
+    storeCurrentThreadId,
     isOfflineSnapshot,
     hasMore,
     isLoadingHistory,
     scheduleScrollToMessage,
     fetchHistory,
     finishMessageNavigation,
+    beginMessageNavigation,
   ]);
 
   useEffect(() => {
@@ -3047,13 +3075,17 @@ export function useChatHistory(threadId: string) {
     };
   }, [threadId, markScrollIntent, cancelPendingRestore, clearUserScrollIntent]);
 
-  useLayoutEffect(() => {
-    const viewport = scrollContainerRef.current;
-    return viewport ? registerChatScrollOwner(viewport, beginUserScroll) : undefined;
-  }, [beginUserScroll]);
+  const loadEarlier = useCallback(() => {
+    const latest = useChatStore.getState().getThreadState(threadId);
+    const oldest = findEarliestMessageByCursor(latest.messages);
+    return oldest && latest.hasMore
+      ? fetchHistory(`${getMessageTimelineCursorTime(oldest)}:${oldest.id}`)
+      : Promise.resolve();
+  }, [threadId, fetchHistory]);
 
   return {
     captureReadingPosition,
+    loadEarlier,
     navigateToMessage,
     restoreReadingPosition,
     captureReadingRef,

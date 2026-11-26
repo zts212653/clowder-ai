@@ -138,6 +138,10 @@ import {
   recoverOwedContinuations,
 } from './domains/cats/services/agents/invocation/host-sleep/HostSleepContinuationScheduler.js';
 import { createHostSleepEvidenceReader } from './domains/cats/services/agents/invocation/host-sleep/HostSleepEvidence.js';
+import {
+  createRuntimeStopProbe,
+  runtimeStopRecordFile,
+} from './domains/cats/services/agents/invocation/host-sleep/RuntimeStopEvidence.js';
 import { InvocationOwnerReaper } from './domains/cats/services/agents/invocation/InvocationOwnerReaper.js';
 import { startSerializedInvocationOwnerReaperInterval } from './domains/cats/services/agents/invocation/InvocationOwnerReaperInterval.js';
 import {
@@ -456,6 +460,8 @@ import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/sche
 import { securityHeadersPlugin } from './infrastructure/security-headers.js';
 import { sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
 import { startupMilestone } from './infrastructure/startup-diagnostics.js';
+import type { startEventLoopTripwire } from './infrastructure/telemetry/cpu/event-loop-tripwire.js';
+import { initializeWithEventLoopTripwire } from './infrastructure/telemetry/cpu/event-loop-tripwire-startup.js';
 import { startProcessCpuCapture } from './infrastructure/telemetry/cpu/process-cpu-capture.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
 import { avatarsRoutes } from './routes/avatars.js';
@@ -669,11 +675,21 @@ function hasRuntimeSessionDrain(service: AgentService): service is AgentService 
 
 async function main(): Promise<void> {
   startupMilestone('module-graph-loaded');
+  const loggerContext = await import('./infrastructure/logger.js');
+  await initializeWithEventLoopTripwire(
+    { logger: loggerContext.logger, logDir: loggerContext.LOG_DIR_PATH },
+    (tripwire) => initializeApi(loggerContext, tripwire),
+  );
+}
+
+async function initializeApi(
+  { logger: customLogger, isDebugMode, LOG_DIR_PATH }: typeof import('./infrastructure/logger.js'),
+  eventLoopTripwire: ReturnType<typeof startEventLoopTripwire>,
+): Promise<void> {
   // #1838: the API itself stays outside every kernel job, so the background services and managed
   // jobs it starts survive its restart. Each covered Windows provider gets its own host job instead.
   const acpHostPolicy = resolveAcpHostPolicy();
   let managedCommandWakeRecovery: ManagedCommandWakeRecoverySweep | undefined;
-  const { logger: customLogger, isDebugMode, LOG_DIR_PATH } = await import('./infrastructure/logger.js');
   let sessionHookAuthenticationReady = (): boolean => false;
 
   // F152: Initialize OpenTelemetry SDK (must be early, before routes)
@@ -686,6 +702,7 @@ async function main(): Promise<void> {
   const { saveSpan } = await import('./utils/member-save-diagnostics.js');
 
   const app = createApiServer({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
+  app.addHook('onClose', async () => eventLoopTripwire.close());
   reportAcpHostPolicy(app.log, acpHostPolicy);
   const messageReadDiagnostics = registerMessageReadDiagnostics(app);
   const privateUserId = (process.env.CAT_CAFE_USER_ID ?? 'default-user').trim();
@@ -931,6 +948,7 @@ async function main(): Promise<void> {
       });
       if (context) {
         runtimeDeploymentContext = context;
+        eventLoopTripwire.setBootId(context.bootId);
         runtimeDeploymentRevision = context.runningRevision;
         recordRuntimeStartupFailure = async (reason) => {
           await context.ledger.recordStartupFailure({
@@ -1737,6 +1755,10 @@ async function main(): Promise<void> {
         memoryServices.dataDir!,
         ownerUserId,
         () => memoryServices.embeddingLifecycle.getService(),
+        () => {
+          const mode = memoryServices.embeddingLifecycle.getMode();
+          return mode === 'off' ? undefined : mode;
+        },
       );
     },
     getFingerprint,
@@ -1997,11 +2019,18 @@ async function main(): Promise<void> {
 
   // F293 Phase B: one durable composition for owner API, cognition and every
   // dispatch preflight. No Redis means typed 503/degradation, never memory truth.
+  const { SessionCacheReadService } = await import('./domains/cats/services/session/cache/SessionCacheReadService.js');
+  const sessionCacheReadService = new SessionCacheReadService(
+    sessionChainStore,
+    100,
+    (catId) => catRegistry.getAllConfigs()[catId],
+  );
   const routingContextRuntime = redisClient
     ? createRoutingContextRuntime({
         redis: redisClient,
         projectRoot: resolveActiveProjectRoot(),
         getConfigs: () => catRegistry.getAllConfigs(),
+        sessionCache: sessionCacheReadService,
       })
     : undefined;
 
@@ -2608,12 +2637,14 @@ async function main(): Promise<void> {
   const worldKnowledgeAdapter = new WorldKnowledgeAdapter(memoryServices.evidenceStore);
   const worldContextProvider = new WorldContextProvider(worldStore, worldKnowledgeAdapter);
 
-  // F229: Concierge config store — created before AgentRouter so it can be passed into
-  // invocationDeps for routing-layer 岗位 prompt injection (ConciergeRoutingInterceptor).
+  // F229: Concierge runtime state store — created before AgentRouter.
   const { RedisConciergeConfigStore: _RCCSEarly, MemoryConciergeConfigStore: _MCCSEarly } = await import(
     './domains/concierge/ConciergeConfigStore.js'
   );
   const conciergeConfigStoreShared = redis ? new _RCCSEarly(redis) : new _MCCSEarly();
+  // 猫猫球's settings are official.companion's plugin configuration (read when used, after plugins compose).
+  const { readCompanionSettings } = await import('./domains/concierge/companion-settings.js');
+  const companionSettings = () => readCompanionSettings(pluginManagerRuntime.configuration);
 
   // F229 Phase B: TriagePlan store (needed by AgentRouter for reply validator)
   const { RedisConciergeTriagePlanStore: _RTPSEarly, MemoryConciergeTriagePlanStore: _MTPSEarly } = await import(
@@ -2949,8 +2980,19 @@ async function main(): Promise<void> {
     : undefined;
   // F337: a turn a machine sleep cut off is told apart from a provider failure and continued after the lid opens.
   const hostSleepEvidence = createHostSleepEvidenceReader();
-  // F337: set as the runtime's stop begins; turns its provider kills end after this and are continued next boot.
+  // F337: set when the API's own SIGTERM arrives (often after its providers already died; see the probe below).
   const runtimeStop = { begun: false };
+  // The launcher signals provider children before the API, so the stop record (written before any
+  // signal) is what tells a turn the stop began; the SIGTERM flag covers stops without a record.
+  const isRuntimeShuttingDown = createRuntimeStopProbe({
+    begun: () => runtimeStop.begun,
+    recordFile:
+      declaredRuntimeRoot && declaredDeploymentId
+        ? runtimeStopRecordFile({ projectRoot: declaredRuntimeRoot, deploymentId: declaredDeploymentId }).catch(
+            () => undefined,
+          )
+        : undefined,
+  });
   const hostSleepContinuation = new HostSleepContinuationScheduler({
     readEvidence: hostSleepEvidence,
     continueCats: (invocationIds, kind) =>
@@ -2975,7 +3017,7 @@ async function main(): Promise<void> {
       readEvidence: hostSleepEvidence,
       scheduleContinuation: (input) => hostSleepContinuation.schedule(input),
     },
-    isRuntimeShuttingDown: () => runtimeStop.begun,
+    isRuntimeShuttingDown,
     ordinaryTaskHandoffs,
     messageSearchAnswerService,
     ownedWaitStatusReader,
@@ -3022,7 +3064,7 @@ async function main(): Promise<void> {
     ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
     turnCustodyProjectionService,
     frustrationIssueStore,
-    conciergeConfigStore: conciergeConfigStoreShared,
+    companionSettings,
     conciergeTriagePlanStore,
     cloudInvokeBridge,
     cloudReturnGrantStore,
@@ -3473,6 +3515,7 @@ async function main(): Promise<void> {
 
   // Register routes (socketManager injected, no circular import)
   const messagesOpts = {
+    turnExecutionStore,
     onStoredProjectMessage: async (
       message: import('./domains/cats/services/stores/ports/MessageStore.js').StoredMessage,
     ) => projectMessageProducer?.(message),
@@ -4630,7 +4673,7 @@ async function main(): Promise<void> {
   const conciergeThreadServiceShared = new ConciergeThreadService({
     threadStore,
     redis: redis ?? undefined,
-    conciergeConfigStore: conciergeConfigStoreShared,
+    companionSettings,
   });
   // F229 PR-A3b: relay + confirmation stores
   const { RedisConciergeRelayStore, MemoryConciergeRelayStore } = await import(
@@ -4646,6 +4689,7 @@ async function main(): Promise<void> {
   // F229 Phase B: triage plan store — already created above for AgentRouter, reuse here
   await app.register(conciergeRoutes, {
     conciergeConfigStore: conciergeConfigStoreShared,
+    companionSettings,
     conciergeThreadService: conciergeThreadServiceShared,
     conciergeRelayStore,
     conciergeConfirmationStore,
@@ -4703,6 +4747,7 @@ async function main(): Promise<void> {
     queue: invocationQueue,
     maySpeak: watcherMaySpeak,
     outputFence: watcherOutputFence,
+    panelNudge: (input) => watcherPanel.acceptNudge(input),
     afterNudge: async (input) =>
       watcherReceipts?.nudge({
         ...input,
@@ -4728,9 +4773,49 @@ async function main(): Promise<void> {
         );
     },
   });
+  // F335 panel: off until the owner turns it on in Settings; the ledger is durable (TTL=0).
+  const { InMemoryWatcherPanelLedger, RedisWatcherPanelLedger } = await import(
+    './domains/concierge/watcher/panel/watcher-panel-ledger.js'
+  );
+  const watcherPanelLedger = redis ? new RedisWatcherPanelLedger(redis) : new InMemoryWatcherPanelLedger();
+  const { WatcherPanelRunner } = await import('./domains/concierge/watcher/panel/watcher-panel-runner.js');
+  const watcherPanel = new WatcherPanelRunner({
+    userId: privateUserId,
+    configs: conciergeConfigStoreShared,
+    labels: labelStore,
+    ledger: watcherPanelLedger,
+    registry,
+    executions: turnExecutionStore,
+    sessions: sessionChainStore,
+    messages: messageStore,
+    threads: threadStore,
+    transcript: transcriptWriter,
+    apiUrl: `http://127.0.0.1:${PORT}`,
+    service: (catId) => router.getStrategyDeps().services[catId],
+    queue: invocationQueue,
+    publish: (stored) =>
+      socketManager?.broadcastToRoom(`thread:${stored.threadId}`, 'connector_message', {
+        threadId: stored.threadId,
+        message: {
+          id: stored.id,
+          from: stored.from,
+          type: 'connector',
+          content: stored.content,
+          source: stored.source,
+          timestamp: stored.timestamp,
+        },
+      }),
+    report: (error, threadId) =>
+      app.log.warn({ err: error, threadId }, 'Watcher panel round failed; ordinary work remains independent'),
+  });
+  await app.register((await import('./routes/watcher-panel.js')).watcherPanelRoutes, {
+    ledger: watcherPanelLedger,
+    turnExecutionStore,
+  });
   // Always on: the settings switch (default: only threads the owner picks) decides what is watched.
   const { WatcherSupervisor } = await import('./domains/concierge/watcher/WatcherSupervisor.js');
   watcherSupervisor = new WatcherSupervisor({
+    panel: watcherPanel,
     maySpeak: watcherMaySpeak,
     userId: privateUserId,
     configs: conciergeConfigStoreShared,
@@ -4874,7 +4959,7 @@ async function main(): Promise<void> {
     }
     const { conciergeLiveRoutes } = await import('./routes/concierge-live.js');
     await app.register(conciergeLiveRoutes, {
-      configStore: conciergeConfigStoreShared,
+      companionSettings,
       ownerUserId: privateUserId,
       sessions: liveCompanionSessions,
       pageActionOwner,
@@ -5111,7 +5196,7 @@ async function main(): Promise<void> {
     ownedWaitStatusReader,
     backlogStore,
     threadStore,
-    conciergeConfigStore: conciergeConfigStoreShared,
+    companionSettings,
     sessionChainStore,
     runtimeSessionStore,
     proposalStore,
@@ -5780,6 +5865,8 @@ async function main(): Promise<void> {
     './domains/plugin/manager/package-assets/builtin-package-materializer.js'
   );
   const pluginManagerRuntime = createPluginManagerRuntimeComposition({
+    pluginOperationChanged: (pluginId) =>
+      socketManager?.emitToUser(privateUserId, 'plugin_operation_changed', { pluginId }),
     runtime: pluginRuntime,
     catalogProvider: pluginManagerCatalog,
     marketplaces: { sources: marketplaceSources, repository: marketplaceRepository },
@@ -5788,6 +5875,7 @@ async function main(): Promise<void> {
       await companionDesktopComponent.prepare();
     },
     catalogManifests: OFFICIAL_BUNDLED_MANIFESTS,
+    threads: threadStore,
   });
   router.addressedPlugins = pluginManagerRuntime.addressedTargets;
   const { AddressedPluginQueueDelivery } = await import(
@@ -5931,6 +6019,7 @@ async function main(): Promise<void> {
   );
   const { registerCollaborativeContentRoutes } = await import('./routes/collaborative-content-routes.js');
   const { registerWorkspaceContentEditorRoutes } = await import('./routes/workspace-content-editor-routes.js');
+  const { registerWorkspaceContentPreviewRoutes } = await import('./routes/workspace-content-preview-routes.js');
   let projectCatGrants:
     | import('./domains/collaborative-content/workspace-review/project-message/cat-grants.js').ProjectMessageCatGrants
     | undefined;
@@ -5974,6 +6063,10 @@ async function main(): Promise<void> {
   namedCatContentHolder.current = collaborativeContent.namedCats;
   registerCollaborativeContentRoutes(app, { ...collaborativeContent, ownerUserId: privateUserId });
   registerWorkspaceContentEditorRoutes(app, { workspace: collaborativeContent.workspace, ownerUserId: privateUserId });
+  registerWorkspaceContentPreviewRoutes(app, {
+    workspace: collaborativeContent.workspacePreview,
+    ownerUserId: privateUserId,
+  });
   const { createWorkspaceContentReviewComposition } = await import(
     './domains/collaborative-content/workspace-review/composition.js'
   );
@@ -6013,12 +6106,7 @@ async function main(): Promise<void> {
     mediaDir: getDefaultConnectorMediaDir(process.env.CONNECTOR_MEDIA_DIR),
   });
   const { pluginWebhookForwardingRoutes } = await import('./routes/plugin/plugin-webhook-forwarding-routes.js');
-  await app.register(pluginWebhookForwardingRoutes, {
-    webhooks: pluginRuntime.supervisor,
-    ui: pluginRuntime.supervisor.ui,
-  });
-  const { pluginUiRoutes } = await import('./routes/plugin/plugin-ui-routes.js');
-  await app.register(pluginUiRoutes, { ui: pluginRuntime.supervisor.ui });
+  await app.register(pluginWebhookForwardingRoutes, { webhooks: pluginRuntime.supervisor });
 
   // F246/F313: one registry and one renderer projection. The F266 writer stays
   // fenced until an owner-backed resolver/dispatcher and a v1_active epoch are
@@ -6543,6 +6631,10 @@ async function main(): Promise<void> {
       },
       authorizeActor: async (actor, operation) => {
         const record = actor.invocationId ? await registry.peekRecord(actor.invocationId) : null;
+        if (record?.toolExecutionPolicy?.mode === 'watcher_panel')
+          return (
+            actor.byline === 'watcher' && (operation === 'facts' || (await watcherPanel.maySpeak(record.invocationId)))
+          );
         if (record?.toolExecutionPolicy?.mode !== 'watcher') return true;
         return (
           actor.byline === 'watcher' &&
@@ -7161,7 +7253,10 @@ async function main(): Promise<void> {
   });
   await app.register(exportRoutes, { messageStore, threadStore });
   await app.register(debugInvocationExportRoutes, { projectRoot: findMonorepoRoot(process.cwd()) });
-  await app.register(configRoutes, { threadStore });
+  await app.register(configRoutes, {
+    threadStore,
+    builtinThemesRoot: join(runtimeEntrypointRoot, 'packages/web/public/pdl/themes'),
+  });
   await app.register(configSecretsRoutes);
   await app.register(rulesRoutes);
   await app.register(promptInjectionRoutes);

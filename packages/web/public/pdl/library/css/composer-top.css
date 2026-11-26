@@ -1,0 +1,118 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 输入框上沿：在跑的成员、排队；以及跟着它的状态、背景、表面、调宽把手 */
+/* ── 输入框上沿：左边在跑的成员，右边排队 ── */
+.composer-wrap .composer { position: relative; }
+.composer > .lanes { position: absolute; left: var(--sp-m); right: var(--sp-m); bottom: calc(100% + var(--sp-xs)); pointer-events: none; z-index: var(--z-sticky); }
+.lanes > .lane.scroll-x { pointer-events: auto; }
+.lanes > .lane.scroll-x:has(> .lane-in:empty) { pointer-events: none; }   /* 空着的道只占位，不挡下面的内容 */
+.lanes > .lane > .lane-in > :not(.vstack), .lanes > .lane > .lane-in > .vstack > * { pointer-events: auto; }   /* 只有道里的胶囊和按钮接收点击，透明的道盒和留白透传给下方的输入框 */
+/* 执行中头像外那一圈的预设：streaming / spawning 贴着头像平滑地呼吸（亮 → 半亮 → 亮，中间不停），silent / stall / error 是贴着头像的警示脉动；周期都是 --loop，次数各自写在关键帧里 */
+@keyframes mo-streaming { 0%, 100% { opacity: 1; animation-timing-function: cubic-bezier(.4, 0, .6, 1); } 50% { opacity: .5; animation-timing-function: cubic-bezier(.4, 0, .6, 1); } }
+@keyframes mo-spawning { 0%, 100% { opacity: .6; animation-timing-function: cubic-bezier(.4, 0, .6, 1); } 50% { opacity: .25; animation-timing-function: cubic-bezier(.4, 0, .6, 1); } }
+@keyframes mo-silent { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .55; transform: scale(1.12); } 75% { opacity: .775; transform: scale(1.06); } 0%, 100% { box-shadow: 0 0 0 var(--sp-hair) var(--warn); } }
+@keyframes mo-stall { 0%, 50%, 100% { opacity: 1; transform: scale(1); } 25%, 75% { opacity: .55; transform: scale(1.12); } 37.5%, 87.5% { opacity: .775; transform: scale(1.06); } 0%, 100% { box-shadow: 0 0 0 var(--sp-hair) var(--warn); } }
+@keyframes mo-error { 0%, 50%, 100% { opacity: 1; transform: scale(1); } 25%, 75% { opacity: .55; transform: scale(1.12); } 37.5%, 87.5% { opacity: .775; transform: scale(1.06); } 0%, 100% { box-shadow: 0 0 0 var(--sp-hair) var(--danger); } }
+/* 需要关注的状态（没动静 / 疑似卡住 / 出错）：圈一直清楚地是那个色调，动的是强弱（低点也看得见），不会淡到没有 */
+.scap.cur .avatar { box-shadow: 0 0 0 1.5px var(--bg-raised), 0 0 0 3px var(--c, var(--identity-fallback)); }   /* 输入框上：当前“发给”的那只猫 */
+.qto { display: inline-flex; flex-shrink: 0; }
+.qto .avatar + .avatar { margin-left: calc(-1 * var(--sp-xs)); }
+.qto .avatar { box-shadow: 0 0 0 1.5px var(--bg-raised); }
+.cnote { display: inline-flex; align-items: center; gap: var(--sp-xs); height: var(--ctl-s); padding: 0 var(--sp-xs) 0 var(--sp-m); border-radius: var(--r-full); background: var(--surf-secondary); backdrop-filter: blur(var(--blur-soft)); -webkit-backdrop-filter: blur(var(--blur-soft)); box-shadow: var(--shadow-low); font-size: var(--fs-s); max-width: 100%; min-width: 0; white-space: nowrap; overflow: hidden; }
+.cnote-go { display: inline-flex; align-items: center; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.cnote-go:hover { text-decoration: underline; }
+/* 协作规则：生命周期循环图（区域靠底色，不用虚线框） */
+.lflow { display: flex; flex-direction: column; gap: var(--sp-s); }
+.lloop { background: var(--bg-group); border-radius: var(--r-l); padding: var(--sp-s) var(--sp-m) var(--sp-m); display: flex; flex-direction: column; gap: var(--sp-s); }
+.lloop-h { display: flex; align-items: center; gap: var(--sp-xs); }
+.lrow { display: flex; align-items: center; gap: var(--sp-xs); flex-wrap: wrap; }
+.lnode.aff { background: var(--bg-selected); }
+
+.lnum { font-size: var(--fs-xs); padding: 0 var(--sp-xs); border-radius: var(--r-m); background: var(--current-wash); }
+.larr { color: var(--fg-faint); display: inline-flex; }
+.lback { color: var(--fg-faint); display: inline-flex; margin-left: var(--sp-xs); }
+/* 预览窗 */
+/* Skill 工具条与分类 */
+.ctabs { display: flex; align-items: center; gap: var(--sp-xs); flex-wrap: wrap; }   /* 一排可点的标签（筛选）：每一项就是 chip */
+.chip[data-tone] { color: var(--tone-c); }
+.chip[data-tone][aria-pressed="true"] { background: var(--tone-soft); color: var(--tone-c); }
+.demo.lib-ctop { justify-content: space-between; align-items: center; padding: var(--sp-xl) var(--sp-l); }
+/* 发给：自动跟随 */
+.target .auto-tag { margin-left: var(--sp-hair); }
+/* 两栏布局：窄栏收到列表底部，横排 */
+.app.layout-two:not(.no-nav) { grid-template-columns: var(--nav-w, var(--nav-w0)) minmax(0, 1fr); }
+.app.layout-two:not(.no-nav) > .rail { position: fixed; left: 0; bottom: 0; width: var(--nav-w, var(--nav-w0)); height: var(--row-h); flex-direction: row; justify-content: flex-start; padding: 0 var(--sp-s); gap: var(--sp-xs); z-index: var(--z-sticky); }
+.app.layout-two:not(.no-nav) > .rail .rail-mark { margin: 0 var(--sp-xs) 0 0; }
+.app.layout-two:not(.no-nav) > .rail .cells { flex-direction: row; }
+.app.layout-two:not(.no-nav) > .nav { grid-column: 1; padding-bottom: var(--row-h); }
+.app.layout-two:not(.no-nav) > .main { grid-column: 2; }
+/* 组件库：变量总表与架构 */
+.tok-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--span-4), 1fr)); gap: var(--sp-s); }
+.tok-grp { background: var(--bg-group); border-radius: var(--r-l); padding: var(--sp-s) var(--sp-m); }
+.tok-h { font-size: var(--fs-s); color: var(--fg-muted); padding: var(--sp-hair) 0 var(--sp-xs); }
+.tok-row { display: flex; align-items: center; gap: var(--sp-s); min-height: var(--ctl-s); font-size: var(--fs-s); }
+.tok-row code { font-family: var(--font-mono); color: var(--fg-strong); }
+.tok-v { margin-left: auto; color: var(--fg-muted); max-width: var(--span-2); overflow: clip; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-xs); }
+.tok-sw { width: var(--av-s); height: var(--av-s); border-radius: var(--r-xs); box-shadow: inset 0 0 0 1px var(--line); flex-shrink: 0; }
+.tok-r { width: var(--ctl-xs); height: var(--av-s); background: var(--bg-field); box-shadow: inset 0 0 0 1px var(--line-strong); flex-shrink: 0; }
+.tok-sh { width: var(--ctl-xs); height: var(--av-s); border-radius: var(--r-xs); background: var(--bg-raised); flex-shrink: 0; }
+.tok-font { font-size: var(--fs-m); color: var(--fg-strong); flex-shrink: 0; }
+.arch { display: flex; align-items: stretch; gap: var(--sp-s); flex-wrap: wrap; }
+.arch-col { flex: 1; min-width: calc(40 * var(--unit)); background: var(--bg-group); border-radius: var(--r-l); padding: var(--sp-m) var(--sp-m); display: flex; flex-direction: column; gap: var(--sp-xs); font-size: var(--fs-m); color: var(--fg-muted); }
+.arch-col b { font-weight: 600; color: var(--fg-strong); font-size: var(--fs-l); }
+.arch-arrow { display: flex; align-items: center; color: var(--fg-faint); }
+/* 同一层级同一底色：所有列表容器（分组、卡片、扩展列表、流程区、变量表）都用 --bg-group；所有搜索框和输入框都用 --bg-field，高度一致 */
+.search .input { padding-left: var(--page-gap); height: var(--ctl-m); background: var(--bg-field); }
+.lloop.inner { background: var(--bg-page); }
+.skel { border-radius: var(--r-m); background: var(--bg-selected); animation: mo-skel var(--loop) ease-in-out infinite backwards; }
+/* 进行中（refresh）：读的那一下按钮自己用骨架同一个节拍淡入淡出，读完停；不能再点 */
+[aria-busy="true"] > .ic { animation: mo-spin var(--loop) linear infinite; }   /* 进行中：按钮自己的图标（刷新、安装……）转起来 */
+@keyframes mo-spin { to { transform: rotate(360deg); } }
+[data-busy-at][aria-busy="true"]:not(:has(> .ic))::before { content: ''; display: inline-block; inline-size: 1em; block-size: 1em; margin-inline-end: .35em; vertical-align: -.125em; border: .125em solid currentColor; border-inline-end-color: transparent; border-radius: 50%; animation: mo-spin var(--loop) linear infinite; }   /* 引擎标的进行中（对话框确定后还在做）：没有图标的按钮前面转一个圈，和有图标的转图标是同一个意思 */
+[aria-busy="true"] { pointer-events: none; }
+/* 复制：图标原地变成勾，--hold-copied 后变回；不弹提示 */
+[data-copied] { color: var(--ok); }
+/* 字段上的错误：字段下面一行 danger 的状态（必填、重复、格式不对），改这个字段时消失 */
+.field-err { margin-block-start: var(--sp-xs); flex-basis: 100%; }
+:has(> .field-err) { flex-wrap: wrap; }   /* 字段在横排里（工具栏）时，报错也在框下面另起一行，不挤偏输入框 */
+.skel.row { height: var(--row-h-1); margin: var(--sp-xs); }
+.skel.prev { aspect-ratio: 16 / 9; }
+.skel.line { height: 10px; border-radius: var(--r-xs); margin: var(--sp-xs) 0; }
+.skel.short { width: 60%; }
+/* 数据读取中（三点轮流起伏）：读取的是数据而不是容器骨架；共用 --loop 节拍，减少动态效果时只停位移 */
+.load-dots { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-xs); min-height: var(--ctl-xs); color: var(--fg-faint); }
+.load-dots > i { width: var(--dot); height: var(--dot); border-radius: 50%; background: currentColor; animation: mo-dot var(--loop) ease-in-out infinite backwards; }
+.load-dots > i:nth-child(2) { animation-delay: calc(var(--loop) * -.4); }
+.load-dots > i:nth-child(3) { animation-delay: calc(var(--loop) * -.3); }
+:root[data-motion="reduce"] .load-dots { --dot-lift: 0px; }
+.units-held { display: flex; justify-content: center; padding: var(--sp-s) 0; }
+/* 背景铺满窗口：图在 .app 上；窄栏、列表半透明；主区盖一层页面底色，透明度由设置决定 */
+/* 有背景图时（玻璃面盖在图上）：次要、弱、禁用三级文字换成对比更高的一档，消息里的内嵌面换成更实一点的玻璃，
+   保证最坏的图区上次要文字 ≥ 4.5、弱文字 ≥ 3 */
+.app.bg-shell { --fg-muted: var(--fg-muted-glass); --fg-faint: var(--fg-faint-glass); --fg-disabled: var(--fg-disabled-glass); --surf-inline: var(--glass-inline); background: var(--bg-page) var(--shell-img) center / cover no-repeat; --surf-anchor: var(--glass-raised); --surf-secondary: var(--glass-secondary); --surf-group: var(--glass-group);
+  }   /* 全局透明度（--veil-g）一样地作用在外壳的每个表面上 */
+/* 表面按角色分（组件自己选默认角色，不按实例配色）：
+   anchor 稳定的主锚点，用最亮的浮起面（输入框；打开着的对话框、菜单）；
+   secondary 次要、临时的浮在内容上的小件，用从所在层推出来的柔和面（队列胶囊、系统提示、状态胶囊）——有背景图时是玻璃页面，没有时是页面色本身，靠一层模糊和轻阴影浮起；
+   inline 嵌在内容里的小面板，在当前表面上叠一层墨色（执行记录展开、补充、标签、消息里不是主体的卡片） */
+:is(.rail, .nav, .panel) { --glass-rail: color-mix(in srgb, var(--bg-rail) var(--bg-veil), transparent); --glass-nav: color-mix(in srgb, var(--bg-nav) var(--bg-veil), transparent); --glass-panel: color-mix(in srgb, var(--bg-nav) var(--bg-veil), transparent); }
+.app.bg-shell > .rail { --glass-surface: var(--glass-rail); background: var(--glass-rail); }
+.app.bg-shell > .nav { --glass-surface: var(--glass-nav); background: var(--glass-nav); }
+.app.bg-shell > .main, .app.bg-shell .main-col, .app.bg-shell .cover { background-color: var(--glass-page); }   /* 覆盖层和主窗口同一个面 */
+.app.bg-shell .split > .main-col { background-color: var(--glass-page); }
+.app.bg-shell > .main.scroll, .app.bg-shell .main-col.scroll, .app.bg-shell .cover.scroll { -webkit-mask-image: none; mask-image: none; }   /* 这几层自己画着页面的底：边缘渐隐（遮罩）会把底一起抠掉、露出背景图，看起来像发亮——自己画底的滚动区不做渐隐，靠滚动条表达还有更多 */
+.app.bg-shell > .main.split-host { background: none; }
+.app.bg-shell .panel { --glass-surface: var(--glass-panel); background: var(--glass-panel); }
+/* 区域边界的调宽把手（shell.js 的 resizeHandle，侧栏和工作台共用）：一种颜色 --resize-c，悬停、聚焦、拖动中都是它 */
+.resize-handle { position: absolute; top: 0; bottom: 0; width: var(--sp-s); cursor: col-resize; z-index: var(--z-sticky); touch-action: none; }
+.resize-handle[data-side="end"] { right: 0; }
+.resize-handle[data-side="start"] { left: 0; }
+.resize-handle::after { content: ""; position: absolute; top: 0; bottom: 0; width: var(--sp-hair); background: transparent; transition: background var(--dur-fast); }
+.resize-handle:hover::after, .resize-handle:focus-visible::after, body.resizing .resize-handle::after { background: var(--resize-c); }
+.resize-handle[data-side="end"]::after { right: 0; }
+.resize-handle[data-side="start"]::after { left: 0; }
+.resize-handle:focus-visible { outline: none; }
+.split.wide .resize-handle[data-resize="panel"] { display: none; }
+body.edit-layout .resize-handle { display: none; }
+@media (max-width: 960px) { .resize-handle { display: none; } }
+
+/* 行内展开：缩进一级，底色略深，和上一行连成一块 */

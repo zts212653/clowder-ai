@@ -1,0 +1,27 @@
+{
+ "fold": {
+  "viewMore": "View more",
+  "moreHtml": "{0} more"
+ },
+ "threadRow": {
+  "groupAttention": "{0} to see",
+  "meta": {
+   "pending": "Needs decision",
+   "repliedGeneric": "Replied"
+  }
+ },
+ "queue": {
+  "targets": {
+   "title": "Change recipients"
+  }
+ },
+ "delivery": {
+  "recovery": {
+   "repeat": "Send again",
+   "jump": "Jump to reply",
+   "noReply": "No reply yet",
+   "repeated": "Sent again",
+   "unavailable": "Unavailable"
+  }
+ }
+}

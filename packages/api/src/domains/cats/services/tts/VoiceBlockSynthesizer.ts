@@ -12,14 +12,28 @@
 import { createHash } from 'node:crypto';
 import { stat as fsStat, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { RichBlock } from '@cat-cafe/shared';
-import { getCatVoice } from '../../../../config/cat-voices.js';
+import type { ITtsProvider, RichBlock, TtsVoiceSelection } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../infrastructure/logger.js';
+import {
+  cachedVoiceSelection,
+  completeVoiceSelection,
+  prepareCatVoice,
+  ReferenceAudioChangedError,
+  VoiceSelectionSequence,
+} from './cat-voice-synthesis.js';
+import { independentAudioHash, referenceAudioCacheIdentity } from './reference-audio-cache.js';
 import { chunkStaticTtsText } from './TtsChunker.js';
 import type { TtsRegistry } from './TtsRegistry.js';
+import { canReuseVoiceAsset, writeAssetVoiceReceipt } from './tts-asset-provenance.js';
 import { concatenatePcmWavSegments } from './WavConcatenator.js';
 
 const log = createModuleLogger('voice-synthesizer');
+
+interface VoiceFile {
+  audioUrl: string;
+  durationSec?: number;
+  voiceSelection: TtsVoiceSelection;
+}
 
 let instance: VoiceBlockSynthesizer | null = null;
 
@@ -52,6 +66,7 @@ function extractErrorInfo(err: Error): { code: string | undefined; msg: string }
 
 /** Classify an error into a user-friendly category for the 🔇 card. */
 function classifyError(err: unknown): string {
+  if (err instanceof ReferenceAudioChangedError) return err.message;
   if (!(err instanceof Error)) return '未知错误';
   const { code, msg } = extractErrorInfo(err);
 
@@ -124,6 +139,7 @@ export class VoiceBlockSynthesizer {
           url: result.audioUrl,
           ...(result.durationSec != null ? { durationSec: result.durationSec } : {}),
           mimeType: 'audio/wav',
+          voiceSelection: result.voiceSelection,
         });
       } catch (err) {
         // F066 Phase 4: Classify the error for user-friendly display
@@ -154,14 +170,14 @@ export class VoiceBlockSynthesizer {
    * F066 Phase 4: Public method for resynthesize endpoint.
    * Re-attempts TTS synthesis with retry for a given text + catId.
    */
-  async resynthesize(text: string, catId: string): Promise<{ audioUrl: string; durationSec?: number }> {
+  async resynthesize(text: string, catId: string): Promise<VoiceFile> {
     return this.synthesizeWithRetry(text, catId);
   }
 
   /**
    * F066 Phase 4: Synthesize with 1 automatic retry for transient errors.
    */
-  private async synthesizeWithRetry(text: string, catId: string): Promise<{ audioUrl: string; durationSec?: number }> {
+  private async synthesizeWithRetry(text: string, catId: string): Promise<VoiceFile> {
     try {
       return await this.synthesizeToFile(text, catId);
     } catch (err) {
@@ -176,10 +192,10 @@ export class VoiceBlockSynthesizer {
   /**
    * Synthesize text to an audio file and return the URL path.
    */
-  private async synthesizeToFile(text: string, catId: string): Promise<{ audioUrl: string; durationSec?: number }> {
+  private async synthesizeToFile(text: string, catId: string): Promise<VoiceFile> {
     await mkdir(this.cacheDir, { recursive: true });
 
-    let provider;
+    let provider: ITtsProvider;
     try {
       provider = this.ttsRegistry.getDefault();
     } catch {
@@ -187,8 +203,8 @@ export class VoiceBlockSynthesizer {
     }
     provider = (await provider.snapshot?.({ cacheDir: this.cacheDir })) ?? provider;
 
-    // Resolve per-cat voice
-    const catVoice = getCatVoice(catId);
+    const { request: catVoice, voiceSelection } = prepareCatVoice(catId, provider, {}, this.cacheDir);
+    if (voiceSelection.warnings.length) log.warn({ voiceSelection }, 'Voice fallback or uncertainty');
     const voice = catVoice.voice;
     const langCode = catVoice.langCode;
     const speed = catVoice.speed ?? 1.0;
@@ -213,42 +229,53 @@ export class VoiceBlockSynthesizer {
     ];
     // Invalidate truncated pre-chunking cache entries without evicting valid short audio.
     if (textChunks.length > 1) hashParts.push(LONG_FORM_CACHE_VERSION);
-    if (refAudio) hashParts.push(refAudio);
+    if (refAudio) hashParts.push(refAudio, referenceAudioCacheIdentity(refAudio, catVoice.refAudioData?.sha256));
     if (refText) hashParts.push(refText);
     if (instruct) hashParts.push(instruct);
     if (temperature != null) hashParts.push(String(temperature));
-    const hashInput = hashParts.join('|');
+    const hashInput = catVoice.refAudioData ? JSON.stringify(hashParts) : hashParts.join('|');
     const hash = createHash('sha256').update(hashInput).digest('hex');
-    const filename = `${hash}.${format}`;
-    const filePath = path.join(this.cacheDir, filename);
+    let filename = `${hash}.${format}`;
+    let filePath = path.join(this.cacheDir, filename);
 
     // Check cache
     let cached = false;
     try {
-      await fsStat(filePath);
-      cached = true;
+      if (!refAudio || catVoice.refAudioData) {
+        await fsStat(filePath);
+        cached = await canReuseVoiceAsset(this.cacheDir, filename, voiceSelection);
+      }
     } catch {
       /* not cached */
     }
 
+    let actualVoiceSelection: TtsVoiceSelection | undefined;
     if (!cached) {
       const results = [];
+      const sequence = new VoiceSelectionSequence();
       for (const chunk of textChunks) {
-        results.push(
-          await provider.synthesize({
-            text: chunk,
-            voice,
-            langCode,
-            speed,
-            format,
-            ...(refAudio ? { refAudio } : {}),
-            ...(refText ? { refText } : {}),
-            ...(instruct ? { instruct } : {}),
-            ...(temperature != null ? { temperature } : {}),
-          }),
+        const result = await provider.synthesize({
+          text: chunk,
+          voice,
+          langCode,
+          speed,
+          format,
+          ...(refAudio ? { refAudio } : {}),
+          ...(catVoice.refAudioData ? { refAudioData: catVoice.refAudioData } : {}),
+          ...(refText ? { refText } : {}),
+          ...(instruct ? { instruct } : {}),
+          ...(temperature != null ? { temperature } : {}),
+        });
+        actualVoiceSelection = sequence.observe(
+          completeVoiceSelection(voiceSelection, result.referenceAudio, provider),
         );
+        results.push(result);
       }
 
+      if (catVoice.refAudioData && actualVoiceSelection?.referenceStatus !== 'sent') {
+        filename = `${independentAudioHash(hash)}.${format}`;
+        filePath = path.join(this.cacheDir, filename);
+      }
       if (results.length === 1) {
         await writeFile(filePath, results[0].audio);
       } else {
@@ -258,8 +285,17 @@ export class VoiceBlockSynthesizer {
         const joined = concatenatePcmWavSegments(results.map((result) => result.audio));
         await writeFile(filePath, joined.audio);
       }
+      await writeAssetVoiceReceipt(
+        this.cacheDir,
+        filename,
+        actualVoiceSelection ?? voiceSelection,
+        !refAudio || actualVoiceSelection?.referenceStatus === 'sent',
+      );
     }
 
-    return { audioUrl: `/api/tts/audio/${filename}` };
+    return {
+      audioUrl: `/api/tts/audio/${filename}`,
+      voiceSelection: cached ? cachedVoiceSelection(voiceSelection) : (actualVoiceSelection ?? voiceSelection),
+    };
   }
 }

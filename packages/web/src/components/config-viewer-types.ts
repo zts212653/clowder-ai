@@ -21,7 +21,7 @@ export interface CatConfig {
 export interface CatCapacityProjection {
   windowTokens: number;
   inputCeilingTokens: number;
-  source: 'reported' | 'catalog' | 'manual' | 'unresolved';
+  source: 'reported' | 'observed' | 'catalog' | 'manual' | 'unresolved';
   actionable: boolean;
   provenance: string;
 }

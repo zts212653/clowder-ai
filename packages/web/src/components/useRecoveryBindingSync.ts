@@ -2,15 +2,15 @@
 
 import { useEffect, useMemo } from 'react';
 import { useCloudBindingChanges } from './cloud-binding-events';
-import { readBoundConversationId } from './cloud-binding-recovery-operations';
+import { readBoundChatUrl } from './cloud-binding-recovery-operations';
 
 interface Observation {
   ticket: number;
-  conversationId: string | null;
+  chatUrl: string | null;
 }
 
 /**
- * One recovery card identity's knowledge of which conversation is bound, kept true while the thread
+ * One recovery card identity's knowledge of which chat URL is bound, kept true while the thread
  * panel writes the same binding (F202 h3c-1).
  *
  * Every observation of the binding takes a ticket when it starts — a full read of the card, a read of
@@ -33,8 +33,8 @@ export class RecoveryBindingSession {
   constructor(
     private readonly threadId: string,
     private readonly targetCatId: string,
-    /** Shows `conversationId` as bound — on this identity's card state only. */
-    private readonly show: (conversationId: string | null) => void,
+    /** Shows `chatUrl` as bound — on this identity's card state only. */
+    private readonly show: (chatUrl: string | null) => void,
   ) {}
 
   /** The card shows this identity (again, after a remount). */
@@ -51,20 +51,20 @@ export class RecoveryBindingSession {
   beginRead = (): number => ++this.ticket;
 
   /** The binding a full read with this ticket should show: its own, unless a later one has been seen. */
-  settleRead = (ticket: number, conversationId: string | null): string | null =>
-    this.observe(ticket, conversationId) ? conversationId : (this.latest?.conversationId ?? null);
+  settleRead = (ticket: number, chatUrl: string | null): string | null =>
+    this.observe(ticket, chatUrl) ? chatUrl : (this.latest?.chatUrl ?? null);
 
   /** The card's own write is going out. */
   beginWrite = (): void => {
     if (this.live) this.ownWrite = { ticket: ++this.ticket, changedElsewhere: false };
   };
 
-  /** The card's own write answered that `conversationId` is bound: whether to show that answer. */
-  writeLanded = (conversationId: string): boolean => {
+  /** The card's own write answered that `chatUrl` is bound: whether to show that answer. */
+  writeLanded = (chatUrl: string): boolean => {
     const write = this.ownWrite;
     this.ownWrite = null;
     if (!write) return this.live;
-    if (!write.changedElsewhere) return this.observe(write.ticket, conversationId);
+    if (!write.changedElsewhere) return this.observe(write.ticket, chatUrl);
     void this.readBinding();
     return false;
   };
@@ -83,9 +83,9 @@ export class RecoveryBindingSession {
   };
 
   /** Every reading shown passes here: an ended session shows nothing, however late its reading comes. */
-  private observe(ticket: number, conversationId: string | null): boolean {
+  private observe(ticket: number, chatUrl: string | null): boolean {
     if (!this.live || (this.latest && this.latest.ticket > ticket)) return false;
-    this.latest = { ticket, conversationId };
+    this.latest = { ticket, chatUrl };
     return true;
   }
 
@@ -93,14 +93,14 @@ export class RecoveryBindingSession {
   private async readBinding(): Promise<void> {
     if (!this.live) return;
     const ticket = ++this.ticket;
-    const conversationId = await readBoundConversationId(this.threadId, this.targetCatId);
-    if (conversationId !== undefined && this.observe(ticket, conversationId)) this.show(conversationId);
+    const chatUrl = await readBoundChatUrl(this.threadId, this.targetCatId);
+    if (chatUrl !== undefined && this.observe(ticket, chatUrl)) this.show(chatUrl);
   }
 }
 
 /**
  * The binding session of the card's current identity: a new one for every identity, ended when the card
- * moves on or unmounts. `show(identityKey, conversationId)` must apply to that identity's state only.
+ * moves on or unmounts. `show(identityKey, chatUrl)` must apply to that identity's state only.
  */
 export function useRecoveryBindingSession(args: {
   identityKey: string;
@@ -109,11 +109,11 @@ export function useRecoveryBindingSession(args: {
   source: string;
   /** A card that already shows its message as sent reads no binding. */
   listening: boolean;
-  show: (identityKey: string, conversationId: string | null) => void;
+  show: (identityKey: string, chatUrl: string | null) => void;
 }): RecoveryBindingSession {
   const { identityKey, threadId, targetCatId, source, listening, show } = args;
   const session = useMemo(
-    () => new RecoveryBindingSession(threadId, targetCatId, (conversationId) => show(identityKey, conversationId)),
+    () => new RecoveryBindingSession(threadId, targetCatId, (chatUrl) => show(identityKey, chatUrl)),
     [identityKey, threadId, targetCatId, show],
   );
   useEffect(() => {

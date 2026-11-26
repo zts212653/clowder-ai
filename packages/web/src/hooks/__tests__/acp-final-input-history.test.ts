@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { toCliEvents } from '@/components/cli-output/toCliEvents';
-import { summarizeReplyRecord } from '@/components/reply-layers/reply-record';
 import { buildInvocationTimelineRows } from '@/components/workspace/trajectory/invocation-trajectory-model';
 import { adaptTranscriptEvents } from '@/lib/story-player/adapter';
 import { chatMessagesToTranscriptEvents } from '@/lib/story-player/thread-message-events';
@@ -33,7 +32,6 @@ const event = (type: 'tool_use' | 'tool_result', threadId: string, initial?: Rec
 function assertVisible(tools: ToolEvent[]) {
   expect(tools).toHaveLength(2);
   expect(tools[1]).toMatchObject({ inputDetail: JSON.stringify(finalInput) });
-  expect(summarizeReplyRecord(tools, undefined).rows[0].label).toBe('Bash echo complete');
   const classic = toCliEvents(JSON.parse(JSON.stringify(tools)), undefined);
   expect(classic[0]).toMatchObject({ label: 'Bash echo complete', detail: JSON.stringify(finalInput) });
   expect(classic[1].detail).toBe('complete');
@@ -111,20 +109,6 @@ it("does not attach an orphan or another execution's finalized input to the curr
       timestamp: 2,
     },
   ];
-  expect(summarizeReplyRecord(tools, undefined).rows).toEqual([
-    { id: 'use', label: 'Bash original', detail: '{"command":"original"}', failed: false, settled: false },
-  ]);
-  expect(toCliEvents(tools, undefined)[0].label).toBe('Bash original');
-});
 
-it('retains legacy input when terminal events have no finalized input', () => {
-  const tools: ToolEvent[] = [
-    { id: 'use', type: 'tool_use', label: 'Bash', detail: '{"command":"original"}', toolUseId: 'same', timestamp: 1 },
-    { id: 'result', type: 'tool_result', label: 'result', detail: 'out', toolUseId: 'same', timestamp: 2 },
-  ];
-  expect(summarizeReplyRecord(tools, undefined).rows[0]).toMatchObject({
-    label: 'Bash original',
-    detail: 'out',
-    settled: true,
-  });
+  expect(toCliEvents(tools, undefined)[0].label).toBe('Bash original');
 });

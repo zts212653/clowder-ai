@@ -93,7 +93,7 @@ export default function PublicStoryViewerPage() {
       <div style={styles.center}>
         <h2>Public Story Not Available</h2>
         <p>{error ?? 'Export not found.'}</p>
-        <p style={{ opacity: 0.5, fontSize: 'var(--console-font-label)' }}>Story: {storyId}</p>
+        <p style={{ opacity: 0.5, fontSize: '12px' }}>Story: {storyId}</p>
       </div>
     );
   }
@@ -161,36 +161,36 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     height: '100vh',
-    color: 'var(--color-text-primary, #e0e0e0)',
-    background: 'var(--color-surface, #0d0d1a)',
+    color: '#e0e0e0',
+    background: '#0d0d1a',
     gap: '8px',
   },
   container: {
     minHeight: '100vh',
-    background: 'var(--color-surface, #0d0d1a)',
-    color: 'var(--color-text-primary, #e0e0e0)',
+    background: '#0d0d1a',
+    color: '#e0e0e0',
     padding: '0 0 40px 0',
   },
   header: {
     padding: '24px 20px',
-    borderBottom: '1px solid var(--color-border, #333)',
-    background: 'var(--color-surface-elevated, #1a1a2e)',
+    borderBottom: '1px solid #333',
+    background: '#1a1a2e',
   },
   title: {
     margin: 0,
-    fontSize: 'var(--console-font-sm)',
+    fontSize: '16px',
     fontWeight: 600,
   },
   meta: {
     marginTop: '8px',
     display: 'flex',
     gap: '16px',
-    fontSize: 'var(--console-font-label)',
+    fontSize: '12px',
     opacity: 0.6,
   },
   annotationsSection: { padding: '16px 20px' },
   sectionTitle: {
-    fontSize: 'var(--console-font-compact)',
+    fontSize: '13px',
     fontWeight: 600,
     marginBottom: '8px',
     opacity: 0.8,
@@ -200,24 +200,24 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '8px',
     alignItems: 'center',
     padding: '8px 12px',
-    background: 'var(--color-surface-elevated, #1a1a2e)',
-    border: '1px solid var(--color-border, #333)',
+    background: '#1a1a2e',
+    border: '1px solid #333',
     borderRadius: '6px',
     marginBottom: '6px',
-    fontSize: 'var(--console-font-compact)',
+    fontSize: '13px',
   },
-  annotationKind: { fontSize: 'var(--console-font-base)' },
+  annotationKind: { fontSize: '14px' },
   annotationContent: { flex: 1 },
   annotationTime: {
-    fontSize: 'var(--console-font-label)',
+    fontSize: '12px',
     opacity: 0.5,
-    fontFamily: 'var(--font-mono, monospace)',
+    fontFamily: 'monospace',
   },
   eventsSection: { padding: '16px 20px' },
   eventCard: {
     padding: '10px 12px',
-    background: 'var(--color-surface-elevated, #1a1a2e)',
-    border: '1px solid var(--color-surface-secondary, #2a2a3e)',
+    background: '#1a1a2e',
+    border: '1px solid #2a2a3e',
     borderRadius: '6px',
     marginBottom: '4px',
   },
@@ -229,25 +229,25 @@ const styles: Record<string, React.CSSProperties> = {
   },
   catBadge: {
     padding: '1px 6px',
-    background: 'var(--color-accent, #6366f1)',
+    background: '#6366f1',
     borderRadius: '3px',
-    fontSize: 'var(--console-font-label)',
+    fontSize: '12px',
     fontWeight: 600,
     color: '#fff',
   },
   eventKind: {
-    fontSize: 'var(--console-font-label)',
+    fontSize: '12px',
     opacity: 0.6,
     textTransform: 'uppercase',
   },
   eventTime: {
     marginLeft: 'auto',
-    fontSize: 'var(--console-font-label)',
-    fontFamily: 'var(--font-mono, monospace)',
+    fontSize: '12px',
+    fontFamily: 'monospace',
     opacity: 0.4,
   },
   eventContent: {
-    fontSize: 'var(--console-font-compact)',
+    fontSize: '13px',
     lineHeight: 1.4,
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
@@ -255,7 +255,7 @@ const styles: Record<string, React.CSSProperties> = {
   footer: {
     textAlign: 'center',
     padding: '20px',
-    fontSize: 'var(--console-font-label)',
+    fontSize: '12px',
     opacity: 0.3,
   },
 };

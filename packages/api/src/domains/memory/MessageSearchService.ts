@@ -6,6 +6,7 @@ import type {
   MessageSearchResult,
   SelectedMessageSource,
 } from '@cat-cafe/shared';
+import { isSelectableManagedHoldConnectorSource } from '@cat-cafe/shared';
 import { resolveThreadAccess } from '../cats/services/session/thread-access-policy.js';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore, Thread } from '../cats/services/stores/ports/ThreadStore.js';
@@ -194,6 +195,11 @@ export class MessageSearchService {
       source._tombstone ||
       source.deliveryStatus === 'canceled' ||
       (isInternalNonQuotableParent(source) &&
+        !(
+          source.origin !== 'briefing' &&
+          isAgentReadableManagedHoldMessage(source) &&
+          isSelectableManagedHoldConnectorSource(source.source)
+        ) &&
         !isReadableSchedulerWork(
           source,
           principal.userId,

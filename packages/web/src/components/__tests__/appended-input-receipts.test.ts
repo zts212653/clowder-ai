@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { appendedInputReadDisplay, projectAppendedInputReceipts } from '@/components/message-dispatch-projection';
 import { dispatchReadText, dispatchReceiptDisplay } from '@/lib/dispatch-receipt-display';
 import type { ChatMessage } from '@/stores/chat-types';
-import { appendedInputReadDisplay, projectAppendedInputReceipts } from '../AppendedInputReceipts';
 
 const initial: ChatMessage = {
   id: 'source-initial',

@@ -6,7 +6,7 @@ import {
 } from '../../cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../../cats/services/stores/ports/TaskStore.js';
 import type { EntrustedWorkLifecycleService } from '../../growing/EntrustedWorkLifecycleService.js';
-import type { ArtifactReviewStore } from '../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../artifact-review/storage/store.js';
 import { admissionSourceContext, assertDirectAdmissionSourceCustody } from './entrusted-work-source-custody.js';
 import {
   type ContentModificationProgress,

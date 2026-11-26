@@ -10,7 +10,7 @@ import {
   type VideoProjectScreening,
 } from '@cat-cafe/shared';
 import { useChatStore } from '@/stores/chatStore';
-import { composerAttachments, queuedServerAckBlocks } from '../../composer-queue';
+import { composerAttachments } from '../../composer-queue';
 import { projectScreeningComposerConflict } from '../../project-screening-composer-group';
 
 export function screeningSelection(input: {
@@ -51,7 +51,6 @@ export function screeningSelection(input: {
 /** Queues one immutable position chip; only the original Human send creates a message/ledger fact. */
 export function queueScreeningSelection(threadId: string | null, attachment: ProjectScreeningContextAttachment) {
   if (!threadId) return { kind: 'refused' as const, reason: '先打开一条对话，再记下意见。' };
-  if (queuedServerAckBlocks()) return { kind: 'refused' as const, reason: '输入框正在恢复，请稍后再记下位置。' };
   const parsed = projectScreeningContextAttachmentSchema.parse(attachment);
   const queued = useChatStore.getState().pendingChatInsert;
   if (queued && queued.threadId !== threadId)

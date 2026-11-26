@@ -272,6 +272,7 @@ describe('F293 home routing through canonical Queue dispatch', () => {
       }
       assert.equal(children, 0);
       assert.deepEqual(calls, []);
+      assert.equal(inputs[0].threadId, 'thread', 'actual-send warmth must use the execution destination');
       assert.deepEqual(
         inputs[0].executionBindings?.map((binding) => binding.catId),
         ['opus'],

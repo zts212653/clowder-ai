@@ -20,7 +20,7 @@ test('the production watcher report hooks preserve Error messages and stacks thr
     ts.forEachChild(node, walk);
   };
   walk(source);
-  assert.equal(callbacks.length, 3, 'exercise the always-on startup, invocation and receipt hooks');
+  assert.equal(callbacks.length, 4, 'exercise the always-on startup, invocation, receipt and F335 panel hooks');
   for (const callback of callbacks) {
     const rows = [];
     const log = pino({ level: 'warn' }, { write: (line) => rows.push(JSON.parse(line)) });

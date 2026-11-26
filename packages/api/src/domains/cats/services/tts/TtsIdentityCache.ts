@@ -7,6 +7,7 @@ import { TtsCacheIdentityError } from './TtsCacheIdentityError.js';
 interface CachedIdentity {
   readonly model: string;
   readonly generationProfile: string | null;
+  readonly backend?: string;
 }
 
 interface IdentityRow {
@@ -14,6 +15,7 @@ interface IdentityRow {
   generation_profile: string | null;
   revision: string;
   ambiguous: number;
+  backend: string | null;
 }
 
 export interface TtsIdentityObservation {
@@ -29,8 +31,14 @@ function withDatabase<T>(cacheDir: string, use: (db: Database.Database) => T): T
   try {
     db.exec(`CREATE TABLE IF NOT EXISTS endpoint_identity (
       endpoint_key TEXT PRIMARY KEY, model TEXT NOT NULL, generation_profile TEXT,
-      revision TEXT NOT NULL, ambiguous INTEGER NOT NULL CHECK (ambiguous IN (0, 1))
+      revision TEXT NOT NULL, ambiguous INTEGER NOT NULL CHECK (ambiguous IN (0, 1)), backend TEXT
     )`);
+    const hasBackend = () =>
+      (db.pragma('table_info(endpoint_identity)') as { name: string }[]).some((column) => column.name === 'backend');
+    if (!hasBackend())
+      db.transaction(() => {
+        if (!hasBackend()) db.exec('ALTER TABLE endpoint_identity ADD COLUMN backend TEXT');
+      }).immediate();
     return use(db);
   } finally {
     db.close();
@@ -71,7 +79,13 @@ export function readCachedTtsIdentity(cacheDir: string, baseUrl: string): Cached
         (typeof row.generation_profile !== 'string' || !row.generation_profile || row.generation_profile.length > 64))
     )
       throw new Error('Invalid cached TTS identity receipt');
-    return { model: row.model, generationProfile: row.generation_profile };
+    if (row.backend !== null && (typeof row.backend !== 'string' || !row.backend || row.backend.length > 64))
+      throw new Error('Invalid cached TTS backend receipt');
+    return {
+      model: row.model,
+      generationProfile: row.generation_profile,
+      ...(row.backend ? { backend: row.backend } : {}),
+    };
   });
 }
 
@@ -85,13 +99,21 @@ export function recordTtsIdentity(observation: TtsIdentityObservation, identity:
         current &&
         current.ambiguous === 0 &&
         current.model === identity.model &&
-        current.generation_profile === identity.generationProfile;
+        current.generation_profile === identity.generationProfile &&
+        current.backend === (identity.backend ?? null);
       const ambiguous = !unchanged && !sameIdentity;
-      db.prepare(`INSERT INTO endpoint_identity (endpoint_key, model, generation_profile, revision, ambiguous)
-        VALUES (?, ?, ?, ?, ?) ON CONFLICT(endpoint_key) DO UPDATE SET
+      db.prepare(`INSERT INTO endpoint_identity (endpoint_key, model, generation_profile, revision, ambiguous, backend)
+        VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(endpoint_key) DO UPDATE SET
           model = excluded.model, generation_profile = excluded.generation_profile,
-          revision = excluded.revision, ambiguous = excluded.ambiguous
-      `).run(observation.endpointKey, identity.model, identity.generationProfile, randomUUID(), ambiguous ? 1 : 0);
+          revision = excluded.revision, ambiguous = excluded.ambiguous, backend = excluded.backend
+      `).run(
+        observation.endpointKey,
+        identity.model,
+        identity.generationProfile,
+        randomUUID(),
+        ambiguous ? 1 : 0,
+        identity.backend ?? null,
+      );
     }).immediate();
   });
 }

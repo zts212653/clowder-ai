@@ -6,6 +6,11 @@ export class PassageWarmupDiagnostics {
   private readonly started = performance.now();
   outcome: 'fulfilled' | 'rejected' | 'retired' = 'fulfilled';
   stopReason = 'scan-exhausted';
+  /** `full` walks every passage; `incremental` only rows newer than the last complete walk, plus the rows it kept. */
+  scope: 'full' | 'incremental' = 'full';
+  lastScannedId = 0;
+  /** Rows without a vector that could not be embedded in this run. Not logged; the count is. */
+  readonly skippedIds = new Set<number>();
   scanExhausted = false;
   pagesRead = 0;
   metadataRows = 0;
@@ -28,6 +33,7 @@ export class PassageWarmupDiagnostics {
         outcome: this.outcome,
         stopReason: this.stopReason,
         elapsedMs: performance.now() - this.started,
+        scope: this.scope,
         scanExhausted: this.scanExhausted,
         pagesRead: this.pagesRead,
         metadataRows: this.metadataRows,
@@ -36,6 +42,7 @@ export class PassageWarmupDiagnostics {
         committedVectors: this.committedVectors,
         sourceChanged: this.sourceChanged,
         batchFailures: this.batchFailures,
+        keptForRecheck: this.skippedIds.size,
       });
     } catch {
       /* Optional logging cannot affect fail-open warmup or cleanup. */

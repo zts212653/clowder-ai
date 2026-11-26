@@ -1,0 +1,107 @@
+import type { LifecycleActiveRun } from '@cat-cafe/shared';
+import { cloudDispatchReceipt, isNativeCloudTarget } from '@/components/cloud-dispatch-receipt';
+import {
+  appendedInputReadDisplay,
+  projectAppendedInputReceipts,
+  projectMessageDispatchAvatars,
+} from '@/components/message-dispatch-projection';
+import { dispatchReceiptDisplay } from '@/lib/dispatch-receipt-display';
+import type { ChatMessage } from '@/stores/chat-types';
+
+/** Read evidence and reply progress remain separate, as in the existing lifecycle projection. */
+export function deliveryView(
+  message: ChatMessage,
+  timeline: ChatMessage[],
+  runs: readonly LifecycleActiveRun[],
+  threadId: string,
+) {
+  return projectMessageDispatchAvatars(message, timeline, runs).map((projection) => {
+    const ref = message.lifecycle!.dispatchRefs!.find((r) => r.targetId === projection.targetId)!;
+    const read = dispatchReceiptDisplay(ref, projection.phase === 'processing', message.lifecycle);
+    if (isNativeCloudTarget(projection.targetId)) {
+      const receipt = cloudDispatchReceipt(message, projection.targetId, timeline)?.receipt;
+      return {
+        cloud: true,
+        canRepeat: false,
+        who: projection.targetId,
+        processing: projection.phase === 'processing',
+        state: receipt
+          ? { sent: 'delivered', failed: 'failed', unknown: 'unknown' }[receipt.status]
+          : projection.phase === 'processing'
+            ? 'checking'
+            : 'unknown',
+        time: read.time,
+        detail:
+          receipt?.status === 'failed' && receipt.failure
+            ? [receipt.failure.errorCode, receipt.failure.nextAction]
+            : [],
+        mid: '',
+        open: { act: 'cafeDelivery', args: { threadId, sourceMessageId: message.id } },
+      };
+    }
+    const response = timeline.find((m) => m.id === projection.statusMessageId);
+    return {
+      cloud: false,
+      canRepeat: read.state === 'unconfirmed_delivery',
+      who: projection.targetId,
+      processing: projection.phase === 'processing',
+      state:
+        response?.lifecycle?.kind === 'delivery_failure'
+          ? 'failed'
+          : read.state === 'read'
+            ? 'read'
+            : read.state === 'pending'
+              ? 'busy'
+              : read.state === 'unknown'
+                ? 'unknown'
+                : read.state === 'checking_delivery'
+                  ? 'checking'
+                  : read.state === 'unconfirmed_delivery'
+                    ? 'unconfirmed'
+                    : 'delivered',
+      time: read.time,
+      detail: [],
+      mid: projection.statusMessageId ?? '',
+      open:
+        response?.lifecycle?.kind === 'response'
+          ? { act: 'msgJump', args: { t: threadId, mid: response.id } }
+          : { act: 'cafeDelivery', args: { threadId, sourceMessageId: message.id } },
+    };
+  });
+}
+
+export function supplementView(
+  response: ChatMessage,
+  timeline: ChatMessage[],
+  memberName: (id: string) => string,
+  userName: string,
+  generation?: { messageIds: string[]; complete: boolean },
+) {
+  const sources = projectAppendedInputReceipts(response, timeline);
+  const ids = [
+    ...new Set([...sources.map((source) => source.id), ...(generation?.complete ? generation.messageIds : [])]),
+  ];
+  if (!ids.length) return null;
+  const reads = sources.map((source) => appendedInputReadDisplay(source, response));
+  return {
+    key: `${response.id}:supp`,
+    count: ids.length,
+    status: reads.map((r) => r.state),
+    items: ids.map((mid) => {
+      const source = timeline.find((message) => message.id === mid);
+      const receiptIndex = sources.findIndex((message) => message.id === mid);
+      const catId = source?.from?.kind === 'agent' ? source.from.catId : source?.catId;
+      const user = source?.from?.kind === 'user' || source?.type === 'user';
+      return {
+        key: mid,
+        mid,
+        who: catId ?? (user ? 'me' : (source?.from ?? '')),
+        name: catId ? memberName(catId) : user ? userName : (source?.source?.label ?? ''),
+        text: source && !source.extra?.recall ? source.content : '',
+        recalled: !!source?.extra?.recall,
+        unknown: !source,
+        state: receiptIndex >= 0 ? reads[receiptIndex].state : 'unknown', // no receipt for it: the delivery result is unknown
+      };
+    }),
+  };
+}

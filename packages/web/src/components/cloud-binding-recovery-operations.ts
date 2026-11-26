@@ -1,24 +1,17 @@
 import { apiFetch } from '@/utils/api-client';
-import { parseChatGptConversationUrl } from '@/utils/chatgpt-chat-url';
-import { type AuthorizedConversationCandidate, fetchAuthorizedConversations } from './authorized-conversations';
-import { projectPersonalChromeRecoveryStatus } from './cloud-binding-recovery-status';
 
-export type { AuthorizedConversationCandidate } from './authorized-conversations';
-
+// The host's part of a recovery: the thread's binding for the target cat and the cat's contract provider. Which
+// conversation to bind is chosen by the provider's plugin, which hands the chosen chatUrl to the retry.
 export type RecoveryLoadState =
   | { kind: 'loading' }
   | { kind: 'unauthorized' }
-  | { kind: 'error'; message: string; actionLabel?: string }
+  | { kind: 'error'; message: string }
   | {
       kind: 'ready';
-      candidates: AuthorizedConversationCandidate[];
-      boundConversationId: string | null;
+      boundChatUrl: string | null;
+      provider?: string;
       hydratedAttemptId?: string;
-      retryStateError?: string;
       retryState?: 'ready' | 'pending' | 'unavailable';
-      connectionIssue?: string;
-      connectionActionLabel?: string;
-      titleSyncMessage?: string;
     };
 
 export type RecoveryPhase = 'idle' | 'binding' | 'retrying' | 'queued' | 'connected';
@@ -34,8 +27,13 @@ export interface RecoveryIdentity {
 
 interface CloudBindingsResponse {
   bindings?: Record<string, unknown>;
+  providers?: Record<string, string>;
   error?: string;
   code?: string;
+}
+
+function chatUrlOf(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
 }
 
 function deniesOwnerAccess(response: Response | null): boolean {
@@ -45,54 +43,25 @@ function deniesOwnerAccess(response: Response | null): boolean {
 export async function readRecoveryState(
   identity: RecoveryIdentity,
   signal: AbortSignal,
-  syncTitles = false,
 ): Promise<RecoveryLoadState | null> {
-  const [authorized, bindingResponse] = await Promise.all([
-    fetchAuthorizedConversations(signal, { syncTitles }),
-    apiFetch(`/api/threads/${encodeURIComponent(identity.threadId)}/cloud-bindings`, { signal }),
-  ]);
+  const response = await apiFetch(`/api/threads/${encodeURIComponent(identity.threadId)}/cloud-bindings`, { signal });
   if (signal.aborted) return null;
-  if ([authorized.response, bindingResponse].some(deniesOwnerAccess)) {
-    return { kind: 'unauthorized' };
-  }
-
-  const [bindingBody] = await Promise.all([bindingResponse.json().catch(() => ({})) as Promise<CloudBindingsResponse>]);
+  if (deniesOwnerAccess(response)) return { kind: 'unauthorized' };
+  const body = (await response.json().catch(() => ({}))) as CloudBindingsResponse;
   if (signal.aborted) return null;
-  if (!authorized.response.ok) {
-    return {
-      kind: 'error',
-      message: authorized.body.setupIssue?.message ?? '暂时读不到已授权的会话，请检查 Personal Chrome 插件状态后重试。',
-      actionLabel: authorized.body.setupIssue?.actionLabel ?? '检查 Personal Chrome',
-    };
-  }
-  if (!bindingResponse.ok) {
-    return { kind: 'error', message: bindingBody.error ?? `当前 Thread 绑定读取失败 (${bindingResponse.status})` };
-  }
-
-  const { candidates } = authorized;
-  const rawBinding = bindingBody.bindings?.[identity.targetCatId];
-  const binding = rawBinding === undefined ? null : parseChatGptConversationUrl(rawBinding);
+  if (!response.ok) return { kind: 'error', message: body.error ?? `当前 Thread 绑定读取失败 (${response.status})` };
+  const provider = body.providers?.[identity.targetCatId];
   return {
     kind: 'ready',
-    candidates,
-    boundConversationId:
-      binding && candidates.some((candidate) => candidate.conversationId === binding.conversationId)
-        ? binding.conversationId
-        : null,
+    boundChatUrl: chatUrlOf(body.bindings?.[identity.targetCatId]),
+    ...(provider ? { provider } : {}),
     ...(identity.attemptId
       ? { hydratedAttemptId: identity.attemptId, retryState: 'ready' as const }
-      : {
-          retryState: 'unavailable' as const,
-          retryStateError: '这条消息缺少可验证的发送记录，请查看最新状态。',
-        }),
-    ...projectPersonalChromeRecoveryStatus(authorized.body),
+      : { retryState: 'unavailable' as const }),
   };
 }
 
-export async function readBoundConversationId(
-  threadId: string,
-  targetCatId: string,
-): Promise<string | null | undefined> {
+export async function readBoundChatUrl(threadId: string, targetCatId: string): Promise<string | null | undefined> {
   try {
     const response = await apiFetch(
       `/api/threads/${encodeURIComponent(threadId)}/cloud-bindings`,
@@ -101,8 +70,7 @@ export async function readBoundConversationId(
     );
     if (!response.ok) return undefined;
     const body = (await response.json()) as CloudBindingsResponse;
-    const raw = body.bindings?.[targetCatId];
-    return raw === undefined ? null : (parseChatGptConversationUrl(raw)?.conversationId ?? null);
+    return chatUrlOf(body.bindings?.[targetCatId]);
   } catch {
     return undefined;
   }
@@ -110,7 +78,7 @@ export async function readBoundConversationId(
 
 async function persistSelectedRoute(args: {
   identity: RecoveryIdentity;
-  selected: AuthorizedConversationCandidate;
+  chatUrl: string;
   routeIsBound: boolean;
   isCurrent: () => boolean;
   onBound: () => void;
@@ -125,7 +93,7 @@ async function persistSelectedRoute(args: {
     response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/cloud-bindings`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ catId: targetCatId, chatUrl: args.selected.chatUrl }),
+      body: JSON.stringify({ catId: targetCatId, chatUrl: args.chatUrl }),
     });
   } finally {
     // Whatever the answer, the binding may have changed: whoever else shows it reads it again.
@@ -133,8 +101,7 @@ async function persistSelectedRoute(args: {
   }
   const body = (await response.json().catch(() => ({}))) as CloudBindingsResponse;
   if (!args.isCurrent()) return false;
-  const persisted = parseChatGptConversationUrl(body.bindings?.[targetCatId]);
-  if (!response.ok || persisted?.conversationId !== args.selected.conversationId) {
+  if (!response.ok || body.bindings?.[targetCatId] !== args.chatUrl) {
     throw new Error(body.error ?? `绑定失败 (${response.status})`);
   }
   args.onBound();
@@ -167,25 +134,8 @@ async function retryExactSource(args: {
 
 class RecoveryReconciliationRequired extends Error {}
 
-function selectReadyCandidate(
-  loadState: RecoveryLoadState,
-  selectedConversationId: string | null,
-): AuthorizedConversationCandidate | undefined {
-  if (loadState.kind !== 'ready' || !selectedConversationId) return undefined;
-  return loadState.candidates.find((candidate) => candidate.conversationId === selectedConversationId);
-}
-
-export function markConversationBound(state: RecoveryLoadState, conversationId: string): RecoveryLoadState {
-  return state.kind === 'ready' ? { ...state, boundConversationId: conversationId } : state;
-}
-
-/** The ready state with `conversationId` as the bound one — if it is an authorized conversation. */
-export function showBound(
-  state: Extract<RecoveryLoadState, { kind: 'ready' }>,
-  conversationId: string | null,
-): Extract<RecoveryLoadState, { kind: 'ready' }> {
-  const authorized = state.candidates.some((candidate) => candidate.conversationId === conversationId);
-  return { ...state, boundConversationId: authorized ? conversationId : null };
+export function markBound(state: RecoveryLoadState, chatUrl: string | null): RecoveryLoadState {
+  return state.kind === 'ready' ? { ...state, boundChatUrl: chatUrl } : state;
 }
 
 function recoveryFailureMessage(routeIsBound: boolean, cause: unknown): string {
@@ -194,25 +144,23 @@ function recoveryFailureMessage(routeIsBound: boolean, cause: unknown): string {
 }
 
 export interface PreparedRecoveryOperation {
-  selected: AuthorizedConversationCandidate;
+  chatUrl: string;
   attemptId?: string;
   routeIsBound: boolean;
 }
 
 export function prepareRecoveryOperation(args: {
   loadState: RecoveryLoadState;
-  selectedConversationId: string | null;
+  chatUrl: string;
   attemptId?: string;
   busy: boolean;
 }): PreparedRecoveryOperation | undefined {
-  const selected = selectReadyCandidate(args.loadState, args.selectedConversationId);
-  if (args.busy || !selected || args.loadState.kind !== 'ready' || args.loadState.retryState === 'pending')
+  if (args.busy || !args.chatUrl || args.loadState.kind !== 'ready' || args.loadState.retryState === 'pending')
     return undefined;
-  if (args.attemptId && args.loadState.connectionIssue) return undefined;
   return {
-    selected,
+    chatUrl: args.chatUrl,
     attemptId: args.attemptId,
-    routeIsBound: args.loadState.boundConversationId === selected.conversationId,
+    routeIsBound: args.loadState.boundChatUrl === args.chatUrl,
   };
 }
 
@@ -237,7 +185,7 @@ export async function executeRecoveryOperation(args: {
     args.setPhase(routeIsBound ? 'retrying' : 'binding');
     routeIsBound = await persistSelectedRoute({
       identity: args.identity,
-      selected: args.prepared.selected,
+      chatUrl: args.prepared.chatUrl,
       routeIsBound,
       isCurrent: args.isCurrent,
       onBound: args.onBound,

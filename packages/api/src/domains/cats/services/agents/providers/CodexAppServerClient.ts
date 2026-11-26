@@ -174,6 +174,10 @@ export interface CodexAppServerClientDeps {
   onEnvelope?: (direction: 'inbound' | 'outbound', envelope: JsonObject) => void | Promise<void>;
   onUnsupportedNotification?: (observation: { method: string }) => void | Promise<void>;
   onLifecycle?: (snapshot: CodexAppServerLifecycleSnapshot) => void;
+  onBeforeTurnStart?: (info: { threadId: string }) => void | Promise<void>;
+  onTurnAccepted?: (info: { threadId: string; turnId: string }) => void;
+  onTurnUsageObserved?: (info: { threadId: string; turnId: string }) => void;
+  onTurnEnded?: () => void | Promise<void>;
   now?: () => number;
 }
 
@@ -547,6 +551,7 @@ export class CodexAppServerClient {
         resolveInitialInputRead = resolve;
       });
       const initialClientId = input.activeRunDispatch && !isRecoveryTurn ? randomUUID() : undefined;
+      await this.deps.onBeforeTurnStart?.({ threadId });
       this.lifecycle.patch({ turnStartSent: true });
       const turnResult = asCodexAppServerRecord(
         await this.request('turn/start', {
@@ -575,6 +580,7 @@ export class CodexAppServerClient {
       const turn = asCodexAppServerRecord(turnResult?.turn);
       if (typeof turn?.id !== 'string') throw new Error('Codex app-server did not return a turn id');
       activeTurnId = turn.id;
+      this.deps.onTurnAccepted?.({ threadId, turnId: activeTurnId });
       if (input.boundedWatcher) watcherUsage = new WatcherTokenUsage();
       await input.boundedWatcher?.accepted({ threadId, turnId: activeTurnId });
       if (initialClientId) {
@@ -593,7 +599,12 @@ export class CodexAppServerClient {
       });
       const bindAcceptedLiveTurn = async (accepted: string): Promise<void> => {
         if (accepted === activeTurnId || !input.live) return;
+        if (activeTurnId) {
+          await this.deps.onTurnEnded?.();
+          await this.deps.onBeforeTurnStart?.({ threadId });
+        }
         activeTurnId = accepted;
+        this.deps.onTurnAccepted?.({ threadId, turnId: accepted });
         latestUsage = null;
         // The RPC receipt is authoritative even when retries arrive before turn/started.
         this.lifecycle.transition('turn_accepted', {
@@ -688,6 +699,7 @@ export class CodexAppServerClient {
           submitText: (text, sourceMessageId) => liveInputs.submitText(text, sourceMessageId),
           submitContextAtBoundary: async (text, sourceRefs, contextKind, signal, authorize, clientUserMessageId) => {
             if (!boundaryOpen) throw new Error('Live context outside native safe boundary');
+            if (!activeTurnId) await this.deps.onBeforeTurnStart?.({ threadId });
             const accepted = await liveInputs.submitContextAtBoundary(
               text,
               sourceRefs,
@@ -718,8 +730,10 @@ export class CodexAppServerClient {
         const isText = liveInputs.isSubmission(envelope);
         const isIdleTick = liveInputs.consumeTick(envelope);
         if (isText || isIdleTick) {
-          if (isText) acceptedLiveTurn = await liveInputs.sendText(envelope, threadId, activeTurnId);
-          else if (
+          if (isText) {
+            if (!activeTurnId) await this.deps.onBeforeTurnStart?.({ threadId });
+            acceptedLiveTurn = await liveInputs.sendText(envelope, threadId, activeTurnId);
+          } else if (
             (!activeTurnId && input.live?.hasPendingInboxWake?.()) ||
             input.live?.hasPendingPageResultWake?.() ||
             input.live?.hasPendingOwnerVoiceWake?.()
@@ -800,8 +814,13 @@ export class CodexAppServerClient {
 
         if (isCodexAppServerTokenUsageNotification(record)) {
           const tokenUsage = asCodexAppServerRecord(record?.params)?.tokenUsage;
-          latestUsage = mapCodexAppServerTokenUsage(tokenUsage) ?? latestUsage;
-          if (params?.turnId === activeTurnId) watcherUsage?.observe(tokenUsage);
+          if (!activeTurnId || params?.turnId === activeTurnId) {
+            latestUsage = mapCodexAppServerTokenUsage(tokenUsage) ?? latestUsage;
+          }
+          if (activeTurnId && params?.turnId === activeTurnId) {
+            watcherUsage?.observe(tokenUsage);
+            if (params?.threadId === threadId) this.deps.onTurnUsageObserved?.({ threadId, turnId: activeTurnId });
+          }
         }
 
         // F296 B4b (kimi review A4): a compaction can also arrive *during* the
@@ -863,6 +882,8 @@ export class CodexAppServerClient {
               throw new Error(codexAppServerErrorMessage(completed.error));
             }
             // This is a child completion, not the end of the Host invocation.
+            this.deps.onTurnUsageObserved?.({ threadId, turnId: activeTurnId });
+            await this.deps.onTurnEnded?.();
             yield {
               type: 'app_server.live_turn_completed',
               turnId: activeTurnId,
@@ -877,6 +898,9 @@ export class CodexAppServerClient {
           runtimeInteraction?.close('provider_cancelled');
           const completedTurn = asCodexAppServerRecord(params?.turn);
           const completedStatus = completedTurn?.status;
+          if (completedStatus === 'completed') {
+            this.deps.onTurnUsageObserved?.({ threadId, turnId: activeTurnId });
+          }
           const failureReason =
             completedStatus === 'failed' ? codexAppServerErrorMessage(completedTurn?.error) : undefined;
           const terminalStage: CodexAppServerLifecycleStage =
@@ -914,6 +938,7 @@ export class CodexAppServerClient {
       if (failed) yield this.lifecycle.event(failed);
       throw failure;
     } finally {
+      await this.deps.onTurnEnded?.();
       input.startupCheckSignal?.removeEventListener('abort', startupAbortHandler);
       activeRunDispatchOpen = false;
       inputReadCallbacks.clear();

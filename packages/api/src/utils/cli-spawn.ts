@@ -32,6 +32,7 @@ import {
 import {
   CLI_EXECUTION_ID_ENV,
   CLI_EXECUTION_OWNER_BINDING_ENV,
+  CLI_PROCESS_SNAPSHOT_TIMEOUT_MS,
   cliExecutionOwnerRefFromEnvironment,
 } from './cli-process-ownership.js';
 import { invalidateCliCommand } from './cli-resolve.js';
@@ -221,6 +222,12 @@ function isStallAutoKillWarning(
 
 /** Grace period between SIGTERM and SIGKILL */
 export const KILL_GRACE_MS = 3_000;
+
+// The Unix child is a supervisor, whose TERM→KILL sequence includes bounded
+// ownership scans before signalling and after root exit. A 500ms head start
+// covers neither scan latency nor tree settlement. Reserve six snapshot budgets
+// for that cleanup before escalating against the supervisor itself.
+const SUPERVISED_KILL_GRACE_MS = KILL_GRACE_MS + 6 * CLI_PROCESS_SNAPSHOT_TIMEOUT_MS;
 
 /** Codex gets a short cooperative interrupt window before the existing terminate path. */
 export const INTERRUPT_GRACE_MS = 2_000;
@@ -547,7 +554,9 @@ export async function* spawnCli(
     isChildExited: () => childExited,
     graces: {
       interruptMs: deps?.terminationGraces?.interruptMs ?? INTERRUPT_GRACE_MS,
-      terminateMs: deps?.terminationGraces?.terminateMs ?? KILL_GRACE_MS,
+      terminateMs:
+        deps?.terminationGraces?.terminateMs ??
+        (!IS_WINDOWS && !deps?.spawnFn ? SUPERVISED_KILL_GRACE_MS : KILL_GRACE_MS),
     },
     onTransition: ({ signal, stage, state, sequence }) => {
       const attributes = {

@@ -8,6 +8,7 @@ import { PassageVectorStore, passageVectorKey } from '../../src/domains/memory/P
 import { SqliteEvidenceStore } from '../../src/domains/memory/SqliteEvidenceStore.js';
 import { ensurePassageVectorTable, ensureVectorTable } from '../../src/domains/memory/schema.js';
 import { VectorStore } from '../../src/domains/memory/VectorStore.js';
+import { prepareGenerationInvalidationConnection } from '../../src/domains/memory/vector-generation-invalidation.js';
 
 async function fixture(t: TestContext) {
   const store = new SqliteEvidenceStore(':memory:');
@@ -201,4 +202,138 @@ test('a retired in-flight run cannot certify a newly bound dependency', async (t
   assert.equal(f.passages.count(), 0);
   await warmup(f.builder);
   assert.equal(f.passages.count(), 1, 'the next existing recovery tick must use the new binding');
+});
+
+// 2026-11-16, boot92: 202 warmups in 3 h 50 min, each walking all 562,800 passages again; 153 of the
+// 199 that finished embedded nothing. Every chat write moved the source epoch, which was the whole
+// "nothing changed" certificate. Passage ids only grow and bodies are never rewritten in place, so
+// after one complete walk a missing vector can only be a newer row, or an older row whose vector
+// went away while the row stayed.
+
+test('a write after a completed warmup costs a look at the new rows, not the whole corpus again', async (t) => {
+  const f = await fixture(t);
+  for (let i = 0; i < 40; i++) f.put(`p${i}`);
+  await warmup(f.builder);
+  assert.equal(f.passages.count(), 40);
+  for (let round = 0; round < 5; round++) {
+    const before = f.scanned();
+    f.put(`late-${round}`); // what a chat turn does: one more passage, and the source epoch moves
+    await warmup(f.builder);
+    assert.equal(f.scanned() - before, 1, 'only the new row is checked');
+  }
+  assert.equal(f.passages.count(), 45);
+  assert.equal(f.encoded.length, 45);
+});
+
+test('replaced passages are new rows too: their vectors left with the old rows', async (t) => {
+  const f = await fixture(t);
+  for (let i = 0; i < 40; i++) f.put(`p${i}`);
+  await warmup(f.builder);
+  // A document is re-indexed: three passages are deleted with their vectors and three are inserted.
+  for (const id of ['p0', 'p1', 'p2']) {
+    f.db.prepare('DELETE FROM evidence_passages WHERE passage_id=?').run(id);
+    f.passages.delete(passageVectorKey('parent', id));
+  }
+  for (const id of ['r0', 'r1', 'r2']) f.put(id);
+  const before = f.scanned();
+  await warmup(f.builder);
+  assert.equal(f.scanned() - before, 3, 'fewer vectors is explained by fewer rows');
+  assert.equal(f.passages.count(), 40);
+});
+
+test('a vector that goes away while its row stays is found at once', async (t) => {
+  const f = await fixture(t);
+  for (let i = 0; i < 40; i++) f.put(`p${i}`);
+  await warmup(f.builder);
+  f.put('late'); // an unrelated write, so the warmup is not skipped outright
+  f.passages.delete(passageVectorKey('parent', 'p7')); // e.g. the parent's visibility changed
+  const before = f.scanned();
+  await warmup(f.builder);
+  assert.ok(f.scanned() - before >= 41, 'vectors are missing that no deleted row accounts for: walk everything');
+  assert.equal(f.passages.count(), 41);
+  assert.deepEqual(f.encoded.slice(-2).sort(), ['late', 'p7']);
+});
+
+test('the whole corpus is walked again after ten minutes, and not before', async (t) => {
+  const f = await fixture(t);
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-16T23:00:00Z') });
+  for (let i = 0; i < 40; i++) f.put(`p${i}`);
+  await warmup(f.builder);
+  const walk = async (id: string) => {
+    const before = f.scanned();
+    f.put(id);
+    await warmup(f.builder);
+    return f.scanned() - before;
+  };
+  t.mock.timers.tick(9 * 60_000);
+  assert.equal(await walk('late-1'), 1);
+  t.mock.timers.tick(60_000);
+  assert.equal(await walk('late-2'), 42, 'the backstop for what no cheap signal shows');
+  assert.equal(await walk('late-3'), 1, 'and the next ten minutes start from there');
+});
+
+test('a warmup that did not finish cleanly does not move the starting point', async (t) => {
+  const f = await fixture(t);
+  for (let i = 0; i < 40; i++) f.put(`p${i}`);
+  await warmup(f.builder);
+  const embed = f.embedding.embed;
+  let failures = 1;
+  f.embedding.embed = async (texts, options) => {
+    if (failures-- > 0) throw new Error('one transient provider failure');
+    return embed(texts, options);
+  };
+  f.put('late-1');
+  await warmup(f.builder); // the provider fails: late-1 stays without a vector
+  assert.equal(f.passages.count(), 40);
+  f.put('late-2');
+  await warmup(f.builder);
+  assert.equal(f.passages.count(), 42, 'late-1 is still inside the range the next warmup looks at');
+});
+
+test('a certificate earned by looking only at new rows expires with the full-walk interval', async (t) => {
+  // Review probe for #7194: one vector is lost below the watermark while another row arrives already
+  // embedded, so the counts cancel out. Then nothing is written any more.
+  const f = await fixture(t);
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-16T23:00:00Z') });
+  f.put('old-a');
+  f.put('old-b');
+  await warmup(f.builder);
+  f.passages.delete(passageVectorKey('parent', 'old-a'));
+  f.put('new-c');
+  f.passages.upsert(passageVectorKey('parent', 'new-c'), new Float32Array([1, 0, 0, 0]));
+  await warmup(f.builder); // looks at new-c only: two vectors, as before
+  assert.equal(f.passages.count(), 2);
+  let scanned = f.scanned();
+  await warmup(f.builder);
+  assert.equal(f.scanned(), scanned, 'unchanged within the interval: skipped');
+
+  t.mock.timers.tick(10 * 60_000 + 1);
+  await warmup(f.builder);
+  assert.equal(f.passages.count(), 3, 'the backstop runs although nothing was written since');
+  assert.deepEqual(f.encoded, ['old-a', 'old-b', 'old-a']);
+  scanned = f.scanned();
+  t.mock.timers.tick(10 * 60_000 + 1);
+  await warmup(f.builder);
+  assert.equal(f.scanned(), scanned, 'unchanged since a complete walk: skipped for as long as that holds');
+});
+
+test('a message rewritten in place keeps its row, loses its vector, and is embedded again at once', async (t) => {
+  // indexPassages upserts thread messages ON CONFLICT DO UPDATE SET content: the row id stays.
+  const f = await fixture(t);
+  prepareGenerationInvalidationConnection(f.db); // the canonical writer's native triggers
+  for (let i = 0; i < 40; i++) f.put(`p${i}`);
+  await warmup(f.builder);
+  const id = () => (f.db.prepare("SELECT id FROM evidence_passages WHERE passage_id='p7'").get() as { id: number }).id;
+  const before = id();
+  f.db
+    .prepare(`INSERT INTO evidence_passages(doc_anchor,passage_id,content,created_at) VALUES('parent','p7',?,?)
+      ON CONFLICT(doc_anchor, passage_id) DO UPDATE SET content=excluded.content`)
+    .run('edited body', '2026-11-13T00:00:00Z');
+  assert.equal(id(), before, 'the same row');
+  assert.equal(f.passages.count(), 39, 'its vector went with the old body');
+  const scanned = f.scanned();
+  await warmup(f.builder);
+  assert.ok(f.scanned() - scanned >= 40, 'a vector is missing that no deleted row accounts for');
+  assert.equal(f.passages.count(), 40);
+  assert.equal(f.encoded.at(-1), 'edited body');
 });

@@ -5,7 +5,7 @@ import { nativeArtworkAction } from './f309-artwork-native-opening.mjs';
 
 async function readDraft(page, threadId) {
   return page.evaluate((id) => {
-    const drafts = JSON.parse(sessionStorage.getItem('cat-cafe:thread-context-attachment-drafts') ?? '[]');
+    const drafts = JSON.parse(localStorage.getItem('cat-cafe:thread-context-attachment-drafts') ?? '[]');
     return new Map(drafts).get(id) ?? [];
   }, threadId);
 }

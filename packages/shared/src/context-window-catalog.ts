@@ -53,7 +53,13 @@ export const CONTEXT_WINDOW_SIZES: Readonly<Record<string, number>> = {
  */
 export function stripProviderPrefix(model: string): string {
   const slashAt = model.lastIndexOf('/');
-  return slashAt >= 0 ? model.slice(slashAt + 1) : model;
+  const bare = (slashAt >= 0 ? model.slice(slashAt + 1) : model).trim();
+  const displayMatch = bare.match(/^Gemini\s+([0-9.]+(?:\s+[A-Za-z0-9]+)+?)(?:\s*\((Low|Medium|High|XHigh|Max)\))?$/i);
+  if (displayMatch) {
+    const slug = `gemini-${displayMatch[1].trim().toLowerCase().replace(/\s+/g, '-')}`;
+    return displayMatch[2] ? `${slug}-${displayMatch[2].toLowerCase()}` : slug;
+  }
+  return bare;
 }
 
 function lookupWithPrefixMatch(table: Readonly<Record<string, number>>, bare: string): number | undefined {

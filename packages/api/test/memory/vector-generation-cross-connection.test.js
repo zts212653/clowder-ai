@@ -196,6 +196,8 @@ for (const mode of ['semantic', 'hybrid'])
     assert.equal(result.meta.effectiveMode, 'lexical');
     assert.equal(result.meta.degraded, true);
     assert.ok(result.passages.every((p) => p.content !== 'Original passage'));
+    // A quarantine came and went during the read: that is not a plain source write, so the search is
+    // not read again with vectors (runProjectionRead), and lexical recovery asks the model for nothing.
     assert.equal(calls, 1, 'retirement cannot obtain another model request during lexical recovery');
     assert.equal(caller.signal.aborted, false);
     assert.ok(reads.at(-1).pid > 0, 'the boundary includes a real file worker');

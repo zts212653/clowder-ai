@@ -15,7 +15,7 @@ export const NOW = Date.now();
 export const SOURCE = 'task:work:finish-fixture';
 export const idle = () => ({ cwds: [], argv: [] });
 
-export function fixture() {
+export function fixture({ checkoutOptions } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'worktree-finish-')));
   const repo = join(root, 'cat-cafe');
   mkdirSync(repo);
@@ -36,6 +36,7 @@ export function fixture() {
       policy,
       ttlDays: policy === 'ttl' ? 1 : undefined,
       now: NOW,
+      checkoutOptions,
     });
     return path;
   };

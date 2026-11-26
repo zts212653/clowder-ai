@@ -12,6 +12,17 @@ const params = z.object({ contentRef: id });
 const source = z.object({ threadId: id }).strict();
 export function registerVideoProjectReviewRoutes(app: FastifyInstance, importer: VideoProjectMessageImporter) {
   const base = '/api/video-projects/:contentRef/review';
+  app.get(`${base}/sync-status`, async (request, reply) => {
+    const principal = human(request);
+    if (!principal) return reply.code(401).send({ error: 'identity_required' });
+    try {
+      const { contentRef } = params.parse(request.params),
+        { threadId } = source.parse(request.query);
+      return await importer.syncStatus({ principal, contentRef, threadId });
+    } catch (error) {
+      return replyWorkspaceContentReviewError(reply, error);
+    }
+  });
   app.post(`${base}/synchronize`, async (request, reply) => {
     const principal = human(request);
     if (!principal) return reply.code(401).send({ error: 'identity_required' });

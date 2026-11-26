@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
 import { type TestContext, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { CONCIERGE_CONFIG_DEFAULTS, catRegistry } from '@cat-cafe/shared';
+import { catRegistry } from '@cat-cafe/shared';
 import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 import { getRoster, loadCatConfig, toAllCatConfigs } from '../src/config/cat-config-loader.js';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
-import { MemoryConciergeConfigStore } from '../src/domains/concierge/ConciergeConfigStore.js';
 import { LiveCompanionSessions } from '../src/domains/concierge/live/LiveCompanionSessions.js';
 import type { LiveCompanionCallOptions } from '../src/domains/concierge/live/live-call-options.js';
 import { sessionAuthPlugin, sessionRoute } from '../src/infrastructure/session-auth.js';
 import { conciergeLiveRoutes } from '../src/routes/concierge-live.js';
+import { companionConfigurationFixture } from './helpers/companion-configuration-fixture.js';
 import { createIsolatedTemplateRoot } from './helpers/isolated-template-root.js';
 
 async function fixture(t: TestContext) {
@@ -26,7 +26,7 @@ async function fixture(t: TestContext) {
   const priorOwner = process.env.DEFAULT_OWNER_USER_ID;
   process.env.DEFAULT_OWNER_USER_ID = owner;
   const app = Fastify();
-  const store = new MemoryConciergeConfigStore();
+  const companion = companionConfigurationFixture();
   const sessions = new LiveCompanionSessions();
   const allocations: string[] = [];
   t.mock.method(sessions, 'prepare', async (options: LiveCompanionCallOptions) => {
@@ -39,7 +39,7 @@ async function fixture(t: TestContext) {
   await app.register(sessionRoute, { ownerUserId: owner });
   await app.register(conciergeLiveRoutes, {
     ownerUserId: owner,
-    configStore: store,
+    companionSettings: companion.read,
     sessions,
     threadService: { getOrCreate: async () => 'home', isCurrent: async () => true },
     sessionChainStore: { getActive: async () => null },
@@ -64,7 +64,7 @@ async function fixture(t: TestContext) {
     else process.env.DEFAULT_OWNER_USER_ID = priorOwner;
   });
   return {
-    store,
+    companion,
     owner,
     carrier,
     allocations,
@@ -78,21 +78,22 @@ async function fixture(t: TestContext) {
   };
 }
 
-test('modern prepare rejects a saved retired choice before native allocation; legacy effective selection remains unchanged', async (t) => {
+test('a retired saved choice is never prepared: it reads as the roster default, and the old expected choice is refused', async (t) => {
   const f = await fixture(t);
-  await f.store.put(f.owner, { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: 'retired-choice' });
+  f.companion.set({ dutyCatProfileId: 'retired-choice' });
   const modern = await f.request('retired-choice');
   assert.equal(modern.statusCode, 409);
   assert.equal(modern.json().code, 'live_duty_unavailable');
   assert.deepEqual(f.allocations, []);
-  assert.equal((await f.store.getSaved(f.owner)).dutyCatProfileId, 'retired-choice');
-  assert.equal((await f.request()).statusCode, 503, 'legacy reaches the existing prepare seam');
-  assert.deepEqual(f.allocations, [(await f.store.get(f.owner)).dutyCatProfileId]);
+  const fallback = (await f.companion.read()).dutyCatProfileId;
+  assert.notEqual(fallback, 'retired-choice');
+  assert.equal((await f.request()).statusCode, 503, 'the roster default reaches the existing prepare seam');
+  assert.deepEqual(f.allocations, [fallback]);
 });
 
 test('modern prepare admits only the saved choice it read, and a changed choice never silently selects another cat', async (t) => {
   const f = await fixture(t);
-  await f.store.put(f.owner, { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: f.carrier.id });
+  f.companion.set({ dutyCatProfileId: f.carrier.id });
   assert.equal((await f.request(f.carrier.id)).statusCode, 503, 'the actual selected identity reaches prepare');
   assert.deepEqual(f.allocations, [f.carrier.id]);
   assert.equal((await f.request('previous-choice')).statusCode, 409);

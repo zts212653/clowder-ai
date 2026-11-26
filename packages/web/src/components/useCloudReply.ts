@@ -19,7 +19,15 @@ export function useCloudReply(
   identity: CloudReplyIdentity | undefined,
   threadId?: string,
   messages = EMPTY,
-  { readDotEvent = false }: { readDotEvent?: boolean } = {},
+  {
+    readDotEvent = false,
+    readGeneration = 1,
+    initial,
+  }: {
+    readDotEvent?: boolean;
+    readGeneration?: number;
+    initial?: CloudReplyState;
+  } = {},
 ): CloudReplyState {
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -53,7 +61,9 @@ export function useCloudReply(
       m.lifecycle,
     ]),
   ]);
-  const [remote, setRemote] = useState<{ key: string; result: CloudReplyState } | null>(null);
+  const [remote, setRemote] = useState<{ key: string; result: CloudReplyState } | null>(() =>
+    initial ? { key, result: initial } : null,
+  );
   useEffect(() => {
     if (
       !sourceMessageId ||
@@ -69,6 +79,7 @@ export function useCloudReply(
     if (targetCatId === 'gpt-dot') {
       if (!hostMessageId || !/^dot_evt_[a-f0-9]{64}$/.test(hostMessageId)) return;
       const read = async () => {
+        if (document.hidden) return;
         try {
           const result = await readDotCloudReply(
             { sourceMessageId, targetCatId, dispatchInvocationId, hostMessageId },
@@ -85,9 +96,14 @@ export function useCloudReply(
       };
       const timer = setInterval(() => void read(), 5000);
       void read();
+      const visible = () => {
+        if (!document.hidden) void read();
+      };
+      document.addEventListener('visibilitychange', visible);
       return () => {
         controller.abort();
         clearInterval(timer);
+        document.removeEventListener('visibilitychange', visible);
       };
     }
     const query = new URLSearchParams({ targetCatId, dispatchInvocationId });
@@ -131,6 +147,7 @@ export function useCloudReply(
     // key includes every source/answer/owner boundary; unrelated timeline rows do not refetch.
   }, [
     key,
+    readGeneration,
     local.state,
     sourceMessageId,
     targetCatId,

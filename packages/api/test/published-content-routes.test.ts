@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import Fastify from 'fastify';
 import sharp from 'sharp';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { WorkspaceContentReviewService } from '../src/domains/collaborative-content/workspace-review/service.js';
 import { WorkspaceContentSourceService } from '../src/domains/workspace/workspace-content-source.js';
 import { registerPublishedContentRoutes } from '../src/routes/published-content-routes.js';

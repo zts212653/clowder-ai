@@ -34,6 +34,7 @@ function createDesktopUpdateRuntime({
     trustedOrigin,
     getUpdateSettings: () => updater.getSettings(),
     setUpdateAutoCheck: (enabled) => updater.setAutoCheck(enabled),
+    onCheckForUpdates: () => updater.checkForUpdates({ manual: true }),
     onRendererReady: () => updater?.startSchedule(),
   });
 

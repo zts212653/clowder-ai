@@ -19,7 +19,6 @@ import type {
 import { isReadableSchedulerWork } from '../domains/cats/services/stores/readable-scheduler-work.js';
 import {
   canViewMessage,
-  getTimelineOrderTime,
   isAgentReadableManagedHoldMessage,
   isInternalNonQuotableParent,
   isSystemUserMessage,
@@ -35,6 +34,7 @@ import { requireCallbackPrincipal } from './callback-auth-prehandler.js';
 import { projectCallbackMessageBody, projectCallbackMessageCitation } from './callback-message-body.js';
 import { coverPublishedMessageReads } from './callback-published-wake-coverage.js';
 import { isReadableApprovalDecisionReceipt } from './callback-readable-approval-receipt.js';
+import { mergeCallbackMessageWindow, readCallbackMessageWindow } from './callback-visible-history.js';
 import { guardLiveCarrierRead, isWatcherRead } from './live-carrier-read-guard.js';
 
 export interface CallbackMessageReadDeps {
@@ -257,44 +257,35 @@ export function registerCallbackMessageReadRoutes(app: FastifyInstance, opts: Ca
       const effectiveContextCount = contextCount ?? 0;
       if (effectiveContextCount > 0 && message.threadId) {
         const principalUserId = principal.userId;
-        const exposureAwareThreadRead = {
-          includeQueuedCatMessages: true,
-        } as const;
-        const before = await messageStore.getByThreadBefore(
-          message.threadId,
-          getTimelineOrderTime(message),
-          effectiveContextCount,
-          message.id,
-          principalUserId,
-          exposureAwareThreadRead,
-        );
-        const after = await messageStore.getByThreadAfter(
-          message.threadId,
-          message.id,
-          effectiveContextCount,
-          principalUserId,
-          exposureAwareThreadRead,
-        );
         // #699 P1-1b: Apply same visibility predicate to context items as target
-        const contextMsgs = [...before, ...after]
-          .filter((m) => {
-            if (m.id === messageId) return false;
-            if (m.deletedAt) return false;
-            // Apply the same narrow read exception; system reply-parent eligibility stays unchanged.
-            const isReadableManagedHoldNeighbor = isAgentReadableManagedHoldMessage(m) && m.userId === principalUserId;
-            if (
-              isInternalNonQuotableParent(m) &&
-              !isReadableManagedHoldNeighbor &&
-              !isReadableApprovalDecisionReceipt(m, principalUserId, thread) &&
-              !isReadableSchedulerWork(m, principalUserId, thread)
-            )
-              return false;
-            if (!isReadableManagedHoldNeighbor && !isTimelinePublished(m)) return false;
-            if (m.userId !== principalUserId && !isSystemUserMessage(m)) return false;
-            if (!isReadableManagedHoldNeighbor && !canViewMessage(m, viewer)) return false;
-            return true;
-          })
-          .sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
+        const include = (m: typeof message): boolean => {
+          if (m.id === messageId) return false;
+          if (m.deletedAt) return false;
+          // Apply the same narrow read exception; system reply-parent eligibility stays unchanged.
+          const isReadableManagedHoldNeighbor = isAgentReadableManagedHoldMessage(m) && m.userId === principalUserId;
+          if (
+            isInternalNonQuotableParent(m) &&
+            !isReadableManagedHoldNeighbor &&
+            !isReadableApprovalDecisionReceipt(m, principalUserId, thread) &&
+            !isReadableSchedulerWork(m, principalUserId, thread)
+          )
+            return false;
+          if (!isReadableManagedHoldNeighbor && !isTimelinePublished(m)) return false;
+          if (m.userId !== principalUserId && !isSystemUserMessage(m)) return false;
+          if (!isReadableManagedHoldNeighbor && !canViewMessage(m, viewer)) return false;
+          return true;
+        };
+        const window = {
+          store: messageStore,
+          threadId: message.threadId,
+          userId: principalUserId,
+          anchor: message,
+          include,
+          count: effectiveContextCount,
+        };
+        const before = await readCallbackMessageWindow({ ...window, direction: 'before' });
+        const after = await readCallbackMessageWindow({ ...window, direction: 'after' });
+        const contextMsgs = mergeCallbackMessageWindow({ before, anchor: message, after, includeAnchor: false });
         result.context = await Promise.all(contextMsgs.map(projectMsg));
       }
 
