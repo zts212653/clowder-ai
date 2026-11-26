@@ -191,7 +191,6 @@ function readReceiptHarness() {
     'threadId',
     'notifyHandledMentionRead',
     'invalidateSidebarProjection',
-    'latestMessageIdRef',
     'useSidebarProjectionStore',
     transpileModule('const messageCount = history.messages.length;' + effect, {
       compilerOptions: { target: ScriptTarget.ES2022 },
@@ -199,50 +198,38 @@ function readReceiptHarness() {
   );
 }
 
-it('settles a caught-up read receipt on the row without a full sidebar read', async () => {
+it('skips a full sidebar read for no-op acknowledgements and refreshes on advance', async () => {
   const readReceipt = readReceiptHarness();
   const notify = vi.fn(),
-    invalidate = vi.fn(async () => true),
-    settle = vi.fn(),
-    latestMessageIdRef = { current: undefined as string | undefined };
-  vi.mocked(apiFetch).mockImplementation(async () => Response.json({ caughtUp: true, messageId: 'latest' }));
+    invalidate = vi.fn(async () => true);
+  let advanced = false;
+  vi.mocked(apiFetch).mockImplementation(async () =>
+    Response.json({ caughtUp: true, advanced, handledMention: false, messageId: 'latest' }),
+  );
   let messages: ReturnType<typeof fixtureData>['messages'] = [],
     needed: number | false = false;
   const hook = renderHook(() =>
-    readReceipt(
-      useEffect,
-      { messages },
-      undefined,
-      true,
-      true,
-      () => needed,
-      request,
-      'thread',
-      notify,
-      invalidate,
-      latestMessageIdRef,
-      { getState: () => ({ settleThreadRead: settle }) },
-    ),
+    readReceipt(useEffect, { messages }, undefined, true, true, () => needed, request, 'thread', notify, invalidate, {
+      getState: () => ({ rows: [] }),
+    }),
   );
   expect(apiFetch).not.toHaveBeenCalled();
   needed = 1;
   await act(hook.rerender);
-  await waitFor(() => expect(settle).toHaveBeenCalledWith('thread'));
+  await waitFor(() => expect(notify).toHaveBeenCalledTimes(1));
   expect(invalidate).not.toHaveBeenCalled();
 
+  advanced = true;
   messages = fixtureData().messages;
   await act(hook.rerender);
-  await waitFor(() => expect(settle).toHaveBeenCalledTimes(2));
-  expect(invalidate).not.toHaveBeenCalled();
+  await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1));
   expect(notify).toHaveBeenCalledTimes(2);
 });
 
 it('keeps the canonical read when an acknowledgement is not caught up', async () => {
   const readReceipt = readReceiptHarness();
   const notify = vi.fn(),
-    invalidate = vi.fn(async () => true),
-    settle = vi.fn(),
-    latestMessageIdRef = { current: undefined as string | undefined };
+    invalidate = vi.fn(async () => true);
   vi.mocked(apiFetch).mockImplementation(async () => Response.json({ caughtUp: false, messageId: 'latest' }));
   let needed: number | false = 1;
   renderHook(() =>
@@ -257,12 +244,10 @@ it('keeps the canonical read when an acknowledgement is not caught up', async ()
       'thread',
       notify,
       invalidate,
-      latestMessageIdRef,
-      { getState: () => ({ settleThreadRead: settle }) },
+      { getState: () => ({ rows: [] }) },
     ),
   );
   await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1));
-  expect(settle).not.toHaveBeenCalled();
   needed = false;
 });
 

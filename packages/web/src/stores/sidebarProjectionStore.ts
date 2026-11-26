@@ -65,8 +65,6 @@ export interface SidebarProjectionState {
   ) => string;
   failSidebarCommand: (commandId: string) => void;
   clearSidebarCommand: (threadId: string, field: SidebarCommandField) => void;
-  /** A read receipt the server confirmed caught up: settle this row without a full snapshot read. */
-  settleThreadRead: (threadId: string) => void;
   setRefreshing: (refreshing: boolean) => void;
 }
 
@@ -192,25 +190,6 @@ export const useSidebarProjectionStore = create<SidebarProjectionState>((set, ge
       return { pendingThreadCommands: next };
     });
   },
-
-  settleThreadRead: (threadId) =>
-    set((state) => {
-      const index = state.rows.findIndex((row) => row.id === threadId);
-      if (index < 0) return state;
-      const row = state.rows[index]!;
-      if (row.unreadCount === 0 && !row.hasUserMention) return state;
-      const rows = [...state.rows];
-      rows[index] = {
-        ...row,
-        unreadCount: 0,
-        hasUserMention: false,
-        ...(row.presence.status === 'done' || row.presence.status === 'error'
-          ? { presence: { status: 'idle' as const } }
-          : {}),
-      };
-      void saveSidebarSnapshot(rows).catch(() => {});
-      return { rows };
-    }),
 
   setRefreshing: (refreshing) => set({ refreshing }),
 }));

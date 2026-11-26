@@ -26,6 +26,10 @@ function hydrateLegacyThreadStore(threads: SidebarThread[]): void {
   // hydrated for legacy Chat-owned surfaces until their separate migration.
   const chatStore = useChatStore.getState();
   chatStore.setThreads(threads);
+  // Keep a pending title in the live legacy view while the canonical snapshot is persisted unchanged.
+  for (const command of Object.values(useSidebarProjectionStore.getState().pendingThreadCommands)) {
+    if (command.field === 'title') chatStore.updateThreadTitle(command.threadId, command.value as string);
+  }
   for (const thread of threads) {
     if ((thread.unreadCount ?? 0) > 0 || thread.hasUserMention) {
       chatStore.initThreadUnread(thread.id, thread.unreadCount ?? 0, !!thread.hasUserMention);

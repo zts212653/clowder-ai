@@ -1,4 +1,5 @@
 import { useChatStore } from '@/stores/chatStore';
+import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 
 type TitlePatchResult = { title?: string | null } | void;
 type TitlePatch = (threadId: string, title: string) => Promise<TitlePatchResult>;
@@ -14,6 +15,8 @@ export async function renameThreadTitleOptimistic(threadId: string, title: strin
     pendingTitles.set(threadId, pending);
   }
   const sequence = pending;
+  const sidebar = useSidebarProjectionStore.getState();
+  const commandId = sidebar.beginSidebarCommand(threadId, 'title', title);
   useChatStore.getState().updateThreadTitle(threadId, title);
   const write = sequence.tail.then(async () => {
     const updated = await patch(threadId, title);
@@ -27,6 +30,7 @@ export async function renameThreadTitleOptimistic(threadId: string, title: strin
     if (sequence.tail === tail) {
       pendingTitles.delete(threadId);
       useChatStore.getState().updateThreadTitle(threadId, sequence.confirmed);
+      sidebar.failSidebarCommand(commandId);
     }
   }
 }

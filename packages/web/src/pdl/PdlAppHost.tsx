@@ -489,8 +489,6 @@ function ChatBinding({
   const composingRef = useRef(false);
   const [composing, setComposing] = useState(false);
   const draftRevision = useRef(0);
-  // The latest message at read-receipt start: an older ack must not clear unread after newer activity.
-  const latestMessageIdRef = useRef<string | undefined>(undefined);
   const [images, setImages] = useState<File[]>(() => threadImageDrafts.get(threadId) ?? []);
   const [replyNotices, setReplyNotices] = useState<ChatData['replyNotices']>([]);
   const [sendingThreads, setSendingThreads] = useState<Record<string, true>>({});
@@ -1008,32 +1006,47 @@ function ChatBinding({
   }, []);
   const messageCount = history.messages.length;
   const deliveredCount = history.messages.filter((m) => m.deliveredAt !== undefined).length;
-  latestMessageIdRef.current = history.messages.at(-1)?.id;
+  const latestMessageId = history.messages.at(-1)?.id;
   useEffect(() => {
     if (exportMids !== undefined || !documentVisible || !engineMounted || !need('chat.messages')) return;
-    const ackTargetId = latestMessageIdRef.current;
     let live = true;
-    void request<{ caughtUp?: boolean }>(`/api/threads/${encodeURIComponent(threadId)}/read/latest`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}',
-    })
+    void request<{ caughtUp: boolean; advanced: boolean; handledMention: boolean }>(
+      `/api/threads/${encodeURIComponent(threadId)}/read/latest`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      },
+    )
       .then((receipt) => {
         if (!live) return;
         notifyHandledMentionRead(receipt);
-        // Only a caught-up receipt for this same latest message settles the row locally; newer
-        // activity or an unconverged ack still needs the canonical snapshot.
-        if (receipt?.caughtUp === true && latestMessageIdRef.current === ackTargetId) {
-          useSidebarProjectionStore.getState().settleThreadRead(threadId);
+        const sidebarRow = useSidebarProjectionStore.getState().rows.find((row) => row.id === threadId);
+        // A no-op receipt with no stale attention has nothing to reconcile.
+        if (
+          receipt.caughtUp &&
+          receipt.advanced === false &&
+          !receipt.handledMention &&
+          !sidebarRow?.unreadCount &&
+          !sidebarRow?.hasUserMention
+        )
           return;
-        }
         return invalidateSidebarProjection();
       })
       .catch((error) => console.debug('[PDL read receipt]', error));
     return () => {
       live = false;
     };
-  }, [threadId, messageCount, deliveredCount, documentVisible, exportMids, engineMounted, need('chat.messages')]);
+  }, [
+    threadId,
+    messageCount,
+    deliveredCount,
+    latestMessageId,
+    documentVisible,
+    exportMids,
+    engineMounted,
+    need('chat.messages'),
+  ]);
 
   const patchThread = async (
     id: string,
