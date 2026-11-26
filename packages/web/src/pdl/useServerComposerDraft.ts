@@ -115,7 +115,8 @@ export function useServerComposerDraft(input: {
         if (!live) return;
         const saved = fromSaved(body.draft);
         known.current.set(threadId, { revision: body.revision, signature: JSON.stringify(saved) });
-        const { draft: now, holdWrites: wasComposing } = latest.current;
+        const beforeRestore = latest.current;
+        const now = beforeRestore.draft;
         // What the owner typed before the server answered stays; the server's attachments they haven't seen join it.
         const typedSinceOpen = openedRevision !== (latest.current.revision ?? 0) || opened !== JSON.stringify(now);
         const merged = typedSinceOpen ? mergeDraft(JSON.parse(opened) as ComposerDraft, now, saved) : saved;
@@ -133,10 +134,10 @@ export function useServerComposerDraft(input: {
         }
         if (!live) return;
         shown.current = threadId;
-        // What the owner typed first is written at once, with the server's attachments it now carries.
-        // If attachments took longer than the composition, send the latest committed words with them.
-        const committed = wasComposing ? { ...merged, text: latest.current.draft.text } : merged;
-        if (!latest.current.holdWrites && JSON.stringify(committed) !== JSON.stringify(saved)) {
+        // Use words edited during restoration, or the restored words if React has not rendered them yet.
+        const current = latest.current;
+        const committed = { ...merged, text: current === beforeRestore ? merged.text : current.draft.text };
+        if (!current.holdWrites && JSON.stringify(committed) !== JSON.stringify(saved)) {
           await saveDraft(threadId, committed, known.current, show);
         }
       })

@@ -538,6 +538,53 @@ it('does not let a late draft read replace text edited during composition', asyn
   ]);
 });
 
+it('saves text committed during attachment restoration with the restored attachment', async () => {
+  const attachment = { type: 'image', url: '/uploads/a.png' } as const;
+  const read = Promise.withResolvers<Response>();
+  vi.mocked(apiFetch).mockImplementation(async (_path, init) =>
+    init?.method ? Response.json({ draft: { revision: 2 } }) : read.promise,
+  );
+  const loaded = Promise.withResolvers<void>();
+  const { hook, restore, state } = mount({ text: '', images: [], contexts: [] });
+  restore.mockImplementation((saved) => {
+    state.draft = { ...saved, images: [] };
+    hook.rerender();
+    return loaded.promise.then(() => {
+      state.draft = { ...state.draft, images: saved.images };
+      hook.rerender();
+    });
+  });
+  state.draft = { ...state.draft, text: 'A' };
+  state.revision += 1;
+  hook.rerender();
+  await flushed();
+  read.resolve(Response.json({ draft: { text: 'old', contentBlocks: [attachment] }, revision: 1 }));
+  await waitFor(() => expect(restore).toHaveBeenCalled());
+  expect(state.draft.text).toBe('A');
+
+  state.draft = { ...state.draft, text: 'Ani' };
+  state.holdWrites = true;
+  state.revision += 1;
+  hook.rerender();
+  await flushed();
+  state.draft = { ...state.draft, text: 'A你好' };
+  state.holdWrites = false;
+  state.revision += 1;
+  hook.rerender();
+  await flushed();
+  expect(writes()).toEqual([]);
+
+  loaded.resolve();
+  await waitFor(() => expect(writes()).toHaveLength(1));
+  expect(writes()).toEqual([
+    [
+      'PUT',
+      '/api/threads/t1/composer-draft',
+      JSON.stringify({ expectedRevision: 1, text: 'A你好', contentBlocks: [attachment] }),
+    ],
+  ]);
+});
+
 it('flushes only the last committed draft when leaving during a composition', async () => {
   vi.mocked(apiFetch).mockImplementation(async (path) =>
     String(path).includes('/t2/')
