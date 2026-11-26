@@ -22,8 +22,8 @@ import {
 const REDIS_URL = process.env.REDIS_URL;
 const OWNER = 'f232-recent-boundary-owner';
 const THREADS = [
-  { id: 'thread-a', title: 'Thread A', createdBy: OWNER },
-  { id: 'thread-z', title: 'Thread Z', createdBy: OWNER },
+  { id: 'thread-a', title: 'Thread A', createdBy: OWNER, projectPath: '/target' },
+  { id: 'thread-z', title: 'Thread Z', createdBy: OWNER, projectPath: '/other' },
 ];
 const AUTH = { 'x-cat-cafe-user': OWNER };
 
@@ -33,7 +33,7 @@ describe('F232 recent works — bounded Redis boundaries', { skip: redisIsolatio
   let store;
   let hydratedRawMessages = 0;
 
-  const registerApp = async (artifactWorkLineage) => {
+  const registerApp = async (artifactWorkLineage, acceptedWorkspaceArtifacts) => {
     app = Fastify();
     await app.register(threadsRoutes, {
       threadStore: {
@@ -42,6 +42,7 @@ describe('F232 recent works — bounded Redis boundaries', { skip: redisIsolatio
         getThreadMemory: async () => null,
       },
       messageStore: store,
+      acceptedWorkspaceArtifacts,
       taskStore: { listByThread: async () => [] },
       artifactWorkLineage: {
         current: artifactWorkLineage ?? { resolve: async ({ artifacts }) => artifacts.map(() => undefined) },
@@ -108,10 +109,10 @@ describe('F232 recent works — bounded Redis boundaries', { skip: redisIsolatio
       ...overrides,
     });
 
-  const read = async () => {
+  const read = async (projectQuery = '') => {
     const response = await app.inject({
       method: 'GET',
-      url: '/api/artifacts?view=recent-works&limit=3',
+      url: `/api/artifacts?view=recent-works&limit=3${projectQuery}`,
       headers: AUTH,
     });
     assert.equal(response.statusCode, 200, response.body);
@@ -187,6 +188,85 @@ describe('F232 recent works — bounded Redis boundaries', { skip: redisIsolatio
     assert.ok(hydratedRawMessages <= 512, `raw hydration ${hydratedRawMessages} exceeds the 512-message budget`);
     assert.equal(result.complete, false);
     assert.deepEqual(result.artifacts, []);
+  });
+
+  it('reads the selected thread index, preserving gallery and applied-receipt fields', async () => {
+    const time = Date.now();
+    const gallery = await appendFile(time, 'unused.pdf', {
+      extra: {
+        rich: {
+          v: 1,
+          blocks: [
+            { kind: 'media_gallery', v: 1, id: 'target', items: [{ url: '/uploads/target.png', alt: 'target.png' }] },
+          ],
+        },
+      },
+    });
+    const receipt = await store.append({
+      userId: OWNER,
+      threadId: THREADS[0].id,
+      from: { kind: 'system', service: 'content-modification' },
+      replyTo: gallery.id,
+      timestamp: time + 1,
+      content: 'Applied workspace change',
+      mentions: [],
+      extra: {
+        systemKind: 'content_modification_receipt',
+        contentModificationReceiptV1: {
+          v: 1,
+          state: 'applied',
+          requestId: `f309-modification-${'a'.repeat(64)}`,
+          sourceMessageId: gallery.id,
+          targetCatId: 'codex61-sol',
+          taskId: 'workspace-task',
+          candidateRef: 'workspace-candidate',
+          receiptRef: 'workspace-receipt',
+          observedAt: time + 1,
+          followUp: { kind: 'none', reason: 'not_applicable' },
+        },
+      },
+    });
+    await appendFile(time + 2, 'foreign-system.pdf', {
+      userId: 'other-owner',
+      from: { kind: 'system', service: 'workspace-fixture' },
+    });
+    const receipts = [];
+    await app.close();
+    await registerApp(undefined, {
+      current: {
+        read: async ({ receipts: projected }) => {
+          receipts.push(...projected.map((item) => item.messageId));
+          return [];
+        },
+      },
+    });
+
+    let appended = 0;
+    const observed = [];
+    for (const backgroundCount of [511, 512, 600]) {
+      for (; appended < backgroundCount; appended += 1) {
+        await appendFile(time + 3 + appended, 'other-project.pdf', {
+          threadId: THREADS[1].id,
+          extra: {},
+        });
+      }
+      hydratedRawMessages = 0;
+      const result = await read('&projectId=%2Ftarget');
+      observed.push({
+        names: result.artifacts.map((work) => work.name),
+        complete: result.complete,
+        hydrated: hydratedRawMessages,
+      });
+    }
+    assert.deepEqual(
+      observed,
+      Array.from({ length: 3 }, () => ({
+        names: ['target.png'],
+        complete: true,
+        hydrated: 3,
+      })),
+    );
+    assert.deepEqual(receipts, [receipt.id, receipt.id, receipt.id]);
   });
 
   it('completes a same-timestamp group before applying cross-thread and publication tie order', async () => {
