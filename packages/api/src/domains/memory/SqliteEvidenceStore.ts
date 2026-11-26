@@ -1142,6 +1142,46 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       };
     }
 
+    // Two-stage fast-path protection (SIM-Q4): if Stage-1 metadata search already found
+    // at least one non-penalized active doc (or satisfied an explicit demoted-status query),
+    // skip passage_fts completely (~0 ms overhead, zero ranking perturbation). Only when
+    // Stage-1 missed or returned solely superseded/stale drafts, run a bounded native FTS5
+    // passage lookup to rescue out-of-distribution body-only active corrections.
+    const explicitDemotedStatus = Boolean(options?.status && TEMPORAL_DEMOTION_STATUSES.has(options.status));
+    const stage1Satisfied =
+      results.length > 0 && (explicitDemotedStatus || results.some((item) => !hasTemporalPenalty(item)));
+    const passageFallbackScopeAllowed =
+      !options?.scope || ['all', 'threads', 'docs', 'memory', 'sessions'].includes(options.scope);
+    if (!stage1Satisfied && passageFallbackScopeAllowed) {
+      const fallbackPool = Math.min(Math.max(limit * 4, 20), 100);
+      const fallbackPassages = this.searchPassages(trimmed, fallbackPool, {
+        dateFrom: options?.dateFrom,
+        dateTo: options?.dateTo,
+      });
+      if (fallbackPassages.length > 0) {
+        const candidateAnchors: string[] = [];
+        const anchorSeen = new Set<string>(seenAnchors);
+        for (const passage of fallbackPassages) {
+          if (threadAnchor && passage.docAnchor !== threadAnchor) continue;
+          if (!anchorSeen.has(passage.docAnchor)) {
+            anchorSeen.add(passage.docAnchor);
+            candidateAnchors.push(passage.docAnchor);
+          }
+        }
+        if (candidateAnchors.length > 0) {
+          const rowsByAnchor = this.selectEvidenceDocRowsByAnchor(candidateAnchors, options, filters);
+          for (const anchor of candidateAnchors) {
+            const row = rowsByAnchor.get(anchor);
+            if (!row) continue;
+            if (!seenAnchors.has(anchor)) {
+              results.push(rowToItem(row));
+              seenAnchors.add(anchor);
+            }
+          }
+        }
+      }
+    }
+
     // ── F163: Post-retrieval authority boost (fail-open: Task 11) ──
     try {
       applyAuthorityBoost(results, trimmed);

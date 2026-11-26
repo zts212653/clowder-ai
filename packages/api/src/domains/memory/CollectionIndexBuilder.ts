@@ -3,10 +3,13 @@ import { extractFrontmatter, extractSupersedes } from './CatCafeScanner.js';
 import type { CollectionManifest } from './collection-types.js';
 import { embedIndexedItems } from './embed-utils.js';
 import type { EvidenceItem, IEmbeddingService, RepoScanner, ScannedEvidence } from './interfaces.js';
+import { MARKDOWN_DOC_PASSAGE_PREFIX } from './MarkdownPassageIndexer.js';
+import { replaceDocumentPassages } from './replace-document-passages.js';
 import type { SecretFinding } from './SecretScanner.js';
 import { SecretScanner } from './SecretScanner.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import type { VectorStore } from './VectorStore.js';
+import { createVectorInvalidator } from './vector-invalidation.js';
 
 export interface CollectionRebuildResult {
   indexed: number;
@@ -117,8 +120,24 @@ export class CollectionIndexBuilder {
         authority: this.manifest.reviewPolicy.authorityCeiling,
       };
       await this.store.upsert([item]);
+      await this.syncDocumentPassages(item, scanned.passages);
       await this.refreshFrontmatterSupersedesEdges(item.anchor, scanned.rawContent);
     }
+  }
+
+  private hasMarkdownPassages(anchor: string): boolean {
+    const row = this.store
+      .getDb()
+      .prepare('SELECT 1 FROM evidence_passages WHERE doc_anchor = ? AND passage_id LIKE ? LIMIT 1')
+      .get(anchor, `${MARKDOWN_DOC_PASSAGE_PREFIX}%`);
+    return row !== undefined;
+  }
+
+  private async syncDocumentPassages(item: EvidenceItem, passages: string[]): Promise<void> {
+    await this.store.runExclusive(() => {
+      const db = this.store.getDb();
+      replaceDocumentPassages(db, [{ item, passages }], createVectorInvalidator(db, 'passage_vectors'));
+    });
   }
 
   private async indexResults(results: ScannedEvidence[], force: boolean) {
@@ -135,7 +154,12 @@ export class CollectionIndexBuilder {
 
       if (!force) {
         const existing = await this.store.getByAnchor(anchor);
-        if (existing?.sourceHash === hash && existing.authority === this.manifest.reviewPolicy.authorityCeiling) {
+        const passagesReady = result.passages.length === 0 || this.hasMarkdownPassages(anchor);
+        if (
+          existing?.sourceHash === hash &&
+          existing.authority === this.manifest.reviewPolicy.authorityCeiling &&
+          passagesReady
+        ) {
           skipped++;
           continue;
         }
@@ -148,6 +172,7 @@ export class CollectionIndexBuilder {
         authority: this.manifest.reviewPolicy.authorityCeiling,
       };
       await this.store.upsert([item]);
+      await this.syncDocumentPassages(item, result.passages);
       indexedItems.push(item);
       indexed++;
     }

@@ -4,6 +4,7 @@ import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { matchGlob } from './CatCafeScanner.js';
 import type { RepoScanner, ScannedEvidence } from './interfaces.js';
+import { buildMarkdownDocumentPassages, isMarkdownSeparator, stripYamlFrontmatter } from './MarkdownPassageIndexer.js';
 
 const SKIP_DIRS = new Set([
   'node_modules',
@@ -128,7 +129,7 @@ export class FlatScanner implements RepoScanner {
       },
       provenance: { tier: 'derived', source: rel },
       rawContent: content,
-      passages: [],
+      passages: buildMarkdownDocumentPassages(content),
     };
   }
 
@@ -152,11 +153,20 @@ function extractTitle(content: string): string | null {
   return content.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? null;
 }
 
+function isPureWikiLinkNavigation(text: string): boolean {
+  if (!text.includes('[[')) return false;
+  const remainder = text.replace(/\[\[[^\]\n]+\]\]/g, '').replace(/[\s·|•/\\,、\-–—]+/g, '');
+  return remainder.length === 0;
+}
+
 function extractSummary(content: string): string | null {
-  const afterTitle = content.replace(/^---[\s\S]*?---\s*/, '').replace(/^#.*$/m, '');
+  const afterTitle = stripYamlFrontmatter(content).replace(/^#.*$/m, '');
   const paragraphs = afterTitle.split(/\n\n+/).filter((p) => {
     const t = p.trim();
-    return t && !t.startsWith('#') && !t.startsWith('>') && !t.startsWith('|') && !t.startsWith('```');
+    if (!t) return false;
+    if (isMarkdownSeparator(t)) return false;
+    if (isPureWikiLinkNavigation(t)) return false;
+    return !t.startsWith('#') && !t.startsWith('>') && !t.startsWith('|') && !t.startsWith('```');
   });
   const first = paragraphs[0]?.trim().replace(/\n/g, ' ');
   if (!first) return null;
