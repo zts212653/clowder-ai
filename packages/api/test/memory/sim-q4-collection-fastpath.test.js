@@ -351,6 +351,58 @@ describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
     }
   });
 
+  it('P2-3b: already-seen partial Stage-1 candidate is promoted without duplicates when its body matches all terms', async () => {
+    const memStore = new SqliteEvidenceStore(':memory:');
+    await memStore.initialize();
+    try {
+      await memStore.upsert([
+        {
+          anchor: 'research:sim-q4:doc/weak-first',
+          kind: 'research',
+          status: 'active',
+          title: 'Heading mentions seenalpha',
+          summary: 'Unrelated overview without second token.',
+          updatedAt: '2026-11-26T03:00:00Z',
+        },
+        {
+          anchor: 'research:sim-q4:doc/correct',
+          kind: 'research',
+          status: 'active',
+          title: 'Unrelated title',
+          summary: 'Summary only mentions seenbeta.',
+          updatedAt: '2026-11-26T03:00:00Z',
+        },
+      ]);
+      memStore
+        .getDb()
+        .prepare(
+          'INSERT INTO evidence_passages (doc_anchor, passage_id, content, position, created_at) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run(
+          'research:sim-q4:doc/correct',
+          'md-0',
+          'Authoritative body section covers seenalpha and seenbeta together.',
+          0,
+          '2026-11-26T03:00:00Z',
+        );
+
+      const topOne = await memStore.search('seenalpha seenbeta', { limit: 1 });
+      assert.deepEqual(
+        topOne.map((r) => r.anchor),
+        ['research:sim-q4:doc/correct'],
+        'limit=1 must promote already-seen Stage-1 candidate whose body matches all terms',
+      );
+
+      const topFive = await memStore.search('seenalpha seenbeta', { limit: 5 });
+      const anchors = topFive.map((r) => r.anchor);
+      assert.equal(anchors[0], 'research:sim-q4:doc/correct');
+      assert.equal(new Set(anchors).size, anchors.length, 'promoted results must contain unique anchors only');
+      assert.deepEqual(anchors, ['research:sim-q4:doc/correct', 'research:sim-q4:doc/weak-first']);
+    } finally {
+      memStore.close();
+    }
+  });
+
   it('P1-1: failed passage replacement leaves source_hash incomplete so next rebuild retries and recovers', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'sim-q4-p1-retry-'));
     const file = join(dir, 'policy.md');

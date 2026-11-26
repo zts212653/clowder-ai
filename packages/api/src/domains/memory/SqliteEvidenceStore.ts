@@ -1217,12 +1217,28 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       const fallbackQueries = weakActiveFallback ? ftsQueries.slice(0, 1) : ftsQueries;
       const fallbackDocs = this.searchSummaryFallbackDocs(fallbackQueries, bm25Pool, options, filters);
       if (fallbackDocs.length > 0) {
-        const freshDocs = fallbackDocs.filter((item) => !seenAnchors.has(item.anchor));
-        for (const item of freshDocs) seenAnchors.add(item.anchor);
-        if (weakActiveFallback && freshDocs.length > 0) {
-          results.unshift(...freshDocs);
+        if (weakActiveFallback) {
+          // Promote all strict AND-all passage hits (including docs already seen via partial
+          // Stage-1 match) in fallback rank order while keeping anchors strictly unique.
+          const promotedAnchors = new Set<string>();
+          const promoted: EvidenceItem[] = [];
+          const existingByAnchor = new Map(results.map((item) => [item.anchor, item]));
+          for (const doc of fallbackDocs) {
+            if (promotedAnchors.has(doc.anchor)) continue;
+            promotedAnchors.add(doc.anchor);
+            promoted.push(existingByAnchor.get(doc.anchor) ?? doc);
+            seenAnchors.add(doc.anchor);
+          }
+          const remaining = results.filter((item) => !promotedAnchors.has(item.anchor));
+          results.length = 0;
+          results.push(...promoted, ...remaining);
         } else {
-          results.push(...freshDocs);
+          for (const item of fallbackDocs) {
+            if (!seenAnchors.has(item.anchor)) {
+              seenAnchors.add(item.anchor);
+              results.push(item);
+            }
+          }
         }
       }
     }
