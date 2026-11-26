@@ -346,7 +346,8 @@ function bindMembers() {
       form.carrier === 'acp' &&
       !form.acpAgentProvider &&
       form.acpCommand === 'dsh' &&
-      form.acpStartupArgs === '--profile acp'
+      form.acpStartupArgs === '--profile acp' &&
+      meta.runtimes.some((row) => row.dshDesktop && row.installed)
     );
   }
   function isDshDraft(state, runtime = selectedRuntime(state.form)) {
@@ -799,7 +800,7 @@ function bindMembers() {
         : memberPreferences(f, catalogState, runtime ? runtime.acpMaxDefault : client && client.acpMaxDefault),
       dshSetupError:
         catalogState?.request.dshDesktop && (catalogState.value?.message || catalogState.load === 'error')
-          ? tc('runtime.dshSetupError.' + (catalogState.load === 'error' ? 'default' : catalogState.value.message))
+          ? tcOr('runtime.dshSetupError.' + catalogState.value?.message, 'runtime.dshSetupError.default')
           : '',
       identityProtection: cat && cat.identityProtection,
       follow: canFollowAccount(f) && f.accountBindingMode === 'follow',

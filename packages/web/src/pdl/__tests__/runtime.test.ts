@@ -255,8 +255,16 @@ async function boot(
   };
   w.document.getAnimations = () => [];
   w.document.fonts = { ready: Promise.resolve() };
+  const context = dom.getInternalVMContext();
+  const appendToHead = w.document.head.appendChild.bind(w.document.head);
+  w.document.head.appendChild = (node: Node) => {
+    if (node.nodeName === 'STYLE') return node; // jsdom cannot parse the theme's browser CSS.
+    const appended = appendToHead(node);
+    if (node.nodeName === 'SCRIPT' && node.textContent) runInContext(node.textContent, context);
+    return appended;
+  };
   for (const source of scriptSources)
-    runInContext(readFileSync(path.join(process.cwd(), 'public', source), 'utf8'), dom.getInternalVMContext(), {
+    runInContext(readFileSync(path.join(process.cwd(), 'public', source), 'utf8'), context, {
       filename: source,
     });
   const terminals = new Map<
@@ -6616,7 +6624,7 @@ it('keeps context policy and reference audio in the current member draft until t
   }
 });
 
-it.each(['sys:1', 'sys:2'])('selects DeepSeek Harness and checks the saved binding in %s', async (theme) => {
+it.each(['sys:1', 'pkg:v2'])('selects DeepSeek Harness and checks the saved binding in %s', async (theme) => {
   const meta = {
     ...advancedMemberMetadata(),
     dshMembers: ['codex'],
@@ -6672,8 +6680,12 @@ it.each(['sys:1', 'sys:2'])('selects DeepSeek Harness and checks the saved bindi
     {},
     (port) => {
       const { action, get } = port;
-      port.get = async (path) =>
-        path === '/api/config/console-themes' ? { themes: { active: theme, customs: [] } } : get(path);
+      port.get = async (path) => {
+        if (path === '/api/config/console-themes') return { themes: { active: theme, customs: [] } };
+        if (path === '/api/accounts') return { providers: [] };
+        if (path.startsWith('/api/accounts/')) return { selection: { members: [] } };
+        return get(path);
+      };
       port.action = (name, args, element) => {
         calls(name, args, element);
         if (name === 'membersRead') return meta;
@@ -6689,11 +6701,12 @@ it.each(['sys:1', 'sys:2'])('selects DeepSeek Harness and checks the saved bindi
     },
   );
   try {
+    expect(w.eval('PACK_LOADED')).toBe(theme === 'pkg:v2' ? 'v2' : null);
     w.eval("go('memberNew')");
     await w.__settled();
     const client = () => w.document.getElementById('f-client') as HTMLSelectElement;
     expect([...client().options].map((option) => option.textContent)).toEqual(
-      expect.arrayContaining([expect.stringContaining('DeepSeek Harness'), 'ACP Client']),
+      expect.arrayContaining(['DeepSeek Harness（DSH Desktop）', 'ACP Client']),
     );
     client().value = 'dsh';
     client().dispatchEvent(new w.Event('change', { bubbles: true }));
@@ -6717,9 +6730,12 @@ it.each(['sys:1', 'sys:2'])('selects DeepSeek Harness and checks the saved bindi
     expect(w.eval('VM.member().form.d.acpArgs')).toBe(savedArgs.join(' '));
     const check = w.document.querySelector('[data-act="memberDshCheck"]') as HTMLButtonElement;
     expect(check).not.toBeNull();
+    const runtimeSection = () => w.document.getElementById('ms-runtime')?.textContent;
+    expect(runtimeSection()).toContain(w.eval("tc('runtime.dshCheck.unchecked')"));
     check.click();
     await w.__settled();
     expect(calls.mock.calls.find(([name]) => name === 'memberDshCheck')?.[1]).toMatchObject({ id: 'codex' });
+    expect(runtimeSection()).toContain(w.eval("tc('runtime.dshCheck.passed')"));
     w.eval("INPUTS.md({type:'input',target:{dataset:{k:'name'},value:'Renamed DSH'}})");
     await w.eval('FORMS.member()');
     const save = calls.mock.calls.find(([name]) => name === 'memberSave')?.[1];
@@ -6750,6 +6766,59 @@ it.each(['sys:1', 'sys:2'])('selects DeepSeek Harness and checks the saved bindi
     await w.__settled();
     const creation = calls.mock.calls.find(([name]) => name === 'nativeCreate')?.[1];
     expect(JSON.parse(creation?.value ?? '{}').creationForm).toMatchObject({ clientId: 'acp', acpCommand: command });
+  } finally {
+    dom.window.close();
+  }
+});
+
+it.each(['desktop error', 'CLI only'])('keeps DSH member setup usable with %s', async (scenario) => {
+  const meta = advancedMemberMetadata();
+  const cli = scenario === 'CLI only';
+  const command = cli ? 'dsh' : 'C:/DSH/resources/runtime/cli/bin/dsh.cmd';
+  const form = {
+    clientId: 'acp',
+    carrier: 'acp',
+    configurationSource: 'native_tool',
+    accountRef: '',
+    acpCommand: command,
+    acpStartupArgs: '--profile acp',
+    acpTransport: 'stdio',
+    cliConfigArgs: [],
+  };
+  const desktop = { id: 'dsh', label: 'DSH Desktop', dshDesktop: true, installed: !cli, models: [], form };
+  const runtime = cli ? { id: 'acp:dsh-cli', label: 'DSH CLI', installed: true, models: [], form } : desktop;
+  meta.runtimes = cli
+    ? [
+        { ...runtime, dshSetupSupported: true },
+        { ...desktop, form: { ...form, acpCommand: '' } },
+      ]
+    : [desktop];
+  const reads = vi.fn();
+  const { dom, w } = await boot(undefined, undefined, undefined, {}, (port) => {
+    const previous = port.action;
+    port.action = (name, args, element) => {
+      if (name === 'membersRead') return meta;
+      if (name === 'memberRuntimeModels') {
+        reads(JSON.parse(args.value));
+        return { status: 'unavailable', models: [], message: 'dsh_setup_unavailable' };
+      }
+      return previous(name, args, element);
+    };
+  });
+  try {
+    w.eval("go('memberNew')");
+    await w.__settled();
+    w.eval(`CHANGES.memberRuntime({target:{value:${JSON.stringify(runtime.id)}}})`);
+    await w.__settled();
+    if (cli) {
+      expect(w.document.getElementById('f-client').value).toBe('acp');
+      expect(w.document.querySelector('#ms-model [data-k="dsh-provider"]')).not.toBeNull();
+      expect(reads).toHaveBeenCalledWith(expect.objectContaining({ runtimeId: 'acp:dsh-cli' }));
+    } else {
+      const text = w.document.querySelector('#ms-model')?.textContent;
+      expect(text).toContain(w.eval("tc('runtime.dshSetupError.default')"));
+      expect(text).not.toContain('runtime.dshSetupError.');
+    }
   } finally {
     dom.window.close();
   }

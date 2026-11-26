@@ -6158,7 +6158,9 @@ pdl:
               title: t:wsSessions.runtime
               keep: true
               blocks:
-                - $frag: MEMBER_DSH_CHECK
+                - type: view
+                  id: member.runtime.dsh-check
+                  data: $.form.runtime
                 - type: component
                   use: v2SettingsFields
                   props:
@@ -6496,7 +6498,9 @@ pdl:
               title: t:wsSessions.runtime
               keep: true
               blocks:
-                - $frag: MEMBER_DSH_CHECK
+                - type: view
+                  id: member.runtime.dsh-check
+                  data: $.form.runtime
                 - type: component
                   use: v2SettingsFields
                   props:
