@@ -73,6 +73,10 @@ export function useServerComposerDraft(input: {
   /** Shows a saved draft in the input; what it returns settles once the input shows all of it (attachments are read back).
    *  `current` says whether the input still belongs to that conversation: what arrives after a switch is dropped. */
   restore: (draft: ComposerDraft, current: () => boolean) => void | Promise<unknown>;
+  /** IME is composing: keep the transient text, but no draft write/delete may persist uncommitted pinyin. */
+  holdWrites?: boolean;
+  /** Bumped for every composer edit, including composition input. A later edit wins over an older server restore. */
+  revision?: number;
 }) {
   const known = useRef<Known>(new Map());
   const pending = useRef<{ threadId: string; draft: ComposerDraft } | null>(null);
@@ -97,11 +101,13 @@ export function useServerComposerDraft(input: {
     );
   };
   const signature = JSON.stringify(input.draft);
+  const holdWrites = input.holdWrites === true;
   useEffect(() => {
     if (!enabled) return;
     let live = true;
     shown.current = null;
     const opened = JSON.stringify(latest.current.draft);
+    const openedRevision = latest.current.revision ?? 0;
     void apiFetch(draftPath(threadId))
       .then(async (response) => {
         if (!response.ok) return;
@@ -109,10 +115,10 @@ export function useServerComposerDraft(input: {
         if (!live) return;
         const saved = fromSaved(body.draft);
         known.current.set(threadId, { revision: body.revision, signature: JSON.stringify(saved) });
-        const now = latest.current.draft;
+        const { draft: now, holdWrites: wasComposing } = latest.current;
         // What the owner typed before the server answered stays; the server's attachments they haven't seen join it.
-        const merged =
-          opened === JSON.stringify(now) ? saved : mergeDraft(JSON.parse(opened) as ComposerDraft, now, saved);
+        const typedSinceOpen = openedRevision !== (latest.current.revision ?? 0) || opened !== JSON.stringify(now);
+        const merged = typedSinceOpen ? mergeDraft(JSON.parse(opened) as ComposerDraft, now, saved) : saved;
         if (JSON.stringify(now) !== JSON.stringify(merged)) {
           // A draft whose attachments can't be read back is as unknown as an unreachable one: nothing overwrites it.
           const ok = await Promise.resolve(latest.current.restore(merged, () => live)).then(
@@ -128,7 +134,11 @@ export function useServerComposerDraft(input: {
         if (!live) return;
         shown.current = threadId;
         // What the owner typed first is written at once, with the server's attachments it now carries.
-        if (JSON.stringify(merged) !== JSON.stringify(saved)) await saveDraft(threadId, merged, known.current, show);
+        // If attachments took longer than the composition, send the latest committed words with them.
+        const committed = wasComposing ? { ...merged, text: latest.current.draft.text } : merged;
+        if (!latest.current.holdWrites && JSON.stringify(committed) !== JSON.stringify(saved)) {
+          await saveDraft(threadId, committed, known.current, show);
+        }
       })
       // An unreachable draft leaves this tab's composer as it is; the next edit writes again.
       .catch(() => undefined);
@@ -139,7 +149,8 @@ export function useServerComposerDraft(input: {
   useEffect(() => {
     const server = known.current.get(threadId);
     // Nothing to write until the server's draft is known and shown, or while the composer shows exactly that draft.
-    if (!enabled || !server || shown.current !== threadId) return;
+    // Keep any previous committed edit queued while the native IME owns its candidate text.
+    if (!enabled || !server || shown.current !== threadId || holdWrites) return;
     if (server.signature === signature) {
       pending.current = null;
       return;
@@ -147,7 +158,7 @@ export function useServerComposerDraft(input: {
     pending.current = { threadId, draft: JSON.parse(signature) as ComposerDraft };
     const timer = setTimeout(() => flush(pending, known.current, show), 600);
     return () => clearTimeout(timer);
-  }, [threadId, enabled, signature]);
+  }, [threadId, enabled, signature, holdWrites]);
   useEffect(() => () => flush(pending, known.current, show), [threadId]);
   useEffect(() => {
     const leave = () => flush(pending, known.current, show, true);
@@ -169,6 +180,7 @@ function flush(
 ) {
   const waiting = pending.current;
   pending.current = null;
+  // Uncommitted IME text is not a draft; dropping the pending write keeps it out of the server on a switch/unload.
   if (waiting) void saveDraft(waiting.threadId, waiting.draft, known, show, keepalive).catch(() => undefined);
 }
 

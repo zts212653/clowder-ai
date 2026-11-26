@@ -370,8 +370,8 @@ function patchEl(live, next) {
   if (own && live.getAttribute('data-own') === own && OWN[own]) { syncAttrs(live, next); OWN[own](live, next); return true; }
   if (next.hasAttribute('data-kept') && live.getAttribute('data-view') === next.getAttribute('data-view')) return true;   /* 这次没重画的子视图（ctLeaf 交回上一次的结果）：整棵留着，不往里比 */
   /* 输入框的值以渲染为准（和整页重画一样）：输入时值已经写进状态、渲染又画回来，所以不同就是应用改了它（发送后清空、换了对话的草稿）；值一样就不碰（光标不动） */
-  if (live.tagName === 'TEXTAREA') { syncAttrs(live, next); const v = next.defaultValue; if (live.defaultValue !== v) live.defaultValue = v; if (live.value !== v) live.value = v; return true; }
-  if (live.tagName === 'INPUT') { syncAttrs(live, next); if (live.type === 'checkbox' || live.type === 'radio') { if (live.checked !== next.hasAttribute('checked')) live.checked = next.hasAttribute('checked'); } else if (live.type !== 'file' && live.value !== (next.getAttribute('value') || '')) live.value = next.getAttribute('value') || ''; return true; }
+  if (live.tagName === 'TEXTAREA') { syncAttrs(live, next); if (COMPOSING_FIELDS.has(live)) return true; const v = next.defaultValue; if (live.defaultValue !== v) live.defaultValue = v; if (live.value !== v) live.value = v; return true; }
+  if (live.tagName === 'INPUT') { syncAttrs(live, next); if (COMPOSING_FIELDS.has(live)) return true; if (live.type === 'checkbox' || live.type === 'radio') { if (live.checked !== next.hasAttribute('checked')) live.checked = next.hasAttribute('checked'); } else if (live.type !== 'file' && live.value !== (next.getAttribute('value') || '')) live.value = next.getAttribute('value') || ''; return true; }
   syncAttrs(live, next);
   patchKids(live, next);
   return true;
