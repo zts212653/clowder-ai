@@ -17,7 +17,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { debuglog, isDeepStrictEqual } from 'node:util';
 import { macProcessEnvironmentCommand } from '#process-environment-snapshot';
 import { persistCliExecutionStopEvidence } from './cli-execution-stop-evidence.js';
-import { CLI_PROCESS_OWNER_ENV } from './cli-process-environment.js';
+import { CLI_PROCESS_OWNER_ENV, processTableEnvironment } from './cli-process-environment.js';
 
 export { CLI_PROCESS_OWNER_ENV } from './cli-process-environment.js';
 export const CLI_EXECUTION_ID_ENV = 'CAT_CAFE_EXECUTION_ID';
@@ -366,6 +366,7 @@ export function readUnixProcessSnapshotSync(
   if (options.includeEnvironment) processDebug('ownership-process-table-scan');
   const result = spawnSync(command.file, command.args, {
     encoding: 'utf8',
+    env: processTableEnvironment(),
     timeout: CLI_PROCESS_SNAPSHOT_TIMEOUT_MS,
     maxBuffer: options.includeEnvironment ? 32 * 1024 * 1024 : 4 * 1024 * 1024,
   });
@@ -417,6 +418,7 @@ export function readUnixProcessSnapshot(
       command.args,
       {
         encoding: 'utf8',
+        env: processTableEnvironment(),
         timeout: CLI_PROCESS_SNAPSHOT_TIMEOUT_MS,
         maxBuffer: options.includeEnvironment ? 32 * 1024 * 1024 : 4 * 1024 * 1024,
       },

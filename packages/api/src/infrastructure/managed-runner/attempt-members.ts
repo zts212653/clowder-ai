@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { processTableEnvironment } from '../../utils/cli-process-environment.js';
 import type { UnixProcessIdentity } from '../../utils/cli-process-ownership.js';
 
 /** A previously proven member cannot escape cleanup merely by disappearing from the environment census. */
@@ -12,7 +13,7 @@ export function retainLiveManagedAttemptMembers(
     execFile(
       '/bin/ps',
       ['-p', [...known.keys()].join(','), '-o', 'pid=,lstart=,stat='],
-      { encoding: 'utf8', timeout: 2000, maxBuffer: 1024 * 1024 },
+      { encoding: 'utf8', env: processTableEnvironment(), timeout: 2000, maxBuffer: 1024 * 1024 },
       (error, stdout, stderr) => {
         if (error && !(error.code === 1 && !stdout.trim() && !stderr.trim())) return resolve(null);
         if (stderr.trim()) return resolve(null);
