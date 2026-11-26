@@ -144,6 +144,34 @@ async function bootConsole(
 
 describe('#2067 follow-up fixes across default and v2 themes', () => {
   for (const themeId of ['default', 'v2'] as const) {
+    it(`dispatches each attachment close button to its Host file index (${themeId})`, async () => {
+      const { dom, w, actions } = await bootConsole(themeId, {
+        configure: (data) => {
+          data.images = [
+            new File(['first'], 'first.png', { type: 'image/png' }),
+            new File(['second'], 'second.png', { type: 'image/png' }),
+          ];
+        },
+      });
+      try {
+        const document: Document = w.document;
+        const previews = [...document.querySelectorAll('[data-act="draftAttachment"]')];
+        expect(previews).toHaveLength(2);
+        const closeButtons = previews.map(
+          (preview) => preview.parentElement!.querySelector<HTMLButtonElement>('button:last-child')!,
+        );
+        for (const close of closeButtons) {
+          expect(close.dataset.act).not.toBe('draftAttachment');
+          close.click();
+        }
+        await w.__settled();
+        expect(actions.filter(({ name }) => name === 'removeImage').map(({ args }) => Number(args.id))).toEqual([0, 1]);
+      } finally {
+        await w.__settled();
+        dom.window.close();
+      }
+    });
+
     it(`preserves new-conversation title input and pin toggle feedback (${themeId})`, async () => {
       const { w, evalIn, actions } = await bootConsole(themeId, { threadId: 'default' });
       evalIn(`S.route='home';render(false);`);

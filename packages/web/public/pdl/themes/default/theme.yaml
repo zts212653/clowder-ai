@@ -16664,11 +16664,10 @@ pdl:
                             lost: cafe-att lost
                             _: cafe-att
                         x:
-                          act: listOp
+                          act: remove
                           args:
-                            path: cs.att
-                            op: del
-                            i: "@index"
+                            entity: att
+                            id: "@index"
                           label:
                             t: chip.remove
                             args:
