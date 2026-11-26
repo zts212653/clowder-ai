@@ -833,6 +833,48 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     return new Map(rows.map((row) => [row.anchor, row]));
   }
 
+  /**
+   * Native FTS5 passage fallback for default summary search (SIM-Q4):
+   * Joins parent evidence_docs BEFORE GROUP BY / LIMIT so parent filters (status, kind,
+   * scope, world/scene, activation, d.updated_at) and per-doc deduplication never suffer
+   * candidate pool starvation or passage created_at mismatch.
+   */
+  private searchSummaryFallbackDocs(
+    ftsQueries: string[],
+    limit: number,
+    options: SearchOptions | undefined,
+    filters: SearchFilterContext,
+  ): EvidenceItem[] {
+    if (!this.db || ftsQueries.length === 0) return [];
+    for (const ftsQuery of ftsQueries) {
+      try {
+        const params: unknown[] = [ftsQuery];
+        let inner = `
+          SELECT d.anchor AS anchor, MIN(f.rank) AS best_rank
+          FROM passage_fts f
+          JOIN evidence_passages p ON p.rowid = f.rowid
+          JOIN evidence_docs d ON d.anchor = p.doc_anchor
+          WHERE passage_fts MATCH ?`;
+        inner = this.appendEvidenceDocFilters(inner, params, options, filters, 'd.');
+        inner += ` GROUP BY d.anchor ORDER BY ${temporalPenaltySql('d')}, best_rank LIMIT ?`;
+        params.push(limit);
+        const sql = `
+          WITH matched AS (${inner})
+          SELECT d.*
+          FROM matched m
+          JOIN evidence_docs d ON d.anchor = m.anchor
+          ORDER BY ${temporalPenaltySql('d')}, m.best_rank`;
+        const rows = this.db.prepare(sql).all(...params) as RowShape[];
+        if (rows.length > 0) {
+          return rows.map((row) => rowToItem(row));
+        }
+      } catch {
+        // invalid FTS syntax at this relaxation level — try next
+      }
+    }
+    return [];
+  }
+
   async searchWithMeta(query: string, options?: SearchOptions): Promise<EvidenceSearchExecution> {
     this.ensureOpen();
     if (this.usesIsolatedProcesses()) {
@@ -950,8 +992,11 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     // ── FTS5 full-text search ────────────────────────────────────────
     // HW-6: Progressive relaxation — try AND-all first, then relax to OR
     const ftsQueries = buildProgressiveFtsQueries(trimmed);
+    const explicitDemotedStatus = Boolean(options?.status && TEMPORAL_DEMOTION_STATUSES.has(options.status));
+    let stage1MatchedStrictFts = false;
 
-    for (const ftsQuery of ftsQueries) {
+    for (let ftsIndex = 0; ftsIndex < ftsQueries.length; ftsIndex++) {
+      const ftsQuery = ftsQueries[ftsIndex]!;
       try {
         let sql = `
 					SELECT d.*, bm25(evidence_fts, 5.0, 1.0, 2.0) AS rank
@@ -1020,8 +1065,12 @@ export class SqliteEvidenceStore implements IEvidenceStore {
 
         const rows = this.db?.prepare(sql).all(...params) as RowShape[];
         for (const row of rows) {
+          const item = rowToItem(row);
+          if (ftsIndex === 0 && (explicitDemotedStatus || !hasTemporalPenalty(item))) {
+            stage1MatchedStrictFts = true;
+          }
           if (!seenAnchors.has(row.anchor)) {
-            results.push(rowToItem(row));
+            results.push(item);
             seenAnchors.add(row.anchor);
           }
         }
@@ -1142,42 +1191,38 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       };
     }
 
-    // Two-stage fast-path protection (SIM-Q4): if Stage-1 metadata search already found
-    // at least one non-penalized active doc (or satisfied an explicit demoted-status query),
-    // skip passage_fts completely (~0 ms overhead, zero ranking perturbation). Only when
-    // Stage-1 missed or returned solely superseded/stale drafts, run a bounded native FTS5
-    // passage lookup to rescue out-of-distribution body-only active corrections.
-    const explicitDemotedStatus = Boolean(options?.status && TEMPORAL_DEMOTION_STATUSES.has(options.status));
-    const stage1Satisfied =
-      results.length > 0 && (explicitDemotedStatus || results.some((item) => !hasTemporalPenalty(item)));
+    // Two-stage fast-path protection (SIM-Q4):
+    // - If Stage-1 already found a strong qualifying hit (exact anchor, strict AND-all FTS,
+    //   single-term active hit, or all-terms metadata coverage), skip passage_fts completely
+    //   (zero passage SQL, zero ranking perturbation).
+    // - If Stage-1 missed or returned only superseded/stale drafts, run progressive native FTS5
+    //   on passage_fts joined/filtered/deduped by parent evidence_docs (respecting d.updated_at).
+    // - If Stage-1 only had a weak single-term OR hit on a multi-term query, run only the strict
+    //   AND-all passage FTS query and prepend stronger all-terms body hits ahead of weak hits.
+    const isQualifyingStage1 = (item: EvidenceItem) => explicitDemotedStatus || !hasTemporalPenalty(item);
+    const qualifyingStage1Hits = results.filter(isQualifyingStage1);
+    const stage1Strong =
+      qualifyingStage1Hits.length > 0 &&
+      (Boolean(exactRow && isQualifyingStage1(rowToItem(exactRow))) ||
+        stage1MatchedStrictFts ||
+        lexicalBackfillWords.length <= 1 ||
+        qualifyingStage1Hits.some((item) => {
+          const haystack = `${item.title} ${item.summary ?? ''} ${(item.keywords ?? []).join(' ')}`.toLowerCase();
+          return lexicalBackfillWords.every((word) => haystack.includes(word));
+        }));
     const passageFallbackScopeAllowed =
       !options?.scope || ['all', 'threads', 'docs', 'memory', 'sessions'].includes(options.scope);
-    if (!stage1Satisfied && passageFallbackScopeAllowed) {
-      const fallbackPool = Math.min(Math.max(limit * 4, 20), 100);
-      const fallbackPassages = this.searchPassages(trimmed, fallbackPool, {
-        dateFrom: options?.dateFrom,
-        dateTo: options?.dateTo,
-      });
-      if (fallbackPassages.length > 0) {
-        const candidateAnchors: string[] = [];
-        const anchorSeen = new Set<string>(seenAnchors);
-        for (const passage of fallbackPassages) {
-          if (threadAnchor && passage.docAnchor !== threadAnchor) continue;
-          if (!anchorSeen.has(passage.docAnchor)) {
-            anchorSeen.add(passage.docAnchor);
-            candidateAnchors.push(passage.docAnchor);
-          }
-        }
-        if (candidateAnchors.length > 0) {
-          const rowsByAnchor = this.selectEvidenceDocRowsByAnchor(candidateAnchors, options, filters);
-          for (const anchor of candidateAnchors) {
-            const row = rowsByAnchor.get(anchor);
-            if (!row) continue;
-            if (!seenAnchors.has(anchor)) {
-              results.push(rowToItem(row));
-              seenAnchors.add(anchor);
-            }
-          }
+    if (!stage1Strong && passageFallbackScopeAllowed && ftsQueries.length > 0) {
+      const weakActiveFallback = qualifyingStage1Hits.length > 0;
+      const fallbackQueries = weakActiveFallback ? ftsQueries.slice(0, 1) : ftsQueries;
+      const fallbackDocs = this.searchSummaryFallbackDocs(fallbackQueries, bm25Pool, options, filters);
+      if (fallbackDocs.length > 0) {
+        const freshDocs = fallbackDocs.filter((item) => !seenAnchors.has(item.anchor));
+        for (const item of freshDocs) seenAnchors.add(item.anchor);
+        if (weakActiveFallback && freshDocs.length > 0) {
+          results.unshift(...freshDocs);
+        } else {
+          results.push(...freshDocs);
         }
       }
     }

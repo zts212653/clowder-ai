@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
-describe('SIM-Q4 restrained collection fast-path & cross-lane invalidation', () => {
+describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
   let CollectionIndexBuilder;
   let FlatScanner;
   let StructuredScanner;
@@ -111,8 +112,6 @@ describe('SIM-Q4 restrained collection fast-path & cross-lane invalidation', () 
         'This deprecated proposal uses legacy_m1a_protocol.',
       ].join('\n'),
     );
-    // Out-of-distribution normal doc: NO hand-stuffed topics, NO mention in title/summary —
-    // correction appears ONLY in body Section 2.
     writeFileSync(
       join(dir, 'active-correction.md'),
       [
@@ -131,15 +130,12 @@ describe('SIM-Q4 restrained collection fast-path & cross-lane invalidation', () 
     );
 
     const manifest = makeManifest(dir);
-    const scanner = new StructuredScanner(manifest.id);
-    const builder = new CollectionIndexBuilder(store, manifest, scanner);
+    const builder = new CollectionIndexBuilder(store, manifest, new StructuredScanner(manifest.id));
     await builder.rebuild();
 
-    // Verify passages were persisted
     const passageCount = store.getDb().prepare('SELECT count(*) AS n FROM evidence_passages').get().n;
     assert.ok(passageCount >= 2, `expected persisted passages, got ${passageCount}`);
 
-    // Default depth='summary' search (no depth:'raw'!) must find active correction ahead of superseded draft
     const results = await store.search('legacy_m1a_protocol', { limit: 5 });
     assert.ok(results.length >= 2, `expected both active and superseded docs, got ${results.map((r) => r.anchor)}`);
     assert.equal(
@@ -156,104 +152,276 @@ describe('SIM-Q4 restrained collection fast-path & cross-lane invalidation', () 
     );
   });
 
-  it('Knife 2b: fast-path protection does not invoke passage fallback or perturb ranking when Stage-1 has active hits', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'sim-q4-k2-fast-'));
-    writeFileSync(
-      join(dir, 'canonical-plan.md'),
-      [
-        '---',
-        'title: Canonical Backlog Plan',
-        'status: active',
-        '---',
-        '# Canonical Backlog Plan',
-        '',
-        'Authoritative master plan for alpha_fastpath_token.',
-      ].join('\n'),
-    );
-    writeFileSync(
-      join(dir, 'tangential-notes.md'),
-      [
-        '---',
-        'title: Unrelated Meeting Notes',
-        'status: active',
-        '---',
-        '# Unrelated Meeting Notes',
-        '',
-        'Weekly logistics.',
-        '',
-        '## Side Remark',
-        '',
-        'Mentioned alpha_fastpath_token alpha_fastpath_token alpha_fastpath_token in passing.',
-      ].join('\n'),
-    );
+  it('Knife 2b (P2-4): in-process paired SQL spy proves fast-path touches 0 passage SQL while body-only fallback touches passage_fts', async () => {
+    const memStore = new SqliteEvidenceStore(':memory:');
+    await memStore.initialize();
+    try {
+      assert.equal(memStore.usesIsolatedProcesses(), false, 'must observe SQL inside the same process');
+      const dir = mkdtempSync(join(tmpdir(), 'sim-q4-k2-fast-'));
+      writeFileSync(
+        join(dir, 'canonical-plan.md'),
+        [
+          '---',
+          'title: Canonical Backlog Plan',
+          'status: active',
+          '---',
+          '# Canonical Backlog Plan',
+          '',
+          'Authoritative master plan for alpha_fastpath_token.',
+        ].join('\n'),
+      );
+      writeFileSync(
+        join(dir, 'tangential-notes.md'),
+        [
+          '---',
+          'title: Unrelated Meeting Notes',
+          'status: active',
+          '---',
+          '# Unrelated Meeting Notes',
+          '',
+          'Weekly logistics.',
+          '',
+          '## Side Remark',
+          '',
+          'Mentioned alpha_fastpath_token alpha_fastpath_token and deep_only_positive_control in passing.',
+        ].join('\n'),
+      );
+
+      const manifest = makeManifest(dir);
+      const builder = new CollectionIndexBuilder(memStore, manifest, new StructuredScanner(manifest.id));
+      await builder.rebuild();
+
+      let passageSqlCount = 0;
+      const db = memStore.getDb();
+      const origPrepare = db.prepare.bind(db);
+      db.prepare = (sql, ...rest) => {
+        if (typeof sql === 'string' && /passage_fts|evidence_passages/i.test(sql)) {
+          passageSqlCount++;
+        }
+        return origPrepare(sql, ...rest);
+      };
+
+      // Positive control 1: strong Stage-1 metadata hit must execute 0 passage SQL queries
+      const fastResults = await memStore.search('alpha_fastpath_token', { limit: 5 });
+      const fastSqlCount = passageSqlCount;
+      assert.equal(fastSqlCount, 0, 'Stage-2 passage SQL must NOT execute when Stage-1 has a strong active hit');
+      assert.deepEqual(
+        fastResults.map((r) => r.anchor),
+        ['research:sim-q4:doc/canonical-plan'],
+      );
+
+      // Positive control 2: body-only query MUST execute passage_fts SQL and find the target doc
+      const deepResults = await memStore.search('deep_only_positive_control', { limit: 5 });
+      const deepSqlCount = passageSqlCount - fastSqlCount;
+      assert.ok(deepSqlCount > 0, `body-only fallback must query passage_fts (got ${deepSqlCount})`);
+      assert.deepEqual(
+        deepResults.map((r) => r.anchor),
+        ['research:sim-q4:doc/tangential-notes'],
+      );
+    } finally {
+      memStore.close();
+    }
+  });
+
+  it('P2-1: filtered Stage-2 fallback avoids pool starvation when >20 archived passages match the query', async () => {
+    const memStore = new SqliteEvidenceStore(':memory:');
+    await memStore.initialize();
+    try {
+      const q = 'starvation_guard_needle';
+      await memStore.upsert([
+        {
+          anchor: 'research:sim-q4:doc/distractor',
+          kind: 'research',
+          status: 'archived',
+          title: 'Archived Noise',
+          summary: 'Unrelated overview.',
+          updatedAt: '2026-11-26T03:00:00Z',
+        },
+        {
+          anchor: 'research:sim-q4:doc/target',
+          kind: 'research',
+          status: 'active',
+          title: 'Active Target',
+          summary: 'Unrelated overview.',
+          updatedAt: '2026-11-26T03:00:00Z',
+        },
+      ]);
+      const insert = memStore
+        .getDb()
+        .prepare(
+          'INSERT INTO evidence_passages (doc_anchor, passage_id, content, position, created_at) VALUES (?, ?, ?, ?, ?)',
+        );
+      for (let i = 0; i < 25; i++) {
+        insert.run('research:sim-q4:doc/distractor', `md-${i}`, q, i, '2026-11-26T03:00:00Z');
+      }
+      insert.run('research:sim-q4:doc/target', 'md-0', `${q} ${'padding '.repeat(80)}`, 0, '2026-11-26T03:00:00Z');
+
+      const activeOnly = await memStore.search(q, { status: 'active', limit: 1 });
+      assert.deepEqual(
+        activeOnly.map((r) => r.anchor),
+        ['research:sim-q4:doc/target'],
+        'archived distractor passages must not starve active doc in bounded pool',
+      );
+    } finally {
+      memStore.close();
+    }
+  });
+
+  it('P2-2: default summary fallback filters by parent updated_at rather than unchanged passage created_at', async () => {
+    const memStore = new SqliteEvidenceStore(':memory:');
+    await memStore.initialize();
+    try {
+      await memStore.upsert([
+        {
+          anchor: 'research:sim-q4:doc/updated-parent',
+          kind: 'research',
+          status: 'active',
+          title: 'Updated Parent',
+          summary: 'Summary changed today.',
+          updatedAt: '2026-11-26T03:00:00Z',
+        },
+      ]);
+      memStore
+        .getDb()
+        .prepare(
+          'INSERT INTO evidence_passages (doc_anchor, passage_id, content, position, created_at) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run(
+          'research:sim-q4:doc/updated-parent',
+          'md-0',
+          'Body retains older_created_body_needle from earlier revision.',
+          0,
+          '2026-11-01T03:00:00Z',
+        );
+
+      const hits = await memStore.search('older_created_body_needle', { dateFrom: '2026-11-20', limit: 5 });
+      assert.deepEqual(
+        hits.map((r) => r.anchor),
+        ['research:sim-q4:doc/updated-parent'],
+        'parent updated_at within dateFrom must not be excluded by older passage created_at',
+      );
+    } finally {
+      memStore.close();
+    }
+  });
+
+  it('P2-3: weak single-term OR metadata hit does not suppress stronger all-terms body hit', async () => {
+    const memStore = new SqliteEvidenceStore(':memory:');
+    await memStore.initialize();
+    try {
+      await memStore.upsert([
+        {
+          anchor: 'research:sim-q4:doc/weak',
+          kind: 'research',
+          status: 'active',
+          title: 'Weak Doc',
+          summary: 'Incidental mention of weaktermalpha only.',
+          updatedAt: '2026-11-26T03:00:00Z',
+        },
+        {
+          anchor: 'research:sim-q4:doc/strong',
+          kind: 'research',
+          status: 'active',
+          title: 'Strong Body Doc',
+          summary: 'Unrelated overview.',
+          updatedAt: '2026-11-26T03:00:00Z',
+        },
+      ]);
+      memStore
+        .getDb()
+        .prepare(
+          'INSERT INTO evidence_passages (doc_anchor, passage_id, content, position, created_at) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run(
+          'research:sim-q4:doc/strong',
+          'md-0',
+          'Full correction covering both weaktermalpha and weaktermbeta together.',
+          0,
+          '2026-11-26T03:00:00Z',
+        );
+
+      const results = await memStore.search('weaktermalpha weaktermbeta', { limit: 5 });
+      assert.equal(
+        results[0]?.anchor,
+        'research:sim-q4:doc/strong',
+        'all-terms body match must outrank single-term OR metadata hit',
+      );
+    } finally {
+      memStore.close();
+    }
+  });
+
+  it('P1-1: failed passage replacement leaves source_hash incomplete so next rebuild retries and recovers', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sim-q4-p1-retry-'));
+    const file = join(dir, 'policy.md');
+    const makeDoc = (word) => `# Policy\n\nStable overview.\n\n## Rule\n\n${word}\n`;
+    writeFileSync(file, makeDoc('atomic_old_claim'));
 
     const manifest = makeManifest(dir);
     const builder = new CollectionIndexBuilder(store, manifest, new StructuredScanner(manifest.id));
     await builder.rebuild();
 
-    let passageCalls = 0;
-    const origSearchPassages = store.searchPassages.bind(store);
-    store.searchPassages = (...args) => {
-      passageCalls++;
-      return origSearchPassages(...args);
-    };
+    const updatedText = makeDoc('atomic_new_claim');
+    writeFileSync(file, updatedText);
+    store
+      .getDb()
+      .exec(
+        "CREATE TRIGGER fail_new_passage BEFORE INSERT ON evidence_passages WHEN new.content LIKE '%atomic_new_claim%' BEGIN SELECT RAISE(ABORT, 'injected passage failure'); END",
+      );
 
-    const results = await store.search('alpha_fastpath_token', { limit: 5 });
-    assert.equal(passageCalls, 0, 'Stage-2 passage search must NOT run when Stage-1 already found an active hit');
+    await assert.rejects(() => builder.rebuild(), /injected passage failure/);
+    store.getDb().exec('DROP TRIGGER fail_new_passage');
+
+    const incompleteDoc = await store.getByAnchor('research:sim-q4:doc/policy');
+    assert.notEqual(
+      incompleteDoc?.sourceHash,
+      createHash('sha256').update(updatedText).digest('hex'),
+      'source_hash must not claim completion when passage replacement failed',
+    );
+
+    const retry = await builder.rebuild();
+    assert.equal(retry.indexed, 1, 'next rebuild must retry and re-index incomplete document');
+    assert.equal(retry.skipped, 0);
+    assert.deepEqual(await store.search('atomic_old_claim', { limit: 5 }), []);
+    const recovered = await store.search('atomic_new_claim', { limit: 5 });
     assert.deepEqual(
-      results.map((r) => r.anchor),
-      ['research:sim-q4:doc/canonical-plan'],
+      recovered.map((r) => r.anchor),
+      ['research:sim-q4:doc/policy'],
     );
   });
 
-  it('Knife 2c: zero-hit Stage-1 falls back to native FTS5 passages while respecting scope and status filters', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'sim-q4-k2-zero-'));
-    writeFileSync(
-      join(dir, 'deep-active.md'),
-      [
-        '---',
-        'title: Deep Active Guide',
-        'status: active',
-        '---',
-        '# Deep Active Guide',
-        '',
-        'High-level overview.',
-        '',
-        '## Deep Section',
-        '',
-        'Unique deep phrase obsidian_backfill_needle lives only in section two.',
-      ].join('\n'),
-    );
-    writeFileSync(
-      join(dir, 'deep-archived.md'),
-      [
-        '---',
-        'title: Deep Archived Guide',
-        'status: archived',
-        '---',
-        '# Deep Archived Guide',
-        '',
-        'Old overview.',
-        '',
-        '## Deep Section',
-        '',
-        'Archived copy also mentions obsidian_backfill_needle.',
-      ].join('\n'),
-    );
+  it('P1-2: incrementalUpdate enforces SecretScanner fail-closed gate before persisting body passages', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sim-q4-p1-secret-'));
+    const file = join(dir, 'policy.md');
+    writeFileSync(file, '# Policy\n\nStable overview.\n\n## Rule\n\nSafe body text.\n');
 
     const manifest = makeManifest(dir);
     const builder = new CollectionIndexBuilder(store, manifest, new StructuredScanner(manifest.id));
     await builder.rebuild();
 
-    const activeOnly = await store.search('obsidian_backfill_needle', { status: 'active', limit: 5 });
-    assert.deepEqual(
-      activeOnly.map((r) => r.anchor),
-      ['research:sim-q4:doc/deep-active'],
+    // Synthetic PEM header marker only (not a real key), placed in body below summary
+    writeFileSync(
+      file,
+      '# Policy\n\nStable overview.\n\n## Rule\n\n-----BEGIN PRIVATE KEY-----\nsynthetic_incremental_secret_marker\n',
+    );
+
+    await assert.rejects(() => builder.incrementalUpdate([file]), /blocked by SecretScanner/);
+
+    const leakedPassages = store
+      .getDb()
+      .prepare("SELECT count(*) AS n FROM evidence_passages WHERE content LIKE '%synthetic_incremental_secret_marker%'")
+      .get().n;
+    assert.equal(leakedPassages, 0, 'blocked incrementalUpdate must not persist secret passages');
+    assert.deepEqual(await store.search('synthetic_incremental_secret_marker', { limit: 5 }), []);
+    assert.equal(
+      await store.getByAnchor('research:sim-q4:doc/policy'),
+      null,
+      'fail-closed secret gate must purge collection entries consistently with rebuild()',
     );
   });
 
-  it('Knife 3 (G6-4): cross-lane correction and forgetting immediately invalidate both doc and passage indexes', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'sim-q4-g64-'));
+  it('External collection passage lifecycle: edit via incrementalUpdate and delete via rebuild invalidate doc and passage indexes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sim-q4-lifecycle-'));
     const file = join(dir, 'living-policy.md');
     writeFileSync(
       file,
@@ -276,12 +444,10 @@ describe('SIM-Q4 restrained collection fast-path & cross-lane invalidation', () 
     const builder = new CollectionIndexBuilder(store, manifest, new StructuredScanner(manifest.id));
     await builder.rebuild();
 
-    // Before correction: body-only old claim is discoverable via default search
     const before = await store.search('legacy_budget_claim_71pct', { limit: 5 });
     assert.equal(before.length, 1);
     assert.equal(before[0].anchor, 'research:sim-q4:doc/living-policy');
 
-    // Step A: Edit/correct file via incrementalUpdate -> old body claim must disappear immediately
     writeFileSync(
       file,
       [
@@ -300,24 +466,26 @@ describe('SIM-Q4 restrained collection fast-path & cross-lane invalidation', () 
     );
     await builder.incrementalUpdate([file]);
 
-    const staleAfterEdit = await store.search('legacy_budget_claim_71pct', { limit: 5 });
-    assert.deepEqual(staleAfterEdit, [], 'corrected old passage text must not survive incrementalUpdate');
+    assert.deepEqual(
+      await store.search('legacy_budget_claim_71pct', { limit: 5 }),
+      [],
+      'corrected old passage text must not survive incrementalUpdate',
+    );
     const freshAfterEdit = await store.search('verified_budget_claim_v2', { limit: 5 });
-    assert.equal(freshAfterEdit.length, 1);
-    assert.equal(freshAfterEdit[0].anchor, 'research:sim-q4:doc/living-policy');
+    assert.deepEqual(
+      freshAfterEdit.map((r) => r.anchor),
+      ['research:sim-q4:doc/living-policy'],
+    );
 
-    // Step B: Forget/delete file and rebuild -> both doc and passage indexes must be completely empty
     unlinkSync(file);
     await builder.rebuild();
 
-    const afterDeleteSummary = await store.search('verified_budget_claim_v2', { limit: 5 });
-    const afterDeleteRaw = await store.search('verified_budget_claim_v2', { depth: 'raw', limit: 5 });
-    assert.deepEqual(afterDeleteSummary, []);
-    assert.deepEqual(afterDeleteRaw, []);
+    assert.deepEqual(await store.search('verified_budget_claim_v2', { limit: 5 }), []);
+    assert.deepEqual(await store.search('verified_budget_claim_v2', { depth: 'raw', limit: 5 }), []);
     const remainingPassages = store
       .getDb()
       .prepare('SELECT count(*) AS n FROM evidence_passages WHERE doc_anchor = ?')
       .get('research:sim-q4:doc/living-policy').n;
-    assert.equal(remainingPassages, 0, 'forgotten document must leave 0 orphan passages');
+    assert.equal(remainingPassages, 0, 'removed external document must leave 0 orphan passages');
   });
 });

@@ -104,14 +104,30 @@ export class CollectionIndexBuilder {
   }
 
   async incrementalUpdate(changedPaths: string[]): Promise<void> {
-    const now = new Date().toISOString();
+    if (!('parseSingle' in this.scanner && typeof this.scanner.parseSingle === 'function')) return;
+    const parseSingle = (
+      this.scanner as { parseSingle(f: string, r: string): ScannedEvidence | null }
+    ).parseSingle.bind(this.scanner);
+    const scannedEntries: ScannedEvidence[] = [];
     for (const filePath of changedPaths) {
-      if (!('parseSingle' in this.scanner && typeof this.scanner.parseSingle === 'function')) continue;
-      const scanned = (this.scanner as { parseSingle(f: string, r: string): ScannedEvidence | null }).parseSingle(
-        filePath,
-        this.manifest.root,
+      const scanned = parseSingle(filePath, this.manifest.root);
+      if (scanned) scannedEntries.push(scanned);
+    }
+    if (scannedEntries.length === 0) return;
+
+    // Mirror rebuild()'s fail-closed SecretScanner gate before persisting metadata or body passages.
+    const { findings } = SecretScanner.scanBatch(
+      scannedEntries.map((r) => ({ path: r.item.sourcePath ?? r.item.anchor, content: r.rawContent })),
+    );
+    if (findings.length > 0) {
+      await this.purgeCollection();
+      throw new Error(
+        `Collection ${this.manifest.id} incremental update blocked by SecretScanner (${findings.length} finding(s))`,
       );
-      if (!scanned) continue;
+    }
+
+    const now = new Date().toISOString();
+    for (const scanned of scannedEntries) {
       const hash = createHash('sha256').update(scanned.rawContent).digest('hex');
       const item: EvidenceItem = {
         ...scanned.item,
@@ -119,8 +135,7 @@ export class CollectionIndexBuilder {
         updatedAt: now,
         authority: this.manifest.reviewPolicy.authorityCeiling,
       };
-      await this.store.upsert([item]);
-      await this.syncDocumentPassages(item, scanned.passages);
+      await this.publishDocumentWithPassages(item, scanned.passages);
       await this.refreshFrontmatterSupersedesEdges(item.anchor, scanned.rawContent);
     }
   }
@@ -133,10 +148,20 @@ export class CollectionIndexBuilder {
     return row !== undefined;
   }
 
-  private async syncDocumentPassages(item: EvidenceItem, passages: string[]): Promise<void> {
+  private async publishDocumentWithPassages(item: EvidenceItem, passages: string[]): Promise<void> {
+    // Persist metadata with an incomplete sourceHash stamp first; commit the final sourceHash
+    // only inside the same atomic SQLite transaction that replaces passages. Any failure leaves
+    // source_hash NULL so the next rebuild retries and recovers cleanly.
+    await this.store.upsert([{ ...item, sourceHash: undefined }]);
     await this.store.runExclusive(() => {
       const db = this.store.getDb();
-      replaceDocumentPassages(db, [{ item, passages }], createVectorInvalidator(db, 'passage_vectors'));
+      db.transaction(() => {
+        replaceDocumentPassages(db, [{ item, passages }], createVectorInvalidator(db, 'passage_vectors'));
+        db.prepare('UPDATE evidence_docs SET source_hash = ? WHERE anchor = ?').run(
+          item.sourceHash ?? null,
+          item.anchor,
+        );
+      })();
     });
   }
 
@@ -171,8 +196,7 @@ export class CollectionIndexBuilder {
         updatedAt: now,
         authority: this.manifest.reviewPolicy.authorityCeiling,
       };
-      await this.store.upsert([item]);
-      await this.syncDocumentPassages(item, result.passages);
+      await this.publishDocumentWithPassages(item, result.passages);
       indexedItems.push(item);
       indexed++;
     }
