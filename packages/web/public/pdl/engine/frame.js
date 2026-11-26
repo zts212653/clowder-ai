@@ -825,8 +825,7 @@ function projFrame(c, l) {
       console.error(err);
     }
     CT_UP.forEach(function (k) { LEAF_DIRTY.add(k); });
-    const back = navBackOf(c);
-    return (back ? backHead(back) : '') + PV_DRAW.state('error', { text: tc('common.viewError') });
+    return PV_DRAW.state('error', { text: tc('common.viewError') });
   }
 }
 /* 画之前：记下 DOM 里每一层（缓存）；这一次要被盖住的层记下滚动位置（它的滚动区和它所在的滚动容器）。返回新出现的层 */

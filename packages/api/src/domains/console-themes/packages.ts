@@ -2,7 +2,6 @@ import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:f
 import { dirname, extname, join } from 'node:path';
 import { parse, stringify } from 'yaml';
 import { z } from 'zod';
-import { runModuleWorker } from '../../utils/run-module-worker.js';
 import { readZip, writeZip } from './zip.js';
 
 export const themeId = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -37,7 +36,11 @@ export interface ThemeRoots {
   builtinManifests: Map<string, { source: string; parsed: Promise<Theme> }>;
 }
 export function themeRoots(projectRoot: string, builtinRoot: string): ThemeRoots {
-  return { builtin: builtinRoot, custom: join(projectRoot, '.cat-cafe', 'console-themes'), builtinManifests: new Map() };
+  return {
+    builtin: builtinRoot,
+    custom: join(projectRoot, '.cat-cafe', 'console-themes'),
+    builtinManifests: new Map(),
+  };
 }
 /** The folder of package id: a built-in one wins (its id cannot be imported over). */
 export async function packageDir(roots: ThemeRoots, id: string): Promise<string> {
@@ -202,11 +205,13 @@ async function readManifest(roots: ThemeRoots, dir: string, id: string, source: 
   const cached = cache.get(id);
   if (cached?.source === source) return cached.parsed;
 
-  const parsed = runModuleWorker<Theme>({
-    moduleUrl: new URL(import.meta.url),
-    exportName: 'parseThemeManifest',
-    input: source,
-  });
+  const parsed = import('../../utils/run-module-worker.js').then(({ runModuleWorker }) =>
+    runModuleWorker<Theme>({
+      moduleUrl: new URL(import.meta.url),
+      exportName: 'parseThemeManifest',
+      input: source,
+    }),
+  );
   const entry = { source, parsed };
   cache.set(id, entry);
   void parsed.catch(() => {
