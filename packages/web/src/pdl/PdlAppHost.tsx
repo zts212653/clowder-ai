@@ -545,6 +545,8 @@ function ChatBinding({
   if (conversation !== threadId) {
     const text = drafting ? getThreadDraft(threadId) : '';
     setConversation(threadId);
+    composingRef.current = false;
+    setComposing(false);
     setImages(threadImageDrafts.get(threadId) ?? []);
     setContexts(drafting ? [...getContextAttachmentDraft(threadId)] : []);
     setContextQuery('');

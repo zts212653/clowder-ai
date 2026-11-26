@@ -6311,6 +6311,34 @@ describe('unmodified runtime and project chat bindings', () => {
     }
   });
 
+  it('replaces a composing textarea when the conversation changes without compositionend', async () => {
+    const { dom, w, data, ui, port, action } = await boot(undefined, (data) => {
+      data.threads.push({ ...data.threads[0], id: 'thread-after-composition' });
+    });
+    try {
+      const input = w.document.getElementById('chat-input');
+      input.focus();
+      input.value = 'ni';
+      input.dispatchEvent(new w.CompositionEvent('compositionstart', { bubbles: true }));
+      input.dispatchEvent(new w.InputEvent('input', { bubbles: true, data: 'ni', isComposing: true }));
+      await vi.waitFor(() => expect(action).toHaveBeenCalledWith('compose', { v: 'ni', pos: '2', composing: '1' }));
+
+      ui.draft = { 'chat-input': '新会话的草稿' };
+      data.threadId = 'thread-after-composition';
+      port.threadId = data.threadId;
+      port.data = { ...port.data, chat: fixtureInput(data).chat };
+      port.sidebarData = fixtureSidebar(data);
+      w.clowderChat.update(port);
+      await w.__settled();
+      const incoming = w.document.getElementById('chat-input');
+      expect(input.isConnected).toBe(false);
+      expect(incoming.value).toBe('新会话的草稿');
+      expect(action.mock.calls.filter(([name]) => name === 'compose')).toHaveLength(1);
+    } finally {
+      dom.window.close();
+    }
+  });
+
   it('binds export filtering and file-context input through the existing VM and popup declarations', async () => {
     const { dom, w, data, ui, action, push } = await boot();
     try {

@@ -544,6 +544,9 @@ function chatUpdate(port) {
   S.thread = chatPort.threadId;
   S.navW = chatPort.navResize.width();
   if (changed) {
+    // The old composer may never receive compositionend after a conversation switch.
+    const composer = document.getElementById('chat-input');
+    if (composer && COMPOSING_FIELDS.has(composer)) composer.remove();
     S.ws.recallFor = null;
     S.ws.recallPages = 0;
     navStale();
