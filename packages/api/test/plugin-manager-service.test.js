@@ -257,6 +257,32 @@ describe('F202 terminal Plugin Manager service', () => {
     assert.deepEqual(lifecycleCalls, [['instance:github', false, 1]]);
   });
 
+  it('notifies open consoles after a local archive is installed and reconciled', async () => {
+    const events = [];
+    const installed = { pluginId: 'official.storage-governance', pluginInstanceId: 'instance:storage' };
+    const manager = new PluginManagerService({
+      catalog: { snapshot: async () => ({ candidates: [], status: 'fresh', refreshedAt: 2_000 }) },
+      inventory: { snapshot: async () => emptyInventory },
+      installer: {
+        install: async () => {
+          events.push('installed');
+          return installed;
+        },
+      },
+      configuration: {
+        reconcile: async () => {
+          events.push('reconciled');
+        },
+      },
+      operationChanged: (pluginId) => {
+        events.push(pluginId);
+      },
+    });
+    const result = await manager.install({ source: { kind: 'local-archive', path: '/tmp/storage.tgz' } });
+    assert.deepEqual(result, installed);
+    assert.deepEqual(events, ['installed', 'reconciled', installed.pluginId]);
+  });
+
   it('lists an uninstall that is still running and tells the Host when it starts and ends', async () => {
     let finish;
     const changes = [];
