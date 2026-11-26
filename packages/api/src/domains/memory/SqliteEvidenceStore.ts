@@ -835,12 +835,14 @@ export class SqliteEvidenceStore implements IEvidenceStore {
 
   /**
    * Native FTS5 body/passage fallback for default summary search (SIM-Q4):
-   * Searches lexical-only evidence_doc_body_fts first (1 row per doc, external collections,
-   * supports cross-paragraph multi-term FTS5 queries), then passage_fts (main store
-   * evidence_passages) when remaining slots exist. Joins parent evidence_docs BEFORE
-   * GROUP BY / LIMIT so parent filters (status, kind, scope, world/scene, activation,
-   * d.updated_at) and per-doc deduplication never suffer candidate pool starvation or
-   * passage created_at mismatch.
+   * Collects bounded candidates from both lexical-only evidence_doc_body_fts (1 row per doc,
+   * external collections, supports cross-paragraph multi-term FTS5 queries) and passage_fts
+   * (main store evidence_passages, excluding md-* rows already superseded by an authoritative
+   * evidence_doc_bodies row), then merges and ranks across both lanes by temporal status
+   * penalty + BM25 rank before applying LIMIT so a demoted body hit can never hide an active
+   * passage correction at small limits. Joins parent evidence_docs BEFORE GROUP BY / LIMIT so
+   * parent filters (status, kind, scope, world/scene, activation, d.updated_at) and per-doc
+   * deduplication never suffer candidate pool starvation or passage created_at mismatch.
    */
   private searchSummaryFallbackDocs(
     ftsQueries: string[],
@@ -850,13 +852,13 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   ): EvidenceItem[] {
     if (!this.db || ftsQueries.length === 0) return [];
     for (const ftsQuery of ftsQueries) {
-      const merged: EvidenceItem[] = [];
-      const seen = new Set<string>();
+      const candidates = new Map<string, { item: EvidenceItem; rank: number }>();
+      let hasDocBodiesTable = true;
 
       try {
         const bodyParams: unknown[] = [ftsQuery];
         let bodySql = `
-          SELECT d.*
+          SELECT d.*, f.rank AS _fallback_rank
           FROM evidence_doc_body_fts f
           JOIN evidence_doc_bodies b ON b.rowid = f.rowid
           JOIN evidence_docs d ON d.anchor = b.doc_anchor
@@ -864,48 +866,55 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         bodySql = this.appendEvidenceDocFilters(bodySql, bodyParams, options, filters, 'd.');
         bodySql += ` ORDER BY ${temporalPenaltySql('d')}, f.rank LIMIT ?`;
         bodyParams.push(limit);
-        const bodyRows = this.db.prepare(bodySql).all(...bodyParams) as RowShape[];
+        const bodyRows = this.db.prepare(bodySql).all(...bodyParams) as Array<RowShape & { _fallback_rank: number }>;
         for (const row of bodyRows) {
-          if (seen.has(row.anchor)) continue;
-          seen.add(row.anchor);
-          merged.push(rowToItem(row));
+          if (candidates.has(row.anchor)) continue;
+          candidates.set(row.anchor, { item: rowToItem(row), rank: row._fallback_rank });
+        }
+      } catch (err) {
+        if (/no such table:\s*evidence_doc_bod/i.test(err instanceof Error ? err.message : String(err))) {
+          hasDocBodiesTable = false;
+        }
+      }
+
+      try {
+        const params: unknown[] = [ftsQuery];
+        let inner = `
+          SELECT d.anchor AS anchor, MIN(f.rank) AS best_rank
+          FROM passage_fts f
+          JOIN evidence_passages p ON p.rowid = f.rowid
+          JOIN evidence_docs d ON d.anchor = p.doc_anchor
+          WHERE passage_fts MATCH ?`;
+        if (hasDocBodiesTable) {
+          inner += `
+            AND NOT (
+              p.passage_id LIKE 'md-%'
+              AND EXISTS (SELECT 1 FROM evidence_doc_bodies b WHERE b.doc_anchor = d.anchor)
+            )`;
+        }
+        inner = this.appendEvidenceDocFilters(inner, params, options, filters, 'd.');
+        inner += ` GROUP BY d.anchor ORDER BY ${temporalPenaltySql('d')}, best_rank LIMIT ?`;
+        params.push(limit);
+        const sql = `
+          WITH matched AS (${inner})
+          SELECT d.*, m.best_rank AS _fallback_rank
+          FROM matched m
+          JOIN evidence_docs d ON d.anchor = m.anchor
+          ORDER BY ${temporalPenaltySql('d')}, m.best_rank`;
+        const rows = this.db.prepare(sql).all(...params) as Array<RowShape & { _fallback_rank: number }>;
+        for (const row of rows) {
+          if (candidates.has(row.anchor)) continue;
+          candidates.set(row.anchor, { item: rowToItem(row), rank: row._fallback_rank });
         }
       } catch {
-        // invalid FTS syntax at this relaxation level or pre-V85 DB — continue
+        // invalid FTS syntax at this relaxation level — try next
       }
 
-      if (merged.length < limit) {
-        try {
-          const params: unknown[] = [ftsQuery];
-          let inner = `
-            SELECT d.anchor AS anchor, MIN(f.rank) AS best_rank
-            FROM passage_fts f
-            JOIN evidence_passages p ON p.rowid = f.rowid
-            JOIN evidence_docs d ON d.anchor = p.doc_anchor
-            WHERE passage_fts MATCH ?`;
-          inner = this.appendEvidenceDocFilters(inner, params, options, filters, 'd.');
-          inner += ` GROUP BY d.anchor ORDER BY ${temporalPenaltySql('d')}, best_rank LIMIT ?`;
-          params.push(limit);
-          const sql = `
-            WITH matched AS (${inner})
-            SELECT d.*
-            FROM matched m
-            JOIN evidence_docs d ON d.anchor = m.anchor
-            ORDER BY ${temporalPenaltySql('d')}, m.best_rank`;
-          const rows = this.db.prepare(sql).all(...params) as RowShape[];
-          for (const row of rows) {
-            if (seen.has(row.anchor)) continue;
-            seen.add(row.anchor);
-            merged.push(rowToItem(row));
-            if (merged.length >= limit) break;
-          }
-        } catch {
-          // invalid FTS syntax at this relaxation level — try next
-        }
-      }
-
-      if (merged.length > 0) {
-        return merged;
+      if (candidates.size > 0) {
+        return [...candidates.values()]
+          .sort((a, b) => Number(hasTemporalPenalty(a.item)) - Number(hasTemporalPenalty(b.item)) || a.rank - b.rank)
+          .slice(0, limit)
+          .map((entry) => entry.item);
       }
     }
     return [];

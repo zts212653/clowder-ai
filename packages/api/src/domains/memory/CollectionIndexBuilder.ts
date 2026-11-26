@@ -3,11 +3,13 @@ import { extractFrontmatter, extractSupersedes } from './CatCafeScanner.js';
 import type { CollectionManifest } from './collection-types.js';
 import { embedIndexedItems } from './embed-utils.js';
 import type { EvidenceItem, IEmbeddingService, RepoScanner, ScannedEvidence } from './interfaces.js';
-import { stripYamlFrontmatter } from './MarkdownPassageIndexer.js';
+import { MARKDOWN_DOC_PASSAGE_PREFIX, stripYamlFrontmatter } from './MarkdownPassageIndexer.js';
+import { passageVectorKey } from './PassageVectorStore.js';
 import type { SecretFinding } from './SecretScanner.js';
 import { SecretScanner } from './SecretScanner.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import type { VectorStore } from './VectorStore.js';
+import { createVectorInvalidator } from './vector-invalidation.js';
 
 export interface CollectionRebuildResult {
   indexed: number;
@@ -153,9 +155,19 @@ export class CollectionIndexBuilder {
     return row !== undefined;
   }
 
+  private hasLegacyMarkdownPassages(anchor: string): boolean {
+    if (anchor.startsWith('thread-')) return false;
+    const row = this.store
+      .getDb()
+      .prepare('SELECT 1 FROM evidence_passages WHERE doc_anchor = ? AND passage_id LIKE ? LIMIT 1')
+      .get(anchor, `${MARKDOWN_DOC_PASSAGE_PREFIX}%`);
+    return row !== undefined;
+  }
+
   private async publishDocumentWithBody(item: EvidenceItem, bodyContent: string): Promise<void> {
     // Persist metadata with an incomplete sourceHash stamp first; commit the final sourceHash
-    // only inside the same atomic SQLite transaction that replaces the lexical body row.
+    // only inside the same atomic SQLite transaction that replaces the lexical body row and
+    // retires any legacy md-* passage projection for this document anchor.
     // Any failure leaves source_hash NULL so the next rebuild retries and recovers cleanly.
     // Keeping external bodies in evidence_doc_bodies (rather than vector-tracked evidence_passages)
     // preserves G0/G1 passage_vectors cohort readiness with zero extra embedding batches.
@@ -175,6 +187,21 @@ export class CollectionIndexBuilder {
           ).run(item.anchor, bodyContent, item.updatedAt);
         } else {
           db.prepare('DELETE FROM evidence_doc_bodies WHERE doc_anchor = ?').run(item.anchor);
+        }
+        if (!item.anchor.startsWith('thread-')) {
+          const legacyPassages = db
+            .prepare('SELECT passage_id AS passageId FROM evidence_passages WHERE doc_anchor = ? AND passage_id LIKE ?')
+            .all(item.anchor, `${MARKDOWN_DOC_PASSAGE_PREFIX}%`) as Array<{ passageId: string }>;
+          if (legacyPassages.length > 0) {
+            const invalidatePassage = createVectorInvalidator(db, 'passage_vectors');
+            for (const passage of legacyPassages) {
+              invalidatePassage(passageVectorKey(item.anchor, passage.passageId));
+            }
+            db.prepare('DELETE FROM evidence_passages WHERE doc_anchor = ? AND passage_id LIKE ?').run(
+              item.anchor,
+              `${MARKDOWN_DOC_PASSAGE_PREFIX}%`,
+            );
+          }
         }
         db.prepare('UPDATE evidence_docs SET source_hash = ? WHERE anchor = ?').run(
           item.sourceHash ?? null,
@@ -200,10 +227,12 @@ export class CollectionIndexBuilder {
       if (!force) {
         const existing = await this.store.getByAnchor(anchor);
         const bodyReady = bodyContent.length === 0 || this.hasDocumentBody(anchor);
+        const legacyMdClean = !this.hasLegacyMarkdownPassages(anchor);
         if (
           existing?.sourceHash === hash &&
           existing.authority === this.manifest.reviewPolicy.authorityCeiling &&
-          bodyReady
+          bodyReady &&
+          legacyMdClean
         ) {
           skipped++;
           continue;

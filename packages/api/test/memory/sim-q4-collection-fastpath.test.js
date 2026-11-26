@@ -566,4 +566,144 @@ describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
       .get('research:sim-q4:doc/living-policy').n;
     assert.equal(remainingBodies, 0, 'removed external document must leave 0 orphan bodies');
   });
+
+  it('V85 P2-1: cross-lane merge prioritizes active passage correction over superseded body hit at limit=1 with unique anchors', async () => {
+    const memStore = new SqliteEvidenceStore(':memory:');
+    await memStore.initialize();
+    try {
+      const stamp = '2026-11-26T08:00:00Z';
+      await memStore.upsert([
+        {
+          anchor: 'research:sim-q4:doc/old-body',
+          kind: 'research',
+          status: 'superseded',
+          title: 'Old Body Draft',
+          summary: 'Neutral overview.',
+          updatedAt: stamp,
+        },
+        {
+          anchor: 'research:sim-q4:doc/current-passage',
+          kind: 'research',
+          status: 'active',
+          title: 'Current Passage Correction',
+          summary: 'Neutral overview.',
+          updatedAt: stamp,
+        },
+      ]);
+      const db = memStore.getDb();
+      db.prepare('INSERT INTO evidence_doc_bodies (doc_anchor, content, updated_at) VALUES (?, ?, ?)').run(
+        'research:sim-q4:doc/old-body',
+        'cross_lane_priority_token appears in superseded external body.',
+        stamp,
+      );
+      db.prepare(
+        'INSERT INTO evidence_passages (doc_anchor, passage_id, content, position, created_at) VALUES (?, ?, ?, ?, ?)',
+      ).run(
+        'research:sim-q4:doc/current-passage',
+        'md-0',
+        'cross_lane_priority_token appears in active main-store passage.',
+        0,
+        stamp,
+      );
+
+      const topOne = await memStore.search('cross_lane_priority_token', { limit: 1 });
+      assert.deepEqual(
+        topOne.map((r) => r.anchor),
+        ['research:sim-q4:doc/current-passage'],
+        'limit=1 must not let a superseded body hit hide an active passage correction',
+      );
+
+      const topFive = await memStore.search('cross_lane_priority_token', { limit: 5 });
+      const anchors = topFive.map((r) => r.anchor);
+      assert.equal(anchors[0], 'research:sim-q4:doc/current-passage');
+      assert.equal(new Set(anchors).size, anchors.length, 'cross-lane merged results must have unique anchors');
+      assert.deepEqual(anchors, ['research:sim-q4:doc/current-passage', 'research:sim-q4:doc/old-body']);
+    } finally {
+      memStore.close();
+    }
+  });
+
+  it('V85 P2-2: authoritative body retires legacy md-* passages and vectors on update or unchanged rebuild while preserving thread passages', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sim-q4-v85-legacy-md-'));
+    const file = join(dir, 'policy.md');
+    const stamp = '2026-11-26T08:00:00Z';
+    const anchor = 'research:sim-q4:doc/policy';
+    const manifest = makeManifest(dir);
+    const builder = new CollectionIndexBuilder(store, manifest, new StructuredScanner(manifest.id));
+    const { openVectorGeneration } = await import('../../dist/domains/memory/open-vector-generation.js');
+    const { passageVectorKey } = await import('../../dist/domains/memory/PassageVectorStore.js');
+
+    writeFileSync(file, '# Policy\n\nNeutral summary.\n\n## Details\n\nretracted_legacy_v1\n');
+    await builder.rebuild();
+
+    // Seed an unrelated thread message passage that must NEVER be touched
+    await store.upsert([
+      {
+        anchor: 'thread-keep',
+        kind: 'thread',
+        status: 'active',
+        title: 'Unrelated Thread',
+        summary: 'Thread summary.',
+        updatedAt: stamp,
+      },
+    ]);
+    const db = store.getDb();
+    db.prepare(
+      'INSERT INTO evidence_passages (doc_anchor, passage_id, content, speaker, position, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run('thread-keep', 'msg-1', 'thread_message_must_survive', 'user', 0, stamp);
+
+    // Simulate a lingering pre-V85 md-0 passage + passage vector on the external doc
+    const backend = openVectorGeneration(
+      db,
+      { modelId: 'fixture', modelRev: '1', dim: 4, generationId: 'g0' },
+      { create: true },
+    );
+    db.prepare(
+      'INSERT INTO evidence_passages (doc_anchor, passage_id, content, position, created_at) VALUES (?, ?, ?, ?, ?)',
+    ).run(anchor, 'md-0', 'retracted_legacy_v1 lingering_pre_v85_only', 0, stamp);
+    backend.passageVectorStore.upsert(passageVectorKey(anchor, 'md-0'), new Float32Array([1, 0, 0, 0]));
+
+    // Read-side authority fence: even BEFORE rebuild, default summary search excludes md-* superseded by evidence_doc_bodies
+    assert.deepEqual(
+      await store.search('lingering_pre_v85_only', { limit: 5 }),
+      [],
+      'read-side fence must ignore legacy md-* terms absent from authoritative evidence_doc_bodies',
+    );
+
+    // Ordinary rebuild with unchanged file hash must NOT skip while legacy md-* still exists
+    const cleanupRebuild = await builder.rebuild();
+    assert.equal(cleanupRebuild.indexed, 1, 'ordinary rebuild must retire lingering md-* even when hash matches');
+    assert.equal(
+      db
+        .prepare("SELECT count(*) AS n FROM evidence_passages WHERE doc_anchor = ? AND passage_id LIKE 'md-%'")
+        .get(anchor).n,
+      0,
+    );
+    assert.equal(backend.passageVectorStore.count(), 0, 'derived legacy md-* passage vector must be invalidated');
+    assert.deepEqual(await store.search('lingering_pre_v85_only', { depth: 'raw', limit: 5 }), []);
+
+    // Second rebuild skips cleanly once legacy md-* is retired
+    const secondRebuild = await builder.rebuild();
+    assert.deepEqual([secondRebuild.indexed, secondRebuild.skipped], [0, 1]);
+
+    // Update file to v2 with another pre-existing md-0 seeded: refresh must retire old md-0 so v1 never revives
+    db.prepare(
+      'INSERT INTO evidence_passages (doc_anchor, passage_id, content, position, created_at) VALUES (?, ?, ?, ?, ?)',
+    ).run(anchor, 'md-0', 'retracted_legacy_v1', 0, stamp);
+    writeFileSync(file, '# Policy\n\nNeutral summary.\n\n## Details\n\nverified_policy_v2\n');
+    await builder.rebuild();
+
+    assert.deepEqual(
+      (await store.search('verified_policy_v2', { limit: 5 })).map((r) => r.anchor),
+      [anchor],
+    );
+    assert.deepEqual(await store.search('retracted_legacy_v1', { limit: 5 }), []);
+    assert.deepEqual(await store.search('retracted_legacy_v1', { depth: 'raw', limit: 5 }), []);
+
+    // Unrelated thread message passage must remain intact
+    const survivingThread = db
+      .prepare("SELECT count(*) AS n FROM evidence_passages WHERE doc_anchor = 'thread-keep' AND passage_id = 'msg-1'")
+      .get().n;
+    assert.equal(survivingThread, 1, 'thread message passages must never be deleted');
+  });
 });
