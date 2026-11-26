@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';
+import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
+import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { renameThreadTitleOptimistic } from '../thread-rename';
+
+vi.mock('@/utils/sidebar-thread-snapshot', () => ({ invalidateSidebarProjection: vi.fn() }));
 
 function setTitle(threadId: string, title: string) {
   useChatStore.setState({ threads: [{ id: threadId, title } as never] });
@@ -12,6 +16,8 @@ function title(threadId: string) {
 describe('renameThreadTitleOptimistic', () => {
   beforeEach(() => {
     useChatStore.setState({ threads: [] });
+    useSidebarProjectionStore.setState({ pendingThreadCommands: {}, refreshing: false });
+    vi.mocked(invalidateSidebarProjection).mockReset();
   });
 
   it('shows the new title before the request resolves and applies the server title', async () => {
@@ -78,5 +84,23 @@ describe('renameThreadTitleOptimistic', () => {
     ]);
     expect(results.map(({ status }) => status)).toEqual(['rejected', 'rejected']);
     expect(title('rename-d')).toBe('confirmed');
+  });
+
+  it('keeps the confirmed title while a sidebar request that began before the write is still outstanding', async () => {
+    setTitle('rename-e', 'old');
+    const refresh = Promise.withResolvers<boolean>();
+    vi.mocked(invalidateSidebarProjection).mockReturnValue(refresh.promise);
+    useSidebarProjectionStore.getState().setRefreshing(true);
+
+    await renameThreadTitleOptimistic('rename-e', 'new', async () => ({ title: 'canonical new' }));
+
+    expect(title('rename-e')).toBe('canonical new');
+    expect(invalidateSidebarProjection).toHaveBeenCalledOnce();
+    expect(Object.values(useSidebarProjectionStore.getState().pendingThreadCommands)).toMatchObject([
+      { threadId: 'rename-e', field: 'title', value: 'canonical new' },
+    ]);
+    refresh.resolve(true);
+    await refresh.promise;
+    expect(useSidebarProjectionStore.getState().pendingThreadCommands).toEqual({});
   });
 });

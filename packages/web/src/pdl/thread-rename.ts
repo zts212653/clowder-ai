@@ -1,5 +1,6 @@
 import { useChatStore } from '@/stores/chatStore';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
+import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 
 type TitlePatchResult = { title?: string | null } | void;
 type TitlePatch = (threadId: string, title: string) => Promise<TitlePatchResult>;
@@ -30,7 +31,14 @@ export async function renameThreadTitleOptimistic(threadId: string, title: strin
     if (sequence.tail === tail) {
       pendingTitles.delete(threadId);
       useChatStore.getState().updateThreadTitle(threadId, sequence.confirmed);
-      sidebar.failSidebarCommand(commandId);
+      const projection = useSidebarProjectionStore.getState();
+      if (projection.refreshing) {
+        // A sidebar read already in flight may carry the old title. Keep the receipt visible through its trailing read.
+        const confirmedCommand = projection.beginSidebarCommand(threadId, 'title', sequence.confirmed);
+        void invalidateSidebarProjection().finally(() => projection.failSidebarCommand(confirmedCommand));
+      } else {
+        projection.failSidebarCommand(commandId);
+      }
     }
   }
 }
