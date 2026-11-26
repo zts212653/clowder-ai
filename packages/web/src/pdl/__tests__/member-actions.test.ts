@@ -232,6 +232,37 @@ it('saves strategy intent through its owner, validates thresholds once and retur
   await expect(saveMemberStrategy('codex', form)).rejects.toThrow('strategy owner refused');
 });
 
+it('reads Desktop model choices without opening an ACP session', async () => {
+  vi.mocked(apiFetch).mockResolvedValueOnce(
+    Response.json({
+      provider: 'deepseek-official',
+      model: 'flash',
+      providers: [
+        { id: 'deepseek-official', credential: 'native_auth', models: [{ id: 'flash', label: 'Flash' }] },
+        { id: 'missing', credential: 'missing', models: [{ id: 'unavailable', label: 'Unavailable' }] },
+      ],
+    }),
+  );
+  const target = JSON.stringify({ runtimeId: 'dsh:installed', dshDesktop: true });
+  expect(await readMemberRuntimeModels(target)).toMatchObject({
+    status: 'configured',
+    defaultModel: '["deepseek-official","flash"]',
+    models: [{ value: '["deepseek-official","flash"]', label: 'Flash · deepseek-official' }],
+  });
+  expect(apiFetch).toHaveBeenCalledExactlyOnceWith(
+    '/api/cats/dsh-setup/inspect',
+    expect.objectContaining({ method: 'POST', body: '{"runtimeId":"dsh:installed"}' }),
+  );
+  vi.mocked(apiFetch).mockResolvedValueOnce(
+    Response.json({ error: 'dsh_setup_auth_refresh_required' }, { status: 422 }),
+  );
+  expect(await readMemberRuntimeModels(target)).toEqual({
+    status: 'unavailable',
+    models: [],
+    message: 'dsh_setup_auth_refresh_required',
+  });
+});
+
 it('keeps DSH inspect and test explicit and quotes the prepared launch using the original argument serializer', async () => {
   const inspection = { revision: 'owner-revision', profiles: ['acp'], active: {}, source: { providers: [] } };
   vi.mocked(apiFetch).mockResolvedValueOnce(Response.json(inspection));

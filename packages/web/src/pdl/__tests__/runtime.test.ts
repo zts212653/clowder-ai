@@ -6616,6 +6616,128 @@ it('keeps context policy and reference audio in the current member draft until t
   }
 });
 
+it.each(['sys:1', 'sys:2'])('selects DeepSeek Harness and checks the saved binding in %s', async (theme) => {
+  const meta = {
+    ...advancedMemberMetadata(),
+    dshMembers: ['codex'],
+  };
+  const command = 'C:/DSH/resources/runtime/cli/bin/dsh.cmd';
+  const savedArgs = ['--profile', 'acp', '--patch', 'member.patch.yml'];
+  const savedEnv = { DSH_HOME: 'C:/isolated/member', OTHER: 'kept' };
+  const model = JSON.stringify(['deepseek-official', 'deepseek-flash']);
+  const calls = vi.fn<FixtureApi['action']>();
+  meta.runtimes = [
+    {
+      id: 'dsh',
+      label: 'DSH Desktop',
+      dshDesktop: true,
+      dshSetupSupported: true,
+      installed: true,
+      models: [],
+      form: {
+        clientId: 'acp',
+        carrier: 'acp',
+        configurationSource: 'native_tool',
+        accountRef: '',
+        acpCommand: command,
+        acpStartupArgs: '--profile acp',
+        acpTransport: 'stdio',
+        defaultModel: '',
+        cliEffort: '',
+      },
+    },
+  ];
+  const { dom, w } = await boot(
+    undefined,
+    (data) => {
+      Object.assign(data.cats[0], {
+        clientId: 'acp',
+        carrier: 'acp',
+        configurationSource: 'native_tool',
+        accountRef: '',
+        defaultModel: model,
+        env: savedEnv,
+        acp: { command, startupArgs: savedArgs, transport: 'stdio' },
+      });
+    },
+    undefined,
+    {},
+    (port) => {
+      const { action, get } = port;
+      port.get = async (path) =>
+        path === '/api/config/console-themes' ? { themes: { active: theme, customs: [] } } : get(path);
+      port.action = (name, args, element) => {
+        calls(name, args, element);
+        if (name === 'membersRead') return meta;
+        if (name === 'nativeDetect') return [];
+        if (name === 'memberRuntimeModels') return { status: 'configured', models: [{ value: model, label: 'Flash' }] };
+        if (name === 'memberDshRead') return { state: 'unchecked' };
+        if (name === 'memberDshCheck') return { state: 'passed' };
+        if (name === 'memberSave') return { id: args.id, configurationRevision: 'saved', form: JSON.parse(args.value) };
+        return action(name, args, element);
+      };
+    },
+  );
+  try {
+    w.eval("go('memberNew')");
+    await w.__settled();
+    const client = () => w.document.getElementById('f-client') as HTMLSelectElement;
+    expect([...client().options].map((option) => option.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining('DeepSeek Harness'), 'ACP Client']),
+    );
+    client().value = 'dsh';
+    client().dispatchEvent(new w.Event('change', { bubbles: true }));
+    await w.__settled();
+    expect(client().value).toBe('dsh');
+    expect(w.eval('VM.memberNew().form.d.acpArgs')).toBe('--profile acp');
+    client().value = 'acp';
+    client().dispatchEvent(new w.Event('change', { bubbles: true }));
+    expect(client().value).toBe('acp');
+    expect(w.eval('VM.memberNew().form.d.acpArgs')).toBe('');
+
+    w.eval("go('member-codex')");
+    await w.__settled();
+    expect(client().value).toBe('dsh');
+    expect(w.eval('VM.member().form.d.acpArgs')).toBe(savedArgs.join(' '));
+    client().value = 'acp';
+    client().dispatchEvent(new w.Event('change', { bubbles: true }));
+    expect(w.eval('VM.member().form.d.acpArgs')).toBe('');
+    client().value = 'dsh';
+    client().dispatchEvent(new w.Event('change', { bubbles: true }));
+    expect(w.eval('VM.member().form.d.acpArgs')).toBe(savedArgs.join(' '));
+    const check = w.document.querySelector('[data-act="memberDshCheck"]') as HTMLButtonElement;
+    expect(check).not.toBeNull();
+    check.click();
+    await w.__settled();
+    expect(calls.mock.calls.find(([name]) => name === 'memberDshCheck')?.[1]).toMatchObject({ id: 'codex' });
+    w.eval("INPUTS.md({type:'input',target:{dataset:{k:'name'},value:'Renamed DSH'}})");
+    await w.eval('FORMS.member()');
+    const save = calls.mock.calls.find(([name]) => name === 'memberSave')?.[1];
+    expect(save?.id).toBe('codex');
+    expect(JSON.parse(save?.value ?? '{}')).toMatchObject({
+      nickname: 'Renamed DSH',
+      clientId: 'acp',
+      carrier: 'acp',
+      acpCommand: command,
+      acpStartupArgs: savedArgs.join(' '),
+      defaultModel: model,
+      env: savedEnv,
+    });
+
+    w.eval("go('members')");
+    await w.__settled();
+    const detect = [...w.document.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('探测可用 Client'),
+    );
+    expect(detect).toBeDefined();
+    detect?.click();
+    await w.__settled();
+    expect(calls.mock.calls.some(([name]) => name === 'nativeDetect')).toBe(true);
+  } finally {
+    dom.window.close();
+  }
+});
+
 it('binds DSH inspection, exact revision preparation and optional test, then invalidates the receipt after a manual launch edit', async () => {
   const meta = advancedMemberMetadata();
   meta.runtimes = [
