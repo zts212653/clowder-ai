@@ -298,4 +298,35 @@ describe('sidebarProjectionStore authority boundary', () => {
     expect(projectSidebarRows(useSidebarProjectionStore.getState())[0]?.pinned).toBe(false);
     expect(Object.keys(useSidebarProjectionStore.getState().pendingThreadCommands)).toHaveLength(1);
   });
+
+  it('settles a caught-up read on one row and keeps live working presence', () => {
+    const store = useSidebarProjectionStore.getState();
+    store.applySidebarSnapshot(
+      [
+        row('thread-done', { unreadCount: 3, hasUserMention: true, presence: { status: 'done', cats: ['codex'] } }),
+        row('thread-working', { unreadCount: 1, presence: { status: 'working', cats: ['opus'] } }),
+      ],
+      1,
+    );
+    const workingBefore = useSidebarProjectionStore.getState().rows[1]!.presence;
+    mockSaveSidebarSnapshot.mockClear();
+
+    store.settleThreadRead('thread-done');
+    expect(useSidebarProjectionStore.getState().rows[0]).toMatchObject({
+      unreadCount: 0,
+      hasUserMention: false,
+      presence: { status: 'idle' },
+    });
+    expect(useSidebarProjectionStore.getState().rows[1]!.presence).toEqual(workingBefore);
+    expect(mockSaveSidebarSnapshot).toHaveBeenCalledTimes(1);
+
+    store.settleThreadRead('thread-working');
+    expect(useSidebarProjectionStore.getState().rows[1]).toMatchObject({
+      unreadCount: 0,
+      presence: { status: 'working', cats: ['opus'] },
+    });
+
+    store.settleThreadRead('missing');
+    expect(mockSaveSidebarSnapshot).toHaveBeenCalledTimes(2);
+  });
 });

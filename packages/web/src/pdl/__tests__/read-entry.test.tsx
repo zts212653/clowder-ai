@@ -177,10 +177,10 @@ it('pulls recall once on entry and uses message increments without re-reading wh
   await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(4));
 });
 
-it('posts read receipts on entry and new bubbles, then invalidates the sidebar after each acknowledgement', async () => {
+function readReceiptHarness() {
   const source = readFileSync('src/pdl/PdlAppHost.tsx', 'utf8');
   const effect = source.split('  const messageCount = history.messages.length;')[1].split('\n  const patchThread =')[0];
-  const readReceipt = new Function(
+  return new Function(
     'useEffect',
     'history',
     'exportMids',
@@ -191,36 +191,79 @@ it('posts read receipts on entry and new bubbles, then invalidates the sidebar a
     'threadId',
     'notifyHandledMentionRead',
     'invalidateSidebarProjection',
+    'latestMessageIdRef',
+    'useSidebarProjectionStore',
     transpileModule('const messageCount = history.messages.length;' + effect, {
       compilerOptions: { target: ScriptTarget.ES2022 },
     }).outputText,
   );
+}
+
+it('settles a caught-up read receipt on the row without a full sidebar read', async () => {
+  const readReceipt = readReceiptHarness();
   const notify = vi.fn(),
-    invalidate = vi.fn(async () => true);
+    invalidate = vi.fn(async () => true),
+    settle = vi.fn(),
+    latestMessageIdRef = { current: undefined as string | undefined };
   vi.mocked(apiFetch).mockImplementation(async () => Response.json({ caughtUp: true, messageId: 'latest' }));
   let messages: ReturnType<typeof fixtureData>['messages'] = [],
     needed: number | false = false;
   const hook = renderHook(() =>
-    readReceipt(useEffect, { messages }, undefined, true, true, () => needed, request, 'thread', notify, invalidate),
+    readReceipt(
+      useEffect,
+      { messages },
+      undefined,
+      true,
+      true,
+      () => needed,
+      request,
+      'thread',
+      notify,
+      invalidate,
+      latestMessageIdRef,
+      { getState: () => ({ settleThreadRead: settle }) },
+    ),
   );
   expect(apiFetch).not.toHaveBeenCalled();
   needed = 1;
   await act(hook.rerender);
-  await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(settle).toHaveBeenCalledWith('thread'));
+  expect(invalidate).not.toHaveBeenCalled();
+
   messages = fixtureData().messages;
   await act(hook.rerender);
-  await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2));
-  messages = messages.map((message) => ({ ...message }));
-  await act(hook.rerender);
-  expect(apiFetch).toHaveBeenCalledTimes(2);
-  messages = [...messages, { ...messages[1], id: 'new-reply' }];
-  await act(hook.rerender);
-  await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(3));
-  for (const [path, init] of vi.mocked(apiFetch).mock.calls) {
-    expect(path).toBe('/api/threads/thread/read/latest');
-    expect(init?.method).toBe('POST');
-  }
-  expect(notify).toHaveBeenCalledTimes(3);
+  await waitFor(() => expect(settle).toHaveBeenCalledTimes(2));
+  expect(invalidate).not.toHaveBeenCalled();
+  expect(notify).toHaveBeenCalledTimes(2);
+});
+
+it('keeps the canonical read when an acknowledgement is not caught up', async () => {
+  const readReceipt = readReceiptHarness();
+  const notify = vi.fn(),
+    invalidate = vi.fn(async () => true),
+    settle = vi.fn(),
+    latestMessageIdRef = { current: undefined as string | undefined };
+  vi.mocked(apiFetch).mockImplementation(async () => Response.json({ caughtUp: false, messageId: 'latest' }));
+  let needed: number | false = 1;
+  renderHook(() =>
+    readReceipt(
+      useEffect,
+      { messages: fixtureData().messages },
+      undefined,
+      true,
+      true,
+      () => needed,
+      request,
+      'thread',
+      notify,
+      invalidate,
+      latestMessageIdRef,
+      { getState: () => ({ settleThreadRead: settle }) },
+    ),
+  );
+  await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1));
+  expect(settle).not.toHaveBeenCalled();
+  needed = false;
 });
 
 it('keeps the sidebar source through conversation changes and re-pulls it only on an explicit invalidation', async () => {

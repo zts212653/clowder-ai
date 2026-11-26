@@ -22,14 +22,21 @@ const flushed = async (ms = 0) => {
 
 /** Mounts the hook the way the host does: a restore fills the composer, and the composer feeds the next render. */
 function mount(draft: ComposerDraft, threadId = 't1') {
-  const state = { draft, threadId };
+  const state = { draft, threadId, holdWrites: false, revision: 0 };
   const host: { rerender?: () => void } = {};
   const restore = vi.fn((saved: ComposerDraft) => {
     state.draft = saved;
     host.rerender?.();
   });
   const hook = renderHook(() =>
-    useServerComposerDraft({ threadId: state.threadId, enabled: true, draft: state.draft, restore }),
+    useServerComposerDraft({
+      threadId: state.threadId,
+      enabled: true,
+      draft: state.draft,
+      restore,
+      holdWrites: state.holdWrites,
+      revision: state.revision,
+    }),
   );
   host.rerender = hook.rerender;
   return { hook, restore, state };
@@ -478,5 +485,80 @@ it('edits made while an earlier write is still resolving its conflict are writte
     { expectedRevision: 4, text: 'A', contentBlocks: [fileA] },
     { expectedRevision: 5, text: 'A', contentBlocks: [fileA, fileB] },
     { expectedRevision: 6, text: 'B', contentBlocks: [fileB] },
+  ]);
+});
+
+it('keeps IME composition out of the server draft and writes the committed text after release', async () => {
+  vi.mocked(apiFetch).mockImplementation(async (_path, init) =>
+    init?.method ? Response.json({ draft: { revision: 2 } }) : Response.json({ draft: { text: 'saved' }, revision: 1 }),
+  );
+  const { hook, state } = mount({ text: 'saved', images: [], contexts: [] });
+  await flushed();
+  state.draft = { text: 'saved你', images: [], contexts: [] };
+  state.revision = 1;
+  state.holdWrites = true;
+  hook.rerender();
+  await flushed(700);
+  expect(writes()).toEqual([]);
+
+  state.holdWrites = false;
+  hook.rerender();
+  await flushed(700);
+  expect(writes()).toEqual([
+    ['PUT', '/api/threads/t1/composer-draft', JSON.stringify({ expectedRevision: 1, text: 'saved你' })],
+  ]);
+});
+
+it('does not let a late draft read replace text edited during composition', async () => {
+  let answer: (response: Response) => void = () => {};
+  vi.mocked(apiFetch).mockImplementation((_path, init) =>
+    init?.method
+      ? Promise.resolve(Response.json({ draft: { revision: 2 } }))
+      : new Promise<Response>((resolve) => {
+          answer = resolve;
+        }),
+  );
+  const { hook, restore, state } = mount({ text: '', images: [], contexts: [] });
+  state.draft = { text: 'Ani', images: [], contexts: [] };
+  state.revision = 1;
+  state.holdWrites = true;
+  hook.rerender();
+  await flushed();
+  answer(Response.json({ draft: { text: 'A' }, revision: 1 }));
+  await flushed();
+  expect(restore).not.toHaveBeenCalled();
+  expect(writes()).toEqual([]);
+
+  state.draft = { text: 'A你', images: [], contexts: [] };
+  state.holdWrites = false;
+  hook.rerender();
+  await flushed(700);
+  expect(writes()).toEqual([
+    ['PUT', '/api/threads/t1/composer-draft', JSON.stringify({ expectedRevision: 1, text: 'A你' })],
+  ]);
+});
+
+it('flushes only the last committed draft when leaving during a composition', async () => {
+  vi.mocked(apiFetch).mockImplementation(async (path) =>
+    String(path).includes('/t2/')
+      ? Response.json({ draft: null, revision: 2 })
+      : Response.json({ draft: { text: 'saved' }, revision: 1 }),
+  );
+  const { hook, state } = mount({ text: 'saved', images: [], contexts: [] });
+  await flushed();
+  state.draft = { text: 'committed', images: [], contexts: [] };
+  state.revision = 1;
+  hook.rerender();
+  await flushed();
+  state.draft = { text: 'committedni', images: [], contexts: [] };
+  state.revision = 2;
+  state.holdWrites = true;
+  hook.rerender();
+  await flushed(300);
+  state.threadId = 't2';
+  hook.rerender();
+  await flushed(700);
+  expect(writes()).toEqual([
+    ['PUT', '/api/threads/t1/composer-draft', JSON.stringify({ expectedRevision: 1, text: 'committed' })],
   ]);
 });

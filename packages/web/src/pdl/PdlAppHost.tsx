@@ -98,6 +98,7 @@ import { useApprovalResult } from '@/lib/use-approval-result';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useInputHistoryStore } from '@/stores/inputHistoryStore';
+import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { initSidebarWidth, useSidebarStore } from '@/stores/sidebarStore';
 import { useToastStore } from '@/stores/toastStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
@@ -182,6 +183,7 @@ import {
   subscribePush,
   unsubscribePush,
 } from './settings-actions';
+import { renameThreadTitleOptimistic } from './thread-rename';
 import type { ChatPort, ChatUiState, SidebarSnapshot } from './types';
 import { useConsoleCommandBindings } from './useConsoleCommandBindings';
 import { useBrakeBindings } from './useOpsBindings';
@@ -483,6 +485,12 @@ function ChatBinding({
   const inputChanged = useRef<() => void>();
   const serverDraft = useRef<ReturnType<typeof useServerComposerDraft>>();
   const leaving = useRef(false);
+  // IME composition is transient: keep it in the input state, but do not persist it as a draft.
+  const composingRef = useRef(false);
+  const [composing, setComposing] = useState(false);
+  const draftRevision = useRef(0);
+  // The latest message at read-receipt start: an older ack must not clear unread after newer activity.
+  const latestMessageIdRef = useRef<string | undefined>(undefined);
   const [images, setImages] = useState<File[]>(() => threadImageDrafts.get(threadId) ?? []);
   const [replyNotices, setReplyNotices] = useState<ChatData['replyNotices']>([]);
   const [sendingThreads, setSendingThreads] = useState<Record<string, true>>({});
@@ -518,6 +526,7 @@ function ChatBinding({
     f: {},
   });
   const writeInput = useCallback((text: string) => {
+    draftRevision.current += 1;
     ui.current.draft!['chat-input'] = text;
     leaving.current = !!(
       text.trim() ||
@@ -999,27 +1008,45 @@ function ChatBinding({
   }, []);
   const messageCount = history.messages.length;
   const deliveredCount = history.messages.filter((m) => m.deliveredAt !== undefined).length;
+  latestMessageIdRef.current = history.messages.at(-1)?.id;
   useEffect(() => {
     if (exportMids !== undefined || !documentVisible || !engineMounted || !need('chat.messages')) return;
-    void request(`/api/threads/${encodeURIComponent(threadId)}/read/latest`, {
+    const ackTargetId = latestMessageIdRef.current;
+    let live = true;
+    void request<{ caughtUp?: boolean }>(`/api/threads/${encodeURIComponent(threadId)}/read/latest`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '{}',
     })
       .then((receipt) => {
+        if (!live) return;
         notifyHandledMentionRead(receipt);
+        // Only a caught-up receipt for this same latest message settles the row locally; newer
+        // activity or an unconverged ack still needs the canonical snapshot.
+        if (receipt?.caughtUp === true && latestMessageIdRef.current === ackTargetId) {
+          useSidebarProjectionStore.getState().settleThreadRead(threadId);
+          return;
+        }
         return invalidateSidebarProjection();
       })
       .catch((error) => console.debug('[PDL read receipt]', error));
+    return () => {
+      live = false;
+    };
   }, [threadId, messageCount, deliveredCount, documentVisible, exportMids, engineMounted, need('chat.messages')]);
 
-  const patchThread = async (id: string, patch: Record<string, unknown>) => {
-    await request(`/api/threads/${encodeURIComponent(id)}`, {
+  const patchThread = async (
+    id: string,
+    patch: Record<string, unknown>,
+    options: { refresh?: boolean } = {},
+  ): Promise<Record<string, unknown>> => {
+    const updated = await request<Record<string, unknown>>(`/api/threads/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     });
-    await refreshSidebarThreadSnapshot();
+    if (options.refresh !== false) await refreshSidebarThreadSnapshot();
+    return updated;
   };
   const respondRuntime = async (
     mid: string,
@@ -1265,6 +1292,11 @@ function ChatBinding({
         admissionRef.current?.updatePinned(ui.current.homePin);
         return;
       case 'compose': {
+        const nextComposing = args.composing === '1';
+        if (composingRef.current !== nextComposing) {
+          composingRef.current = nextComposing;
+          setComposing(nextComposing);
+        }
         const pop = composerTrigger(args.v, Number(args.pos));
         if (pop || ui.current.pop?.typed) ui.current.pop = pop;
         if (pop?.kind === 'ctx') setContextQuery(pop.q!);
@@ -1370,7 +1402,9 @@ function ChatBinding({
         return;
       }
       case 'rename':
-        await patchThread(args.id || threadId, { title: args.v });
+        await renameThreadTitleOptimistic(args.id || threadId, args.v, (id, title) =>
+          patchThread(id, { title }, { refresh: false }),
+        );
         return;
       case 'threadFeatureSave':
         await patchThread(args.id || threadId, { backlogItemId: args.value || null });
@@ -2287,6 +2321,8 @@ function ChatBinding({
         ui={ui}
         inputChanged={inputChanged}
         serverDraft={serverDraft}
+        composing={composing}
+        draftRevision={draftRevision.current}
         images={images}
         contexts={contexts}
         reply={reply}
@@ -2379,6 +2415,8 @@ export function ComposerInputBinding({
   ui,
   inputChanged,
   serverDraft,
+  composing = false,
+  draftRevision = 0,
   images,
   contexts,
   reply,
@@ -2393,6 +2431,8 @@ export function ComposerInputBinding({
   ui: MutableRefObject<ChatUiState>;
   inputChanged: MutableRefObject<(() => void) | undefined>;
   serverDraft: MutableRefObject<ReturnType<typeof useServerComposerDraft> | undefined>;
+  composing?: boolean;
+  draftRevision?: number;
   images: File[];
   contexts: ContextAttachment[];
   reply: ChatData['reply'];
@@ -2417,8 +2457,9 @@ export function ComposerInputBinding({
     () => '',
   );
   useEffect(() => {
-    if (enabled) syncDraftToStorage(threadId, input);
-  }, [enabled, threadId, input]);
+    // Uncommitted IME text is not a draft; the next committed edit writes the complete text.
+    if (enabled && !composing) syncDraftToStorage(threadId, input);
+  }, [enabled, threadId, input, composing]);
   const draft = useServerComposerDraft({
     threadId,
     enabled: enabled && threadId !== 'default',
@@ -2429,6 +2470,8 @@ export function ComposerInputBinding({
       ...(reply ? { replyTo: reply.id } : {}),
     },
     restore,
+    holdWrites: composing,
+    revision: draftRevision,
   });
   useLayoutEffect(() => {
     serverDraft.current = draft;
