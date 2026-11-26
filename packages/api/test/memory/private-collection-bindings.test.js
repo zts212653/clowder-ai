@@ -7,7 +7,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
@@ -802,5 +802,443 @@ describe('private-collection-bindings: corpus indexing (INV-9)', () => {
       'stale external store must exit the G1 cohort activation until its vectors are rebuilt',
     );
     service2.embeddingLifecycle.deactivate();
+  });
+
+  test('Issue #2085: recovers stale external collection from SQLite coverage after collections.json write failure (and unavailable root), then rejoins cohort after manual rebuild', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { createMemoryServices } = await import('../../dist/domains/memory/factory.js');
+    const { embeddingRecipeFingerprint, readEmbeddingDeployment } = await import(
+      '../../dist/domains/memory/embedding-generation-config.js'
+    );
+    const { getExternalCollection, updateExternalCollection } = await import(
+      '../../dist/domains/memory/external-collections.js'
+    );
+    const { openVectorGeneration } = await import('../../dist/domains/memory/open-vector-generation.js');
+    const { libraryRoutes } = await import('../../dist/routes/library.js');
+
+    const root = join(tmp, 'issue-2085-stale-recovery');
+    const docs = join(root, 'docs');
+    const extRoot = join(root, 'external-vault');
+    const extRootMoved = join(root, 'external-vault-offline');
+    const extDataDir = join(root, 'data');
+    mkdirSync(docs, { recursive: true });
+    mkdirSync(extRoot, { recursive: true });
+    mkdirSync(extDataDir, { recursive: true });
+
+    writeFileSync(join(extRoot, 'keep.md'), '# Keep\n\nKEEP_PERSISTENT_ANCHOR');
+    writeFileSync(join(extRoot, 'to-delete.md'), '# Delete\n\nDELETE_OBSOLETE_ANCHOR');
+
+    const deployment = readEmbeddingDeployment();
+    deployment.activeId = 'g1';
+    deployment.generations.g1.runtime.maxModelMemMb = 32;
+    deployment.generations.g1.recipe = { ...deployment.generations.g1.recipe, modelId: 'fixture-g1', dim: 6 };
+    const model = {
+      modelId: 'fixture-g1',
+      modelRev: deployment.generations.g1.recipe.modelRevision,
+      dim: 6,
+      generationId: 'g1',
+      representationFingerprint: embeddingRecipeFingerprint(deployment.generations.g1.recipe),
+    };
+    const encoder = {
+      load: async () => {},
+      reprobeIfNeeded: async () => {},
+      dispose() {},
+      isReady: () => true,
+      getModelInfo: () => model,
+      embed: async (texts) => texts.map(() => new Float32Array([1, 0, 0, 0, 0, 0])),
+    };
+
+    const makeMemoryService = () =>
+      createMemoryServices({
+        type: 'sqlite',
+        sqlitePath: join(root, 'evidence.sqlite'),
+        globalDbPath: join(root, 'global.sqlite'),
+        dataDir: extDataDir,
+        docsRoot: docs,
+        markersDir: join(root, 'markers'),
+        skillsRoot: join(root, 'skills'),
+        memoryRoot: join(root, 'memory'),
+        embed: { embedMode: 'off', embedDim: 6 },
+      });
+
+    const prepareMainG1 = (svc) => {
+      const main = openVectorGeneration(svc.store.getDb(), model, { create: true });
+      main.vectorStore.initMeta(model);
+      svc.store
+        .getDb()
+        .prepare("INSERT OR REPLACE INTO vector_generations VALUES('g1',?,'ready')")
+        .run(model.representationFingerprint);
+      svc.embeddingLifecycle.getDeployment = () => deployment;
+      svc.embeddingLifecycle.createEmbeddingService = () => encoder;
+      svc.embeddingLifecycle.requireLegacyConsumer = false;
+    };
+
+    const closeService = (svc) => {
+      svc.embeddingLifecycle.deactivate();
+      for (const s of new Set([svc.store, ...svc.collectionStores.values()])) s.close();
+    };
+
+    // Phase 1: Register opt-in autoRebuild external collection and build full G1 vectors.
+    const service1 = await makeMemoryService();
+    prepareMainG1(service1);
+    const app1 = Fastify();
+    await app1.register(libraryRoutes, {
+      catalog: service1.catalog,
+      stores: service1.collectionStores,
+      dataDir: service1.dataDir,
+      getEmbeddingService: () => encoder,
+      getEmbedMode: () => 'on',
+    });
+    const regRes = await app1.inject({
+      method: 'POST',
+      url: '/api/library/register',
+      payload: {
+        id: 'research:g1-2085',
+        kind: 'research',
+        name: 'g1-2085',
+        displayName: 'G1 2085 Vault',
+        root: extRoot,
+        sensitivity: 'internal',
+        scannerLevel: 0,
+        indexPolicy: { autoRebuild: true },
+      },
+    });
+    assert.equal(regRes.statusCode, 200, regRes.body);
+    const reb1 = await app1.inject({ method: 'POST', url: '/api/library/research:g1-2085/rebuild' });
+    assert.equal(reb1.statusCode, 200, reb1.body);
+    assert.equal((await service1.embeddingLifecycle.activate('on')).ok, true);
+    assert.equal(
+      service1.collectionStores.get('research:g1-2085').searchEmbedding()?.getModelInfo().generationId,
+      'g1',
+    );
+    await app1.close();
+    closeService(service1);
+
+    // Phase 2: Delete 1 doc, add 41 new docs (exceeding bounded cohort vector repair),
+    // and make collections.json read-only so startup status persistence fails.
+    rmSync(join(extRoot, 'to-delete.md'));
+    for (let i = 0; i < 41; i++) {
+      writeFileSync(join(extRoot, `bulk-${String(i).padStart(2, '0')}.md`), `# Bulk ${i}\n\nBULK_DOC_CONTENT_${i}`);
+    }
+    const collectionsPath = join(extDataDir, 'library', 'collections.json');
+    chmodSync(collectionsPath, 0o444);
+    try {
+      const service2 = await makeMemoryService();
+      assert.equal(service2.catalog.get('research:g1-2085')?.status, 'stale');
+      closeService(service2);
+    } finally {
+      chmodSync(collectionsPath, 0o644);
+    }
+    // Verify collections.json remained 'active' despite SQLite receiving 41 unembedded docs.
+    assert.equal(
+      getExternalCollection(extDataDir, 'research:g1-2085')?.status,
+      'active',
+      'collections.json write failure must leave disk manifest active before recovery',
+    );
+
+    // Phase 3a: Zero-change restart with collections.json writable again must recover 'stale'
+    // from SQLite coverage, heal collections.json, and keep main-store activate('on') green.
+    const service3 = await makeMemoryService();
+    prepareMainG1(service3);
+    assert.equal(
+      service3.catalog.get('research:g1-2085')?.status,
+      'stale',
+      'zero-change restart must recover stale state from SQLite vector coverage',
+    );
+    assert.equal(
+      getExternalCollection(extDataDir, 'research:g1-2085')?.status,
+      'stale',
+      'collections.json must be healed to stale once writable',
+    );
+    const act3 = await service3.embeddingLifecycle.activate('on');
+    assert.equal(act3.ok, true, 'main-store G1 activation must not be degraded by unembedded external docs');
+    assert.equal(service3.store.searchEmbedding()?.getModelInfo().generationId, 'g1');
+    assert.equal(service3.collectionStores.get('research:g1-2085')?.searchEmbedding(), undefined);
+    closeService(service3);
+
+    // Phase 3b: Even if manifest.root becomes temporarily unavailable between load and registration
+    // while collections.json still claims 'active', stale recovery stays intact and heals collections.json.
+    updateExternalCollection(extDataDir, 'research:g1-2085', { status: 'active' });
+    const loadedBeforeOffline = getExternalCollection(extDataDir, 'research:g1-2085');
+    assert.ok(loadedBeforeOffline);
+    renameSync(extRoot, extRootMoved);
+    try {
+      const { LibraryCatalog } = await import('../../dist/domains/memory/LibraryCatalog.js');
+      const { registerPrivateAndExternalCollections } = await import(
+        '../../dist/domains/memory/private-collection-bindings.js'
+      );
+      const offlineCatalog = new LibraryCatalog();
+      const offlineStores = new Map();
+      await registerPrivateAndExternalCollections({
+        catalog: offlineCatalog,
+        stores: offlineStores,
+        externalManifests: [loadedBeforeOffline],
+        dataDir: extDataDir,
+        now: new Date().toISOString(),
+      });
+      assert.equal(
+        offlineCatalog.get('research:g1-2085')?.status,
+        'stale',
+        'stale recovery must remain intact even when manifest.root is temporarily unavailable',
+      );
+      for (const s of offlineStores.values()) s.close();
+    } finally {
+      renameSync(extRootMoved, extRoot);
+    }
+    assert.equal(
+      getExternalCollection(extDataDir, 'research:g1-2085')?.status,
+      'stale',
+      'collections.json must also be healed to stale when root is temporarily unavailable',
+    );
+
+    // Opt-in boundary check: autoRebuild=false and archived manifests must not be altered by stale recovery.
+    {
+      const { LibraryCatalog } = await import('../../dist/domains/memory/LibraryCatalog.js');
+      const { registerPrivateAndExternalCollections } = await import(
+        '../../dist/domains/memory/private-collection-bindings.js'
+      );
+      const boundaryCatalog = new LibraryCatalog();
+      const boundaryStores = new Map();
+      const baseManifest = getExternalCollection(extDataDir, 'research:g1-2085');
+      await registerPrivateAndExternalCollections({
+        catalog: boundaryCatalog,
+        stores: boundaryStores,
+        externalManifests: [
+          { ...baseManifest, indexPolicy: { autoRebuild: false }, status: 'active' },
+          { ...baseManifest, id: 'research:g1-2085-archived', name: 'g1-2085-archived', status: 'archived' },
+        ],
+        dataDir: extDataDir,
+        now: new Date().toISOString(),
+      });
+      assert.equal(
+        boundaryCatalog.get('research:g1-2085')?.status,
+        'active',
+        'autoRebuild=false collection must preserve its manifest status untouched',
+      );
+      assert.equal(
+        boundaryCatalog.get('research:g1-2085-archived')?.status,
+        'archived',
+        'archived collection must remain archived without opening store',
+      );
+      assert.equal(boundaryStores.has('research:g1-2085-archived'), false);
+      for (const s of boundaryStores.values()) s.close();
+    }
+
+    // Phase 4: Manual rebuild repopulates all 42 G1 vectors; subsequent zero-change restart cleanly rejoins G1 cohort.
+    const service4 = await makeMemoryService();
+    prepareMainG1(service4);
+    const app4 = Fastify();
+    await app4.register(libraryRoutes, {
+      catalog: service4.catalog,
+      stores: service4.collectionStores,
+      dataDir: service4.dataDir,
+      getEmbeddingService: () => encoder,
+      getEmbedMode: () => 'on',
+    });
+    const reb4 = await app4.inject({ method: 'POST', url: '/api/library/research:g1-2085/rebuild' });
+    assert.equal(reb4.statusCode, 200, reb4.body);
+    assert.equal(service4.catalog.get('research:g1-2085')?.status, 'active');
+    await app4.close();
+    closeService(service4);
+
+    const service5 = await makeMemoryService();
+    for (const s of new Set([service5.store, ...service5.collectionStores.values()])) storesToClose.push(s);
+    prepareMainG1(service5);
+    assert.equal(
+      service5.catalog.get('research:g1-2085')?.status,
+      'active',
+      'rebuilt external collection must stay active on subsequent zero-change restart',
+    );
+    const act5 = await service5.embeddingLifecycle.activate('on');
+    assert.equal(act5.ok, true);
+    assert.equal(service5.store.searchEmbedding()?.getModelInfo().generationId, 'g1');
+    assert.equal(
+      service5.collectionStores.get('research:g1-2085')?.searchEmbedding()?.getModelInfo().generationId,
+      'g1',
+      'rebuilt external collection must rejoin G1 cohort after restart',
+    );
+    service5.embeddingLifecycle.deactivate();
+  });
+
+  test('Issue #2085 guardrail: canonical activeId=g0 keeps complete serving G0 active despite paused or quarantined G1 shadow, while explicit activeGenerationId=g1 marks stale', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { LibraryCatalog } = await import('../../dist/domains/memory/LibraryCatalog.js');
+    const { embeddingRecipeFingerprint, readEmbeddingDeployment } = await import(
+      '../../dist/domains/memory/embedding-generation-config.js'
+    );
+    const { loadExternalCollections } = await import('../../dist/domains/memory/external-collections.js');
+    const { registerPrivateAndExternalCollections } = await import(
+      '../../dist/domains/memory/private-collection-bindings.js'
+    );
+    const { ShadowVectorGenerationBuilder } = await import(
+      '../../dist/domains/memory/ShadowVectorGenerationBuilder.js'
+    );
+    const { libraryRoutes } = await import('../../dist/routes/library.js');
+
+    const root = join(tmp, 'issue-2085-g0-guardrail');
+    const extRoot = join(root, 'vault-g0');
+    const shadowOnlyRoot = join(root, 'vault-shadow-only');
+    const extDataDir = join(root, 'data');
+    mkdirSync(extRoot, { recursive: true });
+    mkdirSync(shadowOnlyRoot, { recursive: true });
+    mkdirSync(extDataDir, { recursive: true });
+
+    writeFileSync(join(extRoot, 'alpha.md'), '# Alpha\n\nServing G0 document one.');
+    writeFileSync(join(extRoot, 'beta.md'), '# Beta\n\nServing G0 document two.');
+    writeFileSync(join(shadowOnlyRoot, 'gamma.md'), '# Gamma\n\nShadow only document one.');
+    writeFileSync(join(shadowOnlyRoot, 'delta.md'), '# Delta\n\nShadow only document two.');
+
+    const g0Model = { modelId: 'fixture-g0', modelRev: '1', dim: 4, generationId: 'g0' };
+    const g0Encoder = {
+      load: async () => {},
+      reprobeIfNeeded: async () => {},
+      dispose() {},
+      isReady: () => true,
+      getModelInfo: () => g0Model,
+      embed: async (texts) => texts.map(() => new Float32Array([1, 0, 0, 0])),
+    };
+
+    const deployment = readEmbeddingDeployment();
+    assert.equal(deployment.activeId, 'g0', 'canonical deployment activeId fixture assumption');
+    const g1Recipe = { ...deployment.generations.g1.recipe, modelId: 'fixture-g1-shadow', dim: 6 };
+    const g1Model = {
+      modelId: 'fixture-g1-shadow',
+      modelRev: g1Recipe.modelRevision,
+      dim: 6,
+      generationId: 'g1',
+      representationFingerprint: embeddingRecipeFingerprint(g1Recipe),
+    };
+    const g1Encoder = {
+      load: async () => {},
+      reprobeIfNeeded: async () => {},
+      dispose() {},
+      isReady: () => true,
+      getModelInfo: () => g1Model,
+      embed: async (texts) => texts.map(() => new Float32Array([0, 1, 0, 0, 0, 0])),
+    };
+
+    // Phase 1: Register and build a complete serving G0 collection + a lexical-only shadow-target collection.
+    const setupCatalog = new LibraryCatalog();
+    const setupStores = new Map();
+    const app = Fastify();
+    await app.register(libraryRoutes, {
+      catalog: setupCatalog,
+      stores: setupStores,
+      dataDir: extDataDir,
+      getEmbeddingService: () => g0Encoder,
+      getEmbedMode: () => 'on',
+    });
+    for (const [id, name, dir] of [
+      ['research:g0-serving', 'g0-serving', extRoot],
+      ['research:g1-shadow-only', 'g1-shadow-only', shadowOnlyRoot],
+    ]) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/library/register',
+        payload: {
+          id,
+          kind: 'research',
+          name,
+          displayName: name,
+          root: dir,
+          sensitivity: 'internal',
+          scannerLevel: 0,
+          indexPolicy: { autoRebuild: true },
+        },
+      });
+      assert.equal(res.statusCode, 200, res.body);
+    }
+    // Build complete G0 vectors for research:g0-serving only.
+    const g0Reb = await app.inject({ method: 'POST', url: '/api/library/research:g0-serving/rebuild' });
+    assert.equal(g0Reb.statusCode, 200, g0Reb.body);
+    assert.equal(setupCatalog.get('research:g0-serving')?.status, 'active');
+
+    // Run a paused G1 shadow build (1 batch of 1 out of 2 docs -> state='building', incomplete) on both stores.
+    const g0Store = setupStores.get('research:g0-serving');
+    const pausedRes = await new ShadowVectorGenerationBuilder(g0Store, g1Encoder, false).build({
+      deadlineAt: Date.now() + 5000,
+      maxBatches: 1,
+      batchSize: 1,
+    });
+    assert.equal(pausedRes.status, 'paused');
+
+    // For research:g1-shadow-only, index lexically without G0, then start an inactive paused G1 shadow build.
+    await app.close();
+    const appLexOnly = Fastify();
+    await appLexOnly.register(libraryRoutes, {
+      catalog: setupCatalog,
+      stores: setupStores,
+      dataDir: extDataDir,
+    });
+    const lexReb = await appLexOnly.inject({ method: 'POST', url: '/api/library/research:g1-shadow-only/rebuild' });
+    assert.equal(lexReb.statusCode, 200, lexReb.body);
+    await appLexOnly.close();
+    const shadowOnlyStore = setupStores.get('research:g1-shadow-only');
+    const shadowOnlyPaused = await new ShadowVectorGenerationBuilder(shadowOnlyStore, g1Encoder, false).build({
+      deadlineAt: Date.now() + 5000,
+      maxBatches: 1,
+      batchSize: 1,
+    });
+    assert.equal(shadowOnlyPaused.status, 'paused');
+    for (const s of setupStores.values()) s.close();
+
+    // Helper to run zero-change startup registration and inspect statuses.
+    const restartAndCheck = async (extraOptions = {}) => {
+      const cat = new LibraryCatalog();
+      const map = new Map();
+      await registerPrivateAndExternalCollections({
+        catalog: cat,
+        stores: map,
+        externalManifests: loadExternalCollections(extDataDir),
+        dataDir: extDataDir,
+        now: new Date().toISOString(),
+        ...extraOptions,
+      });
+      return { cat, map };
+    };
+
+    // Case A: Canonical activeId='g0' + paused G1 shadow -> g0-serving stays 'active',
+    // and g1-shadow-only (no G0, inactive building G1 shadow) also stays 'active'.
+    const runA = await restartAndCheck();
+    assert.equal(
+      runA.cat.get('research:g0-serving')?.status,
+      'active',
+      'paused G1 shadow must not disqualify complete serving G0 under activeId=g0',
+    );
+    assert.equal(
+      runA.cat.get('research:g1-shadow-only')?.status,
+      'active',
+      'inactive building G1 shadow must not be counted as serving vectors under activeId=g0',
+    );
+    // Quarantine G1 shadow on g0-serving while keeping G0 intact.
+    runA.map
+      .get('research:g0-serving')
+      .getDb()
+      .prepare("INSERT OR REPLACE INTO embedding_meta_g1(key,value) VALUES('vector_invalidation_quarantined','1')")
+      .run();
+    for (const s of runA.map.values()) s.close();
+
+    // Case B: Canonical activeId='g0' + quarantined G1 shadow -> g0-serving STILL stays 'active'.
+    const runB = await restartAndCheck();
+    assert.equal(
+      runB.cat.get('research:g0-serving')?.status,
+      'active',
+      'quarantined G1 shadow must not disqualify complete serving G0 under activeId=g0',
+    );
+    for (const s of runB.map.values()) s.close();
+
+    // Case C: Explicit activeGenerationId='g1' on the exact same store -> MUST mark 'stale'.
+    const runC = await restartAndCheck({ activeGenerationId: 'g1' });
+    for (const s of runC.map.values()) storesToClose.push(s);
+    assert.equal(
+      runC.cat.get('research:g0-serving')?.status,
+      'stale',
+      'explicit activeGenerationId=g1 must mark incomplete/quarantined G1 store stale',
+    );
+    assert.equal(
+      runC.cat.get('research:g1-shadow-only')?.status,
+      'stale',
+      'explicit activeGenerationId=g1 must mark paused building G1 store stale',
+    );
   });
 });
