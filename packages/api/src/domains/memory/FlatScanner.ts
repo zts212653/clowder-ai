@@ -4,7 +4,7 @@ import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { matchGlob } from './CatCafeScanner.js';
 import type { RepoScanner, ScannedEvidence } from './interfaces.js';
-import { buildMarkdownDocumentPassages, isMarkdownSeparator, stripYamlFrontmatter } from './MarkdownPassageIndexer.js';
+import { isMarkdownSeparator, stripYamlFrontmatter } from './MarkdownPassageIndexer.js';
 
 const SKIP_DIRS = new Set([
   'node_modules',
@@ -129,7 +129,7 @@ export class FlatScanner implements RepoScanner {
       },
       provenance: { tier: 'derived', source: rel },
       rawContent: content,
-      passages: buildMarkdownDocumentPassages(content),
+      passages: [],
     };
   }
 

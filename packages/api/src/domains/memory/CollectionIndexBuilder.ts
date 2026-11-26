@@ -3,13 +3,11 @@ import { extractFrontmatter, extractSupersedes } from './CatCafeScanner.js';
 import type { CollectionManifest } from './collection-types.js';
 import { embedIndexedItems } from './embed-utils.js';
 import type { EvidenceItem, IEmbeddingService, RepoScanner, ScannedEvidence } from './interfaces.js';
-import { MARKDOWN_DOC_PASSAGE_PREFIX } from './MarkdownPassageIndexer.js';
-import { replaceDocumentPassages } from './replace-document-passages.js';
+import { stripYamlFrontmatter } from './MarkdownPassageIndexer.js';
 import type { SecretFinding } from './SecretScanner.js';
 import { SecretScanner } from './SecretScanner.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import type { VectorStore } from './VectorStore.js';
-import { createVectorInvalidator } from './vector-invalidation.js';
 
 export interface CollectionRebuildResult {
   indexed: number;
@@ -135,28 +133,49 @@ export class CollectionIndexBuilder {
         updatedAt: now,
         authority: this.manifest.reviewPolicy.authorityCeiling,
       };
-      await this.publishDocumentWithPassages(item, scanned.passages);
+      await this.publishDocumentWithBody(item, this.extractLexicalBody(scanned));
       await this.refreshFrontmatterSupersedesEdges(item.anchor, scanned.rawContent);
     }
   }
 
-  private hasMarkdownPassages(anchor: string): boolean {
+  private extractLexicalBody(result: ScannedEvidence): string {
+    if (result.rawContent) {
+      return stripYamlFrontmatter(result.rawContent).trim();
+    }
+    return result.passages.join('\n\n').trim();
+  }
+
+  private hasDocumentBody(anchor: string): boolean {
     const row = this.store
       .getDb()
-      .prepare('SELECT 1 FROM evidence_passages WHERE doc_anchor = ? AND passage_id LIKE ? LIMIT 1')
-      .get(anchor, `${MARKDOWN_DOC_PASSAGE_PREFIX}%`);
+      .prepare('SELECT 1 FROM evidence_doc_bodies WHERE doc_anchor = ? LIMIT 1')
+      .get(anchor);
     return row !== undefined;
   }
 
-  private async publishDocumentWithPassages(item: EvidenceItem, passages: string[]): Promise<void> {
+  private async publishDocumentWithBody(item: EvidenceItem, bodyContent: string): Promise<void> {
     // Persist metadata with an incomplete sourceHash stamp first; commit the final sourceHash
-    // only inside the same atomic SQLite transaction that replaces passages. Any failure leaves
-    // source_hash NULL so the next rebuild retries and recovers cleanly.
+    // only inside the same atomic SQLite transaction that replaces the lexical body row.
+    // Any failure leaves source_hash NULL so the next rebuild retries and recovers cleanly.
+    // Keeping external bodies in evidence_doc_bodies (rather than vector-tracked evidence_passages)
+    // preserves G0/G1 passage_vectors cohort readiness with zero extra embedding batches.
     await this.store.upsert([{ ...item, sourceHash: undefined }]);
     await this.store.runExclusive(() => {
       const db = this.store.getDb();
       db.transaction(() => {
-        replaceDocumentPassages(db, [{ item, passages }], createVectorInvalidator(db, 'passage_vectors'));
+        if (bodyContent.length > 0) {
+          db.prepare(
+            `INSERT INTO evidence_doc_bodies (doc_anchor, content, updated_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT(doc_anchor) DO UPDATE SET
+               content = excluded.content,
+               updated_at = excluded.updated_at
+             WHERE evidence_doc_bodies.content IS NOT excluded.content
+                OR evidence_doc_bodies.updated_at IS NOT excluded.updated_at`,
+          ).run(item.anchor, bodyContent, item.updatedAt);
+        } else {
+          db.prepare('DELETE FROM evidence_doc_bodies WHERE doc_anchor = ?').run(item.anchor);
+        }
         db.prepare('UPDATE evidence_docs SET source_hash = ? WHERE anchor = ?').run(
           item.sourceHash ?? null,
           item.anchor,
@@ -175,15 +194,16 @@ export class CollectionIndexBuilder {
     for (const result of results) {
       const hash = createHash('sha256').update(result.rawContent).digest('hex');
       const anchor = result.item.anchor;
+      const bodyContent = this.extractLexicalBody(result);
       currentAnchors.add(anchor);
 
       if (!force) {
         const existing = await this.store.getByAnchor(anchor);
-        const passagesReady = result.passages.length === 0 || this.hasMarkdownPassages(anchor);
+        const bodyReady = bodyContent.length === 0 || this.hasDocumentBody(anchor);
         if (
           existing?.sourceHash === hash &&
           existing.authority === this.manifest.reviewPolicy.authorityCeiling &&
-          passagesReady
+          bodyReady
         ) {
           skipped++;
           continue;
@@ -196,7 +216,7 @@ export class CollectionIndexBuilder {
         updatedAt: now,
         authority: this.manifest.reviewPolicy.authorityCeiling,
       };
-      await this.publishDocumentWithPassages(item, result.passages);
+      await this.publishDocumentWithBody(item, bodyContent);
       indexedItems.push(item);
       indexed++;
     }

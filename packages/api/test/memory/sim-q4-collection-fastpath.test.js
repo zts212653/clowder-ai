@@ -94,7 +94,15 @@ describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
       'See [[architecture]] for the real design summary.',
       'prose containing an inline wikilink must not be skipped',
     );
-    assert.ok((hrDoc?.passages.length ?? 0) >= 2, 'FlatScanner should emit markdown document passages');
+    assert.deepEqual(
+      hrDoc?.passages,
+      [],
+      'FlatScanner keeps vector-tracked passages empty so external bodies stay lexical-only',
+    );
+    assert.ok(
+      hrDoc?.rawContent.includes('Second section body text.'),
+      'FlatScanner preserves full rawContent for body FTS',
+    );
   });
 
   it('Knife 2a: default summary search rescues out-of-distribution body-only correction over superseded draft', async () => {
@@ -133,8 +141,14 @@ describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
     const builder = new CollectionIndexBuilder(store, manifest, new StructuredScanner(manifest.id));
     await builder.rebuild();
 
+    const bodyCount = store.getDb().prepare('SELECT count(*) AS n FROM evidence_doc_bodies').get().n;
     const passageCount = store.getDb().prepare('SELECT count(*) AS n FROM evidence_passages').get().n;
-    assert.ok(passageCount >= 2, `expected persisted passages, got ${passageCount}`);
+    assert.equal(bodyCount, 2, `expected 1 lexical body row per doc, got ${bodyCount}`);
+    assert.equal(
+      passageCount,
+      0,
+      'external collection lexical bodies must not populate vector-tracked evidence_passages',
+    );
 
     const results = await store.search('legacy_m1a_protocol', { limit: 5 });
     assert.ok(results.length >= 2, `expected both active and superseded docs, got ${results.map((r) => r.anchor)}`);
@@ -142,6 +156,13 @@ describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
       results[0].anchor,
       'research:sim-q4:doc/active-correction',
       'active body correction must outrank superseded draft on default search',
+    );
+
+    // Cross-paragraph multi-term query: terms in different paragraphs still match in 1-row-per-doc body FTS
+    const crossPara = await store.search('Canonical three-sentence', { limit: 5 });
+    assert.deepEqual(
+      crossPara.map((r) => r.anchor),
+      ['research:sim-q4:doc/active-correction'],
     );
 
     // Negative guard: explicit historical archaeology still finds the superseded draft
@@ -152,7 +173,7 @@ describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
     );
   });
 
-  it('Knife 2b (P2-4): in-process paired SQL spy proves fast-path touches 0 passage SQL while body-only fallback touches passage_fts', async () => {
+  it('Knife 2b (P2-4): in-process paired SQL spy proves fast-path touches 0 body/passage SQL while body-only fallback touches evidence_doc_body_fts', async () => {
     const memStore = new SqliteEvidenceStore(':memory:');
     await memStore.initialize();
     try {
@@ -191,29 +212,32 @@ describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
       const builder = new CollectionIndexBuilder(memStore, manifest, new StructuredScanner(manifest.id));
       await builder.rebuild();
 
-      let passageSqlCount = 0;
+      let deepSqlCountTotal = 0;
       const db = memStore.getDb();
       const origPrepare = db.prepare.bind(db);
       db.prepare = (sql, ...rest) => {
-        if (typeof sql === 'string' && /passage_fts|evidence_passages/i.test(sql)) {
-          passageSqlCount++;
+        if (
+          typeof sql === 'string' &&
+          /evidence_doc_body_fts|evidence_doc_bodies|passage_fts|evidence_passages/i.test(sql)
+        ) {
+          deepSqlCountTotal++;
         }
         return origPrepare(sql, ...rest);
       };
 
-      // Positive control 1: strong Stage-1 metadata hit must execute 0 passage SQL queries
+      // Positive control 1: strong Stage-1 metadata hit must execute 0 body/passage SQL queries
       const fastResults = await memStore.search('alpha_fastpath_token', { limit: 5 });
-      const fastSqlCount = passageSqlCount;
-      assert.equal(fastSqlCount, 0, 'Stage-2 passage SQL must NOT execute when Stage-1 has a strong active hit');
+      const fastSqlCount = deepSqlCountTotal;
+      assert.equal(fastSqlCount, 0, 'Stage-2 body/passage SQL must NOT execute when Stage-1 has a strong active hit');
       assert.deepEqual(
         fastResults.map((r) => r.anchor),
         ['research:sim-q4:doc/canonical-plan'],
       );
 
-      // Positive control 2: body-only query MUST execute passage_fts SQL and find the target doc
+      // Positive control 2: body-only query MUST execute evidence_doc_body_fts SQL and find the target doc
       const deepResults = await memStore.search('deep_only_positive_control', { limit: 5 });
-      const deepSqlCount = passageSqlCount - fastSqlCount;
-      assert.ok(deepSqlCount > 0, `body-only fallback must query passage_fts (got ${deepSqlCount})`);
+      const deepSqlCount = deepSqlCountTotal - fastSqlCount;
+      assert.ok(deepSqlCount > 0, `body-only fallback must query evidence_doc_body_fts (got ${deepSqlCount})`);
       assert.deepEqual(
         deepResults.map((r) => r.anchor),
         ['research:sim-q4:doc/tangential-notes'],
@@ -403,7 +427,7 @@ describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
     }
   });
 
-  it('P1-1: failed passage replacement leaves source_hash incomplete so next rebuild retries and recovers', async () => {
+  it('P1-1: failed body replacement leaves source_hash incomplete so next rebuild retries and recovers', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'sim-q4-p1-retry-'));
     const file = join(dir, 'policy.md');
     const makeDoc = (word) => `# Policy\n\nStable overview.\n\n## Rule\n\n${word}\n`;
@@ -418,17 +442,17 @@ describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
     store
       .getDb()
       .exec(
-        "CREATE TRIGGER fail_new_passage BEFORE INSERT ON evidence_passages WHEN new.content LIKE '%atomic_new_claim%' BEGIN SELECT RAISE(ABORT, 'injected passage failure'); END",
+        "CREATE TRIGGER fail_new_body BEFORE UPDATE ON evidence_doc_bodies WHEN new.content LIKE '%atomic_new_claim%' BEGIN SELECT RAISE(ABORT, 'injected body failure'); END",
       );
 
-    await assert.rejects(() => builder.rebuild(), /injected passage failure/);
-    store.getDb().exec('DROP TRIGGER fail_new_passage');
+    await assert.rejects(() => builder.rebuild(), /injected body failure/);
+    store.getDb().exec('DROP TRIGGER fail_new_body');
 
     const incompleteDoc = await store.getByAnchor('research:sim-q4:doc/policy');
     assert.notEqual(
       incompleteDoc?.sourceHash,
       createHash('sha256').update(updatedText).digest('hex'),
-      'source_hash must not claim completion when passage replacement failed',
+      'source_hash must not claim completion when body replacement failed',
     );
 
     const retry = await builder.rebuild();
@@ -442,7 +466,7 @@ describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
     );
   });
 
-  it('P1-2: incrementalUpdate enforces SecretScanner fail-closed gate before persisting body passages', async () => {
+  it('P1-2: incrementalUpdate enforces SecretScanner fail-closed gate before persisting lexical bodies', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'sim-q4-p1-secret-'));
     const file = join(dir, 'policy.md');
     writeFileSync(file, '# Policy\n\nStable overview.\n\n## Rule\n\nSafe body text.\n');
@@ -459,11 +483,13 @@ describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
 
     await assert.rejects(() => builder.incrementalUpdate([file]), /blocked by SecretScanner/);
 
-    const leakedPassages = store
+    const leakedBodies = store
       .getDb()
-      .prepare("SELECT count(*) AS n FROM evidence_passages WHERE content LIKE '%synthetic_incremental_secret_marker%'")
+      .prepare(
+        "SELECT count(*) AS n FROM evidence_doc_bodies WHERE content LIKE '%synthetic_incremental_secret_marker%'",
+      )
       .get().n;
-    assert.equal(leakedPassages, 0, 'blocked incrementalUpdate must not persist secret passages');
+    assert.equal(leakedBodies, 0, 'blocked incrementalUpdate must not persist secret bodies');
     assert.deepEqual(await store.search('synthetic_incremental_secret_marker', { limit: 5 }), []);
     assert.equal(
       await store.getByAnchor('research:sim-q4:doc/policy'),
@@ -472,7 +498,7 @@ describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
     );
   });
 
-  it('External collection passage lifecycle: edit via incrementalUpdate and delete via rebuild invalidate doc and passage indexes', async () => {
+  it('External collection body lifecycle: edit via incrementalUpdate and delete via rebuild invalidate doc and body indexes', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'sim-q4-lifecycle-'));
     const file = join(dir, 'living-policy.md');
     writeFileSync(
@@ -521,7 +547,7 @@ describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
     assert.deepEqual(
       await store.search('legacy_budget_claim_71pct', { limit: 5 }),
       [],
-      'corrected old passage text must not survive incrementalUpdate',
+      'corrected old body text must not survive incrementalUpdate',
     );
     const freshAfterEdit = await store.search('verified_budget_claim_v2', { limit: 5 });
     assert.deepEqual(
@@ -534,10 +560,10 @@ describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
 
     assert.deepEqual(await store.search('verified_budget_claim_v2', { limit: 5 }), []);
     assert.deepEqual(await store.search('verified_budget_claim_v2', { depth: 'raw', limit: 5 }), []);
-    const remainingPassages = store
+    const remainingBodies = store
       .getDb()
-      .prepare('SELECT count(*) AS n FROM evidence_passages WHERE doc_anchor = ?')
+      .prepare('SELECT count(*) AS n FROM evidence_doc_bodies WHERE doc_anchor = ?')
       .get('research:sim-q4:doc/living-policy').n;
-    assert.equal(remainingPassages, 0, 'removed external document must leave 0 orphan passages');
+    assert.equal(remainingBodies, 0, 'removed external document must leave 0 orphan bodies');
   });
 });

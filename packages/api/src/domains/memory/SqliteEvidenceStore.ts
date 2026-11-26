@@ -834,10 +834,13 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   }
 
   /**
-   * Native FTS5 passage fallback for default summary search (SIM-Q4):
-   * Joins parent evidence_docs BEFORE GROUP BY / LIMIT so parent filters (status, kind,
-   * scope, world/scene, activation, d.updated_at) and per-doc deduplication never suffer
-   * candidate pool starvation or passage created_at mismatch.
+   * Native FTS5 body/passage fallback for default summary search (SIM-Q4):
+   * Searches lexical-only evidence_doc_body_fts first (1 row per doc, external collections,
+   * supports cross-paragraph multi-term FTS5 queries), then passage_fts (main store
+   * evidence_passages) when remaining slots exist. Joins parent evidence_docs BEFORE
+   * GROUP BY / LIMIT so parent filters (status, kind, scope, world/scene, activation,
+   * d.updated_at) and per-doc deduplication never suffer candidate pool starvation or
+   * passage created_at mismatch.
    */
   private searchSummaryFallbackDocs(
     ftsQueries: string[],
@@ -847,29 +850,62 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   ): EvidenceItem[] {
     if (!this.db || ftsQueries.length === 0) return [];
     for (const ftsQuery of ftsQueries) {
+      const merged: EvidenceItem[] = [];
+      const seen = new Set<string>();
+
       try {
-        const params: unknown[] = [ftsQuery];
-        let inner = `
-          SELECT d.anchor AS anchor, MIN(f.rank) AS best_rank
-          FROM passage_fts f
-          JOIN evidence_passages p ON p.rowid = f.rowid
-          JOIN evidence_docs d ON d.anchor = p.doc_anchor
-          WHERE passage_fts MATCH ?`;
-        inner = this.appendEvidenceDocFilters(inner, params, options, filters, 'd.');
-        inner += ` GROUP BY d.anchor ORDER BY ${temporalPenaltySql('d')}, best_rank LIMIT ?`;
-        params.push(limit);
-        const sql = `
-          WITH matched AS (${inner})
+        const bodyParams: unknown[] = [ftsQuery];
+        let bodySql = `
           SELECT d.*
-          FROM matched m
-          JOIN evidence_docs d ON d.anchor = m.anchor
-          ORDER BY ${temporalPenaltySql('d')}, m.best_rank`;
-        const rows = this.db.prepare(sql).all(...params) as RowShape[];
-        if (rows.length > 0) {
-          return rows.map((row) => rowToItem(row));
+          FROM evidence_doc_body_fts f
+          JOIN evidence_doc_bodies b ON b.rowid = f.rowid
+          JOIN evidence_docs d ON d.anchor = b.doc_anchor
+          WHERE evidence_doc_body_fts MATCH ?`;
+        bodySql = this.appendEvidenceDocFilters(bodySql, bodyParams, options, filters, 'd.');
+        bodySql += ` ORDER BY ${temporalPenaltySql('d')}, f.rank LIMIT ?`;
+        bodyParams.push(limit);
+        const bodyRows = this.db.prepare(bodySql).all(...bodyParams) as RowShape[];
+        for (const row of bodyRows) {
+          if (seen.has(row.anchor)) continue;
+          seen.add(row.anchor);
+          merged.push(rowToItem(row));
         }
       } catch {
-        // invalid FTS syntax at this relaxation level — try next
+        // invalid FTS syntax at this relaxation level or pre-V85 DB — continue
+      }
+
+      if (merged.length < limit) {
+        try {
+          const params: unknown[] = [ftsQuery];
+          let inner = `
+            SELECT d.anchor AS anchor, MIN(f.rank) AS best_rank
+            FROM passage_fts f
+            JOIN evidence_passages p ON p.rowid = f.rowid
+            JOIN evidence_docs d ON d.anchor = p.doc_anchor
+            WHERE passage_fts MATCH ?`;
+          inner = this.appendEvidenceDocFilters(inner, params, options, filters, 'd.');
+          inner += ` GROUP BY d.anchor ORDER BY ${temporalPenaltySql('d')}, best_rank LIMIT ?`;
+          params.push(limit);
+          const sql = `
+            WITH matched AS (${inner})
+            SELECT d.*
+            FROM matched m
+            JOIN evidence_docs d ON d.anchor = m.anchor
+            ORDER BY ${temporalPenaltySql('d')}, m.best_rank`;
+          const rows = this.db.prepare(sql).all(...params) as RowShape[];
+          for (const row of rows) {
+            if (seen.has(row.anchor)) continue;
+            seen.add(row.anchor);
+            merged.push(rowToItem(row));
+            if (merged.length >= limit) break;
+          }
+        } catch {
+          // invalid FTS syntax at this relaxation level — try next
+        }
+      }
+
+      if (merged.length > 0) {
+        return merged;
       }
     }
     return [];
@@ -2257,6 +2293,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           );
           db.prepare('DELETE FROM evidence_passages WHERE doc_anchor = ?').run(anchor);
         }
+        db.prepare('DELETE FROM evidence_doc_bodies WHERE doc_anchor = ?').run(anchor);
         invalidateDocument(anchor);
         db.prepare('DELETE FROM evidence_docs WHERE anchor = ?').run(anchor);
       })();
@@ -2276,6 +2313,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         }>;
         for (const { anchor } of rows) {
           removeDocument(anchor);
+          db.prepare('DELETE FROM evidence_doc_bodies WHERE doc_anchor = ?').run(anchor);
           const passages = db
             .prepare('SELECT passage_id AS id FROM evidence_passages WHERE doc_anchor=?')
             .all(anchor) as Array<{ id: string }>;
@@ -2317,6 +2355,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           db.prepare(
             `DELETE FROM evidence_passages WHERE doc_anchor IN (${ph}) AND doc_anchor NOT LIKE 'thread-%'`,
           ).run(...batch);
+          db.prepare(`DELETE FROM evidence_doc_bodies WHERE doc_anchor IN (${ph})`).run(...batch);
           for (const anchor of batch) invalidateDocument(anchor);
         }
       }
