@@ -828,10 +828,9 @@ export class AcpAgentService implements AgentService {
             envDiag: callbackEnvDiagnostic(sessionCallbackEnv),
           };
         }
-        return {
-          mcpServers: await materializeSessionMcpServers(invokeServers, sessionCallbackEnv, Boolean(agy)),
-          envDiag: callbackEnvDiagnostic(sessionCallbackEnv),
-        };
+        const mcpServers = await materializeSessionMcpServers(invokeServers, sessionCallbackEnv, Boolean(agy));
+        options?.signal?.throwIfAborted();
+        return { mcpServers, envDiag: callbackEnvDiagnostic(sessionCallbackEnv) };
       };
       let sessionMcpServers: AcpMcpServer[] = invokeServers;
       let envDiag = callbackEnvDiagnostic(options?.callbackEnv);

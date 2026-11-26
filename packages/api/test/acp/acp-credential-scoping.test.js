@@ -13,7 +13,9 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import fsPromises from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
@@ -188,6 +190,41 @@ async function drain(iterable) {
 }
 
 describe('AcpAgentService session-scoped credential injection (integration)', () => {
+  it('does not start an ACP session after a stop during managed MCP credential read', async (t) => {
+    const client = makeCapturingClient();
+    const adapter = makeAdapter(client);
+    const controller = new AbortController();
+    const path = join(credsDir, 'abort-during-read.json');
+    const invocationId = 'inv-abort-during-read';
+    const callbackToken = 'fixture-abort-token';
+    writeFileSync(path, JSON.stringify({ invocationId, callbackToken }));
+
+    const readFile = fsPromises.readFile;
+    const delayedRead = t.mock.method(fsPromises, 'readFile', async (...args) => {
+      if (args[0] === path) controller.abort();
+      return readFile(...args);
+    });
+    syncBuiltinESMExports();
+    try {
+      await drain(
+        adapter.invoke('hello', {
+          signal: controller.signal,
+          callbackEnv: {
+            ...makeCallbackEnv({ invocationId, callbackToken }),
+            CAT_CAFE_CREDENTIAL_FILE: path,
+            CAT_CAFE_MCP_TRANSPORT: 'shared',
+          },
+        }),
+      );
+      assert.equal(controller.signal.aborted, true);
+      assert.equal(client.newSessions.length, 0);
+      assert.equal(client.prompts.length, 0);
+    } finally {
+      delayedRead.mock.restore();
+      syncBuiltinESMExports();
+    }
+  });
+
   it('newSession → resume reuses one file; a second session gets its own', async () => {
     const client = makeCapturingClient();
     const adapter = makeAdapter(client);
