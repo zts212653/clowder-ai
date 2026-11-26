@@ -90,6 +90,27 @@ async function attemptMembers(attemptToken: string): Promise<UnixProcessIdentity
   });
 }
 
+/**
+ * Format-independent liveness for a recorded owner whose start-time comparison failed. The owner still
+ * holds the attempt when its PID is present and either carries the attempt token itself or is the parent
+ * of a live process that does. A dead owner's children are re-parented and a reused PID carries nothing,
+ * so neither passes; a changed locale alone (#2025) cannot turn a live owner into "gone". Null is unknown.
+ */
+export async function durableGateOwnerStillHoldsAttempt(
+  owner: Pick<UnixProcessIdentity, 'pid'>,
+  attemptToken: string,
+): Promise<boolean | null> {
+  const environmentMarkers = [`${DURABLE_GATE_ATTEMPT_TOKEN_ENV}=${attemptToken}`];
+  const snapshot = await readUnixProcessSnapshot({ includeEnvironment: true, environmentMarkers });
+  if (snapshot === null) return null;
+  const ownerEntry = snapshot.get(owner.pid);
+  if (!ownerEntry) return false;
+  if (hasAttemptToken(ownerEntry.commandAndEnvironment, attemptToken)) return true;
+  return [...snapshot.values()].some(
+    (entry) => entry.ppid === owner.pid && hasAttemptToken(entry.commandAndEnvironment, attemptToken),
+  );
+}
+
 function signalMembers(
   members: readonly UnixProcessIdentity[],
   signal: DurableManagedGateCleanupSignal['signal'],

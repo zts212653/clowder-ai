@@ -169,9 +169,72 @@ test('a pre-fix identity keeps its exact pre-fix meaning: live stays live, reuse
   );
 });
 
-test('reconcile neither signals nor reports gone a live worker whose owner identity predates the fix', async (t) => {
+const LOCALES = {
+  zh_CN: 'zh_CN.UTF-8',
+  en_GB: 'en_GB.UTF-8',
+  de_DE: 'de_DE.UTF-8',
+  en_US: 'en_US.UTF-8',
+};
+
+function withLocale(t, locale) {
+  const keys = ['LANG', 'LC_ALL', 'LC_TIME'];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) process.env[key] = locale;
+  t.after(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+}
+
+/** The identity a pre-fix build recorded while running under `locale`. */
+function preFixIdentityUnder(pid, locale) {
+  const line = cp.spawnSync('/bin/ps', ['-p', String(pid), '-o', 'pid=,ppid=,pgid=,lstart=,command='], {
+    encoding: 'utf8',
+    env: { ...process.env, LANG: locale, LC_ALL: locale, LC_TIME: locale },
+  }).stdout;
+  const parts = line.trim().split(/\s+/);
+  return { pid, ppid: Number(parts[1]), pgid: Number(parts[2]), startedAt: parts.slice(3, 8).join(' ') };
+}
+
+/**
+ * Production shape: the recorded owner is the durable worker, and the attempt token lives on the command it
+ * spawned. `tokenOn: 'owner'` is the reviewer's fixture, where the owner itself carries the token.
+ */
+async function startOwner(t, attemptToken, tokenOn) {
+  const tokenEnv = { ...process.env, [ATTEMPT_TOKEN_ENV]: attemptToken };
+  const script =
+    tokenOn === 'owner'
+      ? 'console.log(process.pid); setInterval(() => {}, 1000)'
+      : `const c = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { env: { ...process.env, ${ATTEMPT_TOKEN_ENV}: ${JSON.stringify(attemptToken)} }, stdio: 'ignore' }); process.on('exit', () => c.kill('SIGKILL')); console.log(c.pid); setInterval(() => {}, 1000)`;
+  const owner = cp.spawn(process.execPath, ['-e', script], {
+    env: tokenOn === 'owner' ? tokenEnv : process.env,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  const [chunk] = await once(owner.stdout, 'data', { signal: AbortSignal.timeout(5000) });
+  const carrierPid = Number(String(chunk).trim());
+  t.after(() => {
+    for (const pid of new Set([owner.pid, carrierPid])) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {}
+    }
+  });
+  return { owner, carrierPid };
+}
+
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function reconcileScene(t, { written, apiNow, tokenOn = 'child', ownerDies = false }) {
   if (process.platform === 'win32') return t.skip('Unix process table only');
-  withNonCParentLocale(t);
   const root = mkdtempSync(join(tmpdir(), 'issue2025-legacy-owner-'));
   const priorDataRoot = process.env.CAT_CAFE_DATA_DIR;
   process.env.CAT_CAFE_DATA_DIR = root;
@@ -180,10 +243,14 @@ test('reconcile neither signals nor reports gone a live worker whose owner ident
     else process.env.CAT_CAFE_DATA_DIR = priorDataRoot;
     rmSync(root, { recursive: true, force: true });
   });
-  const attemptToken = 'issue2025-legacy-attempt';
-  const worker = await startChild(t, { ...process.env, [ATTEMPT_TOKEN_ENV]: attemptToken });
-  const legacy = preFixIdentity(worker.pid);
-  if (C_LSTART.test(legacy.startedAt)) return t.skip('zh_CN locale is not installed on this host');
+  const attemptToken = `issue2025-${written}-${apiNow}-${tokenOn}-${ownerDies ? 'dead' : 'live'}`;
+  const { owner, carrierPid } = await startOwner(t, attemptToken, tokenOn);
+  const legacy = preFixIdentityUnder(owner.pid, LOCALES[written]);
+  const reference = preFixIdentityUnder(owner.pid, LOCALES[apiNow]);
+  if (written !== 'en_US' && C_LSTART.test(legacy.startedAt)) return t.skip(`${written} locale is not installed`);
+  if (written !== apiNow && legacy.startedAt === reference.startedAt)
+    return t.skip(`${apiNow} formats like ${written}`);
+  withLocale(t, LOCALES[apiNow]);
 
   const service = new ManagedJobService(root);
   const principal = { userId: 'fixture-user', threadId: 'fixture-thread', catId: 'codex-astra' };
@@ -192,20 +259,53 @@ test('reconcile neither signals nor reports gone a live worker whose owner ident
     cwd: root,
     originTaskId: 'fixture-task',
     originInvocationId: 'fixture-invocation',
-    idempotencyKey: 'issue2025-legacy-owner',
+    idempotencyKey: attemptToken,
     executionSlaMs: 60000,
     wakeTarget: principal,
   });
   service.admit(principal, job.jobId, 'fixture-visible-admission');
   recordManagedJobAttempt(job, attemptToken);
   assert.equal(recordDurableManagedGateProcess(job, legacy), true);
-  assert.equal(rawDurableGateRecord(job).attemptToken, attemptToken);
+  if (ownerDies) {
+    const exited = once(owner, 'exit');
+    owner.kill('SIGKILL');
+    await exited;
+    try {
+      process.kill(carrierPid, 'SIGKILL');
+    } catch {}
+    await delay(100);
+  }
 
   await reconcileManagedJobDescriptor(job, Date.now(), job.supervisorEpoch);
   await delay(300);
-  assert.equal(worker.exitCode, null, 'the live worker was not terminated');
-  assert.equal(worker.signalCode, null, 'the live worker was not signalled');
-  assert.equal(rawDurableGateRecord(job).cleanupProven, false, 'cleanup is not marked proven');
-  assert.notEqual(rawDurableGateRecord(job).state, 'terminal');
+  return { job, owner, carrierPid, legacy };
+}
+
+for (const [written, apiNow] of [
+  ['zh_CN', 'zh_CN'],
+  ['en_GB', 'zh_CN'],
+  ['zh_CN', 'en_GB'],
+  ['zh_CN', 'de_DE'],
+  ['zh_CN', 'en_US'],
+]) {
+  for (const tokenOn of ['child', 'owner']) {
+    test(`reconcile leaves a live worker alone: identity written under ${written}, API now ${apiNow}, token on ${tokenOn}`, async (t) => {
+      const scene = await reconcileScene(t, { written, apiNow, tokenOn });
+      if (!scene) return;
+      const { job, owner, carrierPid, legacy } = scene;
+      assert.equal(isAlive(owner.pid), true, 'the live worker was not signalled');
+      assert.equal(isAlive(carrierPid), true, 'the live attempt command was not signalled');
+      assert.equal(rawDurableGateRecord(job).cleanupProven, false, 'cleanup is not marked proven');
+      assert.notEqual(rawDurableGateRecord(job).state, 'terminal');
+      assert.deepEqual(rawDurableGateRecord(job).ownerIdentity, legacy, 'ownership evidence is preserved as recorded');
+    });
+  }
+}
+
+test('reconcile still proves cleanup once a pre-fix owner and its attempt are really gone', async (t) => {
+  const scene = await reconcileScene(t, { written: 'zh_CN', apiNow: 'en_GB', ownerDies: true });
+  if (!scene) return;
+  const { job, legacy } = scene;
+  assert.equal(rawDurableGateRecord(job).cleanupProven, true, 'an absent owner with no attempt members is proven');
   assert.deepEqual(rawDurableGateRecord(job).ownerIdentity, legacy, 'ownership evidence is preserved as recorded');
 });
