@@ -1,15 +1,21 @@
 /**
- * G6-4 (F321 AC-A3 / F332 AC-C5): Non-Capsule owner correction/retire/forget
- * cross-layer invalidation end-to-end regression.
+ * G6-4 (F321 AC-A3 / F332 AC-C5): Non-Capsule owner action -> store/document-index
+ * invalidation -> cue-source integration regression (Event + private canonical Taste).
  *
- * Covers the two non-Capsule lanes currently wired without Redis/PR2 gates:
- * 1. Event lane: POST /api/memory/events/:id/actions -> EventMemoryStore -> EventMemoryCueSource
- * 2. Taste lane: POST /api/memory/taste/:id/actions -> TasteMemoryLifecycleService ->
- *    SqliteEvidenceStore derived index invalidation -> CanonicalTasteMemoryCueSource
+ * Scope covered here:
+ * 1. Event lane: real Fastify POST /api/memory/events/:id/actions -> EventMemoryStore ->
+ *    EventMemoryCueSource (prepareOpportunity / resolve / read).
+ * 2. Private Taste lane: real Fastify POST /api/memory/taste/:id/actions ->
+ *    TasteMemoryLifecycleService + document-index deleteByAnchor callback ->
+ *    CanonicalTasteMemoryCueSource (resolve / read), with independent non-empty
+ *    derived-index preconditions for correct, retire, and direct hard_forget.
  *
- * Note: Person lane owner forget is Redis-backed (covered when REDIS_URL is set in
- * person-memory-proposal-forget-owner.test.js), and cat-side Person correction PR2
- * remains upstream-gated (U6-2) and is intentionally not fabricated here.
+ * Explicitly outside this test's scope (tracked separately):
+ * - Production index.ts composition-root wiring for publishedDocuments.markPending(),
+ *   vectorStore.delete(), and public Taste publishedSnapshot;
+ * - Full invocation cue-resolver/episode/prompt delivery pipeline & browser E2E;
+ * - Person lane Redis owner forget (person-memory-proposal-forget-owner.test.js) and
+ *   upstream-gated cat-side Person correction PR2 (U6-2).
  */
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -288,7 +294,7 @@ describe('G6-4 non-Capsule cross-layer invalidation (Event + Taste)', () => {
         }),
         targetLock: new SessionMutex(),
         lockKey: () => 'g64-taste-lock',
-        // Mirror packages/api/src/index.ts:1650-1655 production derived invalidation contract.
+        // Exercises the document-index deleteByAnchor portion of Taste derived invalidation.
         invalidateDerived: async ({ sourcePath: invalidatedPath }) => {
           await evidenceStore.deleteByAnchor(tasteDocumentAnchor(invalidatedPath));
         },
@@ -334,7 +340,7 @@ describe('G6-4 non-Capsule cross-layer invalidation (Event + Taste)', () => {
         payload,
       });
 
-    it('invalidates derived index and stale Taste cue on correct, delivers updated scene next turn, and clears after retire/hard_forget', async () => {
+    async function loadInitialEntryAndCue() {
       const list = await app.inject({
         method: 'GET',
         url: '/api/memory/taste',
@@ -343,21 +349,31 @@ describe('G6-4 non-Capsule cross-layer invalidation (Event + Taste)', () => {
       assert.equal(list.statusCode, 200, list.body);
       const initial = list.json().entries[0];
 
-      // Turn 1: cue resolve + read + derived search return original scene
-      const snap1 = await cueSource.resolve({
+      const snap = await cueSource.resolve({
         ownerUserId,
         stage: 'review',
         selectedSkill: 'request-review',
         featureId: 'F321',
       });
-      assert.ok(snap1);
-      const anchor = `taste-dimensions:${snap1.dimensions.join(',')}`;
-      const read1 = await cueSource.read({ ownerUserId, anchor, expectedRevision: snap1.revision });
-      assert.equal(read1.status, 'ok');
-      assert.equal(read1.payload.vignettes[0].payload.scene, 'g64_original_taste_scene');
-      assert.equal((await evidenceStore.search('g64_original_taste_scene', { limit: 5 })).length, 1);
+      assert.ok(snap);
+      const anchor = `taste-dimensions:${snap.dimensions.join(',')}`;
+      const read = await cueSource.read({ ownerUserId, anchor, expectedRevision: snap.revision });
+      assert.equal(read.status, 'ok');
+      assert.equal(read.payload.vignettes[0].payload.scene, 'g64_original_taste_scene');
 
-      // Owner corrects Taste scene through HTTP action
+      // Non-empty precondition: derived index must actually contain the active projection before mutation.
+      assert.ok(await evidenceStore.getByAnchor(derivedAnchor), 'precondition: derived anchor must exist');
+      assert.equal(
+        (await evidenceStore.search('g64_original_taste_scene', { limit: 5 })).length,
+        1,
+        'precondition: original scene must be searchable before mutation',
+      );
+      return { initial, snap, anchor };
+    }
+
+    it('correct invalidates non-empty derived index and stale cue, and canonical cue source serves updated scene', async () => {
+      const { initial, snap: snap1, anchor } = await loadInitialEntryAndCue();
+
       const corrected = await postAction(initial.id, {
         action: 'correct',
         requestId: 'g64-taste-correct:018f2d5e-9f45-7d8c-a829-88f6440a4f15',
@@ -366,7 +382,6 @@ describe('G6-4 non-Capsule cross-layer invalidation (Event + Taste)', () => {
       });
       assert.equal(corrected.statusCode, 200, corrected.body);
 
-      // Stale cue read must be rejected; production invalidateDerived purges stale evidenceStore anchor
       assert.deepEqual(await cueSource.read({ ownerUserId, anchor, expectedRevision: snap1.revision }), {
         status: 'not_available',
         invalidationReason: 'source_corrected',
@@ -374,7 +389,6 @@ describe('G6-4 non-Capsule cross-layer invalidation (Event + Taste)', () => {
       assert.deepEqual(await evidenceStore.search('g64_original_taste_scene', { limit: 5 }), []);
       assert.equal(await evidenceStore.getByAnchor(derivedAnchor), null);
 
-      // Turn 2: next-turn cue delivers the corrected scene directly from canonical vignette
       const snap2 = await cueSource.resolve({
         ownerUserId,
         stage: 'review',
@@ -386,14 +400,21 @@ describe('G6-4 non-Capsule cross-layer invalidation (Event + Taste)', () => {
       const read2 = await cueSource.read({ ownerUserId, anchor, expectedRevision: snap2.revision });
       assert.equal(read2.status, 'ok');
       assert.equal(read2.payload.vignettes[0].payload.scene, 'g64_corrected_taste_scene_v2');
+    });
 
-      // Owner retires -> next-turn cue disappears, derived index cleared
+    it('retire from active state clears non-empty derived index and suppresses subsequent cue resolution', async () => {
+      const { initial, snap, anchor } = await loadInitialEntryAndCue();
+
       const retired = await postAction(initial.id, {
         action: 'retire',
         requestId: 'g64-taste-retire:018f2d5e-9f45-7d8c-a829-88f6440a4f15',
-        expectedRevision: corrected.json().revision,
+        expectedRevision: initial.revision,
       });
       assert.equal(retired.statusCode, 200, retired.body);
+      assert.equal(retired.json().status, 'retired');
+
+      assert.equal(await evidenceStore.getByAnchor(derivedAnchor), null, 'retire must clear derived anchor');
+      assert.deepEqual(await evidenceStore.search('g64_original_taste_scene', { limit: 5 }), []);
       assert.equal(
         await cueSource.resolve({
           ownerUserId,
@@ -403,21 +424,25 @@ describe('G6-4 non-Capsule cross-layer invalidation (Event + Taste)', () => {
         }),
         null,
       );
-      assert.deepEqual(await evidenceStore.search('g64_corrected_taste_scene_v2', { limit: 5 }), []);
-      assert.deepEqual(await cueSource.read({ ownerUserId, anchor, expectedRevision: snap2.revision }), {
+      assert.deepEqual(await cueSource.read({ ownerUserId, anchor, expectedRevision: snap.revision }), {
         status: 'not_available',
         invalidationReason: 'source_forgotten',
       });
+    });
 
-      // Owner hard-forgets -> canonical file deleted, cue & derived search stay empty
+    it('direct hard_forget from active state deletes canonical file, clears non-empty derived index, and blocks cue reads', async () => {
+      const { initial, snap, anchor } = await loadInitialEntryAndCue();
+
       const forgotten = await postAction(initial.id, {
         action: 'hard_forget',
         requestId: 'g64-taste-forget:018f2d5e-9f45-7d8c-a829-88f6440a4f15',
-        expectedRevision: retired.json().revision,
+        expectedRevision: initial.revision,
         confirmed: true,
       });
       assert.equal(forgotten.statusCode, 200, forgotten.body);
       assert.equal(existsSync(join(root, sourcePath)), false);
+      assert.equal(await evidenceStore.getByAnchor(derivedAnchor), null, 'hard_forget must clear derived anchor');
+      assert.deepEqual(await evidenceStore.search('g64_original_taste_scene', { limit: 5 }), []);
       assert.equal(
         await cueSource.resolve({
           ownerUserId,
@@ -427,7 +452,10 @@ describe('G6-4 non-Capsule cross-layer invalidation (Event + Taste)', () => {
         }),
         null,
       );
-      assert.deepEqual(await evidenceStore.search('g64_corrected_taste_scene_v2', { limit: 5 }), []);
+      assert.deepEqual(await cueSource.read({ ownerUserId, anchor, expectedRevision: snap.revision }), {
+        status: 'not_available',
+        invalidationReason: 'source_forgotten',
+      });
     });
   });
 });
