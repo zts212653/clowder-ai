@@ -5,26 +5,26 @@ import type { ChatData } from './chat-models';
 import { request } from './owner-api';
 import { workKey } from './useReviewBindings';
 
-/** The same project-scoped owner feeds the new-conversation page and workbench home. */
+/** The same recent-works reader feeds the new-conversation page and workbench home. */
 export function useRecentWorks(data: ChatData, needed: boolean | number = false) {
   const projectId =
     data.threadId === 'default'
-      ? data.newProjectId
+      ? data.newProjectId || null
       : data.threads.find((thread) => thread.id === data.threadId)?.projectPath;
   const [attempt, retry] = useState(0);
   const sourceChanged = useCallback(() => retry((n) => n + 1), []);
   useWorksSourceRefresh(undefined, Boolean(needed), sourceChanged);
   const [read, setRead] = useState<{
-    projectId: string;
+    projectId: string | null;
     load: string;
     artifacts: (GlobalArtifactsResponse['artifacts'][number] & { navigationId: string })[];
-  }>({ projectId: '', load: 'loading', artifacts: [] });
+  }>({ projectId: null, load: 'loading', artifacts: [] });
   useEffect(() => {
-    if (!needed || !projectId) return;
+    if (!needed || projectId === undefined) return;
     const abort = new AbortController();
     setRead((current) => (current.projectId === projectId ? current : { projectId, load: 'loading', artifacts: [] }));
     void request<GlobalArtifactsResponse & { complete: boolean }>(
-      `/api/artifacts?view=recent-works&limit=3&projectId=${encodeURIComponent(projectId)}`,
+      `/api/artifacts?view=recent-works&limit=3${projectId === null ? '' : `&projectId=${encodeURIComponent(projectId)}`}`,
       { signal: abort.signal },
     ).then(
       (result) => {
