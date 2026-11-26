@@ -55,8 +55,11 @@ function pcfCtl(r, p) {
   if (r.kind === 'list') return kvEditor({ key: p + '|' + r.key, rows: r.items.map(function (v) { return { v: v }; }), single: true, input: 'pcfListIn', del: 'pcfOp', add: tc('pcf.addItem') });
   if (r.kind === 'records') return pcfRecordsHtml(r, p);
   const type = { secret: 'password', number: 'number', url: 'url' }[r.kind] || 'text';
-  const ph = r.record ? r.placeholder : r.kind === 'secret' ? (r.currentValue ? tc('pcf.secretSet') : tc('pcf.unset')) : r.currentValue || r.defaultValue || tc('pcf.unset');
-  return '<input class="input" id="' + h(r.id) + '" type="' + type + '" value="' + h(r.value) + '" placeholder="' + h(ph) + '" data-input="' + (r.record ? 'pcfRecIn' : 'pcfIn') + '"' + d + (r.defaultClient && (r.schemaKey === 'id' || r.schemaKey === 'name') ? ' readonly' : '') + (r.err ? ' aria-invalid="true"' : '') + ' autocomplete="off">';
+  const ph = r.record ? r.placeholder : r.kind === 'secret' ? (r.currentValue && !r.cleared ? tc('pcf.secretSet') : tc('pcf.unset')) : r.currentValue || r.defaultValue || tc('pcf.unset');
+  const inp = '<input class="input" id="' + h(r.id) + '" type="' + type + '" value="' + h(r.value) + '" placeholder="' + h(ph) + '" data-input="' + (r.record ? 'pcfRecIn' : 'pcfIn') + '"' + d + (r.defaultClient && (r.schemaKey === 'id' || r.schemaKey === 'name') ? ' readonly' : '') + (r.err ? ' aria-invalid="true"' : '') + ' autocomplete="off">';
+  return r.kind === 'secret' && !r.req && r.currentValue && !r.cleared
+    ? '<span class="combo">' + inp + btn(tc('common.clear'), { iconOnly: true, sm: true, icon: 'close', act: 'pcfOp', data: argAttrs({ op: 'clear', p: p, k: r.key }) }) + '</span>'
+    : inp;
 }
 function pcfRecordsHtml(r, p) {
   const sub = function (x) { return field({ label: x.label ? pv(x.label, x, x) : tc('pcf.fieldLabel', x.schemaKey), id: x.kind === 'list' || x.kind === 'boolean' ? '' : x.id, req: x.req, control: pcfCtl(x, p), foot: (x.err ? status('danger', x.err) : '') + (x.desc ? '<span>' + h(x.desc) + '</span>' : '') }); };

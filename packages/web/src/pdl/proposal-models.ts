@@ -1,5 +1,6 @@
 import type {
   ProfileUpdateProposal,
+  RichBlock,
   RichCardBlock,
   ScheduleMutationProposal,
   SessionHandoffProposal,
@@ -223,8 +224,11 @@ export function proposalView(
   editing: boolean,
   asking: boolean,
   draft: Record<string, unknown>,
+  /** The approval card; a session handoff read returns only its status, so the card carries its content. */
+  block?: RichBlock,
 ) {
   const p = binding.record;
+  const card = block?.kind === 'card' ? block : undefined;
   if (!p) return null;
   const thread = binding.target.feature === 'F128' ? (p as ThreadProposal) : null,
     profile = binding.target.feature === 'F231' ? (p as ProfileUpdateProposal) : null,
@@ -243,7 +247,7 @@ export function proposalView(
           { field: 'target', v: profile.targetPath },
           { field: 'reason', v: profile.rationale },
         ]
-      : [];
+      : (card?.fields ?? []).map((f) => ({ k: f.label, v: f.value }));
   const rows = thread
     ? (
         [
@@ -266,14 +270,14 @@ export function proposalView(
         };
       })
     : [];
-  const first = thread ? thread.initialMessage : profile ? profile.afterContent : null;
+  const first = thread ? thread.initialMessage : profile ? profile.afterContent : (card?.bodyMarkdown ?? null);
   return {
-    title: thread ? thread.title : '',
-    titleType: profile ? 'profile' : thread ? '' : 'handoff',
+    title: thread ? thread.title : profile ? '' : (card?.title ?? ''),
+    titleType: profile ? 'profile' : '',
     fields,
     first,
     firstKey: binding.target.id,
-    firstTitle: profile ? 'profile' : 'initialMessage',
+    firstTitle: profile ? 'profile' : thread ? 'initialMessage' : '',
     recovery: recovery?.phase ?? '',
     recoveryReading: recovery?.reading ?? false,
     canReadback: !!recovery?.phase && recovery.phase !== 'writing',
@@ -297,7 +301,7 @@ export function proposalView(
           fields,
           first,
           firstKey: binding.target.id,
-          firstTitle: profile ? 'profile' : 'initialMessage',
+          firstTitle: profile ? 'profile' : thread ? 'initialMessage' : '',
         }
       : null,
     open: !!(thread && thread.createdThreadId),

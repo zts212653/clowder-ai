@@ -4,7 +4,7 @@ import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
 import { readPublicationReviewContexts } from '../collaborative-content/artifact-review/publication-contexts.js';
 import { ArtifactReviewService } from '../collaborative-content/artifact-review/service.js';
-import { ArtifactReviewStore } from '../collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../collaborative-content/artifact-review/storage/store.js';
 import { ModificationPublicationGrants } from '../collaborative-content/modification/request-authority.js';
 import { ModificationTargetService } from '../collaborative-content/modification/target-service.js';
 import { ContentTextModificationService } from '../collaborative-content/modification/text/text-service.js';

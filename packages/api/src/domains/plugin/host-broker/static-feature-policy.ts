@@ -1,4 +1,5 @@
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
+import { isStaticContentProviderType } from '../content-editor-runtime/admission.js';
 import { desktopWindowContribution } from '../desktop-window-runtime/admission.js';
 import { HostBrokerError } from './types.js';
 
@@ -17,7 +18,7 @@ export function staticFeatureDeclarations(
   if (!feature || feature.resources.length !== 0)
     throw new HostBrokerError('AUTHORITY_CHANGED', 'feature is not a declared static feature');
   const references = feature.contributions ?? [];
-  if (references.some((r) => r.type !== 'content-editor-provider'))
+  if (references.some((reference) => !isStaticContentProviderType(reference.type)))
     throw new HostBrokerError('AUTHORITY_CHANGED', 'unsupported static feature contribution');
   return references.map((r) => r.id);
 }

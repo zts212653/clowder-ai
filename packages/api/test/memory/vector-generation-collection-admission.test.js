@@ -196,7 +196,7 @@ test('project bootstrap also admits secrets and canonical sources before creatin
   const f = await fixture(t);
   const projectRoot = join(f.path, '..');
   writeFileSync(f.path, `# Secret\n\nOPENAI_API_KEY=sk-${'x'.repeat(48)}\n`);
-  const bootstrap = () =>
+  const bootstrap = (resolveMode = () => 'on') =>
     ensureProjectCollection(
       projectRoot,
       f.service.catalog,
@@ -204,6 +204,7 @@ test('project bootstrap also admits secrets and canonical sources before creatin
       f.service.dataDir,
       'fixture-owner',
       () => f.encoder,
+      resolveMode,
     );
   await assert.rejects(bootstrap(), /blocked/);
   const store = f.service.collectionStores.get(deriveProjectCollectionId(projectRoot));
@@ -214,6 +215,31 @@ test('project bootstrap also admits secrets and canonical sources before creatin
   await bootstrap();
   assert.equal(f.service.catalog.get(deriveProjectCollectionId(projectRoot)).status, 'active');
   assert.equal(store.searchEmbedding().getModelInfo().generationId, 'g1');
+
+  const hybridLexical = await store.searchWithMeta('Ordinary source', { mode: 'hybrid' });
+  assert.equal(hybridLexical.meta.degraded, false, 'bootstrapped project collection in on mode must not degrade');
+  assert.equal(hybridLexical.items.length, 1);
+
+  const hybridSemanticOnly = await store.searchWithMeta('paraphrased query sharing zero words', { mode: 'hybrid' });
+  assert.equal(hybridSemanticOnly.meta.degraded, false, 'zero-lexical-overlap query must not degrade in on mode');
+  assert.equal(
+    hybridSemanticOnly.items.length,
+    1,
+    'zero-lexical-overlap query must hit via vector similarity rather than empty-vector pass',
+  );
+
+  // Re-running bootstrap on an already-on collection must keep mode='on' and not downgrade to 'shadow'.
+  await bootstrap();
+  const afterRebootstrap = await store.searchWithMeta('paraphrased query sharing zero words', { mode: 'hybrid' });
+  assert.equal(afterRebootstrap.meta.degraded, false, 're-running bootstrap must not downgrade active collection');
+  assert.equal(afterRebootstrap.items.length, 1);
+
+  // Control: mode='off' (resolveMode returns undefined) must leave hybrid search degraded.
+  await bootstrap(() => undefined);
+  const offResult = await store.searchWithMeta('paraphrased query sharing zero words', { mode: 'hybrid' });
+  assert.equal(offResult.meta.degraded, true);
+  assert.equal(offResult.meta.degradeReason, 'passage_embedding_unavailable');
+  assert.equal(offResult.items.length, 0);
 });
 
 test('an explicit library rebuild can repair an old G0 collection after the active same-dimensional provider changes', async (t) => {

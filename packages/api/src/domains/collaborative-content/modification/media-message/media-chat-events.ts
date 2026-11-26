@@ -8,7 +8,7 @@ import {
 } from '@cat-cafe/shared';
 import { reviewModificationBindings } from '../../artifact-review/modification-request-reference.js';
 import type { ArtifactReviewService } from '../../artifact-review/service.js';
-import type { ArtifactReviewStore } from '../../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../../artifact-review/storage/store.js';
 import type { ContentModificationResultService } from '../result-service.js';
 
 export interface ModificationReceiptEvent {

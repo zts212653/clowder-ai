@@ -9,10 +9,10 @@ import {
 import { resolveVisibleReplyParent } from '../../cats/services/stores/visibility.js';
 import type { MediaReviewPrincipal } from '../../video-studio/content-owner/published-media-access.js';
 import type { PublishedMediaService } from '../../video-studio/content-owner/published-media-service.js';
-import { publicationLedgerId } from '../artifact-review/canonical-ledger.js';
 import { ArtifactReviewError } from '../artifact-review/errors.js';
 import type { ArtifactReviewInspection } from '../artifact-review/inspection.js';
 import { readReviewMediaEvidence } from '../artifact-review/media-evidence.js';
+import { publicationLedgerId } from '../artifact-review/storage/canonical-ledger.js';
 import { leafRecords, pageRecords } from '../inspection-records.js';
 import { publicationLedgerSource } from './publication-review-source.js';
 import type { WorkspaceContentReviewStore } from './store.js';

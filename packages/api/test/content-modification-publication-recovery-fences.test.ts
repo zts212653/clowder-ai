@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { reviewVersionOperationId } from '../src/domains/collaborative-content/artifact-review/version-response-service.js';
 import { publicationRecoveryFingerprint } from '../src/domains/collaborative-content/modification/publication-recovery-contract.js';
 import { publicationRecoveryFixture, publicationResponseRecord } from './helpers/publication-recovery-fixture.js';

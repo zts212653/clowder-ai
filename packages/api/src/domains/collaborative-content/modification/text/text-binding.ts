@@ -6,7 +6,7 @@ import type {
 } from '../../../video-studio/content-owner/published-media-access.js';
 import type { WorkspaceContentSourceService } from '../../../workspace/workspace-content-source.js';
 import { isWorkspaceTextEditable } from '../../../workspace/workspace-text-policy.js';
-import type { ArtifactReviewStore } from '../../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../../artifact-review/storage/store.js';
 import type { WorkspaceContentReviewService } from '../../workspace-review/service.js';
 import type { ContentModificationProgress, ContentModificationRecord } from '../journal.js';
 import type { ModificationContentPort } from '../service.js';

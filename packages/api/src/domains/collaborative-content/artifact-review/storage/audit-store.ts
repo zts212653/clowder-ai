@@ -1,6 +1,6 @@
 import type { ArtifactReviewAuditEntry, ArtifactReviewReceipt } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
-import { ArtifactReviewError } from './errors.js';
+import { ArtifactReviewError } from '../errors.js';
 import type { ReviewMutation } from './store.js';
 import { fingerprint, receiptReference } from './store-support.js';
 

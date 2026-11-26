@@ -9,10 +9,10 @@ import {
   artifactReviewActionSchema,
   type ImmutableMedia,
 } from '../../shared/src/types/artifact-review.js';
-import { publicationLedgerId } from '../src/domains/collaborative-content/artifact-review/canonical-ledger.js';
 import { commitReviewAction } from '../src/domains/collaborative-content/artifact-review/linked-review-action.js';
 import { applyArtifactReviewAction } from '../src/domains/collaborative-content/artifact-review/reducer.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { publicationLedgerId } from '../src/domains/collaborative-content/artifact-review/storage/canonical-ledger.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 
 const actor = { kind: 'human', actorId: 'operator' } as const;
 const now = '2026-10-03T06:00:00.000Z';

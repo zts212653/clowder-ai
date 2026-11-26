@@ -5,6 +5,21 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
+export async function waitForElapsedGap(
+  ms,
+  {
+    now = () => performance.now(),
+    sleep = (remaining) => new Promise((resolve) => setTimeout(resolve, remaining)),
+  } = {},
+) {
+  const deadline = now() + ms;
+  let remaining = ms;
+  while (remaining > 0) {
+    await sleep(remaining);
+    remaining = deadline - now();
+  }
+}
+
 // A real, owned JS file beneath dist gives V8 a verifiable API coordinate; no fabricated frame.
 const fixture = `
 import { createServer } from 'node:http';
@@ -13,6 +28,7 @@ import { acquireCpuProfiler } from '../infrastructure/telemetry/cpu/cpu-profiler
 import { recordProcessCpuProfile } from '../infrastructure/telemetry/cpu/process-cpu-session.js';
 import { normalizeJsonUnicode } from '../utils/json-unicode.js';
 import { fileURLToPath } from 'node:url';
+const waitForElapsedGap = ${waitForElapsedGap.toString()};
 const keepAlive = setInterval(() => {}, 1000);
 const install = createEventLoopTripwire();
 const initialLease = process.argv[2] === 'foreground-first' ? await acquireCpuProfiler() : undefined;
@@ -50,7 +66,7 @@ process.on('message', async message => {
     const firstStarted=performance.now();
     const first=unicodeWork(450);
     const firstEnded=performance.now();
-    await new Promise(resolve=>setTimeout(resolve,message.gap));
+    await waitForElapsedGap(message.gap);
     const secondStarted=performance.now();
     const second=unicodeWork(450);
     process.send({type:'pair-done',firstStarted,firstEnded,secondStarted,secondEnded:performance.now(),work:first+second});

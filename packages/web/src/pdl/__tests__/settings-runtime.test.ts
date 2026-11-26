@@ -691,7 +691,80 @@ describe('r8 missing settings binding families', () => {
     }
   });
 
-  it('restores the current real account in the member draft and waits for the existing member save owner', async () => {
+  it('offers configured API models on OpenCode and saves without account-following fields', async () => {
+    const { dom, w, data, action, port, errors } = await boot();
+    Object.assign(data.cats[0], {
+      clientId: 'opencode',
+      carrier: 'acp',
+      accountRef: 'prior',
+      cli: undefined,
+      acp: { command: 'opencode', startupArgs: ['acp'] },
+      provider: 'anthropic',
+      defaultModel: 'glm-5.3',
+      accountBindingMode: undefined,
+    });
+    const metadata = {
+      accounts: [
+        { id: 'prior', displayName: 'Prior', authType: 'api_key', models: ['old-model'] },
+        { id: 'qiniu', displayName: '七牛', authType: 'api_key', models: ['glm-5.3', 'configured-other'] },
+      ],
+      templates: [],
+      blank: initialState(),
+      codex: { sandboxMode: 'workspace-write', approvalPolicy: 'on-request' },
+      strategies: [],
+      libraries: [],
+      runtimes: [],
+      clients: CLIENT_OPTIONS.map((c) => ({
+        id: c.value,
+        label: c.label,
+        carriers: carrierOptionsForClient(c.value).map((v) => [v.value, v.label]),
+        accounts: ['prior', 'qiniu'],
+      })),
+    };
+    action.mockImplementation(async (name) => {
+      if (name === 'membersRead') return structuredClone(metadata);
+      if (name === 'memberCanonRead') return { bound: false, versions: [] };
+      if (name === 'memberRuntimeModels') return { status: 'configured', models: [] };
+      if (name === 'memberSave') return { id: 'codex', configurationRevision: 'next' };
+    });
+    try {
+      port.data = { ...port.data, ...fixtureInput(data) };
+      w.clowderChat.update(port);
+      w.eval("go('member-codex')");
+      await w.__settled();
+      const account = w.document.querySelector('[data-k="acc"]');
+      account.value = 'qiniu';
+      account.dispatchEvent(new w.Event('change', { bubbles: true }));
+      await w.__settled();
+      expect(w.document.querySelector('[data-act="followAcc"]')).toBeNull();
+      const form = w.eval('VM.member().form');
+      expect(form.preferences.catalog.models.map((m: { value: string }) => m.value)).toEqual([
+        'glm-5.3',
+        'configured-other',
+      ]);
+      expect(form.d.model).toBe('glm-5.3');
+      const model = w.document.querySelector('[data-k="model"]');
+      model.value = 'manual-model';
+      model.dispatchEvent(new w.Event('change', { bubbles: true }));
+      await w.eval('FORMS.member()');
+      const saved = JSON.parse(action.mock.calls.find(([name]) => name === 'memberSave')![1].value);
+      expect(saved).toMatchObject({ accountRef: 'qiniu', defaultModel: 'manual-model', provider: 'anthropic' });
+      expect(saved).not.toHaveProperty('accountBindingMode');
+      expect(action.mock.calls.filter(([name]) => name === 'settingsFollowRead')).toHaveLength(0);
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      await w.__settled();
+      dom.window.close();
+    }
+  });
+
+  it.each([
+    'save',
+    'clear',
+    'client',
+    'carrier',
+    'runtime',
+  ] as const)('restores the current real account and handles %s through the member save owner', async (transition) => {
     const { dom, w, data, action, port, post, errors } = await boot();
     Object.assign(data.cats[0], {
       accountRef: 'prior',
@@ -707,7 +780,7 @@ describe('r8 missing settings binding families', () => {
       blank: initialState(),
       codex: { sandboxMode: 'workspace-write', approvalPolicy: 'on-request' },
       strategies: [],
-      runtimes: [],
+      runtimes: [{ id: 'native-claude', form: { ...initialState(), clientId: 'anthropic', carrier: 'cli' } }],
       libraries: [],
       clients: CLIENT_OPTIONS.map((c) => ({
         id: c.value,
@@ -719,6 +792,7 @@ describe('r8 missing settings binding families', () => {
     action.mockImplementation(async (name) => {
       if (name === 'membersRead') return structuredClone(metadata);
       if (name === 'memberCanonRead') return { bound: false, versions: [] };
+      if (name === 'memberRuntimeModels') return { status: 'configured', models: [] };
       if (name === 'settingsFollowRead') {
         port.data = {
           ...port.data,
@@ -740,6 +814,25 @@ describe('r8 missing settings binding families', () => {
       expect(w.document.querySelector('[data-k="acc"]').value).toBe('current');
       expect(action.mock.calls.filter(([name]) => name === 'memberSave')).toHaveLength(0);
       expect(post).not.toHaveBeenCalled();
+      if (transition !== 'save') {
+        if (transition === 'runtime') w.eval("CHANGES.memberRuntime({target:{value:'native-claude'}})");
+        else {
+          const field = { clear: 'acc', client: 'client', carrier: 'via' }[transition];
+          const value = { clear: '', client: 'anthropic', carrier: 'acp' }[transition];
+          w.eval(
+            `CHANGES.md({type:'change',target:{dataset:{k:${JSON.stringify(field)}},value:${JSON.stringify(value)}}})`,
+          );
+        }
+        await w.__settled();
+        expect(w.eval('VM.member().form.follow')).toBe(false);
+        expect(w.eval('VM.member().form.overrideAccount')).toBe(false);
+        expect(w.document.querySelector('[data-act="followAcc"]')).toBeNull();
+        await w.eval('FORMS.member()');
+        expect(JSON.parse(action.mock.calls.find(([name]) => name === 'memberSave')![1].value)).not.toHaveProperty(
+          'accountBindingMode',
+        );
+        return;
+      }
       await w.eval('FORMS.member()');
       expect(JSON.parse(action.mock.calls.find(([name]) => name === 'memberSave')![1].value)).toMatchObject({
         accountRef: 'current',
@@ -2615,4 +2708,52 @@ it('opens a member whose client is no longer offered (a legacy antigravity membe
   await w.__settled();
   expect(w.eval('VM.member().form.d.model')).toBe('gemini-3.1-pro');
   expect(errors).not.toHaveBeenCalled();
+});
+
+it('clears a set optional secret field via pcfOp clear and saves null without exposing clear on required secrets', async () => {
+  const { dom, w, errors } = await boot();
+  try {
+    const saved: Array<Array<{ key: string; value: string | null }>> = [];
+    w.__secretClearSave = (updates: Array<{ key: string; value: string | null }>) => {
+      saved.push(updates);
+      return Promise.resolve();
+    };
+    const html = w.eval(`
+      (() => {
+        const model = pcfModel('secret-clear-test', {
+          plugin: 'official.github-operations',
+          installed: true,
+          steps: [],
+          testable: false,
+          fields: [
+            { key: 'token', label: 'Token', kind: 'secret', required: false, currentValue: '••••••' },
+            { key: 'requiredSecret', label: 'Required', kind: 'secret', required: true, currentValue: '••••••' },
+          ],
+          save: (updates) => window.__secretClearSave(updates),
+        });
+        return pluginConfigForm(model);
+      })()
+    `);
+    const host = dom.window.document.createElement('div');
+    host.innerHTML = html;
+    expect(host.querySelector('[data-act="pcfOp"][data-op="clear"][data-k="token"]')).not.toBeNull();
+    expect(host.querySelector('[data-act="pcfOp"][data-op="clear"][data-k="requiredSecret"]')).toBeNull();
+    expect(w.eval("pcfDirty('secret-clear-test')")).toBe(false);
+
+    w.eval("A.pcfOp({ op: 'clear', p: 'secret-clear-test', k: 'token' })");
+    expect(w.eval("pcfDirty('secret-clear-test')")).toBe(true);
+    const afterHtml = w.eval("pluginConfigForm(pcfModel('secret-clear-test', PCF_SRC['secret-clear-test']))");
+    host.innerHTML = afterHtml;
+    expect(host.querySelector('[data-act="pcfOp"][data-op="clear"][data-k="token"]')).toBeNull();
+    expect((host.querySelector('#pcf-secret-clear-test-token') as HTMLInputElement | null)?.placeholder).toBe(
+      w.eval("tc('pcf.unset')"),
+    );
+
+    await w.eval("pcfSave('secret-clear-test')");
+    expect(saved).toEqual([[{ key: 'token', value: null }]]);
+    expect(errors).not.toHaveBeenCalled();
+  } finally {
+    await w.__settled();
+    dom.window.close();
+  }
 });

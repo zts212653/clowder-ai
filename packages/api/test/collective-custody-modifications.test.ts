@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { validateCollectiveArtifactCustodyBundle } from '../src/domains/collaborative-content/collective-artifact/custody-bundle.js';
 import { collectiveContentScopeRef } from '../src/domains/video-studio/content-owner/collective-scope.js';
 import { baseConstraint, digest, fixture, scope, text } from './collective-markdown.fixture.js';

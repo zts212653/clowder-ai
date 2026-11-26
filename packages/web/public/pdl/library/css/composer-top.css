@@ -3,8 +3,9 @@
 /* ── 输入框上沿：左边在跑的成员，右边排队 ── */
 .composer-wrap .composer { position: relative; }
 .composer > .lanes { position: absolute; left: var(--sp-m); right: var(--sp-m); bottom: calc(100% + var(--sp-xs)); pointer-events: none; z-index: var(--z-sticky); }
-.lanes > .lane { pointer-events: auto; }
-.lanes > .lane:has(> .lane-in:empty) { pointer-events: none; }   /* 空着的道只占位，不挡下面的内容 */
+.lanes > .lane.scroll-x { pointer-events: auto; }
+.lanes > .lane.scroll-x:has(> .lane-in:empty) { pointer-events: none; }   /* 空着的道只占位，不挡下面的内容 */
+.lanes > .lane > .lane-in > :not(.vstack), .lanes > .lane > .lane-in > .vstack > * { pointer-events: auto; }   /* 只有道里的胶囊和按钮接收点击，透明的道盒和留白透传给下方的输入框 */
 /* 执行中头像外那一圈的预设：streaming / spawning 贴着头像平滑地呼吸（亮 → 半亮 → 亮，中间不停），silent / stall / error 是贴着头像的警示脉动；周期都是 --loop，次数各自写在关键帧里 */
 @keyframes mo-streaming { 0%, 100% { opacity: 1; animation-timing-function: cubic-bezier(.4, 0, .6, 1); } 50% { opacity: .5; animation-timing-function: cubic-bezier(.4, 0, .6, 1); } }
 @keyframes mo-spawning { 0%, 100% { opacity: .6; animation-timing-function: cubic-bezier(.4, 0, .6, 1); } 50% { opacity: .25; animation-timing-function: cubic-bezier(.4, 0, .6, 1); } }
@@ -77,6 +78,13 @@
 .skel.prev { aspect-ratio: 16 / 9; }
 .skel.line { height: 10px; border-radius: var(--r-xs); margin: var(--sp-xs) 0; }
 .skel.short { width: 60%; }
+/* 数据读取中（三点轮流起伏）：读取的是数据而不是容器骨架；共用 --loop 节拍，减少动态效果时只停位移 */
+.load-dots { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-xs); min-height: var(--ctl-xs); color: var(--fg-faint); }
+.load-dots > i { width: var(--dot); height: var(--dot); border-radius: 50%; background: currentColor; animation: mo-dot var(--loop) ease-in-out infinite backwards; }
+.load-dots > i:nth-child(2) { animation-delay: calc(var(--loop) * -.4); }
+.load-dots > i:nth-child(3) { animation-delay: calc(var(--loop) * -.3); }
+:root[data-motion="reduce"] .load-dots { --dot-lift: 0px; }
+.units-held { display: flex; justify-content: center; padding: var(--sp-s) 0; }
 /* 背景铺满窗口：图在 .app 上；窄栏、列表半透明；主区盖一层页面底色，透明度由设置决定 */
 /* 有背景图时（玻璃面盖在图上）：次要、弱、禁用三级文字换成对比更高的一档，消息里的内嵌面换成更实一点的玻璃，
    保证最坏的图区上次要文字 ≥ 4.5、弱文字 ≥ 3 */

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { artifactReviewAnchorSchema } from '@cat-cafe/shared';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { WorkVideoContextService } from '../src/domains/collaborative-content/works/video-context.js';
 
 const reference = { contentRef: `work:${'a'.repeat(64)}`, ownerRevision: 1 };

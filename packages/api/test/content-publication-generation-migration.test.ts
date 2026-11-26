@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type TestContext, test } from 'node:test';
 import Database from 'better-sqlite3';
-import { ArtifactReviewReturnStore } from '../src/domains/collaborative-content/artifact-review/return-store.js';
+import { ArtifactReviewReturnStore } from '../src/domains/collaborative-content/artifact-review/storage/return-store.js';
 
 /** Historical selector rows only; these fixtures never authorize a recovery or publish a candidate. */
 function legacyDatabase(t: TestContext, receipts: string[]) {

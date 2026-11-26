@@ -287,6 +287,8 @@ function workbenchModels() {
         ? ['image', 'video', 'audio'].find((kind) => file.mime.startsWith(`${kind}/`))
         : undefined;
       const fileParams = opened ? new URLSearchParams({ worktreeId: opened.worktreeId, path: opened.file.path }) : null;
+      const documentEditor = Boolean(file && /\.docx$/i.test(file.path));
+      const pluginPreview = Boolean(file && !documentEditor && !mediaKind && file.binary);
       const filePage = file
         ? {
             path: file.absolutePath ?? file.path,
@@ -301,6 +303,8 @@ function workbenchModels() {
             markdown,
             mode: rendered ? 'render' : 'src',
             binary: file.binary,
+            documentEditor,
+            documentFrame: (documentEditor || pluginPreview) && fileParams ? '/workspace-document?' + fileParams : null,
             hasBody: !file.binary,
             quote: !file.binary,
             media: mediaKind

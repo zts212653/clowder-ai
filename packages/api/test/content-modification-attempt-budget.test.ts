@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { TaskStore } from '../src/domains/cats/services/stores/ports/TaskStore.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { ContentModificationService } from '../src/domains/collaborative-content/modification/service.js';
 import { EntrustedWorkLifecycleService } from '../src/domains/growing/EntrustedWorkLifecycleService.js';
 import './helpers/setup-cat-registry.js';

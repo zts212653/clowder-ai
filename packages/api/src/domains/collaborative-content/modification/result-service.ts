@@ -7,7 +7,7 @@ import { WorkspaceWritebackError } from '../../workspace/writeback/journal.js';
 import type { WorkspaceWritebackService, WorkspaceWritebackView } from '../../workspace/writeback/service.js';
 import { reviewModificationBindings } from '../artifact-review/modification-request-reference.js';
 import type { ArtifactReviewService } from '../artifact-review/service.js';
-import type { ArtifactReviewStore } from '../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../artifact-review/storage/store.js';
 import type { ContentModificationChatProjection } from './chat-projection.js';
 import type { ModificationFileLineage } from './file-lineage.js';
 import type { ContentModificationRecord } from './journal.js';

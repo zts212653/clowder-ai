@@ -1,7 +1,20 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { harness } from './helpers/event-loop-tripwire-harness.js';
+import { harness, waitForElapsedGap } from './helpers/event-loop-tripwire-harness.js';
+
+test('pair fixture waits the full elapsed gap when a timer returns early', async () => {
+  let elapsed = 0;
+  let firstTimer = true;
+  await waitForElapsedGap(80, {
+    now: () => elapsed,
+    sleep: async (ms) => {
+      elapsed += firstTimer ? ms - 1.5 : ms;
+      firstTimer = false;
+    },
+  });
+  assert.ok(elapsed >= 80, `fixture resumed after only ${elapsed}ms`);
+});
 
 for (const gap of [80, 95, 105, 115, 125]) {
   test(`two real API blockers separated by ${gap}ms remain application stall events`, { timeout: 10000 }, async (t) => {

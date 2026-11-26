@@ -550,3 +550,74 @@ it('blocks cached previews when a source failure is followed by a missing file',
     code: 'not_found',
   });
 });
+
+it('re-projects temporary review mark label and range immediately via INPUTS.workReviewText and INPUTS.workReviewTime', async () => {
+  const { runInContext } = await import('node:vm');
+  const hook = await openReview();
+  await act(() => hook.result.current.action('workReviewPick', { x: '5', y: '6', width: '10', height: '12', at: '1' }));
+
+  let renderedMarks: Array<Record<string, unknown>> = [];
+  let renderCount = 0;
+  const INPUTS: Record<string, (e: { target: { id?: string; value: string } }) => unknown> = {};
+  Object.assign(hook.result.current.console.context, {
+    INPUTS,
+    CHANGES: {},
+    FORMS: {},
+    PAGES: {},
+    VIEW_LOAD: {},
+    VIEW_AFTER: {},
+    DIALOGS: {},
+    MODALS: {},
+    POPUPS: {},
+    MENUS: {},
+    LIVE: {},
+    KEY_FNS: [],
+    DROP_HANDLERS: [],
+    ENT: {},
+    SET_AFTER: {},
+    PANEL_VIEWS: {},
+    PANELS: {},
+    REGION_TABS: { panel: {} },
+    RESIZERS: {},
+    ENGINE_PARTS: {},
+    PATH_STORES: {},
+    STATE_ROOTS: {},
+    ROUTE_ANCHOR: {},
+    PDL_GUARDS: {},
+    PDL_DATA: {},
+    PDL_LIVE: {},
+    PDL_TABS: {},
+    ACT_AFTER: {},
+    NEAR_VIEW: {},
+    rtBind: () => {},
+    treeMatch: () => {},
+    treeLoad: () => {},
+    listNext: () => {},
+    onOpenToggle: () => {},
+    store: { get: () => ({}), set: () => {} },
+    beforeRender: () => {},
+    onRender: () => {},
+    formDraft: () => {},
+    panelShown: () => false,
+    document: { addEventListener: () => {} },
+    chatPort: {
+      action: (name: string, args: Record<string, string>) =>
+        act(() => hook.result.current.action(name as never, args)),
+    },
+    chatAction: async (name: string, args: Record<string, string>) => {
+      await act(() => hook.result.current.action(name as never, args));
+      renderCount++;
+      renderedMarks = (hook.result.current.project().mediaReview?.media?.marks ?? []) as Array<Record<string, unknown>>;
+    },
+  });
+  runInContext('bindProject();', hook.result.current.console.context);
+
+  await INPUTS.workReviewText({ target: { value: 'mark preview' } });
+  await INPUTS.workReviewTime({ target: { id: 'review-from', value: '2' } });
+  await INPUTS.workReviewTime({ target: { id: 'review-to', value: '6' } });
+
+  expect(renderCount).toBe(3);
+  expect(renderedMarks).toContainEqual(
+    expect.objectContaining({ x: 5, y: 6, width: 10, height: 12, label: 'mark preview', from: 2, until: 6 }),
+  );
+});

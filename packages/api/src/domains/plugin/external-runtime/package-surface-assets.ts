@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { lstat, readdir } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import type { ContentEditorProviderContribution, DesktopWindowContribution } from '@clowder-ai/plugin-contract';
+import type { DesktopWindowContribution } from '@clowder-ai/plugin-contract';
+import type { StaticContentProviderContribution } from '../content-editor-runtime/admission.js';
 import { readBoundedPackageFile } from './bounded-package-file.js';
 import type { VerifiedPluginPackage } from './types.js';
 
@@ -12,7 +13,7 @@ function contained(root: string, path: string): boolean {
 
 export async function snapshotPluginSurfaceAssets(
   pkg: VerifiedPluginPackage,
-  contributions: readonly (ContentEditorProviderContribution | DesktopWindowContribution)[],
+  contributions: readonly (StaticContentProviderContribution | DesktopWindowContribution)[],
 ): Promise<ReadonlyMap<string, Buffer>> {
   await pkg.verifyIntegrity();
   const files = new Map<string, Buffer>();
