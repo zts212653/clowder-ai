@@ -17155,8 +17155,8 @@ pdl:
                               map: {image: draftAttachment, _: ""}
                             args: "@preview"
                             x:
-                              act: listOp
-                              args: {path: cs.att, op: del, i: "@index"}
+                              act: remove
+                              args: {entity: att, id: "@index"}
                               label: t:common.remove
                 when: $.input.draft.att
               - type: component
