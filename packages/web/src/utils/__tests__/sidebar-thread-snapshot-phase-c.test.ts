@@ -22,6 +22,7 @@ vi.mock('@/stores/sidebarProjectionStore', () => ({
   useSidebarProjectionStore: {
     getState: () => ({
       applySidebarSnapshot: mockApplySidebarSnapshot,
+      pendingThreadCommands: {},
       setRefreshing: mockSetRefreshing,
     }),
   },
