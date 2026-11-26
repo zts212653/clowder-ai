@@ -222,7 +222,7 @@ export async function resolveProviderMcpConfigResolution(
   return materializeProviderMcpConfig(plan, input);
 }
 
-export function materializeProviderMcpConfig(
+export async function materializeProviderMcpConfig(
   plan: ProviderMcpConfigPlan,
   input: { callbackEnv: Record<string, string>; credentialFile?: string },
 ) {
@@ -231,19 +231,21 @@ export function materializeProviderMcpConfig(
     ...(input.credentialFile ? { CAT_CAFE_CREDENTIAL_FILE: input.credentialFile } : {}),
   };
   return {
-    servers: materializeNativeMcpHttp(
+    servers: await materializeNativeMcpHttp(
       Object.fromEntries(
-        Object.entries(plan.servers).map(([name, server]) => [
-          name,
-          bindManagedMcpStdioConfig(
-            plan.pluginMcpServerNames.includes(name)
-              ? { ...server, env: bindPluginMcpEnvironment(server.env as Record<string, string>, callback) }
-              : plan.catCafeMcpServerNames.includes(name)
-                ? { ...server, env: catCafeEnvironment(input, server.env as Record<string, string>) }
-                : server,
-            callback,
-          ),
-        ]),
+        Object.entries(plan.servers).map(([name, server]) => {
+          const configured = plan.pluginMcpServerNames.includes(name)
+            ? { ...server, env: bindPluginMcpEnvironment(server.env as Record<string, string>, callback) }
+            : plan.catCafeMcpServerNames.includes(name)
+              ? { ...server, env: catCafeEnvironment(input, server.env as Record<string, string>) }
+              : server;
+          return [
+            name,
+            input.callbackEnv.CAT_CAFE_MCP_TRANSPORT === 'shared'
+              ? configured
+              : bindManagedMcpStdioConfig(configured, callback),
+          ];
+        }),
       ),
       callback,
     ),

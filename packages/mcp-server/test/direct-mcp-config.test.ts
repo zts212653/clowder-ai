@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import fsPromises from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
+import { setImmediate as yieldToIo } from 'node:timers/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { bindManagedMcpStdioConfig, materializeNativeMcpHttp } from '../src/managed-mcp-config.js';
@@ -57,7 +60,46 @@ test('managed stdio cannot adopt a replacement invocation from its original cred
   }
 });
 
-test('native HTTP pins the original turn once; refreshed B cannot relabel A and foreign entries remain direct', () => {
+test('native HTTP launch can wait on credential reads without blocking the API loop', async (t) => {
+  const root = mkdtempSync(resolve(tmpdir(), 'native-mcp-async-read-'));
+  const path = resolve(root, 'owned.json');
+  writeFileSync(
+    path,
+    JSON.stringify({ invocationId: callback.CAT_CAFE_INVOCATION_ID, callbackToken: callback.CAT_CAFE_CALLBACK_TOKEN }),
+  );
+  const reading = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const lstat = fsPromises.lstat;
+  const mockedLstat = t.mock.method(fsPromises, 'lstat', async (file) => {
+    reading.resolve();
+    await release.promise;
+    return lstat(file);
+  });
+  syncBuiltinESMExports();
+  try {
+    const pending = Promise.resolve(
+      materializeNativeMcpHttp(
+        { 'cat-cafe-memory': { command: process.execPath, args: [resolve('dist/memory.js')] } },
+        { ...callback, CAT_CAFE_CREDENTIAL_FILE: path, CAT_CAFE_MCP_TRANSPORT: 'shared' },
+      ),
+    );
+    assert.equal(
+      await Promise.race([reading.promise.then(() => 'reading'), pending.then(() => 'returned')]),
+      'reading',
+    );
+    await yieldToIo();
+    assert.equal(mockedLstat.mock.callCount(), 1);
+    release.resolve();
+    assert.equal((await pending)['cat-cafe-memory'].type, 'http');
+  } finally {
+    release.resolve();
+    mockedLstat.mock.restore();
+    syncBuiltinESMExports();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('native HTTP pins the original turn once; refreshed B cannot relabel A and foreign entries remain direct', async () => {
   const root = mkdtempSync(resolve(tmpdir(), 'f333-native-binding-'));
   try {
     const path = resolve(root, 'owned.json');
@@ -75,14 +117,14 @@ test('native HTTP pins the original turn once; refreshed B cannot relabel A and 
       'cat-cafe-memory': { command: process.execPath, args: [resolve('dist/memory.js')] },
       external: { command: 'owned-third-party', args: [] },
     };
-    const configA = materializeNativeMcpHttp(source, a);
+    const configA = await materializeNativeMcpHttp(source, a);
     assert.equal(configA['cat-cafe-memory'].type, 'http');
     assert.equal(configA['cat-cafe-memory'].command, undefined);
     assert.equal(new URL(String(configA['cat-cafe-memory'].url)).searchParams.get('family'), 'memory');
     assert.deepEqual(configA.external, source.external);
     writeFileSync(path, JSON.stringify({ invocationId: 'B', callbackToken: tokenB }), { mode: 0o600 });
-    assert.throws(() => materializeNativeMcpHttp(source, a), /mismatch/);
-    const configB = materializeNativeMcpHttp(source, {
+    await assert.rejects(() => materializeNativeMcpHttp(source, a), /mismatch/);
+    const configB = await materializeNativeMcpHttp(source, {
       ...a,
       CAT_CAFE_INVOCATION_ID: 'B',
       CAT_CAFE_CALLBACK_TOKEN: tokenB,
@@ -93,9 +135,9 @@ test('native HTTP pins the original turn once; refreshed B cannot relabel A and 
     assert.equal(headersA['x-callback-token'], tokenA);
     assert.equal(headersB['x-callback-token'], tokenB);
     assert.notEqual(headersA['x-mcp-connection-id'], headersB['x-mcp-connection-id']);
-    assert.deepEqual(materializeNativeMcpHttp(source, { ...a, CAT_CAFE_MCP_TRANSPORT: 'stdio' }), source);
+    assert.deepEqual(await materializeNativeMcpHttp(source, { ...a, CAT_CAFE_MCP_TRANSPORT: 'stdio' }), source);
     writeFileSync(path, 'owned-malformed-private-content');
-    assert.throws(() => materializeNativeMcpHttp(source, a), {
+    await assert.rejects(() => materializeNativeMcpHttp(source, a), {
       message: 'shared_mcp_launch_credentials_invalid',
     });
   } finally {

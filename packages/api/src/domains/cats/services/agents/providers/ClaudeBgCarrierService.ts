@@ -335,6 +335,10 @@ export class ClaudeBgCarrierService implements AgentService {
             mcpServerPath: this.mcpServerPath,
           })
         : undefined;
+    const mcpConfigPath =
+      !readOnly && options?.callbackEnv && this.mcpServerPath
+        ? await writeInvocationMcpConfigFile({ mcpServers: mcpResolution?.servers ?? {} }, options.callbackEnv)
+        : undefined;
     return new Promise<StartJobResult>((resolve, reject) => {
       // Critical: even with --bg, the child inherits parent env unless we
       // explicitly strip CLAUDE_CODE_ENTRYPOINT. Otherwise transcript entrypoint
@@ -441,14 +445,8 @@ export class ClaudeBgCarrierService implements AgentService {
       // present + mcpServerPath resolved. Mirrors ClaudeAgentService so
       // canary布偶猫 sessions retain Clowder AI MCP tools (cat_cafe_*) under
       // --bg. Without this, AC-B4 / R5 break the moment canary flips.
-      //
-      // Windows: claude CLI treats inline JSON as a file path → write JSON
-      // to a temp file. POSIX: pass JSON inline (matches ClaudeAgentService).
-      if (!readOnly && options?.callbackEnv && this.mcpServerPath) {
-        args.push(
-          '--mcp-config',
-          writeInvocationMcpConfigFile({ mcpServers: mcpResolution?.servers ?? {} }, options.callbackEnv),
-        );
+      if (mcpConfigPath) {
+        args.push('--mcp-config', mcpConfigPath);
         // F198 Step-4 (2026-05-14, alpha-evidence): daemon `--bg` discovers
         // cwd `.mcp.json` walking up the tree. WITHOUT this flag, claude
         // would LOAD discovered servers ALONGSIDE our injected cat-cafe MCP

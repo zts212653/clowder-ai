@@ -2511,7 +2511,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     // is guaranteed by the finally block, even on generator early abort.
     activeInvocations.add(1, { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke' });
     if (sharedMcpContext) {
-      const prepared = prepareSessionCredentialFile('invocation-mcp-turn', callbackEnv);
+      const prepared = await prepareSessionCredentialFile('invocation-mcp-turn', callbackEnv);
       if (!prepared) throw new Error('Shared MCP launch credentials unavailable');
       invocationMcpCredentialFile = prepared.path;
       callbackEnv.CAT_CAFE_CREDENTIAL_FILE = prepared.path;
@@ -7019,7 +7019,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     await closeActiveServiceIterator().catch((error: unknown) => {
       teardownFailure = error;
     });
-    if (invocationMcpCredentialFile) releaseInvocationCredentialFile(invocationMcpCredentialFile);
+    if (invocationMcpCredentialFile) await releaseInvocationCredentialFile(invocationMcpCredentialFile);
     await terminateCurrentRequestGeneration(
       providerTeardownUnconfirmed
         ? 'unknown'

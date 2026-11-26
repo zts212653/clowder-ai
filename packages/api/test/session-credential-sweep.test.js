@@ -86,8 +86,8 @@ test('credential publication does no synchronous directory walk for unrelated fr
   });
   syncBuiltinESMExports();
   const path = join(directory, 'published.json');
-  assert.equal(writeSessionCredentialFile(undefined, path), false);
-  assert.equal(writeSessionCredentialFile(payload(), path), true);
+  assert.equal(await writeSessionCredentialFile(undefined, path), false);
+  assert.equal(await writeSessionCredentialFile(payload(), path), true);
   read.mock.restore();
   stat.mock.restore();
   syncBuiltinESMExports();
@@ -110,7 +110,7 @@ test('cleanup retains the exact 48-hour boundary, fresh files and non-json entri
     fs.writeFileSync(path, '{}');
     fs.utimesSync(path, mtime / 1000, mtime / 1000);
   }
-  assert.equal(writeSessionCredentialFile(payload(), join(directory, 'published.json')), true);
+  assert.equal(await writeSessionCredentialFile(payload(), join(directory, 'published.json')), true);
   await until(() => active === 0);
   assert.equal(fs.existsSync(join(directory, 'expired.json')), false);
   for (const name of ['boundary.json', 'fresh.json', 'old.txt', 'published.json'])
@@ -124,8 +124,8 @@ test('pending same-directory cleanup coalesces while a resumed credential is alr
   });
   const path = join(directory, 'published.json');
   try {
-    assert.equal(writeSessionCredentialFile(payload('one'), path), true);
-    assert.equal(writeSessionCredentialFile(payload('two'), path), true);
+    assert.equal(await writeSessionCredentialFile(payload('one'), path), true);
+    assert.equal(await writeSessionCredentialFile(payload('two'), path), true);
     const saved = JSON.parse(fs.readFileSync(path, 'utf8'));
     assert.equal(saved.invocationId, 'two');
     assert.equal(saved.callbackToken, 'synthetic-test-value-two');
@@ -147,12 +147,12 @@ test('a credential refreshed after asynchronous stale metadata is retained', asy
     const metadata = await originalStat(...args);
     if (String(args[0]) === path && !refreshed) {
       refreshed = true;
-      assert.equal(writeSessionCredentialFile(payload('renewed'), path), true);
+      assert.equal(await writeSessionCredentialFile(payload('renewed'), path), true);
     }
     return metadata;
   });
   syncBuiltinESMExports();
-  assert.equal(writeSessionCredentialFile(payload(), join(directory, 'published.json')), true);
+  assert.equal(await writeSessionCredentialFile(payload(), join(directory, 'published.json')), true);
   await until(() => active === 0);
   assert.ok(refreshed, 'Exercise the asynchronous stat-to-delete renewal window');
   assert.equal(JSON.parse(fs.readFileSync(path, 'utf8')).invocationId, 'renewed');
@@ -164,10 +164,10 @@ test('a failed asynchronous walk cannot reject publication or prevent a later cl
   const old = (Date.now() - 49 * 60 * 60 * 1000) / 1000;
   fs.utimesSync(path, old, old);
   failNextOpen = true;
-  assert.equal(writeSessionCredentialFile(payload('one'), join(directory, 'published.json')), true);
+  assert.equal(await writeSessionCredentialFile(payload('one'), join(directory, 'published.json')), true);
   await until(() => active === 0);
   assert.ok(fs.existsSync(path), 'The deliberately failed walk leaves cleanup pending');
-  assert.equal(writeSessionCredentialFile(payload('two'), join(directory, 'published.json')), true);
+  assert.equal(await writeSessionCredentialFile(payload('two'), join(directory, 'published.json')), true);
   await until(() => active === 0);
   assert.equal(fs.existsSync(path), false);
   assert.equal(opens, 2);

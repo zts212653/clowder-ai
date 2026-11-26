@@ -258,7 +258,7 @@ export async function prepareClaudeSdkLaunch(input: {
               ...operator.extraArgs,
               ...(member ? { 'no-chrome': null, 'disable-slash-commands': null } : readOnly ? {} : { chrome: null }),
               ...(mcpResolution || launch
-                ? { 'mcp-config': writeInvocationMcpConfigFile({ mcpServers }, options?.callbackEnv) }
+                ? { 'mcp-config': await writeInvocationMcpConfigFile({ mcpServers }, options?.callbackEnv) }
                 : {}),
             },
           }

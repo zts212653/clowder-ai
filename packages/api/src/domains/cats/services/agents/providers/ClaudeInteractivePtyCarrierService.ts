@@ -231,7 +231,10 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
         workingDirectory: options.workingDirectory ?? this.cwd,
         mcpServerPath: this.mcpServerPath,
       });
-      const configPath = writeInvocationMcpConfigFile({ mcpServers: resolution?.servers ?? {} }, options.callbackEnv);
+      const configPath = await writeInvocationMcpConfigFile(
+        { mcpServers: resolution?.servers ?? {} },
+        options.callbackEnv,
+      );
       extraArgs.push('--mcp-config', configPath, '--strict-mcp-config');
     }
     const cwd = options?.workingDirectory ?? this.cwd;

@@ -23,7 +23,7 @@ function sharedCallback(root) {
   };
 }
 
-test('only the pinned launch is nominated to the shared browser route, with invocation headers', () => {
+test('only the pinned launch is nominated to the shared browser route, with invocation headers', async () => {
   const root = mkdtempSync(join(tmpdir(), 'f333-browser-nominate-'));
   try {
     const pinned = sharedBrowserStdioServer();
@@ -32,7 +32,7 @@ test('only the pinned launch is nominated to the shared browser route, with invo
       legacy: { command: 'npx', args: ['@playwright/mcp@latest', '--headless'] },
       edited: { command: pinned.command, args: [pinned.args[0], '--headless'] },
     };
-    const out = materializeNativeMcpHttp(servers, sharedCallback(root));
+    const out = await materializeNativeMcpHttp(servers, sharedCallback(root));
     const url = new URL(String(out.playwright.url));
     assert.equal(out.playwright.type, 'http');
     assert.equal(out.playwright.command, undefined, 'no per-session Playwright process');
@@ -48,11 +48,11 @@ test('only the pinned launch is nominated to the shared browser route, with invo
   }
 });
 
-test('outside the shared transport the pinned launch stays an isolated stdio fallback', () => {
+test('outside the shared transport the pinned launch stays an isolated stdio fallback', async () => {
   const root = mkdtempSync(join(tmpdir(), 'f333-browser-fallback-'));
   try {
     const pinned = sharedBrowserStdioServer();
-    const out = materializeNativeMcpHttp(
+    const out = await materializeNativeMcpHttp(
       { playwright: pinned },
       { ...sharedCallback(root), CAT_CAFE_MCP_TRANSPORT: 'stdio' },
     );

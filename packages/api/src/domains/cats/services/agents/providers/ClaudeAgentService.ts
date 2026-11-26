@@ -561,7 +561,7 @@ export class ClaudeAgentService implements AgentService {
       const server = member.pluginNativeLaunch.server;
       args.push(
         '--mcp-config',
-        writeInvocationMcpConfigFile(
+        await writeInvocationMcpConfigFile(
           {
             mcpServers: {
               [server.name]: {
@@ -610,7 +610,7 @@ export class ClaudeAgentService implements AgentService {
         // #712: Always pass --mcp-config + --strict-mcp-config in managed invocations.
         // --strict-mcp-config ensures only the merged config (capabilities.json +
         // user project .mcp.json) is active — no auto-discovered entries leak through.
-        args.push('--mcp-config', writeInvocationMcpConfigFile({ mcpServers }, options?.callbackEnv));
+        args.push('--mcp-config', await writeInvocationMcpConfigFile({ mcpServers }, options?.callbackEnv));
         args.push('--strict-mcp-config');
         declaredMcpServerNames = Object.keys(mcpServers).sort();
       }
