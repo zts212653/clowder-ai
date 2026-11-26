@@ -78,14 +78,14 @@ test('packaged first-party entrypoints retain callback binding across two ACP se
     false,
     'matching content and name do not grant callback authority',
   );
-  assert.deepEqual(materializeSessionMcpServers([foreignCopy], callbackFor('A'))[0], foreignCopy);
+  assert.deepEqual((await materializeSessionMcpServers([foreignCopy], callbackFor('A')))[0], foreignCopy);
 
-  const a = prepareSessionCredentialFile(callbackFor('A'));
-  const b = prepareSessionCredentialFile(callbackFor('B'));
+  const a = await prepareSessionCredentialFile(callbackFor('A'));
+  const b = await prepareSessionCredentialFile(callbackFor('B'));
   bindSessionCredentialFile('session-A', a.path);
   bindSessionCredentialFile('session-B', b.path);
-  const launchA = materializeSessionMcpServers([descriptor], a.env)[0];
-  const launchB = materializeSessionMcpServers([descriptor], b.env)[0];
+  const launchA = (await materializeSessionMcpServers([descriptor], a.env))[0];
+  const launchB = (await materializeSessionMcpServers([descriptor], b.env))[0];
   assert.equal(
     Object.fromEntries(launchA.env.map(({ name, value }) => [name, value])).CAT_CAFE_CREDENTIAL_FILE,
     a.path,
@@ -110,7 +110,7 @@ test('packaged first-party entrypoints retain callback binding across two ACP se
       [1, 'B'],
     ]) {
       if (invocation === 'A-resumed') {
-        const resumed = prepareSessionCredentialFile(callbackFor(invocation), 'session-A');
+        const resumed = await prepareSessionCredentialFile(callbackFor(invocation), 'session-A');
         assert.equal(resumed.path, a.path);
         assert.notEqual(resumed.path, b.path);
       }

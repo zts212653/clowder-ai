@@ -75,9 +75,9 @@ for (const nativePlugin of [false, true]) {
         CAT_CAFE_INVOCATION_ID: turn,
         CAT_CAFE_CALLBACK_TOKEN: `synthetic-${turn}`,
       });
-      const first = prepareSessionCredentialFile(callbackFor('first'));
+      const first = await prepareSessionCredentialFile(callbackFor('first'));
       bindSessionCredentialFile(root, first.path);
-      const launch = materializeSessionMcpServers([registration], first.env, true)[0];
+      const launch = (await materializeSessionMcpServers([registration], first.env, true))[0];
       const { launchEnv, upstream } = directMcpContract(launch);
       assert.equal(upstream.command, registration.command);
       assert.deepEqual(upstream.args, registration.args);
@@ -96,9 +96,11 @@ for (const nativePlugin of [false, true]) {
         await client.connect(transport);
         for (const turn of ['first', 'second', 'third']) {
           if (turn !== 'first') {
-            const refreshed = prepareSessionCredentialFile(callbackFor(turn), root);
+            const refreshed = await prepareSessionCredentialFile(callbackFor(turn), root);
             assert.equal(refreshed.path, first.path);
-            const resumed = directMcpContract(materializeSessionMcpServers([registration], refreshed.env, true)[0]);
+            const resumed = directMcpContract(
+              (await materializeSessionMcpServers([registration], refreshed.env, true))[0],
+            );
             for (const env of [resumed.launchEnv, resumed.upstream.env]) {
               assert.equal(env.CAT_CAFE_CREDENTIAL_FILE, first.path);
               assert.equal(env.CAT_CAFE_INVOCATION_ID, undefined);

@@ -47,18 +47,18 @@ function readCreds(path) {
 }
 
 describe('prepareSessionCredentialFile (unit)', () => {
-  it('returns null when invocation credentials are missing', () => {
-    assert.equal(prepareSessionCredentialFile(undefined), null);
+  it('returns null when invocation credentials are missing', async () => {
+    assert.equal(await prepareSessionCredentialFile(undefined), null);
     assert.equal(
-      prepareSessionCredentialFile({ CAT_CAFE_THREAD_ID: 't', CAT_CAFE_CAT_ID: 'c' }),
+      await prepareSessionCredentialFile({ CAT_CAFE_THREAD_ID: 't', CAT_CAFE_CAT_ID: 'c' }),
       null,
       'no invocationId/token → nothing to protect',
     );
   });
 
-  it('new session gets a nonce path and does not mutate the input env', () => {
+  it('new session gets a nonce path and does not mutate the input env', async () => {
     const callbackEnv = makeCallbackEnv({ threadId: 'th-unit', invocationId: 'inv-1', callbackToken: 'tok-1' });
-    const prepared = prepareSessionCredentialFile(callbackEnv);
+    const prepared = await prepareSessionCredentialFile(callbackEnv);
     assert.ok(prepared, 'creds present → file prepared');
     assert.match(
       prepared.path,
@@ -73,13 +73,13 @@ describe('prepareSessionCredentialFile (unit)', () => {
     );
   });
 
-  it('bound resume rewrites the SAME file with fresh credentials', () => {
-    const first = prepareSessionCredentialFile(
+  it('bound resume rewrites the SAME file with fresh credentials', async () => {
+    const first = await prepareSessionCredentialFile(
       makeCallbackEnv({ threadId: 'th-resume', invocationId: 'inv-1', callbackToken: 'tok-1' }),
     );
     bindSessionCredentialFile('sess-r1', first.path);
 
-    const second = prepareSessionCredentialFile(
+    const second = await prepareSessionCredentialFile(
       makeCallbackEnv({ threadId: 'th-resume', invocationId: 'inv-2', callbackToken: 'tok-2' }),
       'sess-r1',
     );
@@ -87,8 +87,8 @@ describe('prepareSessionCredentialFile (unit)', () => {
     assert.equal(readCreds(first.path).invocationId, 'inv-2', 'file must carry the fresh invocationId');
   });
 
-  it('unknown resume target falls back to a fresh nonce path', () => {
-    const prepared = prepareSessionCredentialFile(
+  it('unknown resume target falls back to a fresh nonce path', async () => {
+    const prepared = await prepareSessionCredentialFile(
       makeCallbackEnv({ threadId: 'th-unknown', invocationId: 'inv-1', callbackToken: 'tok-1' }),
       'sess-never-bound',
     );
@@ -96,14 +96,14 @@ describe('prepareSessionCredentialFile (unit)', () => {
     assert.match(prepared.path, /th-unknown_kimi_[0-9a-f-]{36}\.json$/);
   });
 
-  it('P1 regression: a newer session never overwrites an older session file', () => {
-    const older = prepareSessionCredentialFile(
+  it('P1 regression: a newer session never overwrites an older session file', async () => {
+    const older = await prepareSessionCredentialFile(
       makeCallbackEnv({ threadId: 'th-vuln', invocationId: 'inv-old', callbackToken: 'tok-old' }),
     );
     bindSessionCredentialFile('sess-old', older.path);
 
     // Newer invocation, same (thread, cat), NEW session — the supersede scenario.
-    const newer = prepareSessionCredentialFile(
+    const newer = await prepareSessionCredentialFile(
       makeCallbackEnv({ threadId: 'th-vuln', invocationId: 'inv-new', callbackToken: 'tok-new' }),
     );
     assert.notEqual(newer.path, older.path, 'sessions must not share a credential file');
