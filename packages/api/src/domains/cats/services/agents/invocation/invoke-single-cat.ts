@@ -7063,13 +7063,31 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         // #1838: a host exit is not a stopped tree. A provider in host jobs is torn down only once
         // every one of them is verifiably closed; otherwise the turn keeps its stop protection.
         const scope = windowsHostScope;
+        let loggedPendingExit = false;
         const confirmedStop =
           unclosedServiceIterators.size === 0 &&
           (!scope ||
-            (await waitForWindowsProviderFinalization(scope.execution, () => scope.close(), {
-              isShuttingDown: deps.isRuntimeShuttingDown,
-              onPending: () => log.warn({ invocationId }, 'Windows provider exit proof pending; retrying online'),
-            })));
+            (await waitForWindowsProviderFinalization(
+              scope.execution,
+              () =>
+                scope.close(({ durationMs, evidence }) => {
+                  if (loggedPendingExit) return;
+                  loggedPendingExit = true;
+                  log.warn(
+                    {
+                      invocationId,
+                      durationMs,
+                      stopEvidence: evidence.map(({ verdict, reason, activeProcesses }) => ({
+                        verdict,
+                        reason: reason.split(':', 2).join(':'),
+                        activeProcesses,
+                      })),
+                    },
+                    'Windows provider exit proof pending; retrying online',
+                  );
+                }),
+              { isShuttingDown: deps.isRuntimeShuttingDown },
+            )));
         if (confirmedStop) {
           const providerTeardownAt = scope ? Date.now() : terminal.endedAt;
           terminal = { ...terminal, providerTeardownAt };

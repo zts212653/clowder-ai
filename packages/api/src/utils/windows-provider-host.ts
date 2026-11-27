@@ -56,12 +56,11 @@ export function isWindowsProviderFinalizing(execution: CliExecutionOwnerRef): bo
 export async function waitForWindowsProviderFinalization(
   execution: CliExecutionOwnerRef,
   confirmStop: () => Promise<boolean>,
-  options: { retryMs?: number; isShuttingDown?: () => boolean | Promise<boolean>; onPending?: () => void } = {},
+  options: { retryMs?: number; isShuttingDown?: () => boolean | Promise<boolean> } = {},
 ): Promise<boolean> {
   finalizingProviders.set(execution.invocationId, execution);
   try {
     if (await confirmStop()) return true;
-    options.onPending?.();
     while (!(await options.isShuttingDown?.())) {
       await delay(options.retryMs ?? FINALIZATION_RETRY_MS);
       if (await options.isShuttingDown?.()) return false;
@@ -170,7 +169,9 @@ export interface WindowsProviderHostScope {
   /** A linked host to launch the next provider in: the prepared first one, then a new one each time. */
   take(): Promise<WindowsProviderHost>;
   /** Ends every host and reports whether all of their jobs are verifiably closed. */
-  close(): Promise<boolean>;
+  close(
+    reportPending?: (attempt: { durationMs: number; evidence: readonly WindowsJobStopEvidence[] }) => void,
+  ): Promise<boolean>;
   /**
    * Removes this execution's links and its hosts' owner records together. Only once its stop is
    * recorded: until then they are its only native proof, and a restart needs both to find it.
@@ -206,6 +207,7 @@ export async function createWindowsProviderHostScope(options: {
   };
   let first: WindowsProviderHost | undefined = await prepareLinked();
   let closing = false;
+  const confirmed = new Set<WindowsProviderHost>();
   return {
     execution: options.execution,
     async take() {
@@ -214,10 +216,21 @@ export async function createWindowsProviderHostScope(options: {
       first = undefined;
       return host;
     },
-    async close() {
+    async close(reportPending) {
       closing = true;
-      const verdicts = await Promise.all(hosts.map((host) => host.close()));
-      return verdicts.every((evidence) => evidence.verdict === 'absent');
+      const startedAt = performance.now();
+      const evidence = await Promise.all(
+        hosts
+          .filter((host) => !confirmed.has(host))
+          .map(async (host) => {
+            const observation = await host.close();
+            if (observation.verdict === 'absent') confirmed.add(host);
+            return observation;
+          }),
+      );
+      if (confirmed.size === hosts.length) return true;
+      reportPending?.({ durationMs: Math.round(performance.now() - startedAt), evidence });
+      return false;
     },
     clearEvidence() {
       for (const path of linkPaths) clearWindowsJobExecutionLink(path);
