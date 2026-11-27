@@ -2123,6 +2123,7 @@ function bindProject() {
                 title: tc('workbench.file.needsConnection'),
                 text: tc('workbench.file.newProjectFolderSteps'),
                 doc: {
+                  id: 'workspace-connection-directory',
                   text: result.root,
                   acts: [{ label: tc('composerPop.copyPath'), act: 'copy', args: { v: result.root } }],
                 },

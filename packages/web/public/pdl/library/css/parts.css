@@ -163,6 +163,7 @@ form.search { margin: 0; }
 /* from workspace.css */ .ws-fold-h { display: flex; align-items: center; gap: var(--sp-xs); width: 100%; border: 0; background: none; padding: var(--sp-xs) var(--sp-hair); cursor: pointer; color: var(--fg-strong); font: 500 var(--fs-l)/1.4 var(--font-text); text-align: left; border-radius: var(--r-s); }
 /* from workspace.css */ .ws-fold-h:hover { color: var(--fg-strong); background: var(--bg-hover); }
 /* from workspace.css */ .ws-fold-b { display: flex; flex-direction: column; gap: var(--sp-s); }
+#workspace-connection-directory { white-space: pre-wrap; overflow-wrap: anywhere; }
 /* from workspace.css */ .ws-pre { margin: 0; font: var(--fs-s)/1.6 var(--font-mono); background: var(--bg-field); color: var(--fg-strong); border-radius: var(--r-m); padding: var(--sp-s) var(--sp-m); white-space: pre-wrap; overflow-wrap: anywhere; }
 /* from workspace.css */ .kv .ws-warn { color: var(--warn); }
 /* from workspace.css */ .ws-prog { display: inline-block; width: calc(18 * var(--unit)); height: var(--unit); border-radius: var(--r-xs); background: var(--bg-field); overflow: hidden; vertical-align: middle; flex-shrink: 0; }
