@@ -407,11 +407,13 @@ function bindProject() {
   VM.filePage = function () {
     const model = filePage(),
       docs = documentModels();
+    const documentEditing = Boolean(model?.documentEditor && editingOfficeFile === model.documentFrame);
     return model
       ? Object.assign({}, model, {
           documentReview: docs.documentReview,
           annotations: docs.documentAnnotations,
-          documentFrame: model.documentEditor && model.documentFrame !== editingOfficeFile ? null : model.documentFrame,
+          documentEditing,
+          documentFrame: documentEditing ? model.documentFrame + '&mode=edit' : model.documentFrame,
         })
       : null;
   };

@@ -10,7 +10,7 @@ import {
 } from '../src/domains/plugin/host-inventory/contract-policy.js';
 import { MemoryPluginInventoryStore } from '../src/domains/plugin/host-inventory/stores.js';
 
-const currentContract = '0.4.0-candidate.0';
+const currentContract = '0.4.0-candidate.1';
 
 test('source policy matches the exact locked contract and rejects the next candidate', async () => {
   const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as {
@@ -18,18 +18,18 @@ test('source policy matches the exact locked contract and rejects the next candi
   };
   assert.equal(
     packageJson.dependencies['@clowder-ai/plugin-contract'],
-    'file:vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-a4836266493d.tgz',
+    'file:vendor/clowder-ai-plugin-contract-0.4.0-candidate.1-9300daadc617.tgz',
   );
   const archive = await readFile(
-    new URL('../vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-a4836266493d.tgz', import.meta.url),
+    new URL('../vendor/clowder-ai-plugin-contract-0.4.0-candidate.1-9300daadc617.tgz', import.meta.url),
   );
   assert.equal(
     createHash('sha256').update(archive).digest('hex'),
-    'a4836266493d1c5610af76164bc55389c1f7813ef6e62fc19824390536080986',
+    '9300daadc617b6ee2ea17fa660a2777f525fc6167c54d5fbb7373ffb11e6a9b3',
   );
   assert.equal(PLUGIN_CONTRACT_PACKAGE_VERSION, currentContract);
   assert.equal(isManifestContractSupported(currentContract, PLUGIN_MANIFEST_CONTRACT_RANGE), true);
-  assert.equal(isManifestContractSupported('0.4.0-candidate.1', PLUGIN_MANIFEST_CONTRACT_RANGE), false);
+  assert.equal(isManifestContractSupported('0.4.0-candidate.2', PLUGIN_MANIFEST_CONTRACT_RANGE), false);
 });
 
 test('snapshot recovery applies the same current contract policy', async () => {

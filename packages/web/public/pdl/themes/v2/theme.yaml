@@ -25104,7 +25104,7 @@ pdl:
                   act: fileOffice
                 when:
                   - $.documentEditor
-                  - "!$.documentFrame"
+                  - "!$.documentEditing"
               - type: component
                 use: v2Action
                 props:
@@ -25112,7 +25112,7 @@ pdl:
                   act: fileOffice
                 when:
                   - $.documentEditor
-                  - $.documentFrame
+                  - $.documentEditing
               - type: frame
                 title: $.name
                 key: $.documentFrame
