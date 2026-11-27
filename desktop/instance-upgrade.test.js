@@ -21,6 +21,18 @@ function configure(root, args = []) {
   );
 }
 
+function currentSid() {
+  return execFileSync(path.join(process.env.SystemRoot, 'System32', 'whoami.exe'), ['/user', '/fo', 'csv', '/nh'], {
+    encoding: 'utf8',
+    windowsHide: true,
+  }).match(/,"(S-1-\d+(?:-\d+)+)"/)?.[1];
+}
+
+function aclFor(target) {
+  const acl = execFileSync('icacls.exe', [target], { encoding: 'utf8', windowsHide: true });
+  return { protected: !/\(I\)/.test(acl) };
+}
+
 test('stable install marker remains authoritative after payload replacement', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'stable-install-identity-'));
   const payload = path.join(root, 'desktop-dist');
@@ -98,15 +110,148 @@ test(
       const { dataRoot } = resolveDesktopRuntime({}, program);
       assert.equal(path.dirname(dataRoot), fs.realpathSync.native(path.join(app, 'user-state')));
       assert.match(path.basename(dataRoot), /^S-1-\d+(?:-\d+)+$/);
-      fs.mkdirSync(dataRoot);
+      assert.equal(aclFor(dataRoot).protected, true);
+      fs.mkdirSync(dataRoot, { recursive: true });
       const witness = path.join(dataRoot, 'test-conversation');
       fs.writeFileSync(witness, 'retained');
-      fs.mkdirSync(path.dirname(program));
+      fs.mkdirSync(path.dirname(program), { recursive: true });
+      fs.writeFileSync(program, '');
+      // Replace the packaged payload in place; the SID profile must stay outside it.
+      fs.renameSync(path.dirname(program), path.join(app, 'previous-desktop-dist'));
+      fs.mkdirSync(path.dirname(program), { recursive: true });
       fs.writeFileSync(program, '');
       configure(app, ['-ExistingInstallation']);
       assert.equal(fs.readFileSync(marker, 'utf8'), body);
       assert.equal(resolveDesktopRuntime({}, program).dataRoot, dataRoot);
       assert.equal(fs.readFileSync(witness, 'utf8'), 'retained');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'install profile resolution is reusable across repeated runtime lookups',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sid-repeat-resolve-'));
+    const app = path.join(root, 'installed');
+    const program = path.join(app, 'desktop-dist', 'Clowder AI.exe');
+    try {
+      configure(app);
+      fs.mkdirSync(path.dirname(program), { recursive: true });
+      fs.writeFileSync(program, '');
+      const first = resolveDesktopRuntime({}, program);
+      const second = resolveDesktopRuntime({}, program);
+      assert.equal(second.dataRoot, first.dataRoot);
+      assert.equal(second.useInstallDataRoot, true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'install mode rejects a SID junction into the payload before writing data',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sid-junction-install-'));
+    const app = path.join(root, 'installed');
+    const payload = path.join(app, 'packages', 'api');
+    const userState = path.join(app, 'user-state');
+    const program = path.join(app, 'desktop-dist', 'Clowder AI.exe');
+    const sid = currentSid();
+    const link = path.join(userState, sid);
+    const sentinel = path.join(payload, 'keep.txt');
+    fs.mkdirSync(payload, { recursive: true });
+    fs.mkdirSync(userState, { recursive: true });
+    fs.mkdirSync(path.dirname(program), { recursive: true });
+    fs.writeFileSync(sentinel, 'payload remains');
+    fs.writeFileSync(path.join(app, 'desktop-data-root.json'), '{"mode":"install"}');
+    fs.writeFileSync(program, '');
+    fs.symlinkSync(payload, link, 'junction');
+    try {
+      assert.throws(
+        () => resolveDesktopRuntime({}, program),
+        /replacement boundary|owner\/ACL|reparse|owned by another/i,
+      );
+      assert.equal(fs.readFileSync(sentinel, 'utf8'), 'payload remains');
+    } finally {
+      try {
+        execFileSync('cmd.exe', ['/c', 'rmdir', link], { stdio: 'pipe' });
+      } catch {}
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'install mode rejects a SID profile whose owner is another principal',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sid-owner-install-'));
+    const app = path.join(root, 'installed');
+    const program = path.join(app, 'desktop-dist', 'Clowder AI.exe');
+    const sid = currentSid();
+    const profile = path.join(app, 'user-state', sid);
+    try {
+      fs.mkdirSync(profile, { recursive: true });
+      fs.mkdirSync(path.dirname(program), { recursive: true });
+      fs.writeFileSync(path.join(app, 'desktop-data-root.json'), '{"mode":"install"}');
+      fs.writeFileSync(program, '');
+      execFileSync('icacls', [profile, '/setowner', '*S-1-5-32-545'], { stdio: 'pipe' });
+      assert.throws(() => resolveDesktopRuntime({}, program), /owner\/ACL|owned by another/i);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'install mode accepts a pre-created SID profile owned by this account',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sid-own-owner-'));
+    const app = path.join(root, 'installed');
+    const program = path.join(app, 'desktop-dist', 'Clowder AI.exe');
+    const sid = currentSid();
+    const profile = path.join(app, 'user-state', sid);
+    const witness = path.join(profile, 'existing-conversation');
+    try {
+      configure(app);
+      fs.mkdirSync(profile, { recursive: true });
+      fs.writeFileSync(witness, 'existing data');
+      execFileSync('icacls.exe', [profile, '/setowner', `*${sid}`], { stdio: 'pipe' });
+      const resolved = resolveDesktopRuntime({}, program);
+      assert.equal(resolved.dataRoot, path.join(fs.realpathSync.native(path.join(app, 'user-state')), sid));
+      assert.equal(fs.readFileSync(witness, 'utf8'), 'existing data');
+      assert.equal(aclFor(profile).protected, true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'install mode hardens an existing trusted-owner SID profile without moving its data',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sid-legacy-acl-'));
+    const app = path.join(root, 'installed');
+    const program = path.join(app, 'desktop-dist', 'Clowder AI.exe');
+    const sid = currentSid();
+    const profile = path.join(app, 'user-state', sid);
+    const witness = path.join(profile, 'old-conversation');
+    try {
+      configure(app);
+      fs.mkdirSync(profile, { recursive: true });
+      fs.writeFileSync(witness, 'old data');
+      execFileSync('icacls', [profile, '/inheritance:e'], { stdio: 'pipe' });
+      assert.equal(aclFor(profile).protected, false);
+      const resolved = resolveDesktopRuntime({}, program);
+      assert.equal(resolved.dataRoot, path.join(fs.realpathSync.native(path.join(app, 'user-state')), sid));
+      assert.equal(aclFor(profile).protected, true);
+      assert.equal(fs.readFileSync(witness, 'utf8'), 'old data');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

@@ -406,14 +406,18 @@ test(
   async () => {
     const install = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-selected-drive-'));
     const client = path.join(install, 'existing-native-home');
+    const geminiClient = path.join(install, 'existing-gemini-home');
     const execPath = process.execPath;
     const previousCodex = process.env.CODEX_HOME;
+    const previousGemini = process.env.GEMINI_CLI_HOME;
     const previousInstance = process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
     process.execPath = path.join(install, 'desktop-dist', 'Clowder AI.exe');
     delete process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
     process.env.CODEX_HOME = client;
+    process.env.GEMINI_CLI_HOME = geminiClient;
     try {
       fs.mkdirSync(client);
+      fs.mkdirSync(geminiClient);
       fs.mkdirSync(path.join(install, 'user-state'));
       fs.writeFileSync(path.join(install, 'desktop-data-root.json'), '{"mode":"install"}');
       const manager = new ServiceManager(install, { frontendPort: 3003, apiPort: 3004, redisPort: 6399 });
@@ -423,7 +427,14 @@ test(
       assert.equal(path.dirname(profile), base);
       fs.mkdirSync(business, { recursive: true });
       const capture = path.join(install, 'api.json');
-      const keys = ['CAT_CAFE_DATA_DIR', 'TRANSCRIPT_DATA_DIR', 'UPLOAD_DIR', 'EVIDENCE_DB', 'CODEX_HOME'];
+      const keys = [
+        'CAT_CAFE_DATA_DIR',
+        'TRANSCRIPT_DATA_DIR',
+        'UPLOAD_DIR',
+        'EVIDENCE_DB',
+        'CODEX_HOME',
+        'GEMINI_CLI_HOME',
+      ];
       manager._startProcess(
         'api',
         execPath,
@@ -440,6 +451,7 @@ test(
         path.join(business, 'uploads'),
         path.join(business, 'evidence.sqlite'),
         fs.realpathSync.native(client),
+        fs.realpathSync.native(geminiClient),
       ]);
       const starts = [];
       manager._isPortOpen = async () => false;
@@ -454,6 +466,56 @@ test(
       process.execPath = execPath;
       if (previousCodex === undefined) delete process.env.CODEX_HOME;
       else process.env.CODEX_HOME = previousCodex;
+      if (previousGemini === undefined) delete process.env.GEMINI_CLI_HOME;
+      else process.env.GEMINI_CLI_HOME = previousGemini;
+      if (previousInstance !== undefined) process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT = previousInstance;
+      fs.rmSync(install, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'new Windows installation discovers Gemini from the original profile when its env is unset',
+  {
+    skip: process.platform !== 'win32',
+  },
+  async () => {
+    const install = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-gemini-default-'));
+    const originalProfile = path.join(install, 'original-profile');
+    const gemini = path.join(originalProfile, '.gemini');
+    const execPath = process.execPath;
+    const previousGemini = process.env.GEMINI_CLI_HOME;
+    const previousProfile = process.env.USERPROFILE;
+    const previousInstance = process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
+    process.execPath = path.join(install, 'desktop-dist', 'Clowder AI.exe');
+    delete process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
+    delete process.env.GEMINI_CLI_HOME;
+    process.env.USERPROFILE = originalProfile;
+    try {
+      fs.mkdirSync(gemini, { recursive: true });
+      fs.mkdirSync(path.join(install, 'user-state'));
+      fs.writeFileSync(path.join(install, 'desktop-data-root.json'), '{"mode":"install"}');
+      const manager = new ServiceManager(install, { frontendPort: 3003, apiPort: 3004, redisPort: 6399 });
+      const business = manager._getUserDataDir();
+      fs.mkdirSync(business, { recursive: true });
+      const capture = path.join(install, 'gemini.json');
+      manager._startProcess(
+        'api',
+        execPath,
+        [
+          '-e',
+          `require('node:fs').writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.env.GEMINI_CLI_HOME || null))`,
+        ],
+        { envOverrides: manager._buildApiEnv(business) },
+      );
+      assert.equal(await new Promise((resolve) => manager.procs.api.once('exit', resolve)), 0);
+      assert.equal(JSON.parse(fs.readFileSync(capture, 'utf8')), fs.realpathSync.native(gemini));
+    } finally {
+      process.execPath = execPath;
+      if (previousGemini === undefined) delete process.env.GEMINI_CLI_HOME;
+      else process.env.GEMINI_CLI_HOME = previousGemini;
+      if (previousProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousProfile;
       if (previousInstance !== undefined) process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT = previousInstance;
       fs.rmSync(install, { recursive: true, force: true });
     }

@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 
 let windowsUserSid;
+const validatedInstallRoots = new Set();
 
 function resolveInstallDataRoot(installRoot) {
   const base = path.join(fs.realpathSync.native(installRoot), 'user-state');
@@ -15,7 +16,95 @@ function resolveInstallDataRoot(installRoot) {
     { encoding: 'utf8', windowsHide: true },
   ).match(/,"(S-1-\d+(?:-\d+)+)"/)?.[1];
   if (!windowsUserSid) throw new Error('Cannot identify the Windows user for desktop storage');
-  return path.join(base, windowsUserSid);
+  const dataRoot = path.join(base, windowsUserSid);
+  if (validatedInstallRoots.has(dataRoot)) return dataRoot;
+  // A sibling account can create a directory named after this SID before the
+  // first launch. Reject payload redirection and require the leaf to be owned
+  // by this SID before any Electron/API data is written there.
+  assertDesktopDataBoundary(dataRoot, installRoot);
+  assertPrivateInstallProfile(dataRoot, windowsUserSid);
+  validatedInstallRoots.add(dataRoot);
+  return dataRoot;
+}
+
+function assertPrivateInstallProfile(dataRoot, sid) {
+  const created = !fs.existsSync(dataRoot);
+  if (created) {
+    fs.mkdirSync(dataRoot);
+  } else {
+    assertInstallProfileOwner(dataRoot, sid);
+  }
+  if (created || hasInheritedAcl(dataRoot)) setPrivateProfileAcl(dataRoot, sid);
+}
+
+function assertInstallProfileOwner(dataRoot, sid) {
+  if (fs.lstatSync(dataRoot).isSymbolicLink()) throw new Error('Install data directory must not be a reparse point');
+  const owner = windowsOwnerSid(dataRoot);
+  if (![sid, 'S-1-5-18', 'S-1-5-32-544'].includes(owner)) {
+    throw new Error('Install data directory is owned by another account');
+  }
+}
+
+function windowsOwnerSid(target) {
+  const script = [
+    '$acl = Get-Acl -LiteralPath $env:SG_OWNER_PATH',
+    '$acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value',
+  ].join('; ');
+  const env = {
+    ...process.env,
+    SG_OWNER_PATH: target,
+    PSModulePath: path.join(
+      process.env.SystemRoot || 'C:\\Windows',
+      'System32',
+      'WindowsPowerShell',
+      'v1.0',
+      'Modules',
+    ),
+  };
+  const candidates = [
+    'pwsh.exe',
+    path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+  ];
+  for (const executable of candidates) {
+    try {
+      const owner = execFileSync(executable, ['-NoProfile', '-NonInteractive', '-Command', script], {
+        encoding: 'utf8',
+        env,
+        windowsHide: true,
+      }).trim();
+      if (/^S-1-\d+(?:-\d+)+$/.test(owner)) return owner;
+    } catch {
+      // Try the next PowerShell host; do not fall back to truncated dir output.
+    }
+  }
+  throw new Error('Install data directory owner cannot be verified');
+}
+
+function hasInheritedAcl(dataRoot) {
+  return /\(I\)/.test(runWindowsTool('icacls.exe', [dataRoot]));
+}
+
+function setPrivateProfileAcl(dataRoot, sid) {
+  runWindowsTool('icacls.exe', [
+    dataRoot,
+    '/inheritance:r',
+    '/grant:r',
+    `*${sid}:(OI)(CI)F`,
+    '/grant:r',
+    '*S-1-5-18:(OI)(CI)F',
+    '/grant:r',
+    '*S-1-5-32-544:(OI)(CI)F',
+  ]);
+}
+
+function runWindowsTool(name, args) {
+  const absolute = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', name);
+  try {
+    return execFileSync(absolute, args, { encoding: 'utf8', windowsHide: true, stdio: 'pipe' });
+  } catch (error) {
+    if (!['ENOENT', 'EPERM'].includes(error.code)) throw error;
+    return execFileSync(name, args, { encoding: 'utf8', windowsHide: true, stdio: 'pipe' });
+  }
 }
 
 function canonicalWithMissingSuffix(value) {
