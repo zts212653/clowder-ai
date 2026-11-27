@@ -6,7 +6,11 @@ export interface AgentAdapterNativeRuntime {
   prepare?(
     input: { hostSessionId: string; resumeNativeSessionId?: string; instructions: string },
     signal: AbortSignal,
-  ): Promise<{ agentFile?: string; nativeSessionId?: string }>;
+  ): Promise<{ agentFile?: string; nativeSessionId?: string; sessionFingerprint?: string }>;
+  recordSessionFingerprint?(
+    input: { hostSessionId: string; nativeSessionId: string; fingerprint: string },
+    signal: AbortSignal,
+  ): Promise<void>;
   run?(
     input: { hostSessionId: string; args: readonly string[] },
     signal: AbortSignal,

@@ -10,6 +10,7 @@ import Fastify from 'fastify';
 import { writeCatalogAccount } from '../dist/config/catalog-accounts.js';
 import { SessionImplementationRegistry } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
 import { RegisteredSessionAgentService } from '../dist/domains/cats/services/agents/session-contract/registered-session-agent-service.js';
+import { computeKimiL0Fingerprint } from '../dist/domains/cats/services/agents/providers/kimi-l0-session-fingerprint.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import {
   createDormantPluginRuntimeComposition,
@@ -104,11 +105,15 @@ test(
           };
         }
         assert.equal(request.catId, 'fixture');
+        assert.equal(request.hostSession?.cwd, projectRoot);
         if (request.action === 'openSession')
           return {
             async prepare(input) {
               assert.equal(input.resumeNativeSessionId, 'legacy-native');
-              return { nativeSessionId: 'legacy-native' };
+              return {
+                nativeSessionId: 'legacy-native',
+                sessionFingerprint: computeKimiL0Fingerprint('fixture identity'),
+              };
             },
           };
         if (request.action === 'startTurn')
@@ -219,6 +224,8 @@ test(
         hostSessionId: 'host-fixture',
         sessionId: 'legacy-native',
         invocationId: 'kimi-fixture-turn',
+        workingDirectory: projectRoot,
+        systemPrompt: 'fixture identity',
       }),
     );
     assert.equal(messages.find((item) => item.type === 'text')?.content, 'portable driver fixture');

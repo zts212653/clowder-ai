@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { SessionImplementationRegistry } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
 import { RegisteredSessionAgentService } from '../dist/domains/cats/services/agents/session-contract/registered-session-agent-service.js';
@@ -65,3 +66,92 @@ test('an active archive supplies real Worker turns through the registered Host s
   const offline = await send('third');
   assert.equal(offline.at(-1).errorCode, 'session_implementation_unavailable');
 });
+
+test(
+  'an installed Worker binds on first turn, drains cancellation, and releases the scoped Host session',
+  { timeout: 35_000 },
+  async (t) => {
+    const registry = new SessionImplementationRegistry();
+    const scopes = [];
+    const { manager, runtime, install } = await setup(t, registry, ({ action, hostSession }) => {
+      if (hostSession) scopes.push([action, hostSession.cwd]);
+    });
+    const ref = { pluginId: 'local.lifecycle-fixture', contributionId: 'demo' };
+    const source = `export default { create: () => ({
+    start() {
+      let finish;
+      let released = false;
+      let cancelled = false;
+      return { actions: {
+        describe() { return {}; },
+        detect() {
+          return { candidates: [{ id: 'lifecycle', label: 'Lifecycle', state: { status: 'unavailable', reason: [cancelled, released].join(':') } }] };
+        },
+        openSession(input) {
+          if ('cwd' in input || 'config' in input) throw new Error('Host scope was exposed');
+          return { ok: true, binding: { state: 'pending_first_input' } };
+        },
+        async *startTurn(input) {
+          const cancellation = new Promise((resolve) => { finish = resolve; });
+          if (input.prompt !== 'continue') yield { type: 'native_bound', nativeSessionId: 'worker-bound' };
+          yield { type: 'output', text: 'started' };
+          if (input.prompt === 'cancel') {
+            await cancellation;
+            yield { type: 'output', text: 'late' };
+          }
+          yield { type: 'done', outcome: cancelled ? 'cancelled' : 'completed' };
+        },
+        cancel(input) {
+          if (input.invocationId !== 'turn-cancel') throw new Error('Unexpected cancellation identity');
+          cancelled = true;
+          finish();
+          return { ok: true };
+        },
+        release(input) {
+          released = input.sessionId === 'new-host';
+          return { ok: true };
+        },
+      }, stop() {} };
+    },
+  }) };`;
+    await install({ ...ref, declaration: declaration(ref.contributionId), executable: source });
+    const { plugin } = await manager.get(ref.pluginId);
+    await manager.setEnabled(ref.pluginId, { enabled: true, expectedRevision: plugin.lifecycleRevision });
+    const cat = new RegisteredSessionAgentService({ catId: 'fixture', ref, registry });
+    const controller = new AbortController();
+    const workingDirectory = join(runtime.projectRoot, 'member-project');
+    const observed = [];
+    for await (const event of cat.invoke('cancel', {
+      hostSessionId: 'new-host',
+      invocationId: 'turn-cancel',
+      signal: controller.signal,
+      workingDirectory,
+    })) {
+      observed.push(event);
+      if (event.type === 'text') controller.abort();
+    }
+    assert.deepEqual(
+      observed.filter((event) => event.type === 'text').map((event) => event.content),
+      ['started'],
+    );
+    assert.equal(observed.at(-1)?.errorCode, 'cancelled');
+    assert.equal(observed.at(-1)?.metadata.sessionId, 'worker-bound');
+    const wrongDirectory = await Array.fromAsync(
+      cat.invoke('continue', {
+        hostSessionId: 'new-host',
+        invocationId: 'outside-scope',
+        workingDirectory: join(runtime.projectRoot, 'other-member'),
+      }),
+    );
+    assert.equal(wrongDirectory.at(-1)?.errorCode, 'session_unavailable');
+    await cat.releaseAll('test_complete');
+    const status = await runtime.agentAdapters.detect(ref);
+    assert.equal(status.candidates[0].state.reason, 'true:true');
+    assert.deepEqual(scopes, [
+      ['openSession', workingDirectory],
+      ['startTurn', workingDirectory],
+      ['cancel', workingDirectory],
+      ['release', workingDirectory],
+    ]);
+  },
+);

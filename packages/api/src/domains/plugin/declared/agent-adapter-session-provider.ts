@@ -7,15 +7,18 @@
 import type {
   AgentSessionEvent,
   AgentSessionProvider,
+  OpenSessionInput,
   TurnRef,
 } from '../../cats/services/agents/session-contract/types.js';
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
 
 type SessionAction = 'openSession' | 'startTurn' | 'cancel' | 'release';
+export type AgentAdapterSessionScope = Readonly<Pick<OpenSessionInput, 'cwd' | 'config'>>;
 export type AgentAdapterSessionInvocation = (
   action: SessionAction,
   params: Readonly<Record<string, unknown>>,
   signal?: AbortSignal,
+  hostSession?: AgentAdapterSessionScope,
 ) => Promise<unknown>;
 
 function protocolError(): never {
@@ -30,7 +33,10 @@ export function createAgentAdapterSessionProvider(
   invoke: AgentAdapterSessionInvocation,
   lifetime: AbortSignal,
 ): AgentSessionProvider {
-  const bindings = new Map<string, string | undefined>();
+  const bindings = new Map<
+    string,
+    { nativeId: string | undefined; scope: AgentAdapterSessionScope; rejectedNativeId?: string }
+  >();
   async function* readEvents(
     stream: AsyncIterable<unknown>,
     sessionId: string,
@@ -49,41 +55,56 @@ export function createAgentAdapterSessionProvider(
         continue;
       }
       const prior = bindings.get(sessionId);
-      if (prior !== undefined && prior !== event.nativeSessionId) protocolError();
-      bindings.set(sessionId, event.nativeSessionId);
+      if (
+        !prior ||
+        prior.rejectedNativeId === event.nativeSessionId ||
+        (prior.nativeId !== undefined && prior.nativeId !== event.nativeSessionId)
+      )
+        protocolError();
+      prior.nativeId = event.nativeSessionId;
       yield { ...event, scope: 'session', sessionId, seq };
     }
   }
   return {
+    revalidateInstructions: true,
     async openSession(input, signal) {
-      const { sessionId, instructions, model, resume } = input;
-      const result = agentAdapterOpenResultSchema.safeParse(
-        await invoke(
-          'openSession',
-          {
-            sessionId,
-            instructions,
-            ...(model === undefined ? {} : { model }),
-            ...(resume === undefined ? {} : { resume: { nativeSessionId: resume.nativeSessionId } }),
-          },
-          signal,
-        ),
-      );
-      if (!result.success) protocolError();
-      if (result.data.ok) {
-        const nativeId = result.data.binding.state === 'bound' ? result.data.binding.nativeSessionId : undefined;
-        if (resume && nativeId !== resume.nativeSessionId)
-          return {
-            ok: false,
-            code: 'resume_unavailable',
-            reason: 'Agent adapter did not resume the requested session',
-          };
-        bindings.set(sessionId, nativeId);
-      }
-      return result.data;
+      const { sessionId, instructions, model, resume, cwd, config } = input;
+      const scope: AgentAdapterSessionScope = { cwd, ...(config === undefined ? {} : { config }) };
+      const publicInput = { sessionId, instructions, ...(model === undefined ? {} : { model }) };
+      const open = async (request: OpenSessionInput['resume']) => {
+        const result = agentAdapterOpenResultSchema.safeParse(
+          await invoke(
+            'openSession',
+            { ...publicInput, ...(request === undefined ? {} : { resume: request }) },
+            signal,
+            scope,
+          ),
+        );
+        if (!result.success) protocolError();
+        return result.data;
+      };
+      const first = await open(resume);
+      const fallback =
+        resume?.onUnavailable === 'start_new' && !first.ok && first.code === 'resume_unavailable'
+          ? { previousSessionId: resume.nativeSessionId, reason: first.identityStatus ?? ('unavailable' as const) }
+          : undefined;
+      const result = fallback ? await open(undefined) : first;
+      if (!result.ok) return result;
+      const nativeId = result.binding.state === 'bound' ? result.binding.nativeSessionId : undefined;
+      if (fallback ? nativeId === fallback.previousSessionId : resume && nativeId !== resume.nativeSessionId)
+        return { ok: false, code: 'resume_unavailable', reason: 'Agent adapter returned an unexpected session' };
+      bindings.set(sessionId, {
+        nativeId,
+        scope,
+        ...(fallback ? { rejectedNativeId: fallback.previousSessionId } : {}),
+      });
+      return { ...result, ...(fallback ? { resumeFallback: fallback } : {}) };
     },
     async startTurn(sessionId, input, signal) {
-      if (!bindings.has(sessionId)) return { ok: false, code: 'session_unavailable' };
+      const binding = bindings.get(sessionId);
+      if (!binding) return { ok: false, code: 'session_unavailable' };
+      if (input.hostOptions?.workingDirectory && input.hostOptions.workingDirectory !== binding.scope.cwd)
+        return { ok: false, code: 'session_unavailable', reason: 'Agent session working directory changed' };
       if (input.prompt.kind !== 'frozen')
         return { ok: false, code: 'failed', reason: 'continuity_preflight_unsupported' };
       const turn = { invocationId: input.invocation.invocationId };
@@ -91,20 +112,29 @@ export function createAgentAdapterSessionProvider(
         'startTurn',
         { sessionId, invocationId: turn.invocationId, prompt: input.prompt.text },
         signal,
+        binding.scope,
       );
       if (!isEventStream(stream)) protocolError();
       return { ok: true, turn, events: readEvents(stream, sessionId, turn) };
     },
     async cancelTurn(sessionId, expected, reason) {
       const result = agentAdapterCancelResultSchema.safeParse(
-        await invoke('cancel', { sessionId, invocationId: expected.invocationId, reason }),
+        await invoke(
+          'cancel',
+          { sessionId, invocationId: expected.invocationId, reason },
+          undefined,
+          bindings.get(sessionId)?.scope,
+        ),
       );
       if (!result.success) protocolError();
       return result.data;
     },
     async release(sessionId, reason) {
+      const binding = bindings.get(sessionId);
       bindings.delete(sessionId);
-      const result = agentAdapterReleaseResultSchema.safeParse(await invoke('release', { sessionId, reason }));
+      const result = agentAdapterReleaseResultSchema.safeParse(
+        await invoke('release', { sessionId, reason }, undefined, binding?.scope),
+      );
       if (!result.success) protocolError();
       return result.data;
     },

@@ -16,7 +16,12 @@ export const agentAdapterOpenResultSchema = z.discriminatedUnion('ok', [
       z.strictObject({ state: z.literal('pending_first_input') }),
     ]),
   }),
-  z.strictObject({ ok: z.literal(false), code: z.enum(['resume_unavailable', 'failed']), reason: message }),
+  z.strictObject({
+    ok: z.literal(false),
+    code: z.enum(['resume_unavailable', 'failed']),
+    reason: message,
+    identityStatus: z.enum(['stale', 'unverifiable']).optional(),
+  }),
 ]);
 
 const toolId = z.string().min(1).max(512);

@@ -6,6 +6,11 @@ import { createServer } from 'node:http';
 import { isAbsolute, join } from 'node:path';
 import { test } from 'node:test';
 import { promisify } from 'node:util';
+import {
+  computeKimiL0Fingerprint,
+  lookupKimiL0Fingerprint,
+  recordKimiL0Fingerprint,
+} from '../dist/domains/cats/services/agents/providers/kimi-l0-session-fingerprint.js';
 import { SessionImplementationRegistry } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
 import { RegisteredSessionAgentService } from '../dist/domains/cats/services/agents/session-contract/registered-session-agent-service.js';
 import { setup } from './helpers/agent-adapter-archive.js';
@@ -35,12 +40,16 @@ test(
         request.catId !== 'fixture'
       )
         return;
+      assert.equal(request.hostSession?.cwd, root);
       if (request.action === 'openSession')
         return {
           async prepare(input) {
             if (input.resumeNativeSessionId) {
               assert.equal(input.resumeNativeSessionId, legacySession);
-              return { nativeSessionId: legacySession };
+              return {
+                nativeSessionId: legacySession,
+                sessionFingerprint: lookupKimiL0Fingerprint(home, 'fixture', legacySession),
+              };
             }
             assert.equal(input.instructions, updatedL0);
             return { agentFile: await agentFile('updated', input.instructions) };
@@ -48,6 +57,9 @@ test(
         };
       if (request.action === 'startTurn')
         return {
+          async recordSessionFingerprint(input) {
+            recordKimiL0Fingerprint(home, 'fixture', input.nativeSessionId, input.fingerprint);
+          },
           async run(input, signal) {
             const records = await startCli(input.args, signal);
             return (async function* () {
@@ -154,6 +166,7 @@ test(
     ]);
     legacySession = original.find((event) => event.type === 'session.resume_hint')?.session_id;
     assert.ok(legacySession);
+    recordKimiL0Fingerprint(home, 'fixture', legacySession, computeKimiL0Fingerprint(legacyL0));
     await manager.install({ source: { kind: 'local-archive', path: archive } });
     const { plugin } = await manager.get(ref.pluginId);
     approvedDigest = plugin.packageDigest;
@@ -164,32 +177,54 @@ test(
         hostSessionId: 'legacy-host',
         sessionId: legacySession,
         invocationId: 'legacy-continue',
-        systemPrompt: updatedL0,
+        systemPrompt: legacyL0,
+        workingDirectory: root,
       }),
     );
     assert.equal(continued.find((event) => event.type === 'text')?.content, 'cutover-2');
     assert.equal(continued.at(-1)?.metadata.sessionId, legacySession);
     assert.equal(continued.at(-1)?.errorCode, undefined);
 
+    // The active Host service revalidates a different compiled role.
+    const edited = {
+      hostSessionId: 'legacy-host',
+      sessionId: legacySession,
+      systemPrompt: updatedL0,
+      workingDirectory: root,
+    };
+    const exact = await Array.fromAsync(
+      service.invoke('Require stale native chat', { ...edited, invocationId: 'exact-old', requireExactResume: true }),
+    );
+    assert.equal(exact.at(-1)?.errorCode, 'resume_unavailable');
+    assert.equal(requests.length, 2);
     const fresh = await Array.fromAsync(
-      service.invoke('Start a new chat', {
-        hostSessionId: 'fresh-host',
-        invocationId: 'new-role-turn',
-        systemPrompt: updatedL0,
-      }),
+      service.invoke('Start a new chat', { ...edited, invocationId: 'new-role-turn' }),
     );
     assert.equal(fresh.find((event) => event.type === 'text')?.content, 'cutover-3');
     assert.ok(fresh.at(-1)?.metadata.sessionId);
     assert.notEqual(fresh.at(-1)?.metadata.sessionId, legacySession);
     assert.equal(fresh.at(-1)?.errorCode, undefined);
+    const notice = fresh.find((event) => event.type === 'system_info')?.content;
+    assert.ok(notice);
+    assert.deepEqual(JSON.parse(notice), {
+      type: 'l0_resume_fresh_start',
+      previousSessionId: legacySession,
+      reason: 'stale',
+    });
     assert.equal(requests.length, 3);
     assert.match(JSON.stringify(requests[1].system), new RegExp(legacyL0));
     assert.doesNotMatch(JSON.stringify(requests[1].system), new RegExp(updatedL0));
     assert.match(JSON.stringify(requests[1].messages), /cutover-1/);
     assert.match(JSON.stringify(requests[2].system), new RegExp(updatedL0));
     assert.doesNotMatch(JSON.stringify(requests[2].messages), new RegExp(updatedL0));
+    assert.doesNotMatch(JSON.stringify(requests[2].messages), /cutover-1/);
+    assert.equal(
+      lookupKimiL0Fingerprint(home, 'fixture', fresh.at(-1).metadata.sessionId),
+      computeKimiL0Fingerprint(updatedL0),
+    );
+    assert.equal(lookupKimiL0Fingerprint(home, 'fixture', legacySession), computeKimiL0Fingerprint(legacyL0));
     t.diagnostic(
-      'Real CLI made three loopback model requests. Old history and role were retained; new session used edited system L0.',
+      'Same identity resumed with history. Exact stale resume was blocked. Ordinary stale resume opened a new native session with a notice.',
     );
   },
 );

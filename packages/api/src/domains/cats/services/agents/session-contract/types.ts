@@ -23,6 +23,7 @@ export interface AgentSessionCapabilities {
 }
 
 export interface AgentSessionProvider {
+  readonly revalidateInstructions?: boolean;
   openSession(input: OpenSessionInput, signal: AbortSignal): Promise<OpenSessionResult>;
   startTurn(sessionId: HostSessionId, input: TurnInput, signal: AbortSignal): Promise<StartTurnResult>;
   input(sessionId: HostSessionId, expected: TurnRef, message: SupplementInput): Promise<InputResult>;
@@ -50,7 +51,11 @@ export interface OpenSessionInput {
 }
 
 export type OpenSessionResult =
-  | { ok: true; binding: NativeBinding }
+  | {
+      ok: true;
+      binding: NativeBinding;
+      resumeFallback?: { previousSessionId: string; reason: 'stale' | 'unverifiable' | 'unavailable' };
+    }
   | { ok: false; code: 'resume_unavailable' | 'failed'; reason: string };
 
 export type NativeBinding = { state: 'bound'; nativeSessionId: string } | { state: 'pending_first_input' };

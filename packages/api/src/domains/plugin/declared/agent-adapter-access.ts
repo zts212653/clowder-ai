@@ -18,6 +18,7 @@ import type { PluginInstanceRecord } from '../host-inventory/types.js';
 
 import {
   type AgentAdapterSessionInvocation,
+  type AgentAdapterSessionScope,
   createAgentAdapterSessionProvider,
 } from './agent-adapter-session-provider.js';
 
@@ -38,6 +39,7 @@ export type AgentAdapterRuntimeGrant = (request: {
   readonly action: AdapterAction;
   readonly catId?: string;
   readonly account?: AgentAdapterAccountScope;
+  readonly hostSession?: AgentAdapterSessionScope;
 }) => AgentAdapterNativeRuntime | undefined;
 
 export function createAgentAdapterAccess(
@@ -67,6 +69,7 @@ export function createAgentAdapterAccess(
       lifetime?: AbortSignal;
       catId?: string;
       account?: AgentAdapterAccountScope;
+      hostSession?: AgentAdapterSessionScope;
     },
   ) {
     const active = resolve((await inventory.readCurrentAuthority(ref.pluginId))?.instance);
@@ -85,6 +88,7 @@ export function createAgentAdapterAccess(
       action,
       ...(options?.catId === undefined ? {} : { catId: options.catId }),
       ...(options?.account === undefined ? {} : { account: options.account }),
+      ...(options?.hostSession === undefined ? {} : { hostSession: options.hostSession }),
     });
     const deadline = new AbortController();
     const signals = [active.lifetime, deadline.signal];
@@ -134,8 +138,8 @@ export function createAgentAdapterAccess(
         ({ catId }) => {
           const existing = providers.get(catId);
           if (existing) return existing;
-          const invoke: AgentAdapterSessionInvocation = async (action, args, signal) =>
-            (await read(ref, action, args, { signal, lifetime, catId })).response;
+          const invoke: AgentAdapterSessionInvocation = async (action, args, signal, hostSession) =>
+            (await read(ref, action, args, { signal, lifetime, catId, hostSession })).response;
           const provider = createAgentAdapterSessionProvider(invoke, lifetime);
           providers.set(catId, provider);
           return provider;
