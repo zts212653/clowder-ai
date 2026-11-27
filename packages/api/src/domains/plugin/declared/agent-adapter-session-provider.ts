@@ -14,7 +14,14 @@ import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
 
 type SessionAction = 'openSession' | 'startTurn' | 'cancel' | 'release';
 export type AgentAdapterSessionScope = Readonly<
-  Pick<OpenSessionInput, 'sessionId' | 'cwd' | 'config' | 'executionAccount'> & { resumeNativeSessionId?: string }
+  Pick<
+    OpenSessionInput,
+    'sessionId' | 'cwd' | 'config' | 'executionAccount' | 'instructions' | 'model' | 'hostOptions'
+  > & {
+    resumeNativeSessionId?: string;
+    nativeSessionId?: string;
+    prompt?: string;
+  }
 >;
 export type AgentAdapterSessionInvocation = (
   action: SessionAction,
@@ -69,11 +76,14 @@ export function createAgentAdapterSessionProvider(
   }
   return {
     revalidateInstructions: true,
+    usesSessionInstructions: true,
     async openSession(input, signal) {
-      const { sessionId, instructions, model, resume, cwd, config, executionAccount } = input;
+      const { sessionId, instructions, model, resume, cwd, config, executionAccount, hostOptions } = input;
       const scope: AgentAdapterSessionScope = {
         sessionId,
         cwd,
+        instructions,
+        ...(model === undefined ? {} : { model }),
         ...(config === undefined ? {} : { config }),
         ...(executionAccount === undefined ? {} : { executionAccount }),
       };
@@ -84,7 +94,11 @@ export function createAgentAdapterSessionProvider(
             'openSession',
             { ...publicInput, ...(request === undefined ? {} : { resume: request }) },
             signal,
-            request === undefined ? scope : { ...scope, resumeNativeSessionId: request.nativeSessionId },
+            {
+              ...scope,
+              ...(hostOptions === undefined ? {} : { hostOptions }),
+              ...(request === undefined ? {} : { resumeNativeSessionId: request.nativeSessionId }),
+            },
           ),
         );
         if (!result.success) protocolError();
@@ -128,7 +142,12 @@ export function createAgentAdapterSessionProvider(
         'startTurn',
         { sessionId, invocationId: turn.invocationId, prompt: input.prompt.text },
         signal,
-        binding.scope,
+        {
+          ...binding.scope,
+          ...(input.hostOptions === undefined ? {} : { hostOptions: input.hostOptions }),
+          ...(binding.nativeId === undefined ? {} : { nativeSessionId: binding.nativeId }),
+          prompt: input.prompt.text,
+        },
       );
       if (!isEventStream(stream)) protocolError();
       return { ok: true, turn, events: readEvents(stream, sessionId, turn) };

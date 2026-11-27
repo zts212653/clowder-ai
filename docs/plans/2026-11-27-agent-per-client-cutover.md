@@ -134,7 +134,9 @@ Host 会话授权端口接收本轮 Host 会话 ID、工作目录、所选执行
 
 `packages/api/test/plugin-agent-codex-exec-archive.test.js` 由真实 Manager 装载 `official.agent-codex` 本地归档，检测 Codex CLI 0.169.1。两次受控进程调用经 stdin 提交，使用独立 CODEX_HOME 与回环 Responses 端点。第一次取得原生会话 ID，释放 Host 会话后以原 ID 续接。回环请求保留前轮内容，正常终态与原生 usage 回到 Host 会话服务。测试不依赖真实账号。
 
-此候选只完成 exec 承载的隔离回归。App Server、模型目录、登录、额度、工具审批以及正常产品默认切换仍需要完成。
+产品默认授权回归 `packages/api/test/plugin-agent-codex-default-grant.test.js` 使用受信目录安装同一归档。指定 `CLOWDER_CODEX_PRODUCT_CANDIDATE_ARCHIVE` 后，测试走实际 Host 会话注册表和默认原生授权，使用隔离的自定义 API-key 网关、`read-only` 沙箱与 `never` 审批。真实 CLI 完成检测、首轮和释放后按原生 ID 续聊。回环 Responses 收到前轮历史，角色指令只进入系统或开发者侧，用户输入单独提交。请求到达模型后取消只产生一个取消终态，下一轮可继续使用同一原生 ID。工作区改变或网关凭据轮换时拒绝继续启动。API key、启动目录、执行 HOME 与最终启动参数由 Host 授权，不进入 Worker 的会话 DTO。
+
+该回归验收显式绑定的 Codex exec 和用于该组合的账号授权。旧版桌面升级、默认切换、App Server、OAuth/共享历史、目录登录、额度、交互工具审批及其他启动策略仍待验。账号、工作区和进程授权继续收敛为 Host 公共接入，Codex 命令准入仍保留专用实现，尚未达到五包迁完后 Host 无客户端特化的要求。
 
 ### Claude Code print 模式候选
 

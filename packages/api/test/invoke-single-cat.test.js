@@ -7645,6 +7645,34 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.ok(promptsSeen[0].includes('test'), 'F-BLOAT: original prompt should still be present');
   });
 
+  it('passes adapter session instructions separately from the user prompt', async () => {
+    const calls = [];
+    const service = {
+      usesSessionInstructions: true,
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(prompt, options) {
+        calls.push({ prompt, instructions: options.systemPrompt });
+        yield { type: 'text', catId: 'opus', content: 'hi', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    await collect(
+      invokeSingleCat(makeDeps(), {
+        catId: 'opus',
+        service,
+        prompt: 'adapter user input',
+        systemPrompt: 'ADAPTER_ROLE_MARKER',
+        userId: 'u1',
+        threadId: 'thread-adapter-role',
+        isLastCat: true,
+      }),
+    );
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].instructions, 'ADAPTER_ROLE_MARKER');
+    assert.ok(calls[0].prompt.includes('adapter user input'));
+    assert.ok(!calls[0].prompt.includes('ADAPTER_ROLE_MARKER'));
+  });
+
   // L0-budget-defense PR-B-impl (ADR-038 件套 ④, Cloud R2 P1 + 砚砚 R4 P1 #2237):
   // staging must reach service.invoke prompt on EVERY turn including resumes
   // where systemPrompt is skipped. This regression directly tests the

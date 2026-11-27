@@ -72,6 +72,7 @@ import { captureInvocationMcpSources } from '../../../../../config/capabilities/
 import { pluginMcpExposureProject } from '../../../../../config/capabilities/plugin-mcp-exposure.js';
 import { buildCatGitIdentityEnv } from '../../../../../config/cat-git-identity.js';
 import { isPublishedCatalogSnapshotCurrent } from '../../../../../config/cat-registry-reconciliation.js';
+import { codexGatewayCredentialVersion } from '../../../../../config/codex-execution-account.js';
 import { parseOpenCodeModel, resolveEffectiveOpenCodeModel } from '../../../../../config/opencode-model.js';
 import { shouldTakeAction } from '../../../../../config/session-strategy.js';
 import { assertSafeTestConfigRoot } from '../../../../../config/test-config-write-guard.js';
@@ -3936,7 +3937,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         .join('\n');
       const promptWithMission = missionPrefix ? `${missionPrefix}\n\n${composedPrompt}` : composedPrompt;
       let composedEffectivePrompt =
-        includeSystemPrompt && params.systemPrompt
+        includeSystemPrompt && params.systemPrompt && !service.usesSessionInstructions
           ? `${params.systemPrompt}\n\n---\n\n${promptWithMission}`
           : `${promptWithMission}`;
       if (contextHintPrefix) composedEffectivePrompt = `${contextHintPrefix}\n\n---\n\n${composedEffectivePrompt}`;
@@ -4263,6 +4264,10 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       ...(resolvedAccount?.claude ? { claudeTokenAccount: true } : {}),
       ...(resolvedAccount?.agy ? { agyAccount: resolvedAccount.agy } : {}),
       ...(codexAccountLaunch ? { codexAccountLaunch } : {}),
+      ...(service.usesSessionInstructions && params.systemPrompt ? { systemPrompt: params.systemPrompt } : {}),
+      ...(codexAccountLaunch?.authMode === 'api_key' && resolvedAccount?.baseUrl && resolvedAccount.apiKey
+        ? { codexGatewayCredentialVersion: codexGatewayCredentialVersion(resolvedAccount.baseUrl, resolvedAccount.apiKey) }
+        : {}),
       auditContext: {
         invocationId,
         executionId: params.parentInvocationId ?? invocationId,

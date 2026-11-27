@@ -6,6 +6,7 @@ import { captureTerminalInteraction } from '../../../utils/capture-terminal-inte
 import { resolveCliCommand } from '../../../utils/cli-resolve.js';
 import { isCliPlainTextResult, spawnCli } from '../../../utils/cli-spawn.js';
 import type { AgentAdapterRuntimeGrant } from './agent-adapter-access.js';
+import { grantAgentAdapterCodexExec } from './agent-adapter-codex-native-grant.js';
 
 const officialNativeClients = [
   {
@@ -50,6 +51,9 @@ export const grantAgentAdapterNativeRuntime: AgentAdapterRuntimeGrant = (request
       entry.packageName === source.packageName,
   );
   if (!grant) return;
+
+  if (grant.command === 'codex' && ['openSession', 'startTurn', 'release'].includes(request.action))
+    return grantAgentAdapterCodexExec(request);
 
   if (request.action === 'quota' && request.account && grant.terminalCommand) {
     const { account } = request;
