@@ -18,12 +18,12 @@ function toastHtml(t, a, o) { o = o || {}; const acts = [].concat(a || []).map(f
 function tintDot(n) { return lrDot('id', '', typeof n === 'string' && n.charAt(0) === '#' ? n : 'var(--tint-' + (+n || 1) + ')'); }   /* 色调点：主题色调槽位（1–6），或者取色器选的固定值（#hex） */
 /* 徽标（组件库）：两种形态，由数据决定——有数就是计数胶囊（超过 99 写 99+），只有“有变化”没有数就是小圆点。
    计数（未读、待处理、@你）不是严重度：所有计数徽标同一个强调色胶囊（“等你来看”）；只有真正带严重度的指示才传 tone（warn / danger …），走同一套 data-tone */
-function railActivity(value) {
+function railActivity(value, corner = true) {
   if (value?.kind !== 'busy' && value?.kind !== 'unread') return null;
   const busy = value.kind === 'busy';
   return {
     label: value.label,
-    html: '<span class="badge corner ' + (busy ? 'rail-busy' : 'dot') + '" data-tone="' +
+    html: '<span class="badge ' + (corner ? 'corner ' : 'trail ') + (busy ? 'rail-busy' : 'dot') + '" data-tone="' +
       (busy ? 'info' : 'danger') + '" data-rail-activity="' + value.kind + '" aria-hidden="true"></span>',
   };
 }
