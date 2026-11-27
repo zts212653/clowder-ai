@@ -81,7 +81,7 @@ test('ACP and Codex app-server nominate the same pinned launch to the shared rou
     capabilitiesConfig: config,
     configSourceRoot: project,
   });
-  const [acpEntry] = materializeSessionMcpServers(captureSessionMcpServers(acp), shared);
+  const [acpEntry] = await materializeSessionMcpServers(captureSessionMcpServers(acp), shared);
   assert.equal(acpEntry.type, 'http');
   assert.equal(new URL(acpEntry.url).pathname, SHARED_BROWSER_HTTP_PATH);
 
@@ -95,7 +95,7 @@ test('ACP and Codex app-server nominate the same pinned launch to the shared rou
     '--config',
     'mcp_servers.playwright.enabled=true',
   ];
-  const servers = codexNativeMcpThreadConfig(args, shared).mcp_servers;
+  const servers = (await codexNativeMcpThreadConfig(args, shared)).mcp_servers;
   // Codex deep-merges this over its own config files, which may already hold a stdio `playwright`
   // table (2026-11-09 incident): the shared route gets its own name, and `playwright` stays a
   // complete, disabled stdio table so the merge is valid whether or not that table exists.
@@ -138,8 +138,9 @@ test(
       '--config',
       'mcp_servers.playwright.enabled=true',
     ];
-    const overrides = Object.entries(codexNativeMcpThreadConfig(args, shared).mcp_servers).flatMap(([name, server]) =>
-      Object.entries(server).flatMap(([key, value]) => ['-c', `mcp_servers.${name}.${key}=${tomlValue(value)}`]),
+    const overrides = Object.entries((await codexNativeMcpThreadConfig(args, shared)).mcp_servers).flatMap(
+      ([name, server]) =>
+        Object.entries(server).flatMap(([key, value]) => ['-c', `mcp_servers.${name}.${key}=${tomlValue(value)}`]),
     );
     const legacy = '[mcp_servers.playwright]\ncommand = "npx"\nargs = [ "@playwright/mcp@latest", "--headless" ]\n';
     for (const [label, accountConfig] of [

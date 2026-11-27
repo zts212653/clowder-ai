@@ -174,7 +174,7 @@ test('client config adapters expand env references before ACP session callback m
     capabilitiesConfig: config,
     configSourceRoot: project,
   });
-  const acpContract = directMcpContract(materializeSessionMcpServers(captureSessionMcpServers(acp))[0]);
+  const acpContract = directMcpContract((await materializeSessionMcpServers(captureSessionMcpServers(acp)))[0]);
   assert.equal(acpContract.upstream.env.CUSTOM, 'prefix:current-value');
   assert.equal(acpContract.launchEnv.CUSTOM, 'prefix:current-value');
   assert.equal(acpContract.upstream.command, entry.mcpServer.command);
@@ -192,7 +192,7 @@ test('client config adapters expand env references before ACP session callback m
       ],
     },
   ];
-  const result = materializeSessionMcpServers(captureSessionMcpServers(native), {
+  const result = await materializeSessionMcpServers(captureSessionMcpServers(native), {
     CAT_CAFE_CALLBACK_TOKEN: 'current-callback',
     CAT_CAFE_INVOCATION_ID: 'current-invocation',
   });
@@ -207,7 +207,7 @@ test('client config adapters expand env references before ACP session callback m
   assert.equal(native[0].env[0].value, '${MCP_FIXTURE_TOKEN}');
 });
 
-test('ACP captures references before session launch, preserving replacement values verbatim', (t) => {
+test('ACP captures references before session launch, preserving replacement values verbatim', async (t) => {
   const saved = Object.fromEntries(['MCP_FIXTURE_VALUE', 'NOT_A_SECOND_LOOKUP'].map((key) => [key, process.env[key]]));
   process.env.MCP_FIXTURE_VALUE = 'literal:${NOT_A_SECOND_LOOKUP}';
   t.after(() => {
@@ -222,7 +222,7 @@ test('ACP captures references before session launch, preserving replacement valu
   const captured = captureSessionMcpServers(base);
   process.env.MCP_FIXTURE_VALUE = 'changed-after-capture';
   process.env.NOT_A_SECOND_LOOKUP = 'must-not-expand';
-  const materialized = materializeSessionMcpServers(captured);
+  const materialized = await materializeSessionMcpServers(captured);
   const { launchEnv, upstream } = directMcpContract(materialized[0]);
   assert.equal(upstream.command, base[0].command);
   assert.deepEqual(upstream.args, base[0].args);

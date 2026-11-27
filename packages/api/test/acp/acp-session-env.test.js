@@ -24,7 +24,7 @@ const own = (name) => ({
 });
 const environment = (server) => Object.fromEntries(server.env.map(({ name, value }) => [name, value]));
 
-test('ACP preserves direct third-party transports, including a colliding first-party name', () => {
+test('ACP preserves direct third-party transports, including a colliding first-party name', async () => {
   const servers = [
     { name: 'cat-cafe-collab', command: 'foreign', args: ['collab.js'], env: [{ name: 'EXPLICIT', value: 'keep' }] },
     {
@@ -34,27 +34,27 @@ test('ACP preserves direct third-party transports, including a colliding first-p
       headers: [{ name: 'Authorization', value: 'explicit' }],
     },
   ];
-  assert.deepEqual(materializeSessionMcpServers(servers, callback), servers);
-  assert.deepEqual(materializeSessionMcpServers(servers), servers);
+  assert.deepEqual(await materializeSessionMcpServers(servers, callback), servers);
+  assert.deepEqual(await materializeSessionMcpServers(servers), servers);
 });
-test('ACP binds only genuine installed first-party entrypoints and never mutates the source', () => {
+test('ACP binds only genuine installed first-party entrypoints and never mutates the source', async () => {
   const servers = [own('collab'), own('memory')],
     before = structuredClone(servers);
-  const bound = materializeSessionMcpServers(servers, { ...callback, RANDOM: 'exclude' });
+  const bound = await materializeSessionMcpServers(servers, { ...callback, RANDOM: 'exclude' });
   assert.equal(environment(bound[0]).CAT_CAFE_INVOCATION_ID, 'A');
   assert.equal(environment(bound[1]).CAT_CAFE_CAT_ID, 'gemini');
   assert.equal(environment(bound[0]).RANDOM, undefined);
   assert.deepEqual(bound[0].args, servers[0].args);
   assert.deepEqual(servers, before);
 });
-test('ACP native HTTP keeps six original names and pins private headers from the original turn', () => {
+test('ACP native HTTP keeps six original names and pins private headers from the original turn', async () => {
   const root = mkdtempSync(join(tmpdir(), 'acp-native-http-'));
   try {
     const file = join(root, 'turn.json');
     writeFileSync(file, JSON.stringify({ invocationId: 'A', callbackToken: 'owned-A' }), { mode: 0o600 });
     const source = ['collab', 'memory', 'signals', 'limb', 'audio', 'finance'].map(own);
     const env = { ...callback, CAT_CAFE_CREDENTIAL_FILE: file, CAT_CAFE_MCP_TRANSPORT: 'shared' };
-    const http = materializeSessionMcpServers(source, env, true);
+    const http = await materializeSessionMcpServers(source, env, true);
     assert.deepEqual(
       http.map((x) => x.name),
       source.map((x) => x.name),
@@ -68,20 +68,20 @@ test('ACP native HTTP keeps six original names and pins private headers from the
       );
     }
     writeFileSync(file, JSON.stringify({ invocationId: 'B', callbackToken: 'owned-B' }));
-    assert.throws(() => materializeSessionMcpServers(source, env, true), /mismatch/);
+    await assert.rejects(() => materializeSessionMcpServers(source, env, true), /mismatch/);
     assert.equal(Object.fromEntries(http[0].headers.map(({ name, value }) => [name, value]))['x-invocation-id'], 'A');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
-test('foreign MCP cannot obtain callback authority by configuring an action-token field', () => {
+test('foreign MCP cannot obtain callback authority by configuring an action-token field', async () => {
   const server = {
     name: 'external',
     command: 'foreign',
     args: [],
     env: [{ name: 'CLOWDER_PLUGIN_ACTION_TOKEN', value: 'forged' }],
   };
-  assert.deepEqual(materializeSessionMcpServers([server], callback), [server]);
+  assert.deepEqual(await materializeSessionMcpServers([server], callback), [server]);
 });
 
 test('ACP diagnostics expose presence only', () => {

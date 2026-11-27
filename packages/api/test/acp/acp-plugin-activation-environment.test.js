@@ -79,7 +79,7 @@ for (const [clientId, transport] of [
     const client = originalPool.clientFactory();
     assert.ok(hostKeys.every((key) => client.config.preparedEnv[key] === undefined));
     const selected = actions.environment(admission.instance.pluginInstanceId, 'isolated-mcp');
-    const [server] = materializeSessionMcpServers(
+    const [server] = await materializeSessionMcpServers(
       captureSessionMcpServers([
         {
           name: 'selected-plugin',
