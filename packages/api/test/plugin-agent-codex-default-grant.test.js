@@ -38,10 +38,13 @@ test(
       else process.env.CAT_CAFE_DATA_DIR = previousDataDir;
     });
     const requests = [];
+    const preparedRequests = [];
+    const preparedCountsAtModel = [];
     const pendingRequest = Promise.withResolvers();
     const finishResponse = Promise.withResolvers();
     const model = await startLayoutModel({
       onRequest(body) {
+        preparedCountsAtModel.push(preparedRequests.length);
         requests.push(body);
         if (requests.length !== 3) return;
         pendingRequest.resolve();
@@ -110,6 +113,20 @@ test(
       codexGatewayCredentialVersion: codexGatewayCredentialVersion(model.url, apiKey),
       codexLaunchPolicy: { ...captureCodexLaunchPolicy(), sandboxMode: 'read-only', approvalPolicy: 'never' },
       executionPreferences: { model: 'fixture', effort: '', nativeAuthentication: false },
+      async beforeProviderLaunch(request) {
+        assert.equal(request.runtime.carrier, 'exec_json');
+        assert.deepEqual(
+          request.nativeInstructions.map(({ body }) => body),
+          [options.systemPrompt],
+        );
+        assert.equal(JSON.stringify(request).includes(apiKey), false);
+        preparedRequests.push(request.message.body);
+        return {
+          requestGenerationId: `request-${preparedRequests.length}`,
+          generationOrdinal: 1,
+          sessionId: options.hostSessionId,
+        };
+      },
     };
     const read = (messages, text) => {
       assert.equal(messages.at(-1)?.errorCode, undefined, messages.find((message) => message.type === 'error')?.error);
@@ -119,6 +136,7 @@ test(
     const first = await Array.fromAsync(service.invoke('F320_NATIVE_MEMORY', { ...options, invocationId: 'first' }));
     const sessionId = read(first, 'LOCAL_LAYOUT_REPLY_1');
     assert.ok(sessionId);
+    assert.deepEqual(preparedCountsAtModel, [1], 'Host must record the request before model traffic');
     await service.releaseAll('reopen');
     const second = await Array.fromAsync(
       service.invoke('Continue the chat', { ...options, invocationId: 'second', sessionId, requireExactResume: true }),
@@ -174,12 +192,33 @@ test(
       service.invoke('Continue after cancelling', { ...options, invocationId: 'after-cancel', sessionId }),
     );
     assert.equal(read(afterCancel, 'LOCAL_LAYOUT_REPLY_4'), sessionId);
+    assert.deepEqual(preparedRequests, [
+      'F320_NATIVE_MEMORY',
+      'Continue the chat',
+      'Wait for an answer',
+      'Continue after cancelling',
+    ]);
+    assert.deepEqual(preparedCountsAtModel, [1, 2, 3, 4]);
+    const rejectedRecording = await Array.fromAsync(
+      service.invoke('Do not launch without request provenance', {
+        ...options,
+        invocationId: 'recording-failed',
+        sessionId,
+        async beforeProviderLaunch() {
+          throw new Error('Fixture request recording unavailable');
+        },
+      }),
+    );
+    assert.ok(rejectedRecording.at(-1)?.errorCode);
+    assert.equal(model.requests.length, 4);
     writeCredential(accountRef, { apiKey: 'rotated-loopback-key' }, cwd);
     const rejected = await Array.fromAsync(
       service.invoke('Do not start a process', { ...options, invocationId: 'rotated', sessionId }),
     );
     assert.ok(rejected.at(-1)?.errorCode);
     assert.equal(model.requests.length, 4);
-    t.diagnostic(`Catalog archive ran Codex CLI ${detection.candidates[0].state.version} through the default Host grant.`);
+    t.diagnostic(
+      `Catalog archive ran Codex CLI ${detection.candidates[0].state.version} through the default Host grant.`,
+    );
   },
 );

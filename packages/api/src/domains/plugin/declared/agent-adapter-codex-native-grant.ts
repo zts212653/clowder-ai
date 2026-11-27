@@ -211,6 +211,20 @@ export function grantAgentAdapterCodexExec(
       args: hostArgs,
       executionHome: home,
     });
+    await options.beforeProviderLaunch?.({
+      v: 1,
+      message: { body: stdin },
+      nativeInstructions: [{ body: scope.instructions, injectionDecision: 'native_l0_compiled' }],
+      runtime: {
+        provider: 'openai',
+        carrier: 'exec_json',
+        protocol: 'exec_json',
+        ...(model ? { model } : {}),
+        toolExecutionPolicy: 'read_only',
+      },
+      tools: { finalSurface: 'unknown' },
+      providerNativeVisibility: 'unknown',
+    });
     return {
       command,
       cwd,
