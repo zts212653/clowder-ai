@@ -538,8 +538,10 @@ export function createDormantPluginRuntimeComposition(
     options.threadStore && options.threadOwnerUserId
       ? { threads: options.threadStore, ownerUserId: options.threadOwnerUserId }
       : undefined;
+  const registry = options.agentSessionImplementations;
   const moduleRuntime = new ModulePluginRuntime({
-    isDeclaredAgentProviderAvailable: options.isDeclaredAgentProviderAvailable,
+    isDeclaredAgentProviderAvailable:
+      options.isDeclaredAgentProviderAvailable ?? (registry ? (reference) => registry.has(reference) : undefined),
     ...(options.taskArtifactReader ? { taskArtifactReader: options.taskArtifactReader } : {}),
     ...(options.onTaskDataChanged ? { onTaskDataChanged: options.onTaskDataChanged } : {}),
     taskAdmission: (pluginInstanceId, packageDigest, assertActivation) =>
@@ -654,7 +656,6 @@ export function createDormantPluginRuntimeComposition(
     moduleRuntime,
     options.grantAgentAdapterNativeRuntime ?? grantAgentAdapterNativeRuntime,
   );
-  const registry = options.agentSessionImplementations;
   const supervisor = new PluginRuntimeCarrierRouter(
     inventoryStore,
     {

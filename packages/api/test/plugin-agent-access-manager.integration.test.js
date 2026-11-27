@@ -20,7 +20,9 @@ import { A2AAgentService } from '../dist/domains/cats/services/agents/providers/
 import { observeAgyNativeTurn } from '../dist/domains/cats/services/agents/providers/agy-native/agy-native-turn.js';
 import { ClaudeSdkAgentService } from '../dist/domains/cats/services/agents/providers/ClaudeSdkAgentService.js';
 import { transformCodexEvent } from '../dist/domains/cats/services/agents/providers/codex-event-transform.js';
-import { sessionImplementationKey } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
+import { SessionImplementationRegistry } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
+import { resolveMemberSessionRef } from '../dist/domains/cats/services/agents/session-contract/plugin-agent-provider.js';
+import { RegisteredSessionAgentService } from '../dist/domains/cats/services/agents/session-contract/registered-session-agent-service.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { createAgentAccessA2ARunner } from '../dist/domains/plugin/agent-access/a2a.js';
 import { createAgentAccessAcpModelSelection } from '../dist/domains/plugin/agent-access/acp.js';
@@ -49,6 +51,7 @@ import {
 import { catsRoutes } from '../dist/routes/cats.js';
 import { tarArchive } from '../scripts/bundled-plugin-artifacts.mjs';
 import { canonicalGzip } from '../scripts/canonical-gzip.mjs';
+import { declaration } from './helpers/agent-adapter-archive.js';
 import { claudeSdkRuntimeFixture } from './helpers/claude-sdk-runtime-fixture.js';
 
 test('Kimi native events cross with redaction and consume only the same active package generation', async () => {
@@ -100,7 +103,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const previousRoot = process.env.CAT_CAFE_CONFIG_ROOT;
   const previousTemplate = process.env.CAT_TEMPLATE_PATH;
   const template = join(projectRoot, 'cat-template.json');
-  const availableProviders = new Set();
+  const sessionImplementations = new SessionImplementationRegistry();
   await writeFile(template, JSON.stringify({ version: 1, breeds: [], roleTemplates: [] }));
   process.env.CAT_CAFE_CONFIG_ROOT = projectRoot;
   process.env.CAT_TEMPLATE_PATH = template;
@@ -108,7 +111,7 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
     projectRoot,
     messageStore: new MessageStore(),
     contract: { manifestContractRange: '0.4.0-candidate.0', validateManifest },
-    isDeclaredAgentProviderAvailable: (reference) => availableProviders.has(sessionImplementationKey(reference)),
+    agentSessionImplementations: sessionImplementations,
   });
   t.after(async () => {
     catRegistry.reset();
@@ -1225,7 +1228,8 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const lanDirectory = await call('GET', '/api/agent-access/v1/clients');
   assert.equal(lanDirectory.statusCode, 200, lanDirectory.payload);
   assert.ok(lanDirectory.json().clients.some((client) => client.id === 'kimi'));
-  const selectedProvider = 'plugin:local.agent-access-test/kimi';
+  const adapterId = 'local.agent-access-test';
+  const selectedProvider = `plugin:${adapterId}/kimi`;
   const declared = {
     clientId: 'acp',
     carrier: 'acp',
@@ -1278,7 +1282,46 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   });
   assert.equal(staleSelection.statusCode, 409, staleSelection.payload);
   assert.equal(staleSelection.json().code, 'agent_provider_unavailable');
-  availableProviders.add(selectedProvider);
+  const candidate = join(projectRoot, 'declared-role-adapter.tgz');
+  const fixture = {
+    'manifest.json': JSON.stringify({
+      pluginId: adapterId,
+      version: '1.0.0',
+      contractVersion: '0.4.0-candidate.0',
+      name: 'Member session fixture',
+      features: [{ id: 'member', name: 'Member session', capabilities: [], resources: [] }],
+      runtime: { transport: 'builtin', entrypoint: 'entrypoint.mjs' },
+    }),
+    'agent-adapter.json': JSON.stringify(declaration('kimi')),
+    'package.json': JSON.stringify({ name: adapterId, version: '1.0.0', type: 'module' }),
+    'entrypoint.mjs': `export default { create: () => ({ start: () => ({
+      actions: {
+        describe() { return {}; },
+        detect() { return { candidates: [] }; },
+        openSession({ resume }) {
+          return { ok: true, binding: { state: 'bound', nativeSessionId: resume?.nativeSessionId ?? 'fixture-new' } };
+        },
+        async *startTurn({ prompt }) {
+          yield { type: 'output', text: 'member adapter: ' + prompt };
+          yield { type: 'done', outcome: 'completed' };
+        },
+        cancel() { return { ok: true }; },
+        release() { return { ok: true }; },
+      },
+      stop() {},
+    }) }) };`,
+  };
+  await writeFile(
+    candidate,
+    canonicalGzip(
+      tarArchive(
+        Object.entries(fixture).map(([name, value]) => ({ name: `package/${name}`, bytes: Buffer.from(value) })),
+      ),
+    ),
+  );
+  await install(candidate);
+  const installedAdapter = (await manager.get(adapterId)).plugin;
+  await manager.setEnabled(adapterId, { enabled: true, expectedRevision: installedAdapter.lifecycleRevision });
   const enabledInherited = await call('PATCH', rolePath, {
     carrier: 'acp',
     expectedRevision: createdRole.configurationRevision,
@@ -1290,7 +1333,23 @@ test('Agent access discovery executes the same standalone entrypoint from a Mana
   const receiptRole = distinctCreation.json().cat;
   assert.notEqual(receiptRole.id, createdRole.id);
   assert.equal(receiptRole.acp.agentProvider, selectedProvider);
-  availableProviders.delete(selectedProvider);
+  const ref = resolveMemberSessionRef(receiptRole.agentProvider, undefined, receiptRole.acp.agentProvider);
+  assert.deepEqual(ref, { pluginId: adapterId, contributionId: 'kimi' });
+  const member = new RegisteredSessionAgentService({ catId: receiptRole.id, ref, registry: sessionImplementations });
+  const send = () =>
+    Array.fromAsync(
+      member.invoke('hello', {
+        hostSessionId: 'fixture-member-session',
+        invocationId: 'fixture-member-turn',
+        sessionId: 'fixture-existing',
+      }),
+    );
+  const messages = await send();
+  assert.equal(messages.find(({ type }) => type === 'text')?.content, 'member adapter: hello');
+  assert.equal(messages.at(-1)?.metadata.sessionId, 'fixture-existing');
+  const enabledAdapter = (await manager.get(adapterId)).plugin;
+  await manager.setEnabled(adapterId, { enabled: false, expectedRevision: enabledAdapter.lifecycleRevision });
+  assert.equal((await send()).at(-1)?.errorCode, 'session_implementation_unavailable');
   const bound = await call('PATCH', rolePath, {
     ...declared,
     expectedRevision: enabledInherited.json().cat.configurationRevision,

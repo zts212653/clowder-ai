@@ -5576,7 +5576,7 @@ async function initializeApi(
   const collectiveArtifactOwnerHolder: import('./domains/plugin/host-surface/collective-artifact-owner.js').CollectiveArtifactOwnerHolder =
     {};
   const pluginRuntime = cloudConversations.createRuntime({
-    isDeclaredAgentProviderAvailable: (reference) => sessionImplementations.has(reference),
+    agentSessionImplementations: sessionImplementations,
     agentSessionProviders: (packages, configuration) =>
       declaredAgentSessionProviders({
         configuration,
