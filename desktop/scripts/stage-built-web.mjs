@@ -9,11 +9,15 @@ export function stageBuiltWeb(source, destination) {
     if (!fs.existsSync(asset) || !fs.statSync(asset).size) throw new Error(`Missing built Web CSS asset: ${file}`);
   }
   if (!fs.existsSync(path.join(source, '.next/BUILD_ID'))) throw new Error('Missing Web build identity');
+  const excludedBuildCaches = new Set([
+    path.resolve(source, '.next/cache/webpack'),
+    path.resolve(source, '.next/cache/eslint'),
+  ]);
   const copy = (from, to) =>
     fs.cpSync(from, to, {
       recursive: true,
       filter: (entry) => {
-        if (path.resolve(entry) === path.resolve(source, '.next/cache/webpack')) return false;
+        if (excludedBuildCaches.has(path.resolve(entry))) return false;
         if (fs.lstatSync(entry).isSymbolicLink()) throw new Error('Linked Web build asset');
         return true;
       },
