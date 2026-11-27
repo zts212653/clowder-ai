@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import type { ChatData } from '../chat-models';
 import { useMessageSourceBindings } from '../useMessageSourceBindings';
 import { fixtureData } from './chat-fixture';
@@ -102,4 +103,50 @@ it('refreshes a processing generation even if the previous scan reached the end'
   await act(hook.rerender);
   expect(generationCalls()).toHaveLength(3);
   expect(generationCalls().filter(([path]) => String(path).includes('/live/'))).toHaveLength(2);
+});
+
+it('re-reads completed generations after input deletion and reconnect', async () => {
+  vi.mocked(apiFetch).mockReset();
+  let ids = ['deleted', 'kept'];
+  vi.mocked(apiFetch).mockImplementation(async () =>
+    Response.json({ messageIds: ids, hasAppendedInputs: false, complete: true }),
+  );
+  const generation = generationMessage('past');
+  const previousInput = { ...fixtureData().messages[0]!, id: 'deleted', extra: undefined, source: undefined };
+  let data = dataWith([previousInput, generation]);
+  let needed = 1;
+  const hook = renderHook(() => useMessageSourceBindings(data, needed));
+  await waitFor(() => expect(hook.result.current.data.records.generations.past?.messageIds).toEqual(ids));
+
+  ids = ['kept'];
+  data = dataWith([generation]);
+  await act(hook.rerender);
+  await waitFor(() => expect(hook.result.current.data.records.generations.past?.messageIds).toEqual(ids));
+
+  ids = ['changed while disconnected'];
+  needed = 2;
+  await act(hook.rerender);
+  await waitFor(() => expect(hook.result.current.data.records.generations.past?.messageIds).toEqual(ids));
+  expect(generationCalls()).toHaveLength(3);
+});
+
+it('publishes no old source records while the new account is still loading', async () => {
+  vi.mocked(apiFetch).mockReset();
+  const pending = Promise.withResolvers<Response>();
+  const data = dataWith([generationMessage('shared-id')]);
+  observeApiSessionOwner('source-owner-a');
+  vi.mocked(apiFetch)
+    .mockResolvedValueOnce(Response.json({ messageIds: ['private-a'], hasAppendedInputs: false, complete: true }))
+    .mockReturnValueOnce(pending.promise);
+  const hook = renderHook(() => useMessageSourceBindings(data, 1));
+  await waitFor(() =>
+    expect(hook.result.current.data.records.generations['shared-id']?.messageIds).toEqual(['private-a']),
+  );
+
+  await act(() => observeApiSessionOwner('source-owner-b'));
+  expect(hook.result.current.data.records.generations).toEqual({});
+  await act(() => {
+    pending.resolve(Response.json({ messageIds: ['private-b'], hasAppendedInputs: false, complete: true }));
+  });
+  expect(hook.result.current.data.records.generations['shared-id']?.messageIds).toEqual(['private-b']);
 });

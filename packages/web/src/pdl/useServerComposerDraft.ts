@@ -1,5 +1,5 @@
 import type { ContextAttachment, FileContent, ImageContent } from '@cat-cafe/shared';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
 /** An uploaded attachment the draft keeps as the server stored it: an image, or a file with its name, type and size. */
@@ -83,6 +83,7 @@ export function useServerComposerDraft(input: {
   // The conversation whose server draft the input shows in full (attachments read back). Until then nothing is written:
   // the input is not yet what the owner left. Each opening starts unshown; a restore after a switch never counts.
   const shown = useRef<string | null>(null);
+  const [restoreRevision, setRestoreRevision] = useState(0);
   const latest = useRef(input);
   latest.current = input;
   const { threadId, enabled } = input;
@@ -115,8 +116,7 @@ export function useServerComposerDraft(input: {
         if (!live) return;
         const saved = fromSaved(body.draft);
         known.current.set(threadId, { revision: body.revision, signature: JSON.stringify(saved) });
-        const beforeRestore = latest.current;
-        const now = beforeRestore.draft;
+        const now = latest.current.draft;
         // What the owner typed before the server answered stays; the server's attachments they haven't seen join it.
         const typedSinceOpen = openedRevision !== (latest.current.revision ?? 0) || opened !== JSON.stringify(now);
         const merged = typedSinceOpen ? mergeDraft(JSON.parse(opened) as ComposerDraft, now, saved) : saved;
@@ -134,12 +134,8 @@ export function useServerComposerDraft(input: {
         }
         if (!live) return;
         shown.current = threadId;
-        // Use words edited during restoration, or the restored words if React has not rendered them yet.
-        const current = latest.current;
-        const committed = { ...merged, text: current === beforeRestore ? merged.text : current.draft.text };
-        if (!current.holdWrites && JSON.stringify(committed) !== JSON.stringify(saved)) {
-          await saveDraft(threadId, committed, known.current, show);
-        }
+        // The restore can queue attachment state in React. Save the committed composer on its next render.
+        setRestoreRevision((revision) => revision + 1);
       })
       // An unreachable draft leaves this tab's composer as it is; the next edit writes again.
       .catch(() => undefined);
@@ -159,7 +155,7 @@ export function useServerComposerDraft(input: {
     pending.current = { threadId, draft: JSON.parse(signature) as ComposerDraft };
     const timer = setTimeout(() => flush(pending, known.current, show), 600);
     return () => clearTimeout(timer);
-  }, [threadId, enabled, signature, holdWrites]);
+  }, [threadId, enabled, signature, holdWrites, restoreRevision]);
   useEffect(() => () => flush(pending, known.current, show), [threadId]);
   useEffect(() => {
     const leave = () => flush(pending, known.current, show, true);

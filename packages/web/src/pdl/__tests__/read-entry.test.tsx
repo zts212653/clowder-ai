@@ -8,7 +8,7 @@ import { approvalResultRead } from '@/lib/approval-result-read';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
 import { apiFetch } from '@/utils/api-client';
-import { observeApiSessionOwner } from '@/utils/api-session-identity';
+import { apiSessionIdentity, observeApiSessionOwner } from '@/utils/api-session-identity';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { request } from '../owner-api';
 import { ProposalRecordBinding } from '../PdlAppHost';
@@ -180,7 +180,7 @@ it('pulls recall once on entry and uses message increments without re-reading wh
 function readReceiptHarness() {
   const source = readFileSync('src/pdl/PdlAppHost.tsx', 'utf8');
   const effect = source.split('  const messageCount = history.messages.length;')[1].split('\n  const patchThread =')[0];
-  return new Function(
+  const invoke = new Function(
     'useEffect',
     'history',
     'exportMids',
@@ -192,10 +192,12 @@ function readReceiptHarness() {
     'notifyHandledMentionRead',
     'invalidateSidebarProjection',
     'useSidebarProjectionStore',
+    'apiSessionIdentity',
     transpileModule('const messageCount = history.messages.length;' + effect, {
       compilerOptions: { target: ScriptTarget.ES2022 },
     }).outputText,
   );
+  return (...args: unknown[]) => invoke(...args, apiSessionIdentity);
 }
 
 it('skips a full sidebar read for no-op acknowledgements and refreshes on advance', async () => {
@@ -372,4 +374,35 @@ it('shares uncertain approval and explicit readback between inbox and native car
   } finally {
     useApprovalHubStore.setState(oldHub);
   }
+});
+
+it('reconciles a durable read receipt after a newer request or a thread switch', async () => {
+  const readReceipt = readReceiptHarness();
+  const notify = vi.fn();
+  const invalidate = vi.fn(async () => true);
+  const late = Promise.withResolvers<Response>();
+  const wrongOwner = Promise.withResolvers<Response>();
+  const committed = () => Response.json({ caughtUp: true, advanced: true, handledMention: true });
+  vi.mocked(apiFetch)
+    .mockReturnValueOnce(late.promise)
+    .mockResolvedValueOnce(Response.json({ caughtUp: true, advanced: false, handledMention: false }))
+    .mockReturnValueOnce(wrongOwner.promise);
+  let threadId = 'first';
+  let messages: ReturnType<typeof fixtureData>['messages'] = [];
+  const hook = renderHook(() =>
+    readReceipt(useEffect, { messages }, undefined, true, true, () => 1, request, threadId, notify, invalidate, {
+      getState: () => ({ rows: [] }),
+    }),
+  );
+  messages = fixtureData().messages;
+  await act(hook.rerender);
+  await waitFor(() => expect(notify).toHaveBeenCalledOnce());
+  threadId = 'second';
+  await act(hook.rerender);
+  await act(() => late.resolve(committed()));
+  expect(notify).toHaveBeenLastCalledWith(expect.objectContaining({ handledMention: true }));
+  expect(invalidate).toHaveBeenCalledOnce();
+  observeApiSessionOwner('another owner');
+  await act(() => wrongOwner.resolve(committed()));
+  expect(invalidate).toHaveBeenCalledOnce();
 });

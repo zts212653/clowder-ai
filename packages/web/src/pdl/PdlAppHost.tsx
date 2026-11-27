@@ -346,6 +346,14 @@ export function PdlAppHost() {
   );
 }
 
+/** Mark the conversation being left without notifying the sidebar on each edit. */
+export function useThreadDraftMarker(threadId: string) {
+  const leaving = useMemo(() => ({ current: false, hasCommittedText: false }), [threadId]);
+  const setThreadHasDraft = useChatStore((state) => state.setThreadHasDraft);
+  useLayoutEffect(() => () => setThreadHasDraft(threadId, leaving.current), [threadId, leaving, setThreadHasDraft]);
+  return leaving;
+}
+
 function ChatBinding({
   threadId,
   pendingJump,
@@ -484,7 +492,7 @@ function ChatBinding({
   const drafting = exportMids === undefined;
   const inputChanged = useRef<() => void>();
   const serverDraft = useRef<ReturnType<typeof useServerComposerDraft>>();
-  const leaving = useRef(false);
+  const leaving = useThreadDraftMarker(threadId);
   // IME composition is transient: keep it in the input state, but do not persist it as a draft.
   const composingRef = useRef(false);
   const [composing, setComposing] = useState(false);
@@ -523,17 +531,21 @@ function ChatBinding({
     clock: Date.now(),
     f: {},
   });
-  const writeInput = useCallback((text: string) => {
-    draftRevision.current += 1;
-    ui.current.draft!['chat-input'] = text;
-    leaving.current = !!(
-      text.trim() ||
-      current.current.images.length ||
-      current.current.contexts.length ||
-      current.current.reply
-    );
-    inputChanged.current?.();
-  }, []);
+  const writeInput = useCallback(
+    (text: string) => {
+      draftRevision.current += 1;
+      ui.current.draft!['chat-input'] = text;
+      if (!composingRef.current) leaving.hasCommittedText = !!text.trim();
+      leaving.current = !!(
+        leaving.hasCommittedText ||
+        current.current.images.length ||
+        current.current.contexts.length ||
+        current.current.reply
+      );
+      inputChanged.current?.();
+    },
+    [leaving],
+  );
   const setInput = useCallback(
     (value: React.SetStateAction<string>) => {
       writeInput(typeof value === 'function' ? value(ui.current.draft!['chat-input']) : value);
@@ -581,20 +593,35 @@ function ChatBinding({
   const restoreDraft: Parameters<typeof useServerComposerDraft>[0]['restore'] = (saved, current) => {
     setInput(saved.text);
     setContexts(saved.contexts);
-    const message = saved.replyTo && useChatStore.getState().messages.find((m) => m.id === saved.replyTo);
-    if (message)
-      useChatStore
-        .getState()
-        .setReplyTo({ id: message.id, content: message.content, senderCatId: message.catId ?? null, threadId });
-    else useChatStore.getState().clearReplyTo();
+    const state = useChatStore.getState();
+    if (saved.replyTo) {
+      const message = state.messages.find((m) => m.id === saved.replyTo);
+      state.setReplyTo({
+        id: saved.replyTo,
+        content: message?.content ?? '(原消息未加载)',
+        senderCatId: message?.catId ?? null,
+        threadId,
+      });
+    } else state.clearReplyTo();
+    const previousUrls = new Set(images.flatMap((file) => draftFile.get(file)?.url ?? []));
+    const savedUrls = new Set(saved.images.map((block) => block.url));
     return downloadImages(
       saved.images.map((block) => block.url),
       saved.images.filter((block) => block.type === 'file'),
     ).then((files) => {
       if (!current()) return;
       files.forEach((file, i) => draftFile.set(file, saved.images[i]));
-      // Files picked here and not yet uploaded are not in any saved draft: they stay beside it.
-      setImages((all) => [...files, ...all.filter((file) => !draftFile.has(file))].slice(0, 5));
+      setImages((all) => {
+        const currentUrls = new Set(all.flatMap((file) => draftFile.get(file)?.url ?? []));
+        const restored = files.filter(
+          (_, i) => !previousUrls.has(saved.images[i].url) || currentUrls.has(saved.images[i].url),
+        );
+        const added = all.filter((file) => {
+          const url = draftFile.get(file)?.url;
+          return !url || (!previousUrls.has(url) && !savedUrls.has(url));
+        });
+        return [...restored, ...added].slice(0, 5);
+      });
     });
   };
   // Words, places and a quote handed to this conversation's input from elsewhere (a file, a work, a recall).
@@ -642,18 +669,8 @@ function ChatBinding({
         .finally(() => setPreparingImages(false));
     }
   }, [pendingInsert, threadId, setInput]);
-  // The thread list marks a conversation with a draft when you leave it — typing never touches the list.
-  const setThreadHasDraft = useChatStore((s) => s.setThreadHasDraft);
-  leaving.current = !!(
-    ui.current.draft!['chat-input'].trim() ||
-    images.length ||
-    contexts.length ||
-    store.replyToMessage
-  );
-  useLayoutEffect(() => {
-    const left = threadId;
-    return () => setThreadHasDraft(left, leaving.current);
-  }, [threadId, setThreadHasDraft]);
+  if (!composingRef.current) leaving.hasCommittedText = !!ui.current.draft!['chat-input'].trim();
+  leaving.current = !!(leaving.hasCommittedText || images.length || contexts.length || store.replyToMessage);
   const [questions, setQuestions] = useState<Record<string, QuestionBinding>>({});
   const questionChanged = useCallback(
     (id: string, binding: QuestionBinding) =>
@@ -1012,6 +1029,7 @@ function ChatBinding({
   useEffect(() => {
     if (exportMids !== undefined || !documentVisible || !engineMounted || !need('chat.messages')) return;
     let live = true;
+    const generation = apiSessionIdentity.getSnapshot().generation;
     void request<{ caughtUp: boolean; advanced: boolean; handledMention: boolean }>(
       `/api/threads/${encodeURIComponent(threadId)}/read/latest`,
       {
@@ -1021,7 +1039,9 @@ function ChatBinding({
       },
     )
       .then((receipt) => {
-        if (!live) return;
+        if (generation !== apiSessionIdentity.getSnapshot().generation) return;
+        // The request can commit a read even when the conversation that sent it has since closed.
+        if (!live && !receipt.advanced && !receipt.handledMention) return;
         notifyHandledMentionRead(receipt);
         const sidebarRow = useSidebarProjectionStore.getState().rows.find((row) => row.id === threadId);
         // A no-op receipt with no stale attention has nothing to reconcile.

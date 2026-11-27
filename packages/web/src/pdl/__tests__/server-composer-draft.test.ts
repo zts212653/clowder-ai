@@ -609,3 +609,47 @@ it('flushes only the last committed draft when leaving during a composition', as
     ['PUT', '/api/threads/t1/composer-draft', JSON.stringify({ expectedRevision: 1, text: 'committed' })],
   ]);
 });
+
+it('persists the owner attachment and reply edits made during a slow draft restore', async () => {
+  const loaded = Promise.withResolvers<void>();
+  const nextQuote = { ...quote, id: 'new-quote' };
+  const read = Promise.withResolvers<Response>();
+  vi.mocked(apiFetch).mockImplementation(async (_path, init) =>
+    init?.method ? Response.json({ draft: { revision: 2 } }) : read.promise,
+  );
+  const { hook, restore, state } = mount({ text: '', images: [], contexts: [] });
+  restore.mockImplementation((saved) => {
+    state.draft = { ...saved, images: [] };
+    hook.rerender();
+    return loaded.promise.then(() => {
+      state.draft = { ...state.draft, images: [...saved.images, ...state.draft.images] };
+      hook.rerender();
+    });
+  });
+  state.draft = { ...state.draft, text: 'typed' };
+  hook.rerender();
+  await flushed();
+  read.resolve(
+    Response.json({
+      draft: {
+        text: 'saved',
+        replyTo: 'before',
+        contentBlocks: [fileA, { type: 'context_attachment', attachment: quote }],
+      },
+      revision: 1,
+    }),
+  );
+  await waitFor(() => expect(restore).toHaveBeenCalledOnce());
+  state.draft = { text: 'typed', images: [fileB], contexts: [nextQuote], replyTo: 'after' };
+  hook.rerender();
+  await flushed();
+  expect(writes()).toEqual([]);
+
+  loaded.resolve();
+  await waitFor(() => expect(writes()).toHaveLength(1));
+  expect(JSON.parse(String(writes()[0]?.[2]))).toMatchObject({
+    expectedRevision: 1,
+    replyTo: 'after',
+    contentBlocks: [fileA, fileB, { type: 'context_attachment', attachment: nextQuote }],
+  });
+});

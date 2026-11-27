@@ -186,16 +186,23 @@ export function useMessageSourceBindings(data: ChatData, needed: boolean | numbe
   const generationReads = useRef<{
     scope: string;
     entries: Map<string, { version: string; result: Promise<Generation> }>;
+    messageIds: Set<string>;
   }>();
-  const records = useRef<{
+  type Records = {
     evidence: Record<string, { blockId: string; view: MessageSearchAnswerView & { response: MessageSearchResponse } }>;
     works: Record<string, ThreadArtifactDTO>;
     generations: Record<string, Generation>;
     holds?: Record<string, HoldRead>;
     memoryGroups?: Record<string, GroupRead>;
-  }>({ evidence: {}, works: {}, generations: {}, holds: {} });
-  const inboxProposals = useRef<Record<string, ProposalBinding>>({});
-  const failure = useRef<unknown>(null);
+  };
+  const { records, inboxProposals, failure } = useMemo(
+    () => ({
+      records: { current: { evidence: {}, works: {}, generations: {}, holds: {} } as Records },
+      inboxProposals: { current: {} as Record<string, ProposalBinding> },
+      failure: { current: null as unknown },
+    }),
+    [session.generation, data.threadId],
+  );
   const [groupRevision, refreshGroup] = useState(0);
   const [holdBusy, setHoldBusy] = useState<Record<string, boolean>>({});
   const [holdRevision, recheckHold] = useState(0);
@@ -265,14 +272,13 @@ export function useMessageSourceBindings(data: ChatData, needed: boolean | numbe
   useEffect(() => {
     if (!needed) return;
     let active = true;
-    const scope = JSON.stringify([session.generation, data.threadId]);
-    let cache = generationReads.current;
-    const sameScope = cache?.scope === scope;
-    if (cache?.scope !== scope) {
-      cache = { scope, entries: new Map() };
-      generationReads.current = cache;
-    }
-    const reads = cache.entries;
+    const scope = JSON.stringify([session.generation, data.threadId, needed]);
+    const messageIds = new Set(data.messages.map((message) => message.id));
+    const previous = generationReads.current;
+    const sameScope = previous?.scope === scope && [...previous.messageIds].every((id) => messageIds.has(id));
+    const reads = sameScope ? previous.entries : new Map<string, { version: string; result: Promise<Generation> }>();
+    generationReads.current = { scope, entries: reads, messageIds };
+    const clearSources = !sameScope && Object.keys(records.current.generations).length > 0;
     records.current = {
       ...records.current,
       evidence: {},
@@ -282,6 +288,7 @@ export function useMessageSourceBindings(data: ChatData, needed: boolean | numbe
         : {},
     };
     failure.current = null;
+    if (clearSources) changed((n) => n + 1);
     void Promise.all(
       sources.map(async (source) => {
         if (source.kind === 'memory_group') {
@@ -425,7 +432,7 @@ export function useMessageSourceBindings(data: ChatData, needed: boolean | numbe
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', poll);
     };
-  }, [needed, holdIds, holdRevision]);
+  }, [needed, holdIds, holdRevision, records]);
   const rawData = useMemo<{
     records: typeof records.current;
     error: unknown;

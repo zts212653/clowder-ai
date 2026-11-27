@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { getThreadDraft } from '@/components/thread-drafts';
 import type { useWorkspace } from '@/hooks/useWorkspace';
+import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { request } from '../owner-api';
-import { ComposerInputBinding, FirstMessageBinding } from '../PdlAppHost';
+import { ComposerInputBinding, FirstMessageBinding, useThreadDraftMarker } from '../PdlAppHost';
 import { type ProjectBindings, ProjectDataBinding } from '../ProjectDataBinding';
 import type { useServerComposerDraft } from '../useServerComposerDraft';
 import { fixtureData, fixtureUi } from './chat-fixture';
@@ -428,4 +429,34 @@ it('keeps an existing error/retry component on refresh failure and detects its l
   Object.assign(owners.ops, { data: { read: { load: '', title: 'Recovered owner' } } });
   expect(read()).toHaveProperty('title', 'Recovered owner');
   expect(owners.ops.models).not.toHaveBeenCalled();
+});
+
+it('marks the departing conversation using its own draft when switching A to B to A to C', async () => {
+  const original = useChatStore.getState().setThreadHasDraft;
+  const mark = vi.fn();
+  useChatStore.setState({ setThreadHasDraft: mark });
+  try {
+    let threadId = 'A';
+    let hasDraft = true;
+    const hook = renderHook(() => {
+      const draft = useThreadDraftMarker(threadId);
+      draft.current = hasDraft;
+    });
+    for (const [destination, draft] of [
+      ['B', false],
+      ['A', true],
+      ['C', false],
+    ] as const) {
+      threadId = destination;
+      hasDraft = draft;
+      await act(hook.rerender);
+    }
+    expect(mark.mock.calls).toEqual([
+      ['A', true],
+      ['B', false],
+      ['A', true],
+    ]);
+  } finally {
+    useChatStore.setState({ setThreadHasDraft: original });
+  }
 });

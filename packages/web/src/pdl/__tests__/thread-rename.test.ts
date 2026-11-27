@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChatStore } from '@/stores/chatStore';
-import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
+import { type SidebarSnapshotRow, useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { renameThreadTitleOptimistic } from '../thread-rename';
 
@@ -16,7 +16,7 @@ function title(threadId: string) {
 describe('renameThreadTitleOptimistic', () => {
   beforeEach(() => {
     useChatStore.setState({ threads: [] });
-    useSidebarProjectionStore.setState({ pendingThreadCommands: {}, refreshing: false });
+    useSidebarProjectionStore.setState({ rows: [], pendingThreadCommands: {}, refreshing: false });
     vi.mocked(invalidateSidebarProjection).mockReset();
   });
 
@@ -99,8 +99,50 @@ describe('renameThreadTitleOptimistic', () => {
     expect(Object.values(useSidebarProjectionStore.getState().pendingThreadCommands)).toMatchObject([
       { threadId: 'rename-e', field: 'title', value: 'canonical new' },
     ]);
-    refresh.resolve(true);
+    refresh.resolve(false);
     await refresh.promise;
+    expect(Object.values(useSidebarProjectionStore.getState().pendingThreadCommands)).toMatchObject([
+      { threadId: 'rename-e', field: 'title', value: 'canonical new' },
+    ]);
+  });
+
+  it('keeps the receipt over an old canonical title until the sidebar observes it', async () => {
+    const row = {
+      id: 'rename-idle',
+      title: 'old',
+      participants: [],
+      pinned: false,
+      favorited: false,
+      labels: [],
+      preferredCats: [],
+      projectPath: '',
+      lastActiveAt: 0,
+      systemKind: null,
+      isHubThread: false,
+      unreadCount: 0,
+      hasUserMention: false,
+      presence: { status: 'idle' },
+    } satisfies SidebarSnapshotRow;
+    setTitle(row.id, row.title);
+    useSidebarProjectionStore.setState({ rows: [row], pendingThreadCommands: {}, refreshing: false });
+    vi.mocked(invalidateSidebarProjection).mockResolvedValue(false);
+
+    await renameThreadTitleOptimistic(row.id, 'renamed', async () => ({ title: 'confirmed by API' }));
+    expect(invalidateSidebarProjection).toHaveBeenCalledOnce();
+    expect(Object.values(useSidebarProjectionStore.getState().pendingThreadCommands)).toMatchObject([
+      { threadId: row.id, value: 'confirmed by API' },
+    ]);
+
+    await expect(
+      renameThreadTitleOptimistic(row.id, 'rejected', async () => {
+        throw new Error('rejected');
+      }),
+    ).rejects.toThrow('rejected');
+    expect(Object.values(useSidebarProjectionStore.getState().pendingThreadCommands)).toMatchObject([
+      { threadId: row.id, value: 'confirmed by API' },
+    ]);
+    const projection = useSidebarProjectionStore.getState();
+    projection.applySidebarSnapshot([{ ...row, title: 'confirmed by API' }], projection.appliedGeneration + 1);
     expect(useSidebarProjectionStore.getState().pendingThreadCommands).toEqual({});
   });
 });
