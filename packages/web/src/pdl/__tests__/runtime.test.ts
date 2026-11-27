@@ -3988,6 +3988,20 @@ describe('unmodified runtime and project chat bindings', () => {
       dom.window.close();
     }
   });
+  it('keeps a Taste outage distinct from an event read failure', async () => {
+    const owners = ownerData();
+    owners.memory.reads.taste = { data: null, loading: false, error: true };
+    const { dom, w } = await boot(undefined, undefined, undefined, {}, undefined, {}, owners);
+    try {
+      w.eval('go("memory")');
+      await w.__settled();
+      const page = w.document.querySelector('[data-view="cafe.memory"]');
+      expect(page?.textContent).toContain('暂时读不到。');
+      expect(page?.textContent).not.toContain('暂时读不到事件。');
+    } finally {
+      dom.window.close();
+    }
+  });
   it('keeps a profile opening edit in the declared dialog until its actual writer succeeds and shows its rejection there', async () => {
     let finish!: () => void;
     const project = {

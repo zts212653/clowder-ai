@@ -9668,7 +9668,11 @@ pdl:
                   _: $.all.cat
               when: $.all
               load: $.all.load
-              error: t:memory.eventsError
+              error:
+                of: $.all.cat
+                map:
+                  event: t:memory.eventsError
+                  _: t:frame.loadError
               retry:
                 act: cafeMemRetry
                 args:
