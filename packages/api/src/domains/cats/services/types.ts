@@ -1194,6 +1194,8 @@ export interface AgentServiceOptions {
   codexAccountLaunch?: CodexAccountLaunchDescriptor;
   /** Frozen gateway identity for the Host's standalone Codex exec grant. */
   codexGatewayCredentialVersion?: string;
+  /** Host-side catalog root used to revalidate the selected account before a native launch. */
+  executionAccountProjectRoot?: string;
   /** Rich content blocks (e.g. images) to pass to the CLI agent */
   contentBlocks?: readonly MessageContent[];
   /** Upload directory for resolving image paths */

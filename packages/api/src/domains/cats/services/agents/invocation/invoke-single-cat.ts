@@ -4265,6 +4265,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       ...(resolvedAccount?.agy ? { agyAccount: resolvedAccount.agy } : {}),
       ...(codexAccountLaunch ? { codexAccountLaunch } : {}),
       ...(service.usesSessionInstructions && params.systemPrompt ? { systemPrompt: params.systemPrompt } : {}),
+      ...(service.usesSessionInstructions && executionAccount
+        ? { executionAccountProjectRoot: frozenExecutionBinding.projectRoot }
+        : {}),
       ...(codexAccountLaunch?.authMode === 'api_key' && resolvedAccount?.baseUrl && resolvedAccount.apiKey
         ? { codexGatewayCredentialVersion: codexGatewayCredentialVersion(resolvedAccount.baseUrl, resolvedAccount.apiKey) }
         : {}),

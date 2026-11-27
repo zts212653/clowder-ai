@@ -13,6 +13,7 @@ import type {
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
 
 type SessionAction = 'openSession' | 'startTurn' | 'cancel' | 'release';
+/** Host-only launch facts. This scope, including hostOptions, must never be serialized to the Worker. */
 export type AgentAdapterSessionScope = Readonly<
   Pick<
     OpenSessionInput,
