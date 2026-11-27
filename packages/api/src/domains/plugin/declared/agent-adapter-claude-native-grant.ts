@@ -177,7 +177,9 @@ export const grantAgentAdapterClaudePrint: AgentAdapterRuntimeGrant = (request) 
         args.some((value, index) => value !== expected[index])
       )
         throw new Error('Claude process request is outside the Host grant');
-      await scope.hostOptions?.beforeProviderLaunch?.({
+      const beforeProviderLaunch = scope.hostOptions?.beforeProviderLaunch;
+      if (!beforeProviderLaunch) throw new Error('Claude request registration is unavailable');
+      await beforeProviderLaunch({
         v: 1,
         message: { body: stdin },
         nativeInstructions: [{ body: scope.instructions, injectionDecision: 'native_l0_compiled' }],
