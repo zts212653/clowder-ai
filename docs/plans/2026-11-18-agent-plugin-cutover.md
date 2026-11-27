@@ -7,6 +7,8 @@ created: 2026-11-18
 
 # Agent 接入插件化完整切换
 
+首批独立发包协议、影响清单和验收以[按客户端独立发包方案](2026-11-27-agent-per-client-cutover.md)为准。本文保留单包基线与旧版迁移依据。
+
 设计于实施前获鲸鲸独立批准，评审回执 `0001795021847001-000066-0ea3eb17`，所审设计 SHA256 为 `9b479654535104befb644b72b280d97f26ace6a0d6985be81d69b19bc5da5ae3`。验收落在发往 `zts212653/clowder-ai:next` 的 [PR #2030](https://github.com/zts212653/clowder-ai/pull/2030)。
 
 ## 基线和复查坐标
