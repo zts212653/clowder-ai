@@ -4454,7 +4454,14 @@ describe('unmodified runtime and project chat bindings', () => {
         },
       });
       await w.__settled();
-      expect(page().querySelector('iframe')).toBeNull();
+      expect(page().querySelector('iframe')?.getAttribute('src')).toBe(
+        '/workspace-document?worktreeId=wt&path=owner.docx',
+      );
+      page().querySelector('[data-act="fileOffice"]').click();
+      await w.__settled();
+      expect(page().querySelector('iframe')?.getAttribute('src')).toBe(
+        '/workspace-document?worktreeId=wt&path=owner.docx&mode=edit',
+      );
       page().querySelector('[data-act="fileOffice"]').click();
       await w.__settled();
       expect(page().querySelector('iframe')?.getAttribute('src')).toBe(

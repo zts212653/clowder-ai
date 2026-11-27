@@ -27354,11 +27354,11 @@ pdl:
                 - type: button
                   label: t:workbench.file.collabEdit
                   act: fileOffice
-                  when: "!$.documentFrame"
+                  when: "!$.documentEditing"
                 - type: button
                   label: t:common.back
                   act: fileOffice
-                  when: $.documentFrame
+                  when: $.documentEditing
             - type: frame
               title: $.name
               key: $.documentFrame

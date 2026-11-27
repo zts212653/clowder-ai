@@ -7,6 +7,7 @@ import {
   staticContentProviderContributions,
   staticEditorContributions,
 } from '../src/domains/plugin/content-editor-runtime/admission.js';
+import { validateHostPluginManifest } from '../src/domains/plugin/desktop-window-runtime/presentation-manifest.js';
 
 const surface = {
   entrypoint: 'renderer/index.html',
@@ -27,7 +28,10 @@ const editor = {
 const preview = {
   type: 'content-preview-provider',
   id: 'preview',
-  formats: [{ extension: 'pdf', mediaType: 'application/pdf' }],
+  formats: [
+    { extension: 'docx', mediaType: editor.mediaTypes[0] },
+    { extension: 'pdf', mediaType: 'application/pdf' },
+  ],
   surface: { ...surface, entrypoint: 'preview/index.html' },
   bridgeVersion: '1.0.0',
 } as const;
@@ -45,7 +49,8 @@ const manifest = {
   ],
 } satisfies PluginManifest;
 
-test('one static package can declare a viewer without losing its DOCX editor', () => {
+test('one static package can declare a DOCX preview alongside its DOCX editor', () => {
+  assert.equal(validateHostPluginManifest(manifest).valid, true);
   assert.deepEqual(staticContentProviderContributions(manifest), [editor, preview]);
   assert.deepEqual(staticEditorContributions(manifest), [editor]);
 });

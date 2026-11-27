@@ -726,18 +726,20 @@ describe('#2067 follow-up fixes across default and v2 themes', () => {
         expect(pdfFrame?.classList.contains('h-full')).toBe(false);
       }
 
-      // 3. Open DOCX -> stays behind explicit fileOffice trigger until clicked
+      // 3. DOCX previews immediately and only enters edit mode on fileOffice.
       await evalIn(`A.wsFile({ p: 'spec.docx', w: 'wt' })`);
       pushOpened('spec.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'pages', 1);
       evalIn(`render(true)`);
-      expect(w.document.querySelector('aside.panel iframe')).toBeNull();
+      expect(w.document.querySelector('aside.panel iframe')?.getAttribute('src')).toBe(
+        '/workspace-document?worktreeId=wt&path=spec.docx',
+      );
       const editBtn = w.document.querySelector('aside.panel [data-act="fileOffice"]') as HTMLButtonElement | null;
       expect(editBtn).not.toBeNull();
       expect(editBtn?.textContent?.trim()).toBe('协作编辑');
       editBtn!.click();
       evalIn(`render(true)`);
       const docxFrame = w.document.querySelector('aside.panel iframe') as HTMLIFrameElement | null;
-      expect(docxFrame?.getAttribute('src')).toBe('/workspace-document?worktreeId=wt&path=spec.docx');
+      expect(docxFrame?.getAttribute('src')).toBe('/workspace-document?worktreeId=wt&path=spec.docx&mode=edit');
       expect(docxFrame?.classList.contains('tall')).toBe(true);
     });
   }

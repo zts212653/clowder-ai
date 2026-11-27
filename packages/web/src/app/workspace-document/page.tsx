@@ -6,21 +6,21 @@ import { WorkspacePluginFilePreview } from '@/components/workbench/WorkspacePlug
 export default async function WorkspaceDocumentPage({
   searchParams,
 }: {
-  searchParams: Promise<{ worktreeId?: string; path?: string }>;
+  searchParams: Promise<{ worktreeId?: string; path?: string; mode?: string }>;
 }) {
-  const { worktreeId, path } = await searchParams;
+  const { worktreeId, path, mode } = await searchParams;
   if (typeof worktreeId !== 'string' || !worktreeId || typeof path !== 'string' || !path) return null;
   const target = { worktreeId, path };
   return (
     <>
       <SessionBootstrap />
       <main className="flex h-screen min-h-0 flex-col">
-        {/\.docx$/i.test(path) ? (
+        {mode === 'edit' && /\.docx$/i.test(path) ? (
           <WorkspaceOfficeSurface worktreeId={worktreeId} path={path} />
         ) : (
           <WorkspacePluginFilePreview
             target={target}
-            showPluginSettings={/\.(pdf|pptx)$/i.test(path)}
+            showPluginSettings={/\.(docx|pdf|pptx)$/i.test(path)}
             fallback={<p className="p-4 text-sm text-cafe-muted">暂无文件预览。</p>}
           />
         )}
