@@ -5,7 +5,7 @@ import { SessionImplementationRegistry } from '../dist/domains/cats/services/age
 import { RegisteredSessionAgentService } from '../dist/domains/cats/services/agents/session-contract/registered-session-agent-service.js';
 import { declaration, setup } from './helpers/agent-adapter-archive.js';
 
-test('an active archive supplies real Worker turns through the registered Host session service', async (t) => {
+test('active archives supply and retire registered Worker turns', { timeout: 90_000 }, async (t) => {
   const registry = new SessionImplementationRegistry();
   const openedScopes = [];
   const { manager, install } = await setup(t, registry, ({ action, hostSession }) => {
@@ -31,6 +31,7 @@ test('an active archive supplies real Worker turns through the registered Host s
             return;
           }
           yield { type: 'output', text: ${JSON.stringify(version)} + ':' + sessions.get(input.sessionId) + ':' + input.prompt };
+          if (input.prompt === 'hold') await new Promise(() => {});
           yield { type: 'done', outcome: 'completed' };
         },
         cancel() { return { ok: true }; },
@@ -65,8 +66,33 @@ test('an active archive supplies real Worker turns through the registered Host s
   const rejected = await send('unexpected');
   assert.equal(rejected.at(-1).errorCode, 'session_contract_failed');
   assert.equal(rejected.at(-1).metadata.sessionId, 'legacy-native-id');
+  const started = Promise.withResolvers();
+  const activeTurn = (async () => {
+    const output = [];
+    for await (const message of cat.invoke('hold', {
+      invocationId: 'turn-hold',
+      hostSessionId: 'stable-host-session',
+      sessionId: 'legacy-native-id',
+    })) {
+      output.push(message);
+      if (message.type === 'text') started.resolve();
+    }
+    return output;
+  })();
+  await Promise.race([
+    started.promise,
+    activeTurn.then(() => assert.fail('Worker turn ended before activation withdrawal')),
+  ]);
   const enabled = (await manager.get(ref.pluginId)).plugin;
   await manager.setEnabled(ref.pluginId, { enabled: false, expectedRevision: enabled.lifecycleRevision });
+  const activeMessages = await activeTurn;
+  assert.deepEqual(
+    activeMessages.filter(({ type }) => type === 'text').map(({ content }) => content),
+    ['v2:legacy-native-id:hold'],
+  );
+  const ended = activeMessages.filter(({ type }) => type === 'done');
+  assert.equal(ended.length, 1);
+  assert.ok(ended[0].errorCode, 'Withdrawal must not complete an interrupted turn successfully');
   assert.equal(registry.has(ref), false);
   const offline = await send('third');
   assert.equal(offline.at(-1).errorCode, 'session_implementation_unavailable');
