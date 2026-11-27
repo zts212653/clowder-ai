@@ -4551,10 +4551,38 @@ describe('unmodified runtime and project chat bindings', () => {
       expect(head().name).toBe(label);
       expect(head().unassigned).toBe(true);
       expect(toggle().textContent).toContain(label);
-      expect(section().querySelector('[data-tip="default"]')).toBeNull();
+      expect(section().querySelector('[data-tip="default"]') === null).toBe(true);
+      expect(section().querySelector('[data-act="homeOpen"]') === null).toBe(true);
+      const sibling = w.document.querySelector(
+        '[data-sec="proj:/project/sibling"], [data-section="proj:/project/sibling"]',
+      );
+      // The classic header renders tooltip / add controls; v2 has its own compact header.
+      if (theme === 'sys:1') {
+        expect(sibling.querySelector('[data-tip="/project/sibling"]') !== null).toBe(true);
+        expect(sibling.querySelector('[data-act="homeOpen"]') !== null).toBe(true);
+      }
       expect(head().n).toBe(1);
       expect(toggle().getAttribute('aria-expanded')).toBe('true');
       expect(w.eval('VM.navThreads().sections.find(s=>s.key==="proj:/project/sibling").head.name')).toBe('sibling');
+      expect(w.eval('VM.navThreads().sections.find(s=>s.key==="proj:/project/sibling").head.tip')).toBe(
+        '/project/sibling',
+      );
+
+      w.eval("A.rename({entity:'proj',id:'default'})");
+      await w.__settled();
+      // A display fallback is not a saved rename draft. Saving untouched must remain a no-op in either language.
+      expect(w.document.querySelector('#dlg-in').value).toBe('');
+      w.document
+        .querySelector('[data-form="dialog"]')
+        .dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+      await w.__settled();
+      expect(action.mock.calls.filter(([name]) => name === 'projectRename')).toHaveLength(0);
+      expect(toggle().textContent).toContain(label);
+      w.eval(`CHANGES.sysPick({target:{dataset:{k:'lang'},value:${JSON.stringify(lang === 'en' ? 'zh' : 'en')}}})`);
+      await w.__settled();
+      expect(toggle().textContent).toContain(lang === 'en' ? '未分类' : 'Uncategorized');
+      w.eval(`CHANGES.sysPick({target:{dataset:{k:'lang'},value:${JSON.stringify(lang)}}})`);
+      await w.__settled();
 
       toggle().click();
       await w.__settled();
@@ -4572,6 +4600,15 @@ describe('unmodified runtime and project chat bindings', () => {
       await w.__settled();
       expect(toggle().textContent).toContain('My conversations');
       expect(head().unassigned).toBe(true);
+      w.eval("A.rename({entity:'proj',id:'default'})");
+      await w.__settled();
+      expect(w.document.querySelector('#dlg-in').value).toBe('My conversations');
+      w.document.querySelector('#dlg-in').value = 'Renamed conversations';
+      w.document
+        .querySelector('[data-form="dialog"]')
+        .dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+      await w.__settled();
+      expect(action).toHaveBeenCalledWith('projectRename', { id: 'default', v: 'Renamed conversations' }, undefined);
       expect(errors).not.toHaveBeenCalled();
     } finally {
       dom.window.close();

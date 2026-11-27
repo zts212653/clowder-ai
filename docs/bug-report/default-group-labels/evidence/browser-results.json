@@ -1,5 +1,5 @@
 {
-  "base": "http://127.0.0.1:63022",
+  "base": "http://127.0.0.1:50683",
   "results": [
     {
       "id": "sys-1-zh",
@@ -42,7 +42,8 @@
           "left": 64
         },
         "text": "未分类4"
-      }
+      },
+      "screenshot": null
     },
     {
       "id": "sys-1-zh",
@@ -63,7 +64,8 @@
           "left": 64
         },
         "text": "未分类4"
-      }
+      },
+      "screenshot": null
     },
     {
       "id": "sys-1-zh",
@@ -106,7 +108,8 @@
           "left": 64
         },
         "text": "Uncategorized4"
-      }
+      },
+      "screenshot": null
     },
     {
       "id": "sys-1-en",
@@ -127,7 +130,8 @@
           "left": 64
         },
         "text": "Uncategorized4"
-      }
+      },
+      "screenshot": null
     },
     {
       "id": "sys-1-en",
@@ -148,7 +152,8 @@
           "left": 64
         },
         "text": "Uncategorized4"
-      }
+      },
+      "screenshot": null
     },
     {
       "id": "sys-1-en",
@@ -169,7 +174,8 @@
           "left": 64
         },
         "text": "Uncategorized4"
-      }
+      },
+      "screenshot": null
     },
     {
       "id": "pkg-v2-zh",
@@ -190,7 +196,8 @@
           "left": 64
         },
         "text": "未分类4"
-      }
+      },
+      "screenshot": null
     },
     {
       "id": "pkg-v2-zh",
@@ -211,7 +218,8 @@
           "left": 64
         },
         "text": "未分类4"
-      }
+      },
+      "screenshot": null
     },
     {
       "id": "pkg-v2-zh",
@@ -232,7 +240,8 @@
           "left": 64
         },
         "text": "未分类4"
-      }
+      },
+      "screenshot": null
     },
     {
       "id": "pkg-v2-zh",
@@ -275,7 +284,8 @@
           "left": 64
         },
         "text": "Uncategorized4"
-      }
+      },
+      "screenshot": null
     },
     {
       "id": "pkg-v2-en",
@@ -296,7 +306,8 @@
           "left": 64
         },
         "text": "Uncategorized4"
-      }
+      },
+      "screenshot": null
     },
     {
       "id": "pkg-v2-en",
@@ -339,9 +350,20 @@
           "left": 64
         },
         "text": "Uncategorized4"
-      }
+      },
+      "screenshot": null
     }
   ],
-  "fixture": "Isolated synthetic data; production PDL scripts, chatModels, theme package readers and DOM/actions. No live API or persistent store.",
-  "serverStatus": "stopped after verification"
+  "renameChecks": {
+    "untouchedSaveDispatchedRename": false,
+    "languageSwitchPreservedFallback": true,
+    "explicitRenameDispatched": true,
+    "combinations": [
+      "sys-1-zh",
+      "sys-1-en",
+      "pkg-v2-zh",
+      "pkg-v2-en"
+    ]
+  },
+  "screenshotState": "pointer outside header, header blurred, 1100ms after interaction"
 }

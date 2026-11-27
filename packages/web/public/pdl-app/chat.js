@@ -1380,7 +1380,14 @@ window.clowderChat = {
         const section = VM.navThreads().sections.find(function (section) {
           return section.head.id === id;
         });
-        return section ? { id: id, name: section.head.name, pinned: section.head.fixed } : null;
+        // Edit the saved name, not the unassigned group's locale-dependent display fallback.
+        return section
+          ? {
+              id: id,
+              name: section.head.unassigned ? new Map(sidebarData().projectNames).get(id) || '' : section.head.name,
+              pinned: section.head.fixed,
+            }
+          : null;
       },
       title: function () {
         return { kind: 'cafeProjRename' };
