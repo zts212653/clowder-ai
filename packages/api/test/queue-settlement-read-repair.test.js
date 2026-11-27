@@ -7,6 +7,10 @@ import { canonicalTestMessageInput, canonicalTestQueueInput } from './helpers/me
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
 const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
+const { InvocationOwnerReaper } = await import(
+  '../dist/domains/cats/services/agents/invocation/InvocationOwnerReaper.js'
+);
+const { reconcileZombies } = await import('../dist/domains/cats/services/agents/invocation/reconcileZombies.js');
 const { InvocationRecordStore } = await import('../dist/domains/cats/services/stores/ports/InvocationRecordStore.js');
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { DraftStore } = await import('../dist/domains/cats/services/stores/ports/DraftStore.js');
@@ -59,9 +63,19 @@ async function settlingQueue(t) {
         startedAt: Date.now(),
       };
       await turnExecutionStore.createRunning({ ...child, executionKind: 'ordinary' });
-      await options.onLifecycleInvocationStarted(child);
-      yield { type: 'text', catId, content: 'The review is durably delivered.', timestamp: Date.now() };
+      const admission = await options.onLifecycleInvocationStarted(child);
+      const content = 'The review is durably delivered.';
+      yield { type: 'text', catId, content, timestamp: Date.now() };
       await turnExecutionStore.transitionTerminal(child.invocationId, { status: 'succeeded', endedAt: Date.now() });
+      const committed = await messageStore.commitLifecycleResponseTerminal(admission.responseMessageId, {
+        invocationId: child.invocationId,
+        status: 'completed',
+        completedAt: Date.now(),
+        content,
+        mentions: [],
+        origin: 'stream',
+      });
+      assert.equal(committed.kind, 'applied');
       yield { type: 'done', catId, isFinal: true, timestamp: Date.now() };
       invocationTracker.complete(threadId, catId);
     },
@@ -144,6 +158,9 @@ async function settlingQueue(t) {
   return {
     app,
     processor,
+    queue,
+    invocationTracker,
+    messageStore,
     invocationRecordStore,
     turnExecutionStore,
     log,
@@ -163,6 +180,78 @@ async function assertSuccessfulSettlement(harness) {
   assert.equal((await harness.invocationRecordStore.get(harness.parentId)).status, 'succeeded');
   assert.equal(harness.log.error.mock.callCount(), 0, 'ordinary completion must not reject a terminal update');
 }
+
+it('owner sweep recovers an orphan without interrupting a successful Queue settlement in the same cat slot', async (t) => {
+  const h = await settlingQueue(t);
+  const { invocationId: orphanId } = await h.invocationRecordStore.create({
+    threadId: h.threadId,
+    userId: h.userId,
+    targetCats: [h.catId],
+    intent: 'execute',
+    idempotencyKey: 'other-parent-without-producer',
+    actionLeaseCarrier: { kind: 'none' },
+  });
+  await h.invocationRecordStore.update(orphanId, { status: 'running' });
+  const reaper = new InvocationOwnerReaper({
+    invocationTracker: h.invocationTracker,
+    invocationRecordStore: h.invocationRecordStore,
+    turnExecutionStore: h.turnExecutionStore,
+    getProviderLifecycle: () => undefined,
+    listStaleProcessingLeases: (now) => h.processor.listStaleProcessingLeases(now),
+    listRunningRecords: () => h.invocationRecordStore.listRunningByThread(h.threadId, h.userId),
+    now: () => Date.now() + 31_000,
+    ownerLeaseTtlMs: 30_000,
+    hasActiveQueueProducer: (threadId, userId, catId, executionId) =>
+      h.processor.hasActiveQueueProducer(threadId, userId, catId, executionId),
+    reconcileZombie: (zombie) =>
+      reconcileZombies([zombie], {
+        invocationRecordStore: h.invocationRecordStore,
+        invocationQueue: h.queue,
+        log: h.log,
+      }),
+    releaseExactOwner: (threadId, targetCats, executionId) =>
+      h.processor.releaseExactTerminalExecutionOwner(threadId, targetCats, executionId),
+    log: h.log,
+  });
+  const onComplete = t.mock.method(h.processor, 'onInvocationComplete');
+
+  await reaper.runOnce();
+
+  assert.equal((await h.invocationRecordStore.get(h.parentId)).status, 'running');
+  assert.equal((await h.invocationRecordStore.get(orphanId)).error, 'zombie_record_detected');
+
+  const releaseSuccessWrite = Promise.withResolvers();
+  const update = h.invocationRecordStore.update.bind(h.invocationRecordStore);
+  t.mock.method(h.invocationRecordStore, 'update', async (id, patch) => {
+    const record = await update(id, patch);
+    if (id === h.parentId && patch.status === 'succeeded' && record?.status === 'succeeded') {
+      await releaseSuccessWrite.promise;
+    }
+    return record;
+  });
+  h.resumeAck();
+  try {
+    await until(() => h.invocationRecordStore.get(h.parentId)?.status === 'succeeded');
+    assert.equal((await reaper.runOnce()).keptActive, 1);
+    assert.equal(h.processor.hasProcessingSlotReservation(h.threadId, h.catId, h.parentId), true);
+    assert.equal(onComplete.mock.callCount(), 0);
+  } finally {
+    releaseSuccessWrite.resolve();
+  }
+
+  await assertSuccessfulSettlement(h);
+  assert.equal((await reaper.runOnce()).scanned, 0);
+  assert.equal(onComplete.mock.callCount(), 1);
+  assert.deepEqual(onComplete.mock.calls[0].arguments.slice(0, 4), [h.threadId, h.catId, 'succeeded', h.parentId]);
+  assert.equal(
+    h.socketManager.broadcastAgentMessage.mock.calls.some((call) => call.arguments[0]?.type === 'error'),
+    false,
+  );
+  const replies = h.messageStore
+    .getRecent(10, h.userId)
+    .filter((message) => message.from.kind === 'agent' && message.content === 'The review is durably delivered.');
+  assert.equal(replies.length, 1);
+});
 
 describe('active execution read-repair during Queue settlement', () => {
   for (const scope of ['thread', 'project']) {

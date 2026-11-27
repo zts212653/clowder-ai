@@ -3486,6 +3486,8 @@ async function initializeApi(
     turnExecutionStore,
     getProviderLifecycle: getCodexAppServerLifecycle,
     listStaleProcessingLeases: (now) => queueProcessor.listStaleProcessingLeases(now),
+    hasActiveQueueProducer: (threadId, userId, catId, executionId) =>
+      queueProcessor.hasActiveQueueProducer(threadId, userId, catId, executionId),
     reapStalePrestartReservations: (now) => queueProcessor.reapStalePrestartReservations(now),
     listRunningRecords: () => invocationRecordStore.listRunningForRecovery(),
     reconcileZombie: (zombie) =>
