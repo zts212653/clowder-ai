@@ -12,6 +12,9 @@
 .badge.corner { position: absolute; top: var(--badge-in, var(--sp-hair)); right: var(--badge-in, var(--sp-hair)); }
 .badge.count.corner { top: var(--badge-in-count, var(--badge-in, var(--sp-hair))); right: var(--badge-in-count, var(--badge-in, var(--sp-hair))); }   /* 计数胶囊比圆点大：宿主可以给它单独的内缩 token（窄栏：探出角外半格） */   /* 贴在宿主（图标按钮外的一层 relative）右上角：徽标自己的摆放选项，不是宿主写后代规则 */
 .badge.dot { display: inline-block; width: var(--dot); height: var(--dot); border-radius: var(--r-full); background: var(--b-c); }   /* 和状态点同一个大小：只是颜色通道不同（强调色 = 等你来看） */
+.badge.rail-busy { width: 10px; height: 10px; box-sizing: border-box; border: 1.5px solid var(--b-c); border-right-color: transparent; border-radius: 50%; }
+@media (prefers-reduced-motion: no-preference) { .badge.rail-busy { animation: rail-activity-spin .9s linear infinite; } }
+@keyframes rail-activity-spin { to { transform: rotate(360deg); } }
 .badge.count { display: inline-grid; place-items: center; min-width: var(--ic-s); height: var(--ic-s); padding: 0 var(--sp-xs); border-radius: var(--r-full); background: var(--b-c); color: var(--b-on); font-size: var(--fs-xs); font-weight: 600; line-height: 1; }
 .rail-mark { width: var(--ctl-m); height: var(--ctl-m); border-radius: var(--r-m); padding: 0; background: none; display: grid; place-items: center; margin-bottom: var(--sp-s); border: 0; cursor: pointer; overflow: clip; }
 .rail-mark img { width: 100%; height: 100%; object-fit: contain; display: block; }

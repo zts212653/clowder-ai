@@ -200,7 +200,10 @@ function pdlRegister(frag, pk, plug) {
     if (pk) pdlTagActs(node, pk);
     if (pk && node.sources && !node.type) {
       const key = 'plugin:' + pk + '/' + x.id;
-      BADGES[key] = function () { const root = pdlSourceOf(Object.assign({ plugin: pk }, x.node)); return x.node.badge ? pv(x.node.badge, root, root) : null; };
+      BADGES[key] = function () {
+        const root = pdlSourceOf(Object.assign({ plugin: pk }, x.node)), indicator = x.node.activity || x.node.badge;
+        return indicator ? pv(indicator, root, root) : null;
+      };
       node.badge = key;
     }
     return Object.assign({}, x, { node: node });

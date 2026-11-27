@@ -89,12 +89,16 @@ function pdlItem(id, slot) {
   /* 平时什么都不能拖；编辑布局时只有导航结构里的入口能拖（页面内容不在范围里） */
   const cur = pdlCur(id), data = ' data-act="open" data-ref="' + id + '" data-entry="' + id + '" data-from="' + slot + '"' + (S.editLayout && e.movable !== false ? ' data-edit="entry"' : '');
   const n = e.badge && BADGES[e.badge] ? BADGES[e.badge]() : null;   /* 入口的计数（数据给的）：窄栏是角上的点，行是行尾的数 */
+  const activity = railActivity(n, disp === 'icon'), label = activity?.label ? e.title + ' · ' + activity.label : e.title;
   let html;
   if (disp === 'mark') html = '<button type="button" class="rail-mark"' + data + ' aria-label="' + h(e.title) + '" data-tip="' + h(e.title) + '"><img src="' + asset(e.asset) + '" alt=""></button>';
   else if (disp === 'icon') {
-    const dot = e.badge && BADGES[e.badge] ? badge(n, { corner: true }) : '';
-    html = '<button type="button" class="rail-btn' + (S.justAdded && S.justAdded === id ? ' arrive' : '') + '"' + data + ' aria-label="' + h(e.title) + '" data-tip="' + h(e.title) + '"' + (cur ? ' aria-current="page"' : '') + '>' + icon(e.icon, 20) + dot + '</button>';
-  } else html = navRow({ label: e.title, icon: e.icon, attrs: data, current: cur, trail: n ? '<span class="trail num">' + n + '</span>' : '' });
+    const dot = activity?.html || (n ? badge(n, { corner: true }) : '');
+    html = '<button type="button" class="rail-btn' + (S.justAdded && S.justAdded === id ? ' arrive' : '') + '"' + data + ' aria-label="' + h(label) + '" data-tip="' + h(label) + '"' + (cur ? ' aria-current="page"' : '') + '>' + icon(e.icon, 20) + dot + '</button>';
+  } else {
+    const hint = activity?.label ? ' aria-label="' + h(label) + '" data-tip="' + h(label) + '"' : '';
+    html = navRow({ label: e.title, icon: e.icon, attrs: data + hint, current: cur, trail: activity?.html || (n ? '<span class="trail num">' + n + '</span>' : '') });
+  }
   const acts = PDL_SLOTS[slot].itemActions || [];
   return acts.length ? '<div class="nav-row" data-entry="' + id + '" data-from="' + slot + '">' + html + acts.map(function (a) { return ITEM_ACTIONS[a] ? ITEM_ACTIONS[a](id) : ''; }).join('') + '</div>' : html;
 }
