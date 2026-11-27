@@ -8,6 +8,7 @@ export type SidebarSystemKind = 'connector_hub' | 'eval_domain' | 'cat_bedroom' 
 export interface SidebarPresence {
   readonly status: SidebarPresenceStatus;
   readonly cats?: readonly string[];
+  readonly finalizingCats?: readonly string[];
   readonly activeSince?: number;
 }
 
@@ -84,7 +85,11 @@ function copySnapshotRow(row: SidebarSnapshotRow): SidebarSnapshotRow {
     participants: [...row.participants],
     labels: [...row.labels],
     preferredCats: [...row.preferredCats],
-    presence: { ...row.presence, ...(row.presence.cats ? { cats: [...row.presence.cats] } : {}) },
+    presence: {
+      ...row.presence,
+      ...(row.presence.cats ? { cats: [...row.presence.cats] } : {}),
+      ...(row.presence.finalizingCats ? { finalizingCats: [...row.presence.finalizingCats] } : {}),
+    },
   };
 }
 
@@ -272,6 +277,9 @@ export function parseSidebarSnapshotRows(value: unknown): SidebarSnapshotRow[] {
     const status = ['idle', 'working', 'done', 'error'].includes(String(rawPresence.status))
       ? (rawPresence.status as SidebarPresenceStatus)
       : 'idle';
+    const cats = strings(rawPresence.cats);
+    const finalizingCats =
+      status === 'working' ? strings(rawPresence.finalizingCats).filter((id) => cats.includes(id)) : [];
     const systemKind = ['connector_hub', 'eval_domain', 'cat_bedroom', 'memory_ops', 'collective_channel'].includes(
       String(raw.systemKind),
     )
@@ -293,7 +301,8 @@ export function parseSidebarSnapshotRows(value: unknown): SidebarSnapshotRow[] {
       hasUserMention: raw.hasUserMention === true,
       presence: {
         status,
-        ...(strings(rawPresence.cats).length > 0 ? { cats: strings(rawPresence.cats) } : {}),
+        ...(cats.length ? { cats } : {}),
+        ...(finalizingCats.length ? { finalizingCats } : {}),
         ...parseActiveSince(status, rawPresence.activeSince),
       },
     });

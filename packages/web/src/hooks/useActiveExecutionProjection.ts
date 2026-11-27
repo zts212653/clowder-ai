@@ -10,6 +10,7 @@ import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { apiFetch } from '@/utils/api-client';
+import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 
 const ACTIVE_EXECUTION_REFRESH_MS = 4_000;
 
@@ -51,7 +52,18 @@ export async function refreshActiveExecutionProjection(
     });
     if (!response.ok) throw new Error(`Execution hydration failed (${response.status})`);
     const body = (await response.json()) as ActiveExecutionListResponse;
-    useActiveExecutionStore.getState().applySnapshot(anchorThreadId, requestVersion, body);
+    const previous = useActiveExecutionStore.getState();
+    previous.applySnapshot(anchorThreadId, requestVersion, body);
+    const current = useActiveExecutionStore.getState();
+    const before = previous.executionsByKey;
+    const after = current.executionsByKey;
+    if (
+      before !== after &&
+      [...Object.keys(before), ...Object.keys(after)].some(
+        (key) => (before[key]?.phase === 'finalizing') !== (after[key]?.phase === 'finalizing'),
+      )
+    )
+      void invalidateSidebarProjection().catch(() => {});
   } catch (error) {
     if (signal?.aborted) return;
     useActiveExecutionStore.getState().failHydration(anchorThreadId, requestVersion, error);
