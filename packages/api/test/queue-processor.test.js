@@ -9,6 +9,9 @@ const { CallerDispatchObservationRegistry } = await import(
   '../dist/domains/cats/services/agents/invocation/CallerDispatchObservationRegistry.js'
 );
 const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
+const { isWindowsProviderFinalizing, waitForWindowsProviderFinalization } = await import(
+  '../dist/utils/windows-provider-host.js'
+);
 const { InvocationRecordStore } = await import('../dist/domains/cats/services/stores/ports/InvocationRecordStore.js');
 const { ExecutionAdmissionConflict } = await import(
   '../dist/domains/cats/services/agents/registry/AgentServiceUnavailableError.js'
@@ -1228,6 +1231,62 @@ describe('QueueProcessor over the source-row pending Queue', () => {
     releaseFirst();
     await waitFor(() => calls.length === 2);
     await waitFor(() => harness.queue.getEntrySnapshot('thread-1', 'user-1', second.entry.id) === null);
+  });
+
+  it('keeps same-member work queued across a delayed Windows finalizer and resumes it once', async () => {
+    let confirmExit;
+    const exit = new Promise((resolve) => {
+      confirmExit = resolve;
+    });
+    const calls = [];
+    let firstExecution;
+    let probes = 0;
+    const harness = createHarness({
+      routeExecution: async function* (...args) {
+        const [userId, content, threadId, , cats, , options] = args;
+        const invocationId = `turn-windows-finalizing-${calls.length}`;
+        calls.push(content);
+        await startLifecycle(args, invocationId);
+        if (calls.length === 1) {
+          firstExecution = { executionId: options.parentInvocationId, invocationId, threadId, userId, catId: cats[0] };
+        }
+        try {
+          yield { type: 'done', catId: cats[0], isFinal: true, timestamp: Date.now() };
+        } finally {
+          if (firstExecution.invocationId === invocationId) {
+            await waitForWindowsProviderFinalization(
+              firstExecution,
+              async () => {
+                if (++probes === 1) return false;
+                await exit;
+                return true;
+              },
+              { retryMs: 1 },
+            );
+          }
+        }
+      },
+    });
+    await admitMessage(harness, { content: 'first' });
+    const second = await admitMessage(harness, { content: 'second' });
+
+    try {
+      await harness.processor.requestDrain('thread-1');
+      await waitFor(() => firstExecution && isWindowsProviderFinalizing(firstExecution));
+      await harness.processor.requestDrain('thread-1');
+      assert.deepEqual(calls, ['first']);
+      assert.equal(harness.queue.getEntrySnapshot('thread-1', 'user-1', second.entry.id)?.status, 'queued');
+    } finally {
+      confirmExit();
+    }
+    await waitFor(() => harness.queue.getEntrySnapshot('thread-1', 'user-1', second.entry.id) === null);
+    await waitFor(
+      () =>
+        [...harness.invocationRecordStore.records.values()].filter((record) => record.status === 'succeeded').length ===
+        2,
+    );
+    assert.deepEqual(calls, ['first', 'second']);
+    assert.equal(probes, 2);
   });
 
   it('restores a claimed target when routing fails before the response receiver exists', async () => {
