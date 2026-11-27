@@ -27,10 +27,10 @@ async function until(predicate) {
   assert.fail('Queue did not reach the expected settlement boundary');
 }
 
-async function settlingQueue(t) {
+async function settlingQueue(t, { pauseBeforeChild = false } = {}) {
   const threadId = 'settlement-thread';
   const userId = 'settlement-user';
-  const catId = 'opus';
+  const catId = pauseBeforeChild ? 'codex' : 'opus';
   const queue = new InvocationQueue();
   const invocationTracker = new InvocationTracker();
   const invocationRecordStore = new InvocationRecordStore();
@@ -44,16 +44,18 @@ async function settlingQueue(t) {
     emitToUser: mock.fn(),
   };
   let parentId;
-  let ackStarted = false;
-  let resumeAck;
-  const ackBarrier = new Promise((resolve) => {
-    resumeAck = resolve;
-  });
+  let producerPaused = false;
+  const { promise: barrier, resolve: resumeProducer } = Promise.withResolvers();
+  const pauseProducer = () => {
+    producerPaused = true;
+    return barrier;
+  };
   const router = {
     resolveExplicitTargets: async (cats) => [...cats],
     resolveConversationTargetsAtAdmission: async (cats) => [...cats],
     async *routeExecution(_userId, _content, _threadId, _intent, _cats, _images, options) {
       parentId = options.parentInvocationId;
+      if (pauseBeforeChild) await pauseProducer();
       const child = {
         invocationId: 'settlement-child',
         parentInvocationId: parentId,
@@ -80,8 +82,7 @@ async function settlingQueue(t) {
       invocationTracker.complete(threadId, catId);
     },
     async ackCollectedCursors() {
-      ackStarted = true;
-      await ackBarrier;
+      if (!pauseBeforeChild) await pauseProducer();
     },
   };
   const processor = new QueueProcessor({
@@ -113,7 +114,7 @@ async function settlingQueue(t) {
   });
   await app.ready();
   t.after(async () => {
-    resumeAck();
+    resumeProducer();
     await until(() => !processor.hasProcessingSlotReservation(threadId, catId));
     await app.close();
   });
@@ -141,16 +142,16 @@ async function settlingQueue(t) {
     input,
   );
   assert.equal((await processor.processNext(threadId, userId)).started, true);
-  await until(() => ackStarted || log.error.mock.callCount() > 0);
+  await until(() => producerPaused || log.error.mock.callCount() > 0);
   assert.equal(
-    ackStarted,
+    producerPaused,
     true,
     log.error.mock.calls
       .map((call) => call.arguments.map((value) => value?.err?.stack ?? String(value)).join(' '))
       .join('\n'),
   );
-  assert.equal(invocationTracker.has(threadId, catId), false, 'provider ownership has ended');
-  assert.equal((await turnExecutionStore.get('settlement-child')).status, 'succeeded');
+  assert.equal(invocationTracker.has(threadId, catId), pauseBeforeChild);
+  if (!pauseBeforeChild) assert.equal((await turnExecutionStore.get('settlement-child')).status, 'succeeded');
   assert.equal(processor.hasProcessingSlotReservation(threadId, catId), true, 'producer still owns settlement');
   // Advance only wall-clock observation, without waiting a minute or changing durable records.
   const observedAt = Date.now() + 60_000;
@@ -170,29 +171,19 @@ async function settlingQueue(t) {
     userId,
     catId,
     parentId,
-    resumeAck,
+    resumeProducer,
   };
 }
 
 async function assertSuccessfulSettlement(harness) {
-  harness.resumeAck();
+  harness.resumeProducer();
   await until(() => !harness.processor.hasProcessingSlotReservation(harness.threadId, harness.catId));
   assert.equal((await harness.invocationRecordStore.get(harness.parentId)).status, 'succeeded');
   assert.equal(harness.log.error.mock.callCount(), 0, 'ordinary completion must not reject a terminal update');
 }
 
-it('owner sweep recovers an orphan without interrupting a successful Queue settlement in the same cat slot', async (t) => {
-  const h = await settlingQueue(t);
-  const { invocationId: orphanId } = await h.invocationRecordStore.create({
-    threadId: h.threadId,
-    userId: h.userId,
-    targetCats: [h.catId],
-    intent: 'execute',
-    idempotencyKey: 'other-parent-without-producer',
-    actionLeaseCarrier: { kind: 'none' },
-  });
-  await h.invocationRecordStore.update(orphanId, { status: 'running' });
-  const reaper = new InvocationOwnerReaper({
+function queueOwnerReaper(h) {
+  return new InvocationOwnerReaper({
     invocationTracker: h.invocationTracker,
     invocationRecordStore: h.invocationRecordStore,
     turnExecutionStore: h.turnExecutionStore,
@@ -213,6 +204,32 @@ it('owner sweep recovers an orphan without interrupting a successful Queue settl
       h.processor.releaseExactTerminalExecutionOwner(threadId, targetCats, executionId),
     log: h.log,
   });
+}
+
+it('owner sweep keeps a slow Codex queue preparation so the reply can complete', async (t) => {
+  const h = await settlingQueue(t, { pauseBeforeChild: true });
+  assert.equal(h.processor.listStaleProcessingLeases()[0]?.executionId, h.parentId);
+  assert.deepEqual(await h.turnExecutionStore.listByParent(h.parentId), []);
+
+  const sweep = await queueOwnerReaper(h).runOnce();
+  assert.equal((await h.invocationRecordStore.get(h.parentId)).status, 'running');
+  assert.equal(sweep.keptActive, 1);
+  await assertSuccessfulSettlement(h);
+  assert.equal((await h.turnExecutionStore.get('settlement-child')).status, 'succeeded');
+});
+
+it('owner sweep recovers an orphan without interrupting a successful Queue settlement in the same cat slot', async (t) => {
+  const h = await settlingQueue(t);
+  const { invocationId: orphanId } = await h.invocationRecordStore.create({
+    threadId: h.threadId,
+    userId: h.userId,
+    targetCats: [h.catId],
+    intent: 'execute',
+    idempotencyKey: 'other-parent-without-producer',
+    actionLeaseCarrier: { kind: 'none' },
+  });
+  await h.invocationRecordStore.update(orphanId, { status: 'running' });
+  const reaper = queueOwnerReaper(h);
   const onComplete = t.mock.method(h.processor, 'onInvocationComplete');
 
   await reaper.runOnce();
@@ -229,7 +246,7 @@ it('owner sweep recovers an orphan without interrupting a successful Queue settl
     }
     return record;
   });
-  h.resumeAck();
+  h.resumeProducer();
   try {
     await until(() => h.invocationRecordStore.get(h.parentId)?.status === 'succeeded');
     assert.equal((await reaper.runOnce()).keptActive, 1);
