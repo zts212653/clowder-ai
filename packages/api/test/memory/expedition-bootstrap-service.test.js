@@ -53,16 +53,22 @@ describe('ExpeditionBootstrapService', () => {
       const started = Promise.withResolvers();
       const finish = Promise.withResolvers();
       let claims = 0;
-      const service = new ExpeditionBootstrapService({
-        claim: async () => { claims += 1; return true; },
-        markReady: async () => {},
-      }, {
-        getFingerprint: () => 'claim-fixture',
-        rebuildIndex: async () => {
-          started.resolve();
-          return finish.promise;
+      const service = new ExpeditionBootstrapService(
+        {
+          claim: async () => {
+            claims += 1;
+            return true;
+          },
+          markReady: async () => {},
         },
-      });
+        {
+          getFingerprint: () => 'claim-fixture',
+          rebuildIndex: async () => {
+            started.resolve();
+            return finish.promise;
+          },
+        },
+      );
       const first = service.bootstrap(tmpRoot, { ownerUserId: 'owner-a' });
       await started.promise;
       try {

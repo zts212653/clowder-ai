@@ -17,7 +17,11 @@ export interface IndexStateRow {
 }
 
 export interface ProjectIndexStatePort {
-  getState(projectPath: string, fingerprint: string | undefined, ownerUserId: string): IndexStateRow | Promise<IndexStateRow>;
+  getState(
+    projectPath: string,
+    fingerprint: string | undefined,
+    ownerUserId: string,
+  ): IndexStateRow | Promise<IndexStateRow>;
   claim(projectPath: string, fingerprint: string, ownerUserId: string): boolean | Promise<boolean>;
   markReady(projectPath: string, docsIndexed: number, summaryJson: string, ownerUserId: string): void | Promise<void>;
   markFailed(projectPath: string, error: string, ownerUserId: string): void | Promise<void>;

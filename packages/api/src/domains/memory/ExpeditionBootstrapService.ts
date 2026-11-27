@@ -123,7 +123,12 @@ export class ExpeditionBootstrapService {
       await this.stateManager.markFailed(projectPath, errorMsg, ownerUserId);
       return { status: 'failed', durationMs: elapsed(), error: errorMsg };
     }
-    await this.stateManager.markReady(projectPath, completed.docsIndexed, JSON.stringify(completed.summary), ownerUserId);
+    await this.stateManager.markReady(
+      projectPath,
+      completed.docsIndexed,
+      JSON.stringify(completed.summary),
+      ownerUserId,
+    );
     return { status: 'ready', ...completed, durationMs: elapsed() };
   }
 }

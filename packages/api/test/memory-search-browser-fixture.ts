@@ -1,4 +1,3 @@
-import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 /** Real production routes, SQLite index and canonical message reads; no listeners or Redis. */
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -17,6 +16,7 @@ import { evidenceRoutes } from '../src/routes/evidence.js';
 import { libraryRoutes } from '../src/routes/library.js';
 import { memoryPageReadRoutes } from '../src/routes/memory-page-read.js';
 import { tasteBrowseRoutes } from '../src/routes/taste-browse.js';
+import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 
 const root = await mkdtemp(join(tmpdir(), 'f321-real-search-'));
 const evidence = new SqliteEvidenceStore(':memory:');

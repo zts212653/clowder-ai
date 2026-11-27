@@ -1,4 +1,3 @@
-import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -8,6 +7,7 @@ import Fastify from 'fastify';
 import type { CollectionManifest, EvidenceItem, IEvidenceStore } from '../src/domains/memory/interfaces.js';
 import { SqliteEvidenceStore } from '../src/domains/memory/SqliteEvidenceStore.js';
 import { memoryPageReadRoutes } from '../src/routes/memory-page-read.js';
+import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 
 let f: Awaited<ReturnType<typeof fixture>>;
 async function fixture() {

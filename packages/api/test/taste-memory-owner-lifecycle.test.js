@@ -1,4 +1,3 @@
-import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -21,6 +20,7 @@ import { tasteMemoryId } from '../dist/domains/memory/taste/taste-memory-identit
 import { InMemoryTasteProposalStore } from '../dist/domains/taste/stores/InMemoryTasteProposalStore.js';
 import { sessionAuthPlugin, sessionRoute } from '../dist/infrastructure/session-auth.js';
 import { tasteBrowseRoutes } from '../dist/routes/taste-browse.js';
+import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 
 const ownerUserId = 'taste-owner';
 const origin = 'http://localhost:3003';

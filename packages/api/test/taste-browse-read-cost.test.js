@@ -1,4 +1,3 @@
-import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -9,6 +8,7 @@ import Fastify from 'fastify';
 import { FileTasteRepository } from '../dist/domains/taste/services/TasteRepository.js';
 import { tasteBrowseRoutes } from '../dist/routes/taste-browse.js';
 import { tasteMemoryId, visibleTasteMemories } from '../dist/routes/taste-browse-model.js';
+import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 
 const paths = Array.from({ length: 12 }, (_, i) => `docs/taste/vignettes/fixture-${i}.md`);
 const vignette = (quote) =>

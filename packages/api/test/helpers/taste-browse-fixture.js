@@ -7,7 +7,9 @@ export function createTasteBrowseFixture(repository, lifecycle) {
   });
   return {
     async list(owner, privateAccess) {
-      return (await visibleTasteMemories(repository, owner, privateAccess, lifecycle)).map((entry) => project(owner, entry));
+      return (await visibleTasteMemories(repository, owner, privateAccess, lifecycle)).map((entry) =>
+        project(owner, entry),
+      );
     },
     async get(owner, memoryId, privateAccess) {
       const entry = await readTasteMemoryById(repository, owner, privateAccess, memoryId, lifecycle);

@@ -4,7 +4,11 @@ import cookie from '@fastify/cookie';
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
 import { SessionMutex } from '../dist/domains/cats/services/agents/invocation/SessionMutex.js';
-import { EntityHardForgottenError, EntityRegistryStore, entitySourceRevision } from '../dist/domains/memory/EntityRegistry.js';
+import {
+  EntityHardForgottenError,
+  EntityRegistryStore,
+  entitySourceRevision,
+} from '../dist/domains/memory/EntityRegistry.js';
 import { EntityMemoryLifecycleService } from '../dist/domains/memory/entity/EntityMemoryLifecycleService.js';
 import { EntityMemoryLifecycleStore } from '../dist/domains/memory/entity/EntityMemoryLifecycleStore.js';
 import {

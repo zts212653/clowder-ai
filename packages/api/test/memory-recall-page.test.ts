@@ -38,8 +38,12 @@ test('recall pagination delegates only authorized threads and freezes the cursor
       queries.push(input);
       const ids = input.before ? ['older'] : ['newer', 'older'];
       return ids.map((id, index) => ({
-        key: `recall:${id}`, at: input.to - (id === 'newer' ? 1 : 2) - index,
-        thread_id: 'own', invocation_id: `inv-${id}`, cue_id: null, recall_id: id,
+        key: `recall:${id}`,
+        at: input.to - (id === 'newer' ? 1 : 2) - index,
+        thread_id: 'own',
+        invocation_id: `inv-${id}`,
+        cue_id: null,
+        recall_id: id,
       }));
     },
     readRecallEvent: async (input) => {
@@ -57,11 +61,17 @@ test('recall pagination delegates only authorized threads and freezes the cursor
     assert.equal(first.records[0].event.id, 'newer');
     const next = (await f.get(`?limit=1&cursor=${encodeURIComponent(first.nextCursor)}`)).json();
     assert.equal(next.records[0].event.id, 'older');
-    assert.deepEqual(queries.map(({ threadIds, to, before }) => ({ threadIds, to, before })), [
-      { threadIds: ['own', 'system'], to: first.to, before: undefined },
-      { threadIds: ['own', 'system'], to: first.to, before: { at: first.to - 1, key: 'recall:newer' } },
+    assert.deepEqual(
+      queries.map(({ threadIds, to, before }) => ({ threadIds, to, before })),
+      [
+        { threadIds: ['own', 'system'], to: first.to, before: undefined },
+        { threadIds: ['own', 'system'], to: first.to, before: { at: first.to - 1, key: 'recall:newer' } },
+      ],
+    );
+    assert.deepEqual(reads, [
+      { recallId: 'newer', threadId: 'own' },
+      { recallId: 'older', threadId: 'own' },
     ]);
-    assert.deepEqual(reads, [{ recallId: 'newer', threadId: 'own' }, { recallId: 'older', threadId: 'own' }]);
   } finally {
     await f.close();
   }
@@ -81,12 +91,15 @@ test('recall document titles use the provider and thread labels retain owner che
     const response = await f.get();
     assert.equal(response.statusCode, 200, response.body);
     const results = response.json().records[0].event.results;
-    assert.deepEqual(results.map(({ title, href }: { title: string; href: string | null }) => [title, href]), [
-      ['Public feature from plugin', '/memory/search?q=F042'],
-      ['真实对话', '/thread/own'],
-      ['', null],
-      ['', null],
-    ]);
+    assert.deepEqual(
+      results.map(({ title, href }: { title: string; href: string | null }) => [title, href]),
+      [
+        ['Public feature from plugin', '/memory/search?q=F042'],
+        ['真实对话', '/thread/own'],
+        ['', null],
+        ['', null],
+      ],
+    );
     assert.deepEqual(anchors, ['F042', 'private-collection']);
   } finally {
     await f.close();

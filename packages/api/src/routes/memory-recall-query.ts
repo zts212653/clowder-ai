@@ -1,5 +1,8 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import type { MemoryRecallTimelineRequest, MemoryRecallTimelineResult } from '@clowder-ai/plugin-memory-contract/recall';
+import type {
+  MemoryRecallTimelineRequest,
+  MemoryRecallTimelineResult,
+} from '@clowder-ai/plugin-memory-contract/recall';
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import { canAccessThread } from '../domains/guides/guide-state-access.js';

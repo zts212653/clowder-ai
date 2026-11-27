@@ -1,5 +1,5 @@
-import type { MemoryRecallEvent, MemoryRecallEventRequest } from '@clowder-ai/plugin-memory-contract/recall';
 import { isRecallResultStatus } from '@cat-cafe/shared';
+import type { MemoryRecallEvent, MemoryRecallEventRequest } from '@clowder-ai/plugin-memory-contract/recall';
 import type Database from 'better-sqlite3';
 import type { RecallCandidateView } from './recall-candidate-view.js';
 
