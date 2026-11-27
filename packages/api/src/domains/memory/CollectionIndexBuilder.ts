@@ -14,6 +14,7 @@ export interface CollectionRebuildResult {
   skipped: number;
   blocked: boolean;
   secretFindings: SecretFinding[];
+  rejectedAnchors?: string[];
 }
 
 export interface CollectionEmbedDeps {
@@ -86,22 +87,58 @@ export class CollectionIndexBuilder {
     const force = options?.force ?? false;
     const results = this.scanner.discover(this.manifest.root);
 
-    const { findings } = SecretScanner.scanBatch(
-      results.map((r) => ({ path: r.item.sourcePath ?? r.item.anchor, content: r.rawContent })),
-    );
+    let cleanResults = results;
+    const secretFindings: SecretFinding[] = [];
+    const rejectedAnchors: string[] = [];
 
-    if (findings.length > 0) {
-      await this.purgeCollection();
-      return { indexed: 0, skipped: 0, blocked: true, secretFindings: findings };
+    if (this.storeDocumentBodies) {
+      // External collections enforce SecretScanner per document so one rejected file never purges
+      // legal sibling documents; offending anchors have their derived metadata/body/FTS/edges removed.
+      // Only when every discovered document fails SecretScanner is the collection marked blocked.
+      cleanResults = [];
+      for (const entry of results) {
+        const { findings } = SecretScanner.scanBatch([
+          { path: entry.item.sourcePath ?? entry.item.anchor, content: entry.rawContent },
+        ]);
+        if (findings.length > 0) {
+          rejectedAnchors.push(entry.item.anchor);
+          secretFindings.push(...findings);
+          await this.store.deleteByAnchor(entry.item.anchor);
+          await this.deleteFrontmatterSupersedesEdges(entry.item.anchor);
+        } else {
+          cleanResults.push(entry);
+        }
+      }
+      if (rejectedAnchors.length > 0 && cleanResults.length === 0) {
+        await this.purgeCollection();
+        return { indexed: 0, skipped: 0, blocked: true, secretFindings, rejectedAnchors };
+      }
+    } else {
+      // Non-external / default generic callers retain existing collection-wide fail-closed policy (AC-C1/P1-A).
+      const { findings } = SecretScanner.scanBatch(
+        results.map((r) => ({ path: r.item.sourcePath ?? r.item.anchor, content: r.rawContent })),
+      );
+      if (findings.length > 0) {
+        await this.purgeCollection();
+        return { indexed: 0, skipped: 0, blocked: true, secretFindings: findings };
+      }
     }
 
-    const { indexed, skipped, indexedItems } = await this.indexResults(results, force);
-    await this.replaceFrontmatterSupersedesEdges(results);
+    const { indexed, skipped, indexedItems } = await this.indexResults(cleanResults, force);
+    await this.replaceFrontmatterSupersedesEdges(cleanResults);
 
     if (this.embedDeps) {
       try {
         const deps = typeof this.embedDeps === 'function' ? await this.embedDeps() : this.embedDeps;
-        if (!deps) return { indexed, skipped, blocked: false, secretFindings: [] };
+        if (!deps) {
+          return {
+            indexed,
+            skipped,
+            blocked: false,
+            secretFindings,
+            ...(rejectedAnchors.length > 0 ? { rejectedAnchors } : {}),
+          };
+        }
         const { getEmbeddingService, vectorStore } = deps;
         const embedding = createLiveEmbeddingCapability(getEmbeddingService);
         const store = this.store;
@@ -126,7 +163,13 @@ export class CollectionIndexBuilder {
       }
     }
 
-    return { indexed, skipped, blocked: false, secretFindings: [] };
+    return {
+      indexed,
+      skipped,
+      blocked: false,
+      secretFindings,
+      ...(rejectedAnchors.length > 0 ? { rejectedAnchors } : {}),
+    };
   }
 
   async incrementalUpdate(changedPaths: string[]): Promise<void> {

@@ -131,6 +131,13 @@ export async function ensureProjectCollection(
   }
   if (result.blocked)
     throw new Error(`Collection ${collectionId} blocked: ${result.secretFindings.length} secret(s) detected — purged`);
+  if (result.secretFindings.length > 0) {
+    console.warn('[memory] project collection rebuild rejected secret-bearing documents', {
+      collectionId,
+      rejectedAnchors: result.rejectedAnchors ?? [],
+      secretFindings: result.secretFindings.length,
+    });
+  }
 
   return { docsIndexed: result.indexed + result.skipped, durationMs: Date.now() - startMs };
 }

@@ -9,7 +9,7 @@ import { HostBrokerControlPlane } from '../src/domains/plugin/host-broker/contro
 import { MemoryHostBrokerStore } from '../src/domains/plugin/host-broker/stores.js';
 import { staticEditorFixture, staticEditorManifest } from './plugin-static-editor.fixture.js';
 
-async function integrityFixture(t: TestContext, sealed = true, rejectStartup = false) {
+async function integrityFixture(t: TestContext, { sealed = true, rejectStartup = false, slowStartup = false } = {}) {
   const f = await staticEditorFixture(staticEditorManifest());
   const id = (await f.install()).pluginInstanceId;
   await f.store.transaction(async (tx) => {
@@ -48,6 +48,14 @@ async function integrityFixture(t: TestContext, sealed = true, rejectStartup = f
           ...executable,
           verifyIntegrity: async () => {
             fullReads++;
+            if (slowStartup && fullReads === 1) {
+              for (const elapsed of [10_000, 10_000, 10_000, 5_000]) {
+                now += elapsed;
+                t.mock.timers.tick(elapsed);
+                await turn();
+              }
+              assert.equal(await runtime.resolve(id, 'docx'), undefined, 'startup must keep the surface unavailable');
+            }
             now += fullDelay;
             if (rejectStartup) throw new Error('startup byte verification failed');
             await pkg.verifyIntegrity();
@@ -101,6 +109,13 @@ test('ready editor authority uses a fresh static seal while startup still verifi
   assert.ok(f.reads().seal >= 2, 'each warm authority use must revalidate the sealed generation');
 });
 
+test('a slow byte-verified editor startup retains its runtime lease without exposing the surface', async (t) => {
+  const f = await integrityFixture(t, { slowStartup: true });
+  assert.ok(f.reads().full >= 3, 'slow startup still verifies complete bytes');
+  assert.ok(await f.runtime.resolve(f.id, 'docx'));
+  assert.equal(f.reports.length, 0);
+});
+
 test('a valid static editor renews without paying a slow executable byte scan on every heartbeat', async (t) => {
   const f = await integrityFixture(t);
   const initial = f.reads();
@@ -143,7 +158,7 @@ test('same-size tampering with restored mtime revokes the warm editor and cannot
 });
 
 test('a locator without static proof retains full byte verification for warm authority', async (t) => {
-  const f = await integrityFixture(t, false);
+  const f = await integrityFixture(t, { sealed: false });
   const initial = f.reads();
   assert.ok(await f.runtime.resolve(f.id, 'docx'));
   assert.ok(f.reads().full > initial.full);
@@ -151,7 +166,7 @@ test('a locator without static proof retains full byte verification for warm aut
 });
 
 test('static proof cannot replace byte verification while an editor is starting', async (t) => {
-  const f = await integrityFixture(t, true, true);
+  const f = await integrityFixture(t, { rejectStartup: true });
   assert.ok(f.reads().full > 0);
   assert.equal(f.reads().seal, 0);
   assert.equal(await f.runtime.resolve(f.id, 'docx'), undefined);

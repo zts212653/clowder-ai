@@ -173,6 +173,8 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
       });
       signal.throwIfAborted();
       await connection.ready({ bindingNonce: binding.bindingNonce });
+      // The Broker lease starts here, before feature activation and package verification finish.
+      this.scheduleHeartbeat(id, run);
       for (const feature of pkg.manifest.features) {
         if ((await this.options.brokerStore.read.staticFeatures.getPreference(id, feature.id))?.enabled === false)
           continue;
@@ -202,8 +204,8 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
       }
       signal.throwIfAborted();
       await pkg.verifyIntegrity();
+      signal.throwIfAborted();
       run.ready = true;
-      this.scheduleHeartbeat(id, run);
     } catch (error) {
       if (this.active.has(id)) await this.close(id, 'static_editor_start_failed');
       else {
@@ -221,7 +223,8 @@ export class ContentEditorPluginRuntime implements BundledPluginRuntime {
       const diagnostics = new EditorHeartbeatDiagnostics((this.options.now ?? Date.now)() - dueAt);
       void (async () => {
         if (this.active.get(id) !== run) return;
-        await diagnostics.measure('package-verification', () => this.verifySurfacePackage(run));
+        // Activation verifies the bytes and keeps the surface unavailable until it is ready.
+        if (run.ready) await diagnostics.measure('package-verification', () => this.verifySurfacePackage(run));
         await diagnostics.measure('lease-renew', () => run.connection.renewRuntimeLease());
         if (this.active.get(id) === run) this.scheduleHeartbeat(id, run);
       })()

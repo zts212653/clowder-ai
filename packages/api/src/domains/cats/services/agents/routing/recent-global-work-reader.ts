@@ -7,6 +7,7 @@ import { projectRecentMessageArtifactPage } from './thread-artifacts-aggregator.
 const SCAN_PAGE_SIZE = 64;
 const SCAN_MESSAGE_LIMIT = 512;
 const SCAN_ARTIFACT_LIMIT = 512;
+const PROJECT_THREAD_LIMIT = 32;
 
 /** Invalidate on material publications, not streamed prose or thinking. Admission stays in the original projector. */
 export function hasRecentWorkPublication(message: StoredMessage): boolean {
@@ -143,5 +144,47 @@ export async function collectRecentGlobalWorkCandidates(input: {
     artifactLimit,
     messageComplete,
     scannedMessages,
+  });
+}
+
+/** Share the raw-message budget across the most active authorized project threads. */
+export async function collectRecentProjectWorkCandidates(input: {
+  store: Pick<IMessageStore, 'getByThreadBeforeBounded'>;
+  userId: string;
+  threadTitles: ReadonlyMap<string, string>;
+}): Promise<RecentGlobalWorkScanResult> {
+  const threadIds = [...input.threadTitles.keys()].slice(0, PROJECT_THREAD_LIMIT);
+  const perThreadLimit = Math.floor(SCAN_MESSAGE_LIMIT / threadIds.length);
+  const messages: StoredMessage[] = [];
+  const cutTimestamps = new Set<number>();
+  let scannedMessages = 0;
+  let messageComplete = threadIds.length === input.threadTitles.size;
+
+  for (const threadId of threadIds) {
+    const page = await input.store.getByThreadBeforeBounded(
+      threadId,
+      Number.MAX_SAFE_INTEGER,
+      perThreadLimit,
+      undefined,
+      input.userId,
+      perThreadLimit,
+      { includeQueuedCatMessages: true, artifactProjection: true },
+    );
+    messages.push(...page.messages);
+    scannedMessages += page.scannedCount;
+    messageComplete &&= page.exhausted;
+    if (!page.exhausted && page.nextCursor) cutTimestamps.add(page.nextCursor.timestamp);
+  }
+
+  // Preserve the owner-global visibility boundary and withhold any timestamp group cut by a thread budget.
+  return finishScan({
+    messages: messages.filter(
+      (message) => message.userId === input.userId && !cutTimestamps.has(getTimelineOrderTime(message)),
+    ),
+    boundaryPage: undefined,
+    artifactLimit: SCAN_ARTIFACT_LIMIT,
+    messageComplete,
+    scannedMessages,
+    threadTitles: input.threadTitles,
   });
 }

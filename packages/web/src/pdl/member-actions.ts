@@ -32,6 +32,7 @@ import {
   toStrategyForm,
 } from '@/components/hub-cat-editor.model';
 import type { CatStrategyEntry } from '@/components/hub-strategy-types';
+import { type DshInspection, dshSetupRequest } from '@/components/settings/members/dsh-setup-client';
 import {
   type MemberDraft,
   persistMemberDraft,
@@ -186,6 +187,7 @@ export async function readMemberSettings() {
     libraries: libraries.libraries,
     runtimes: memberRuntimeTools(discovered.runtimes, libraries.libraries).map((runtime) => ({
       ...runtime,
+      ...(runtime.dshDesktop ? { discoveredId: discovered.runtimes.find((item) => item.dshDesktop)?.id } : {}),
       acpMaxDefault: defaultAcpPoolMaxProcesses(runtime.clientId),
       form: runtimeDefaults(runtime),
     })),
@@ -229,8 +231,38 @@ export async function runMemberProviderSetup(op: string, body: string) {
     : receipt;
 }
 
-export function readMemberRuntimeModels(body: string) {
-  return request<MemberCatalog>(JSON.parse(body).ref ? '/api/agent-providers/models' : '/api/cats/runtime-models', {
+export async function readMemberRuntimeModels(body: string): Promise<MemberCatalog> {
+  const target = JSON.parse(body);
+  if (target.dshDesktop) {
+    const inspection = await dshSetupRequest<DshInspection>('inspect', { runtimeId: target.runtimeId }).catch(
+      (error: Error) => error,
+    );
+    if (inspection instanceof Error) {
+      return {
+        status: 'unavailable',
+        models: [],
+        message: /^dsh_[a-z_]+$/.test(inspection.message) ? inspection.message : 'default',
+      };
+    }
+    const models = inspection.providers.flatMap((provider) =>
+      provider.credential === 'missing'
+        ? []
+        : provider.models.map((model) => ({
+            value: JSON.stringify([provider.id, model.id]),
+            label: `${model.label} · ${provider.id}`,
+          })),
+    );
+    const defaultModel = models.find(({ value }) => value === JSON.stringify([inspection.provider, inspection.model]));
+    return {
+      status: models.length ? 'configured' : 'unavailable',
+      models,
+      ...(defaultModel
+        ? { defaultModel: defaultModel.value, defaultModelLabel: defaultModel.label, defaultModelSource: 'tool_config' }
+        : {}),
+      ...(!models.length ? { message: 'dsh_setup_credential_missing' } : {}),
+    };
+  }
+  return request<MemberCatalog>(target.ref ? '/api/agent-providers/models' : '/api/cats/runtime-models', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body,

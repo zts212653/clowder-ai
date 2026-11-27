@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -612,26 +612,147 @@ describe('SIM-Q4 narrowed slice — summary fidelity & external-only document bo
     reopened.close();
   });
 
-  it('#2085 compatibility: first external body/summary rewrite isolates stale vectors once, then zero-change reboot stays active', async () => {
-    const dataDir = makeTempDir('sim-q4-2085-compat-');
-    const extRoot = makeTempDir('sim-q4-2085-root-');
-    const docFile = join(extRoot, 'note.md');
+  it('Per-document SecretScanner rejection in rebuild(): external collection keeps clean siblings usable, clears only offending doc, and recovers after remediation', async () => {
+    const dir = makeTempDir('sim-q4-rebuild-secret-');
+    const cleanFile = join(dir, 'clean.md');
+    const badFile = join(dir, 'bad.md');
+    const newCleanFile = join(dir, 'new-clean.md');
+
+    writeFileSync(cleanFile, '# Clean\n\nKeep sibling summary.\n\n## Body\n\nrebuild_sibling_keep_token_701.\n');
     writeFileSync(
-      docFile,
+      badFile,
       [
-        '# Compat Note',
-        '',
         '---',
+        'supersedes: [doc/clean]',
+        '---',
+        '# Bad',
         '',
-        '[[_MOC]]',
+        'Initially safe summary.',
         '',
-        'Real summary paragraph.',
+        '## Body',
         '',
-        'Deep compat_body_token_2085.',
+        'rebuild_bad_initial_token_702.',
       ].join('\n'),
     );
 
-    const extManifest = makeManifest(extRoot, {
+    const manifest = makeManifest(dir, { indexPolicy: { autoRebuild: true } });
+    const scanner = new FlatScanner(manifest.id);
+    const builder = new CollectionIndexBuilder(store, manifest, scanner, undefined, {
+      storeDocumentBodies: true,
+    });
+
+    const initial = await builder.rebuild();
+    assert.equal(initial.blocked, false);
+    assert.equal(initial.indexed, 2);
+
+    const db = store.getDb();
+    const cleanAnchor = `${manifest.id}:doc/clean`;
+    const badAnchor = `${manifest.id}:doc/bad`;
+    const newCleanAnchor = `${manifest.id}:doc/new-clean`;
+    assert.deepEqual(queryBodyFtsAnchors(db, 'rebuild_bad_initial_token_702'), [badAnchor]);
+
+    // Mutate badFile to contain a secret while also adding a new clean sibling file.
+    writeFileSync(newCleanFile, '# New Clean\n\nAdded sibling.\n\n## Body\n\nrebuild_new_sibling_token_703.\n');
+    writeFileSync(badFile, ['# Bad', '', ['token = gh', 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij'].join('')].join('\n'));
+
+    const mixed = await builder.rebuild();
+    assert.equal(mixed.blocked, false, 'mixed external collection with clean siblings must not block whole collection');
+    assert.equal(mixed.indexed, 1, 'new clean sibling must still be indexed');
+    assert.equal(mixed.skipped, 1, 'unchanged clean sibling must stay intact');
+    assert.deepEqual(mixed.rejectedAnchors, [badAnchor]);
+    assert.ok(mixed.secretFindings.length >= 1, 'secretFindings must remain observable on rebuild result');
+
+    // Offending doc must have zero metadata, zero body, zero FTS, and zero supersedes edges.
+    assert.equal(await store.getByAnchor(badAnchor), null);
+    assert.equal(db.prepare('SELECT count(*) AS n FROM evidence_doc_bodies WHERE doc_anchor = ?').get(badAnchor).n, 0);
+    assert.deepEqual(queryBodyFtsAnchors(db, 'rebuild_bad_initial_token_702'), []);
+    assert.equal(
+      db.prepare("SELECT count(*) AS n FROM edges WHERE from_anchor = ? AND relation = 'supersedes'").get(badAnchor).n,
+      0,
+    );
+
+    // Clean siblings remain searchable in both metadata and body FTS.
+    assert.ok(await store.getByAnchor(cleanAnchor));
+    assert.ok(await store.getByAnchor(newCleanAnchor));
+    assert.deepEqual(queryBodyFtsAnchors(db, 'rebuild_sibling_keep_token_701'), [cleanAnchor]);
+    assert.deepEqual(queryBodyFtsAnchors(db, 'rebuild_new_sibling_token_703'), [newCleanAnchor]);
+
+    // Startup autoRebuild on the same mixed external collection keeps status active (not blocked).
+    const dataDir = makeTempDir('sim-q4-rebuild-secret-data-');
+    saveExternalCollection(dataDir, manifest);
+    const catalog = new LibraryCatalog();
+    const stores = new Map();
+    await registerPrivateAndExternalCollections({
+      catalog,
+      stores,
+      externalManifests: [manifest],
+      dataDir,
+      now: '2026-11-27T00:00:00Z',
+    });
+    try {
+      assert.equal(catalog.get(manifest.id)?.status, 'active', 'mixed external startup must stay usable');
+      const startupStore = stores.get(manifest.id);
+      assert.ok(await startupStore.getByAnchor(cleanAnchor));
+      assert.equal(await startupStore.getByAnchor(badAnchor), null);
+    } finally {
+      for (const s of stores.values()) s.close();
+    }
+
+    // Recoverability: removing the secret lets rebuild() index bad.md cleanly.
+    writeFileSync(badFile, '# Bad Fixed\n\nClean again.\n\n## Body\n\nrebuild_bad_recovered_token_704.\n');
+    const recovered = await builder.rebuild();
+    assert.equal(recovered.blocked, false);
+    assert.equal(recovered.indexed, 1);
+    assert.equal(recovered.skipped, 2);
+    assert.deepEqual(recovered.secretFindings, []);
+    assert.equal(recovered.rejectedAnchors, undefined);
+    assert.deepEqual(queryBodyFtsAnchors(db, 'rebuild_bad_recovered_token_704'), [badAnchor]);
+
+    // Non-external default (storeDocumentBodies=false) still retains collection-wide fail-closed policy.
+    const nonExtDir = makeTempDir('sim-q4-nonext-secret-');
+    writeFileSync(join(nonExtDir, 'clean.md'), '# Clean\n\nSafe.');
+    writeFileSync(
+      join(nonExtDir, 'secret.md'),
+      ['# Secret\n\ntoken = gh', 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij'].join(''),
+    );
+    const nonExtStore = new SqliteEvidenceStore(join(makeTempDir('sim-q4-nonext-db-'), 'nonext.sqlite'));
+    await nonExtStore.initialize();
+    try {
+      const nonExtManifest = makeManifest(nonExtDir, { id: 'domain:non-external-policy' });
+      const nonExtBuilder = new CollectionIndexBuilder(nonExtStore, nonExtManifest, new FlatScanner(nonExtManifest.id));
+      const nonExtResult = await nonExtBuilder.rebuild();
+      assert.equal(nonExtResult.blocked, true, 'non-external default retains collection-wide fail-closed gate');
+      assert.equal(await nonExtStore.getByAnchor(`${nonExtManifest.id}:doc/clean`), null);
+    } finally {
+      nonExtStore.close();
+    }
+  });
+
+  it('#2085 integration: first external body backfill + manifest write failure stays stale across zero-change restart, preserves main G1 activation, and heals active only after real G1 vector repair', async () => {
+    const { createMemoryServices } = await import('../../dist/domains/memory/factory.js');
+    const { ShadowVectorGenerationBuilder } = await import(
+      '../../dist/domains/memory/ShadowVectorGenerationBuilder.js'
+    );
+    const { embeddingRecipeFingerprint, readEmbeddingDeployment } = await import(
+      '../../dist/domains/memory/embedding-generation-config.js'
+    );
+
+    const root = makeTempDir('sim-q4-2085-e2e-');
+    const vault = join(root, 'vault');
+    const dataDir = join(root, 'data');
+    const docsRoot = join(root, 'docs');
+    mkdirSync(vault, { recursive: true });
+    mkdirSync(dataDir, { recursive: true });
+    mkdirSync(docsRoot, { recursive: true });
+
+    for (let i = 0; i < 42; i++) {
+      writeFileSync(
+        join(vault, `doc-${i}.md`),
+        `# Doc ${i}\n\nSummary ${i}.\n\n## Body\n\nbody_backfill_token_${i}.\n`,
+      );
+    }
+
+    const extManifest = makeManifest(vault, {
       id: 'research:compat-2085',
       name: 'compat-2085',
       status: 'active',
@@ -639,78 +760,174 @@ describe('SIM-Q4 narrowed slice — summary fidelity & external-only document bo
     });
     saveExternalCollection(dataDir, extManifest);
 
-    // Pre-seed collection store with a broken `---` summary + physical doc_vectors (pre-rewrite state).
+    const deployment = readEmbeddingDeployment();
+    const g1Recipe = { ...deployment.generations.g1.recipe, modelId: 'sim-q4-compat-g1', dim: 6 };
+    deployment.activeId = 'g1';
+    deployment.generations.g1.recipe = g1Recipe;
+    deployment.generations.g1.runtime.maxModelMemMb = 32;
+    const g1Model = {
+      generationId: 'g1',
+      modelId: g1Recipe.modelId,
+      modelRev: g1Recipe.modelRevision,
+      dim: 6,
+      representationFingerprint: embeddingRecipeFingerprint(g1Recipe),
+    };
+    const g1Encoder = {
+      load: async () => {},
+      reprobeIfNeeded: async () => {},
+      isReady: () => true,
+      dispose() {},
+      getModelInfo: () => g1Model,
+      embed: async (texts) => texts.map(() => new Float32Array([1, 0, 0, 0, 0, 0])),
+    };
+
+    const boot = () =>
+      createMemoryServices({
+        type: 'sqlite',
+        sqlitePath: join(root, 'main.sqlite'),
+        globalDbPath: join(root, 'global.sqlite'),
+        dataDir,
+        docsRoot,
+        markersDir: join(root, 'markers'),
+        skillsRoot: join(root, 'skills'),
+        memoryRoot: join(root, 'memory'),
+        includeRosterEntitySeeds: false,
+        embed: { embedMode: 'off', embedDim: 6 },
+      });
+    const closeSvc = (svc) => {
+      svc.embeddingLifecycle.deactivate();
+      for (const s of new Set([svc.store, ...svc.collectionStores.values()])) {
+        try {
+          s.close();
+        } catch {}
+      }
+    };
+
+    // Phase 1: Seed pre-body external store (valid source_hash, 0 body rows) + real G1 ready vectors.
     const storePath = join(dataDir, 'library', 'research-compat-2085', 'evidence.sqlite');
     mkdirSync(join(dataDir, 'library', 'research-compat-2085'), { recursive: true });
     const seed = new SqliteEvidenceStore(storePath, undefined, {
-      sourceRoot: extRoot,
+      sourceRoot: vault,
       sourceRef: extManifest.id,
     });
     await seed.initialize();
-    await seed.upsert([
-      {
-        anchor: `${extManifest.id}:doc/note`,
-        kind: 'research',
-        status: 'active',
-        title: 'Compat Note',
-        summary: '---',
-        sourcePath: 'note.md',
-        sourceHash: 'pre-rewrite-old-hash',
-        updatedAt: '2026-11-26T00:00:00Z',
-        authority: 'validated',
-      },
-    ]);
-    // Seed real G0 vector tables so hasVectorGeneration(db) and vector invalidation run end-to-end.
-    const { openVectorGeneration } = await import('../../dist/domains/memory/open-vector-generation.js');
-    openVectorGeneration(
-      seed.getDb(),
-      { id: 'test-model', dim: 4, version: '1', generationId: 'g0' },
-      { create: true },
-    );
-    seed.close();
-
-    // First boot: summary fidelity + body backfill rewrites the doc -> lexicalChanged=true -> status becomes 'stale'.
-    const catalog1 = new LibraryCatalog();
-    const stores1 = new Map();
-    await registerPrivateAndExternalCollections({
-      catalog: catalog1,
-      stores: stores1,
-      externalManifests: [extManifest],
-      dataDir,
-      now: '2026-11-26T00:00:00Z',
-    });
     try {
-      assert.equal(
-        catalog1.get(extManifest.id)?.status,
-        'stale',
-        'first body/summary rewrite on vector-bearing collection must isolate vectors as stale',
-      );
-      const s1 = stores1.get(extManifest.id);
-      assert.equal((await s1.getByAnchor(`${extManifest.id}:doc/note`))?.summary, 'Real summary paragraph.');
-      assert.deepEqual(queryBodyFtsAnchors(s1.getDb(), 'compat_body_token_2085'), [`${extManifest.id}:doc/note`]);
-      assert.equal(s1.getDb().prepare('SELECT count(*) AS n FROM evidence_passages').get().n, 0);
+      const preBodyBuilder = new CollectionIndexBuilder(seed, extManifest, new FlatScanner(extManifest.id));
+      const seeded = await preBodyBuilder.rebuild();
+      assert.equal(seeded.indexed, 42);
+      assert.equal(seed.getDb().prepare('SELECT count(*) AS n FROM evidence_doc_bodies').get().n, 0);
+      const built = await new ShadowVectorGenerationBuilder(seed, g1Encoder, false).build({
+        deadlineAt: Date.now() + 10_000,
+        maxBatches: 64,
+        batchSize: 2,
+      });
+      assert.equal(built.status, 'ready');
     } finally {
-      for (const s of stores1.values()) s.close();
+      seed.close();
     }
 
-    // Second boot (after vectors are marked active again with no file changes): skips unchanged doc & stays active.
-    const catalog2 = new LibraryCatalog();
-    const stores2 = new Map();
-    await registerPrivateAndExternalCollections({
-      catalog: catalog2,
-      stores: stores2,
-      externalManifests: [{ ...extManifest, status: 'active' }],
-      dataDir,
-      now: '2026-11-26T00:00:00Z',
-    });
+    // Phase 2: First boot with body storage enabled while collections.json is read-only (write failure).
+    const manifestPath = join(dataDir, 'library', 'collections.json');
+    chmodSync(manifestPath, 0o444);
+    let backfillSvc;
+    try {
+      backfillSvc = await boot();
+      assert.equal(backfillSvc.catalog.get(extManifest.id)?.status, 'stale');
+      assert.equal(
+        backfillSvc.collectionStores
+          .get(extManifest.id)
+          .getDb()
+          .prepare('SELECT count(*) AS n FROM evidence_doc_bodies')
+          .get().n,
+        42,
+      );
+      closeSvc(backfillSvc);
+    } finally {
+      chmodSync(manifestPath, 0o644);
+    }
+    assert.equal(
+      JSON.parse(readFileSync(manifestPath, 'utf-8'))[0].status,
+      'active',
+      'failed disk write left stale status unpersisted on collections.json',
+    );
+
+    // Phase 3: Zero-change restart after manifest is writable again must STILL isolate external store
+    // via SQLite coverage recovery, heal collections.json to stale, and keep real main G1 activation green.
+    const rebootSvc = await boot();
     try {
       assert.equal(
-        catalog2.get(extManifest.id)?.status,
+        rebootSvc.catalog.get(extManifest.id)?.status,
+        'stale',
+        'zero-change restart must recover stale status from SQLite coverage',
+      );
+      assert.equal(
+        JSON.parse(readFileSync(manifestPath, 'utf-8'))[0].status,
+        'stale',
+        'zero-change restart must heal collections.json to stale',
+      );
+      await rebootSvc.store.upsert([
+        {
+          anchor: 'main-ready-g1-2085',
+          kind: 'note',
+          title: 'Main G1 Doc',
+          status: 'active',
+          summary: 'Complete main G1 evidence.',
+          updatedAt: '2026-11-27T00:00:00Z',
+        },
+      ]);
+      const mainBuilt = await new ShadowVectorGenerationBuilder(rebootSvc.store, g1Encoder, false).build({
+        deadlineAt: Date.now() + 5000,
+        maxBatches: 8,
+        batchSize: 2,
+      });
+      assert.equal(mainBuilt.status, 'ready');
+      rebootSvc.embeddingLifecycle.getDeployment = () => deployment;
+      rebootSvc.embeddingLifecycle.createEmbeddingService = () => g1Encoder;
+      rebootSvc.embeddingLifecycle.requireLegacyConsumer = false;
+
+      const activation = await rebootSvc.embeddingLifecycle.activate('on');
+      assert.equal(activation.ok, true, 'main G1 activation must stay green while stale external store is isolated');
+      assert.equal(rebootSvc.store.searchEmbedding()?.getModelInfo().generationId, 'g1');
+      assert.equal(rebootSvc.collectionStores.get(extManifest.id)?.searchEmbedding(), undefined);
+
+      // Phase 4: Repair external G1 vectors to real ready state.
+      const repaired = await new ShadowVectorGenerationBuilder(
+        rebootSvc.collectionStores.get(extManifest.id),
+        g1Encoder,
+        false,
+      ).build({
+        deadlineAt: Date.now() + 10_000,
+        maxBatches: 64,
+        batchSize: 2,
+      });
+      assert.equal(repaired.status, 'ready');
+    } finally {
+      closeSvc(rebootSvc);
+    }
+
+    // Phase 5: After real G1 vector repair, zero-change restart self-heals external store back to active
+    // and activates G1 on both main and external stores.
+    const healedSvc = await boot();
+    try {
+      assert.equal(
+        healedSvc.catalog.get(extManifest.id)?.status,
         'active',
-        'unchanged reboot with body already populated must skip rewrite and stay active',
+        'repaired G1 vectors must self-heal external collection back to active',
+      );
+      assert.equal(JSON.parse(readFileSync(manifestPath, 'utf-8'))[0].status, 'active');
+      healedSvc.embeddingLifecycle.getDeployment = () => deployment;
+      healedSvc.embeddingLifecycle.createEmbeddingService = () => g1Encoder;
+      healedSvc.embeddingLifecycle.requireLegacyConsumer = false;
+
+      const activationHealed = await healedSvc.embeddingLifecycle.activate('on');
+      assert.equal(activationHealed.ok, true);
+      assert.equal(healedSvc.store.searchEmbedding()?.getModelInfo().generationId, 'g1');
+      assert.equal(
+        healedSvc.collectionStores.get(extManifest.id)?.searchEmbedding()?.getModelInfo().generationId,
+        'g1',
       );
     } finally {
-      for (const s of stores2.values()) s.close();
+      closeSvc(healedSvc);
     }
   });
 });

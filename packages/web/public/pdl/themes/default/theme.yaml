@@ -6010,7 +6010,7 @@ pdl:
                 control:
                   type: select
                   id: f-client
-                  value: $.form.d.client
+                  value: $.form.clientChoice
                   change: md
                   args:
                     k: client
@@ -6106,6 +6106,7 @@ pdl:
                   gte: 2
               - kind: field
                 label: t:memberForm.fields.account
+                when: "!$.form.dsh"
                 id: f-acc
                 control:
                   type: select
@@ -6425,6 +6426,9 @@ pdl:
                             $frag: MEMBER_MODEL_SOURCE
                         - $.form.preferences.catalog.defaultModelLabel
                     when: $.form.preferences.catalog.defaultModelLabel
+                  - text: $.form.dshSetupError
+                    tone: danger
+                    when: $.form.dshSetupError
               - kind: field
                 label: t:memberForm.fields.collaborationTools
                 help: t:memberForm.fields.collaborationHelp
@@ -6597,71 +6601,9 @@ pdl:
         title: t:wsSessions.runtime
         keep: true
         blocks:
-          - type: box
-            when: $.form.runtime.savedCheck
-            blocks:
-              - type: status
-                text:
-                  of: $.form.runtime.savedCheck.state
-                  map:
-                    unchecked: t:runtime.dshCheck.unchecked
-                    checking: t:runtime.dshCheck.checking
-                    passed: t:runtime.dshCheck.passed
-                    partial: t:runtime.dshCheck.partial
-                    failed: t:runtime.dshCheck.failed
-                    unknown: t:runtime.dshCheck.unknown
-                    stale: t:runtime.dshCheck.stale
-                tone:
-                  of: $.form.runtime.savedCheck.state
-                  map:
-                    passed: ok
-                    failed: danger
-                    partial: warn
-                    stale: warn
-                    _: info
-              - type: text
-                variant: meta
-                when: $.form.runtime.savedCheck.reasonCode
-                text:
-                  of: $.form.runtime.savedCheck.reasonCode
-                  map:
-                    tool_schema_rejected: t:runtime.dshCheck.tool_schema_rejected
-                    dsh_setup_auth_refresh_required: t:runtime.dshSetupError.dsh_setup_auth_refresh_required
-                    dsh_setup_credential_missing: t:runtime.dshSetupError.dsh_setup_credential_missing
-                    dsh_setup_credential_invalid: t:runtime.dshSetupError.dsh_setup_credential_invalid
-                    dsh_setup_custom_startup: t:runtime.dshSetupError.dsh_setup_custom_startup
-                    session_configuration_unavailable: t:runtime.dshCheck.session_configuration_unavailable
-                    check_timed_out: t:runtime.dshCheck.check_timed_out
-                    check_store_unavailable: t:runtime.dshCheck.check_store_unavailable
-                    model_reply_unconfirmed: t:runtime.dshCheck.model_reply_unconfirmed
-                    _: t:runtime.dshCheck.unknown
-              - type: list
-                from: $.form.runtime.savedCheck.toolIssues
-                optional: true
-                row:
-                  layout: two
-                  title: "@pluginId"
-                  sub:
-                    of: "@reasonCode"
-                    map:
-                      plugin_activation_unavailable: t:runtime.dshCheck.plugin_activation_unavailable
-                      _: t:runtime.dshCheck.invalidTool
-              - type: toolbar
-                items:
-                  - type: button
-                    label: t:runtime.dshCheck.refresh
-                    act: memberDshRefresh
-                    busy: $.form.runtime.checkBusy
-                  - type: button
-                    label: t:runtime.dshCheck.check
-                    tip: t:runtime.dshCheck.cost
-                    act: memberDshCheck
-                    busy: $.form.runtime.checkBusy
-                    when:
-                      of: $.form.runtime.savedCheck.state
-                      map:
-                        checking: false
-                        _: true
+          - type: view
+            id: member.runtime.dsh-check
+            data: $.form.runtime
           - type: settings
             rows:
               - label: t:runtime.hooks.label
@@ -16722,11 +16664,10 @@ pdl:
                             lost: cafe-att lost
                             _: cafe-att
                         x:
-                          act: listOp
+                          act: remove
                           args:
-                            path: cs.att
-                            op: del
-                            i: "@index"
+                            entity: att
+                            id: "@index"
                           label:
                             t: chip.remove
                             args:
@@ -25824,6 +25765,73 @@ pdl:
           note: "1"
           help: t:mcpNew.desc
         - $frag: MCP_FORM
+    member.runtime.dsh-check:
+      blocks:
+        - type: box
+          when: $.savedCheck
+          blocks:
+            - type: status
+              text:
+                of: $.savedCheck.state
+                map:
+                  unchecked: t:runtime.dshCheck.unchecked
+                  checking: t:runtime.dshCheck.checking
+                  passed: t:runtime.dshCheck.passed
+                  partial: t:runtime.dshCheck.partial
+                  failed: t:runtime.dshCheck.failed
+                  unknown: t:runtime.dshCheck.unknown
+                  stale: t:runtime.dshCheck.stale
+              tone:
+                of: $.savedCheck.state
+                map:
+                  passed: ok
+                  failed: danger
+                  partial: warn
+                  stale: warn
+                  _: info
+            - type: text
+              variant: meta
+              when: $.savedCheck.reasonCode
+              text:
+                of: $.savedCheck.reasonCode
+                map:
+                  tool_schema_rejected: t:runtime.dshCheck.tool_schema_rejected
+                  dsh_setup_auth_refresh_required: t:runtime.dshSetupError.dsh_setup_auth_refresh_required
+                  dsh_setup_credential_missing: t:runtime.dshSetupError.dsh_setup_credential_missing
+                  dsh_setup_credential_invalid: t:runtime.dshSetupError.dsh_setup_credential_invalid
+                  dsh_setup_custom_startup: t:runtime.dshSetupError.dsh_setup_custom_startup
+                  session_configuration_unavailable: t:runtime.dshCheck.session_configuration_unavailable
+                  check_timed_out: t:runtime.dshCheck.check_timed_out
+                  check_store_unavailable: t:runtime.dshCheck.check_store_unavailable
+                  model_reply_unconfirmed: t:runtime.dshCheck.model_reply_unconfirmed
+                  _: t:runtime.dshCheck.unknown
+            - type: list
+              from: $.savedCheck.toolIssues
+              optional: true
+              row:
+                layout: two
+                title: "@pluginId"
+                sub:
+                  of: "@reasonCode"
+                  map:
+                    plugin_activation_unavailable: t:runtime.dshCheck.plugin_activation_unavailable
+                    _: t:runtime.dshCheck.invalidTool
+            - type: toolbar
+              items:
+                - type: button
+                  label: t:runtime.dshCheck.refresh
+                  act: memberDshRefresh
+                  busy: $.checkBusy
+                - type: button
+                  label: t:runtime.dshCheck.check
+                  tip: t:runtime.dshCheck.cost
+                  act: memberDshCheck
+                  busy: $.checkBusy
+                  when:
+                    of: $.savedCheck.state
+                    map:
+                      checking: false
+                      _: true
     page.member:
       error: t:runtime.readError
       retry:
