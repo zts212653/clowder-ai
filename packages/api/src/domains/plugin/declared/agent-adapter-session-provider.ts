@@ -13,7 +13,9 @@ import type {
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
 
 type SessionAction = 'openSession' | 'startTurn' | 'cancel' | 'release';
-export type AgentAdapterSessionScope = Readonly<Pick<OpenSessionInput, 'cwd' | 'config'>>;
+export type AgentAdapterSessionScope = Readonly<
+  Pick<OpenSessionInput, 'sessionId' | 'cwd' | 'config' | 'executionAccount'> & { resumeNativeSessionId?: string }
+>;
 export type AgentAdapterSessionInvocation = (
   action: SessionAction,
   params: Readonly<Record<string, unknown>>,
@@ -68,8 +70,13 @@ export function createAgentAdapterSessionProvider(
   return {
     revalidateInstructions: true,
     async openSession(input, signal) {
-      const { sessionId, instructions, model, resume, cwd, config } = input;
-      const scope: AgentAdapterSessionScope = { cwd, ...(config === undefined ? {} : { config }) };
+      const { sessionId, instructions, model, resume, cwd, config, executionAccount } = input;
+      const scope: AgentAdapterSessionScope = {
+        sessionId,
+        cwd,
+        ...(config === undefined ? {} : { config }),
+        ...(executionAccount === undefined ? {} : { executionAccount }),
+      };
       const publicInput = { sessionId, instructions, ...(model === undefined ? {} : { model }) };
       const open = async (request: OpenSessionInput['resume']) => {
         const result = agentAdapterOpenResultSchema.safeParse(
@@ -77,7 +84,7 @@ export function createAgentAdapterSessionProvider(
             'openSession',
             { ...publicInput, ...(request === undefined ? {} : { resume: request }) },
             signal,
-            scope,
+            request === undefined ? scope : { ...scope, resumeNativeSessionId: request.nativeSessionId },
           ),
         );
         if (!result.success) protocolError();
@@ -105,6 +112,15 @@ export function createAgentAdapterSessionProvider(
       if (!binding) return { ok: false, code: 'session_unavailable' };
       if (input.hostOptions?.workingDirectory && input.hostOptions.workingDirectory !== binding.scope.cwd)
         return { ok: false, code: 'session_unavailable', reason: 'Agent session working directory changed' };
+      const previousAccount = binding.scope.executionAccount;
+      const currentAccount = input.hostOptions?.executionAccount;
+      if (
+        previousAccount?.accountRef !== currentAccount?.accountRef ||
+        previousAccount?.authType !== currentAccount?.authType ||
+        previousAccount?.accountRevision !== currentAccount?.accountRevision ||
+        previousAccount?.credentialVersion !== currentAccount?.credentialVersion
+      )
+        return { ok: false, code: 'session_unavailable', reason: 'Agent session execution account changed' };
       if (input.prompt.kind !== 'frozen')
         return { ok: false, code: 'failed', reason: 'continuity_preflight_unsupported' };
       const turn = { invocationId: input.invocation.invocationId };

@@ -48,6 +48,8 @@ export interface OpenSessionInput {
   model?: string;
   config?: Record<string, unknown>;
   cwd: string;
+  /** Selected by Host invocation admission. Never serialize to a plugin. */
+  executionAccount?: Service.AgentServiceOptions['executionAccount'];
 }
 
 export type OpenSessionResult =

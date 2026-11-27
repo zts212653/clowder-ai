@@ -105,6 +105,9 @@ export class AgentSessionBridgeService implements Service.AgentService {
           sessionId: host.sessionId,
           instructions,
           cwd: options.workingDirectory ?? process.cwd(),
+          ...(this.input.passHostOptions && options.executionAccount
+            ? { executionAccount: options.executionAccount }
+            : {}),
           ...(previousSessionId
             ? {
                 resume: {

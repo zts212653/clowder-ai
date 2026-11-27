@@ -7,7 +7,10 @@ import { declaration, setup } from './helpers/agent-adapter-archive.js';
 
 test('an active archive supplies real Worker turns through the registered Host session service', async (t) => {
   const registry = new SessionImplementationRegistry();
-  const { manager, install } = await setup(t, registry);
+  const openedScopes = [];
+  const { manager, install } = await setup(t, registry, ({ action, hostSession }) => {
+    if (action === 'openSession') openedScopes.push(hostSession);
+  });
   const ref = { pluginId: 'local.session-driver', contributionId: 'demo' };
   const source = (version) => `export default { create: () => ({
     start() {
@@ -51,6 +54,8 @@ test('an active archive supplies real Worker turns through the registered Host s
   await manager.setEnabled(ref.pluginId, { enabled: true, expectedRevision: plugin.lifecycleRevision });
   assert.equal(cat.implementationSnapshot().key, 'plugin:local.session-driver/demo');
   const first = await send('first');
+  assert.equal(openedScopes[0]?.sessionId, 'stable-host-session');
+  assert.equal(openedScopes[0]?.resumeNativeSessionId, 'legacy-native-id');
   assert.equal(first.find((message) => message.type === 'text')?.content, 'v1:legacy-native-id:first');
   assert.equal(first.at(-1).metadata.sessionId, 'legacy-native-id');
   assert.equal(first.at(-1).errorCode, undefined);
@@ -74,7 +79,7 @@ test(
     const registry = new SessionImplementationRegistry();
     const scopes = [];
     const { manager, runtime, install } = await setup(t, registry, ({ action, hostSession }) => {
-      if (hostSession) scopes.push([action, hostSession.cwd]);
+      if (hostSession) scopes.push([action, hostSession.cwd, hostSession.sessionId, hostSession.executionAccount]);
     });
     const ref = { pluginId: 'local.lifecycle-fixture', contributionId: 'demo' };
     const source = `export default { create: () => ({
@@ -88,10 +93,11 @@ test(
           return { candidates: [{ id: 'lifecycle', label: 'Lifecycle', state: { status: 'unavailable', reason: [cancelled, released].join(':') } }] };
         },
         openSession(input) {
-          if ('cwd' in input || 'config' in input) throw new Error('Host scope was exposed');
+          if ('cwd' in input || 'config' in input || 'executionAccount' in input) throw new Error('Host scope was exposed');
           return { ok: true, binding: { state: 'pending_first_input' } };
         },
         async *startTurn(input) {
+          if ('executionAccount' in input) throw new Error('Host account was exposed');
           const cancellation = new Promise((resolve) => { finish = resolve; });
           if (input.prompt !== 'continue') yield { type: 'native_bound', nativeSessionId: 'worker-bound' };
           yield { type: 'output', text: 'started' };
@@ -120,12 +126,20 @@ test(
     const cat = new RegisteredSessionAgentService({ catId: 'fixture', ref, registry });
     const controller = new AbortController();
     const workingDirectory = join(runtime.projectRoot, 'member-project');
+    const executionAccount = {
+      accountRef: 'isolated-account',
+      displayName: 'Isolated account',
+      authType: 'oauth',
+      accountRevision: 'fixture-revision',
+      credentialVersion: 'fixture-credential',
+    };
     const observed = [];
     for await (const event of cat.invoke('cancel', {
       hostSessionId: 'new-host',
       invocationId: 'turn-cancel',
       signal: controller.signal,
       workingDirectory,
+      executionAccount,
     })) {
       observed.push(event);
       if (event.type === 'text') controller.abort();
@@ -141,17 +155,27 @@ test(
         hostSessionId: 'new-host',
         invocationId: 'outside-scope',
         workingDirectory: join(runtime.projectRoot, 'other-member'),
+        executionAccount,
       }),
     );
     assert.equal(wrongDirectory.at(-1)?.errorCode, 'session_unavailable');
+    const changedCredential = await Array.fromAsync(
+      cat.invoke('continue', {
+        hostSessionId: 'new-host',
+        invocationId: 'different-credential',
+        workingDirectory,
+        executionAccount: { ...executionAccount, credentialVersion: 'changed' },
+      }),
+    );
+    assert.equal(changedCredential.at(-1)?.errorCode, 'session_unavailable');
     await cat.releaseAll('test_complete');
     const status = await runtime.agentAdapters.detect(ref);
     assert.equal(status.candidates[0].state.reason, 'true:true');
     assert.deepEqual(scopes, [
-      ['openSession', workingDirectory],
-      ['startTurn', workingDirectory],
-      ['cancel', workingDirectory],
-      ['release', workingDirectory],
+      ['openSession', workingDirectory, 'new-host', executionAccount],
+      ['startTurn', workingDirectory, 'new-host', executionAccount],
+      ['cancel', workingDirectory, 'new-host', executionAccount],
+      ['release', workingDirectory, 'new-host', executionAccount],
     ]);
   },
 );
