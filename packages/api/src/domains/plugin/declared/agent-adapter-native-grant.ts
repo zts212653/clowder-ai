@@ -1,17 +1,20 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { resolveKimiQuotaExecutionOwner } from '../../../config/kimi-quota-identity.js';
+import { captureTerminalInteraction } from '../../../utils/capture-terminal-interaction.js';
 import { resolveCliCommand } from '../../../utils/cli-resolve.js';
 import { isCliPlainTextResult, spawnCli } from '../../../utils/cli-spawn.js';
 import type { AgentAdapterRuntimeGrant } from './agent-adapter-access.js';
 
-const officialDetection = [
+const officialNativeClients = [
   {
     pluginId: 'official.agent-kimi',
     contributionId: 'kimi',
     catalogId: 'agent-kimi',
     packageName: '@clowder-ai/agent-kimi',
     command: 'kimi',
+    terminalCommand: '/usage',
   },
   {
     pluginId: 'official.agent-codex',
@@ -22,10 +25,10 @@ const officialDetection = [
   },
 ];
 
-export const grantAgentAdapterDetection: AgentAdapterRuntimeGrant = (request) => {
+export const grantAgentAdapterNativeRuntime: AgentAdapterRuntimeGrant = (request) => {
   const source = request.packageProvenance;
-  if (request.action !== 'detect' || source?.kind !== 'catalog') return;
-  const grant = officialDetection.find(
+  if (source?.kind !== 'catalog') return;
+  const grant = officialNativeClients.find(
     (entry) =>
       entry.pluginId === request.pluginId &&
       entry.contributionId === request.contributionId &&
@@ -33,6 +36,50 @@ export const grantAgentAdapterDetection: AgentAdapterRuntimeGrant = (request) =>
       entry.packageName === source.packageName,
   );
   if (!grant) return;
+
+  if (request.action === 'quota' && request.account && grant.terminalCommand) {
+    const { account } = request;
+    const terminalCommand = grant.terminalCommand;
+    const readOwner = () => {
+      const owner = resolveKimiQuotaExecutionOwner(account.projectRoot, account.accountRef);
+      if (
+        !owner ||
+        owner.snapshot.credentialVersion !== account.credentialVersion ||
+        owner.snapshot.accountRevision !== account.accountRevision
+      ) {
+        throw new Error('kimi_quota_credential_changed');
+      }
+      return owner;
+    };
+    return {
+      terminal: {
+        async capture({ submit }, signal) {
+          if (submit !== terminalCommand) throw new Error('Terminal input is not authorized');
+          signal.throwIfAborted();
+          const { launchEnv } = readOwner();
+          const command = resolveCliCommand(grant.command);
+          if (!command) throw new Error('Native terminal command is unavailable');
+          const result = await captureTerminalInteraction({
+            command,
+            args: [],
+            cwd: account.projectRoot,
+            env: {
+              ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+              ...launchEnv,
+            },
+            submit: terminalCommand,
+            startAfterMs: 4_500,
+            settleAfterMs: 2_500,
+            signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+          });
+          readOwner();
+          return result;
+        },
+      },
+    };
+  }
+  if (request.action !== 'detect') return;
+
   return {
     async inspect(signal) {
       signal.throwIfAborted();

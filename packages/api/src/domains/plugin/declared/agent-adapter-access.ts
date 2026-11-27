@@ -23,6 +23,7 @@ import {
 } from './agent-adapter-session-provider.js';
 
 const metadataTimeoutMs = 5_000;
+const quotaTimeoutMs = 16_000;
 type AdapterAction = 'describe' | 'detect' | Parameters<AgentAdapterSessionInvocation>[0] | 'quota';
 type AgentAdapterAccountScope = {
   readonly projectRoot: string;
@@ -105,7 +106,7 @@ export function createAgentAdapterAccess(
     });
     const timer = setTimeout(
       () => deadline.abort(new DOMException('Agent adapter call timed out', 'TimeoutError')),
-      metadataTimeoutMs,
+      action === 'quota' ? quotaTimeoutMs : metadataTimeoutMs,
     );
     timer.unref();
     const response = await Promise.race([
