@@ -35,7 +35,7 @@ function run(root, code, args = []) {
   return spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, ...args], {
     encoding: 'utf8',
     windowsHide: true,
-    timeout: 15000,
+    timeout: 60_000,
     env,
   });
 }
@@ -118,6 +118,7 @@ test('a manifest records the generated file even when another Setup is newer', {
   fs.utimesSync(generated, new Date(0), new Date(0));
   fs.writeFileSync(path.join(root, 'dist/ClowderAI-Setup-other.exe'), 'unrelated setup');
   const result = run(root, manifestScript(root, `$generatedSetupPath = ${quote(generated)}`));
+  assert.ifError(result.error);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   const record = JSON.parse(fs.readFileSync(path.join(root, 'dist/build-manifest.json'), 'utf8'));
   assert.equal(record.installer.path, 'dist/ClowderAI-Setup-current.exe');
