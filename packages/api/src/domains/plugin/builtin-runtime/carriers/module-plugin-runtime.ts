@@ -329,12 +329,12 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
     let subscriptions: PluginMessagingSubscriptionSession | undefined;
     try {
       const { entrypoint } = await verifyPackageEntrypoint(packageRecord, located);
+      // Validate the private package tree before reading its activation metadata.
+      await located.verifyIntegrity();
       const rawAdapter = await readPackageAgentAdapterDeclaration(located.rootDir);
       const adapter = rawAdapter === undefined ? undefined : parseAgentAdapterDeclaration(rawAdapter);
       if (adapter?.success === false)
         throw new ExternalPluginRuntimeError('INVALID_ENTRYPOINT', 'Invalid Agent adapter declaration');
-      // Keep executable admission adjacent to sending the verified private path to the worker.
-      await located.verifyIntegrity();
       const loadedExecution = await loadExecutionDefinition<PluginModuleDefinitionShape>(
         this.#execution,
         pluginInstanceId,

@@ -3,8 +3,15 @@ import { z } from 'zod';
 export const AGENT_ADAPTER_DECLARATION_FILE = 'agent-adapter.json';
 
 const requiredOperations = ['describe', 'detect', 'openSession', 'startTurn', 'cancel', 'release'] as const;
-const optionalOperations = ['login', 'modelCatalog', 'quota', 'input', 'inspectInput', 'compact'] as const;
-const operationSchema = z.enum([...requiredOperations, ...optionalOperations]);
+export const AGENT_ADAPTER_OPTIONAL_OPERATIONS = [
+  'login',
+  'modelCatalog',
+  'quota',
+  'input',
+  'inspectInput',
+  'compact',
+] as const;
+const operationSchema = z.enum([...requiredOperations, ...AGENT_ADAPTER_OPTIONAL_OPERATIONS]);
 
 const declarationSchema = z.strictObject({
   protocolVersion: z.literal(1),
@@ -37,7 +44,11 @@ const descriptionSchema = z.strictObject({
   label: z.string().trim().min(1).max(120),
   capabilities: z.strictObject({
     resume: capability(z.strictObject({ mode: z.literal('native') })),
-    tools: capability(z.strictObject({ approval: z.enum(['host', 'none']) })),
+    tools: capability(z.strictObject({ approval: z.enum(['host', 'client', 'none']) })),
+    login: capability(z.strictObject({ mode: z.enum(['native', 'browser', 'device-code']) })),
+    input: capability(z.strictObject({ duringTurn: z.literal(true) })),
+    inspectInput: capability(z.strictObject({ deliveryReceipt: z.literal(true) })),
+    compact: capability(z.strictObject({ mode: z.literal('native'), observesResult: z.boolean() })),
     modelCatalog: capability(z.strictObject({ source: z.literal('client') })),
     quota: capability(
       z.strictObject({
@@ -45,7 +56,8 @@ const descriptionSchema = z.strictObject({
         units: z
           .array(z.enum(['ratio', 'tokens', 'requests']))
           .min(1)
-          .max(3),
+          .max(3)
+          .refine((units) => new Set(units).size === units.length),
       }),
     ),
   }),

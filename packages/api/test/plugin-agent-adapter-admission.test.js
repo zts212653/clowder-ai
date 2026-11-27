@@ -20,6 +20,10 @@ const describe = (version) => ({
   capabilities: {
     resume: { status: 'supported', data: { mode: 'native' } },
     tools: { status: 'unsupported' },
+    login: { status: 'unknown', reason: 'not_configured' },
+    input: { status: 'unsupported' },
+    inspectInput: { status: 'unsupported' },
+    compact: { status: 'unsupported' },
     modelCatalog: { status: 'unknown', reason: 'not_probed' },
     quota: { status: 'unsupported' },
   },
@@ -49,6 +53,8 @@ async function setup(t) {
     declaration,
     actionNames = operations,
     description = describe(version),
+    hangingDescribe = false,
+    extraDeclarations = {},
   }) {
     const manifest = {
       pluginId,
@@ -64,7 +70,7 @@ async function setup(t) {
       'actions: Object.fromEntries(' +
         JSON.stringify(actionNames) +
         ".map(name => [name, () => name === 'describe' ? " +
-        JSON.stringify(description) +
+        (hangingDescribe ? 'new Promise(() => {})' : JSON.stringify(description)) +
         ' : ({name})])),',
       'stop() {}',
       '}) }) };',
@@ -73,7 +79,8 @@ async function setup(t) {
     const files = [
       ['manifest.json', JSON.stringify(manifest)],
       ['package.json', JSON.stringify({ name: pluginId, version, type: 'module' })],
-      ['agent-adapter.json', JSON.stringify(declaration)],
+      ...(declaration === undefined ? [] : [['agent-adapter.json', JSON.stringify(declaration)]]),
+      ...Object.entries(extraDeclarations).map(([file, value]) => [file, JSON.stringify(value)]),
       ['entrypoint.mjs', entrypoint],
     ].map(([name, content]) => ({ name: `package/${name}`, bytes: Buffer.from(content) }));
     await writeFile(archive, canonicalGzip(tarArchive(files)));
@@ -117,7 +124,7 @@ test('two adapter archives activate independently and a missing operation cannot
   }
   const authority = async (pluginId) => (await runtime.inventoryStore.readCurrentAuthority(pluginId))?.instance;
   await install({ pluginId: first, declaration: declaration('first') });
-  await install({ pluginId: second, declaration: declaration('second') });
+  await install({ pluginId: second, declaration: declaration('first') });
   assert.deepEqual(await runtime.agentAdapters.list(), []);
   await enable(first);
   await enable(second);
@@ -127,10 +134,10 @@ test('two adapter archives activate independently and a missing operation cannot
   assert.equal(b.runtimeState, 'healthy');
   assert.notEqual(a.pluginInstanceId, b.pluginInstanceId);
   const firstRef = { pluginId: first, contributionId: 'first' };
-  const secondRef = { pluginId: second, contributionId: 'second' };
+  const secondRef = { pluginId: second, contributionId: 'first' };
   assert.deepEqual((await runtime.agentAdapters.list()).map((adapter) => adapter.ref).sort(), [
     `plugin:${first}/first`,
-    `plugin:${second}/second`,
+    `plugin:${second}/first`,
   ]);
   assert.deepEqual(await runtime.agentAdapters.describe(firstRef), describe('1.0.0'));
   await assert.rejects(runtime.agentAdapters.describe({ ...firstRef, contributionId: 'other' }), /not active/i);
@@ -148,6 +155,7 @@ test('two adapter archives activate independently and a missing operation cannot
   const upgraded = await authority(first);
   assert.notEqual(upgraded.packageDigest, a.packageDigest);
   assert.deepEqual(await runtime.agentAdapters.describe(firstRef), describe('1.1.0'));
+  assert.deepEqual(await runtime.agentAdapters.describe(secondRef), describe('1.0.0'));
   await assert.rejects(
     install({
       pluginId: first,
@@ -178,7 +186,7 @@ test('two adapter archives activate independently and a missing operation cannot
   assert.equal(other.lifecycleRevision, b.lifecycleRevision);
   assert.deepEqual(
     (await runtime.agentAdapters.list()).map((adapter) => adapter.ref),
-    [`plugin:${second}/second`],
+    [`plugin:${second}/first`],
   );
   await assert.rejects(runtime.agentAdapters.describe(firstRef), /not active/i);
   assert.deepEqual(await runtime.agentAdapters.describe(secondRef), describe('1.0.0'));
@@ -186,14 +194,15 @@ test('two adapter archives activate independently and a missing operation cannot
 
 test('the Host rejects malformed or undeclared capability data from a real installed module', async (t) => {
   const { manager, runtime, install } = await setup(t);
-  for (const [id, quota] of [
-    ['absent', { status: 'supported' }],
-    ['undeclared', { status: 'supported', data: { source: 'account-api', units: ['ratio'] } }],
-    ['fake-quota', { status: 'unsupported', data: { source: 'account-api', units: ['ratio'] } }],
+  for (const [id, operation, value] of [
+    ['absent', 'quota', { status: 'supported' }],
+    ['undeclared', 'quota', { status: 'supported', data: { source: 'account-api', units: ['ratio'] } }],
+    ['fake-quota', 'quota', { status: 'unsupported', data: { source: 'account-api', units: ['ratio'] } }],
+    ['undeclared-input', 'input', { status: 'supported', data: { duringTurn: true } }],
   ]) {
     const pluginId = `local.${id}-adapter`;
     const description = describe('1.0.0');
-    description.capabilities.quota = quota;
+    description.capabilities[operation] = value;
     await install({ pluginId, declaration: declaration(id), description });
     const { plugin } = await manager.get(pluginId);
     await manager.setEnabled(pluginId, { enabled: true, expectedRevision: plugin.lifecycleRevision });
@@ -201,4 +210,67 @@ test('the Host rejects malformed or undeclared capability data from a real insta
       code: 'PROTOCOL_VIOLATION',
     });
   }
+});
+
+test('description stops waiting on an unresponsive installed module and other packages remain usable', async (t) => {
+  const { manager, runtime, install } = await setup(t);
+  for (const [id, hangingDescribe] of [
+    ['slow', true],
+    ['ready', false],
+  ]) {
+    const pluginId = `local.${id}-adapter`;
+    await install({ pluginId, declaration: declaration(id), hangingDescribe });
+    const { plugin } = await manager.get(pluginId);
+    await manager.setEnabled(pluginId, { enabled: true, expectedRevision: plugin.lifecycleRevision });
+  }
+  await assert.rejects(
+    runtime.agentAdapters.describe({
+      pluginId: 'local.slow-adapter',
+      contributionId: 'slow',
+    }),
+    { name: 'TimeoutError' },
+  );
+  assert.deepEqual(
+    await runtime.agentAdapters.describe({
+      pluginId: 'local.ready-adapter',
+      contributionId: 'ready',
+    }),
+    describe('1.0.0'),
+  );
+});
+
+test('legacy Agent Access and ACP declarations install without the new adapter declaration', async (t) => {
+  const { manager, runtime, install } = await setup(t);
+  for (const [pluginId, extraDeclarations] of [
+    [
+      'local.legacy-access',
+      {
+        'agent-access.json': {
+          protocolVersion: 1,
+          operations: [
+            'detect',
+            'configure',
+            'login',
+            'readRoles',
+            'writeRole',
+            'openSession',
+            'startTurn',
+            'cancel',
+            'release',
+          ],
+          transports: ['acp'],
+        },
+      },
+    ],
+    [
+      'local.legacy-acp',
+      {
+        'agent-provider.json': { id: 'old-acp', transport: 'acp', acp: { command: 'old-acp', startupArgs: [] } },
+      },
+    ],
+  ]) {
+    await install({ pluginId, extraDeclarations });
+    assert.equal((await manager.get(pluginId)).plugin.artifact, 'installed');
+  }
+  assert.deepEqual(await runtime.agentAdapters.list(), []);
 });

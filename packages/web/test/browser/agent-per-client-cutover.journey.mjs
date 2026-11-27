@@ -3,10 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { realTaskOutcome } from './native-team-a2a-proof.mjs';
 import { callRealPartner, openLiveJourney } from './native-team-live.harness.mjs';
 import { waitForRenderedReply } from './native-team-rendered-reply.mjs';
 
+// Target acceptance. Current Host routes do not produce the adapter execution receipts asserted below.
 const clients = [
   { key: 'codex', clientId: 'openai', quotaField: 'quota' },
   { key: 'claude-code', clientId: 'anthropic', quotaField: 'claudeQuota', quotaRoute: 'claude' },
@@ -39,16 +41,31 @@ async function installAdapter(journey, key, archive) {
   const plugin = await getAdapter(journey, pluginId);
   assert.ok(plugin.pluginInstanceId && plugin.packageDigest, 'Read back the exact installed package');
   if (plugin.intent !== 'enabled') await setEnabled(journey, pluginId, true);
-  const active = await getAdapter(journey, pluginId);
-  assert.equal(active.live, 'running', pluginId);
-  return active;
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    const active = await getAdapter(journey, pluginId);
+    if (active.live === 'running') return active;
+    assert.notEqual(active.live, 'crashed', pluginId);
+    await delay(200);
+  }
+  assert.fail(`Adapter did not become active: ${pluginId}`);
+}
+
+function assertAdapterOrigin(payload, plugin, ref, stage) {
+  const { adapterOrigin } = payload;
+  assert.ok(adapterOrigin, `No adapter dispatch receipt for ${stage}`);
+  assert.equal(adapterOrigin.ref, ref, stage);
+  assert.equal(adapterOrigin.pluginInstanceId, plugin.pluginInstanceId, stage);
+  assert.equal(adapterOrigin.packageDigest, plugin.packageDigest, stage);
+  assert.equal(adapterOrigin.lifecycleRevision, plugin.lifecycleRevision, stage);
+  assert.equal(adapterOrigin.cutoverState, 'active', stage);
 }
 
 async function detect(journey) {
   return (await journey.request('/api/agent-access/v1/detect', post({ refresh: true }))).candidates;
 }
 
-async function legacyContinuation(journey, legacy) {
+async function legacyContinuation(journey, legacy, verifyDispatch) {
   const { page, request, web } = journey;
   const { threadId, catId, sessionId, historyMarker, messageIds } = legacy;
   const messages = () => request(`/api/messages?threadId=${encodeURIComponent(threadId)}&limit=50`);
@@ -86,6 +103,7 @@ async function legacyContinuation(journey, legacy) {
   assert.equal(result?.status, 'passed', 'Legacy invocation did not complete');
   const resumed = (await messages()).messages.find((message) => message.id === result.messageId);
   assert.ok(resumed?.content?.includes(historyMarker), 'Request did not recover the original session marker');
+  verifyDispatch(resumed);
   assert.deepEqual(await sessionIds(), beforeSessionIds, 'Continuation opened a different native session');
   await page.reload();
   await waitForRenderedReply(page, result.messageId, historyMarker);
@@ -98,7 +116,7 @@ async function readFixture() {
   for (const { key, quotaField } of clients) {
     const input = fixture.clients?.[key];
     assert.ok(
-      input?.archive && input?.upgradeArchive && input?.detectId && input?.member,
+      input?.archive && input?.upgradeArchive && input?.detectId && input?.member && input?.adapterRef,
       `Missing client fixture: ${key}`,
     );
     assert.ok(
@@ -150,10 +168,17 @@ test(
       }
       assert.equal(new Set([...instances.values()].map((row) => row.pluginInstanceId)).size, clients.length);
 
+      const adapterRef = (key) => fixture.clients[key].adapterRef;
+      const activeCandidates = await detect(journey);
       for (const { key, clientId, quotaField, quotaRoute } of clients) {
         const input = fixture.clients[key];
+        const active = instances.get(key);
+        const row = activeCandidates.find((item) => item.id === fixture.clients[key].detectId);
+        assert.ok(row);
+        assertAdapterOrigin(row, active, adapterRef(key), `E02 ${key}`);
         const created = (await request('/api/cats', post(input.member))).cat;
         assert.equal(created.clientId, clientId);
+        assertAdapterOrigin(created, active, adapterRef(key), `E03 ${key}`);
         assert.ok(created.id && created.mentionPatterns.length);
         await page.goto(new URL('/settings?s=members&shell=v2&lang=zh', web).href);
         await page.getByText(created.displayName, { exact: true }).first().waitFor();
@@ -167,12 +192,14 @@ test(
             post({}),
           );
           assert.equal(quota.accountRef, account.expectedRef);
+          assertAdapterOrigin(quota, active, adapterRef(key), `E04 ${key}`);
           assert.ok(quota[quotaField], `Quota observation unavailable for ${key}`);
           await log(`E04 fixed account quota observed ${key}`);
         }
-        assert.ok((await callRealPartner(journey, created)).passed);
+        const verifyDispatch = (message) => assertAdapterOrigin(message, active, adapterRef(key), `chat ${key}`);
+        assert.ok((await callRealPartner(journey, created, { verifyDispatch })).passed);
         await log(`E05 live chat completed ${key}`);
-        await legacyContinuation(journey, input.legacy);
+        await legacyContinuation(journey, input.legacy, verifyDispatch);
         await log(`E06 old history and native session continued ${key}`);
       }
 

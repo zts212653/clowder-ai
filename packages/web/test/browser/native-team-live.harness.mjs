@@ -91,7 +91,7 @@ async function leaveRetiredThread(page, threadId) {
   if (page.url().includes(`/thread/${threadId}`)) await page.goto('about:blank');
 }
 
-export async function callRealPartner(journey, cat) {
+export async function callRealPartner(journey, cat, { verifyDispatch } = {}) {
   if (cat.clientId === 'openai')
     journey.record.nativeHistoryPolicy = await requireCodexTestHistoryPolicy(
       process.env.CAT_CAFE_ONBOARDING_E2E_INSTANCE,
@@ -127,7 +127,9 @@ export async function callRealPartner(journey, cat) {
         result.terminalOutcome = outcome;
         assert.equal(outcome.status, 'passed', `${cat.id}: ${outcome.reason}`);
         result.replyMessageId = outcome.messageId;
-        result.invocationId = messages.find((message) => message.id === outcome.messageId).lifecycle.invocationId;
+        const reply = messages.find((message) => message.id === outcome.messageId);
+        result.invocationId = reply.lifecycle.invocationId;
+        verifyDispatch?.(reply);
         break;
       }
       await page.waitForTimeout(750);
