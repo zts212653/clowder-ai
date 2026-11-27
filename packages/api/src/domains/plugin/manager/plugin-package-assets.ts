@@ -17,6 +17,7 @@ import {
   inventoryIdentity,
   objectIcon,
   pluginIconAsset,
+  readStaticPackageConsole,
   readStaticPackageReadme,
   readVerifiedConsole,
   readVerifiedIcon,
@@ -162,6 +163,10 @@ export class PluginManagerPackageAssetService
       : undefined;
     if (!installed) return {};
     return this.cached(this.consoleCache, installed.packageDigest, async () => {
+      if (this.options.packages.readInstalledConsoleFiles) {
+        const files = await this.options.packages.readInstalledConsoleFiles(installed.packageDigest);
+        return readStaticPackageConsole(files, inventoryIdentity(installed));
+      }
       const located = await this.options.packages.resolveInstalledPackage(installed.packageDigest);
       try {
         return await readVerifiedConsole(located, inventoryIdentity(installed));

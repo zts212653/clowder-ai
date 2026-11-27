@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import type { PluginManifestValidator } from './package-staging.js';
 import { stageVerifiedPackageArchive } from './package-staging.js';
-import { readVerifiedPackageStaticFile } from './package-static-file.js';
+import { readVerifiedPackageConsoleFiles, readVerifiedPackageStaticFile } from './package-static-file.js';
 import {
   type VerifiedPluginPackage,
   type VerifiedPluginPackageLocator,
@@ -55,6 +55,15 @@ export class FilesystemVerifiedPluginPackageLocator implements VerifiedPluginPac
       packageDigest,
       tarBin: this.tarBin,
       selectFile,
+      ...(this.validateManifest === undefined ? {} : { validateManifest: this.validateManifest }),
+    });
+  }
+
+  readInstalledConsoleFiles(packageDigest: string) {
+    return readVerifiedPackageConsoleFiles({
+      artifactRoot: this.packageRoot(packageDigest),
+      packagesRoot: this.packagesRoot,
+      packageDigest,
       ...(this.validateManifest === undefined ? {} : { validateManifest: this.validateManifest }),
     });
   }

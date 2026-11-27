@@ -1,4 +1,5 @@
 import { createReadStream } from 'node:fs';
+import { posix } from 'node:path';
 import { Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { createGunzip } from 'node:zlib';
@@ -129,6 +130,11 @@ class TarReader {
   private pendingPax: Map<string, string> | undefined;
   private pendingLongPath: string | undefined;
   private zeroBlocks = 0;
+  private captured: Buffer | undefined;
+  private capturedBytes = 0;
+  readonly files = new Map<string, Buffer>();
+
+  constructor(private readonly selectFile?: (path: string) => boolean) {}
 
   accept(chunk: Buffer): void {
     this.buffered = Buffer.concat([this.buffered, chunk]);
@@ -152,8 +158,10 @@ class TarReader {
   private consumeBody(): void {
     const consumed = Math.min(this.remaining, this.buffered.length);
     if (this.metadataType) this.metadataParts.push(Buffer.from(this.buffered.subarray(0, consumed)));
+    if (this.captured) this.buffered.copy(this.captured, this.captured.length - this.remaining, 0, consumed);
     this.buffered = this.buffered.subarray(consumed);
     this.remaining -= consumed;
+    if (!this.remaining) this.captured = undefined;
     if (!this.remaining && this.metadataType) this.finishMetadata();
   }
 
@@ -207,6 +215,18 @@ class TarReader {
     if (type === '5' && (size !== 0 || effectiveSize !== 0)) invalid('directory with payload');
     this.remaining = effectiveSize;
     this.padding = (512 - (effectiveSize % 512)) % 512;
+    if (this.selectFile) {
+      const path = posix.normalize(effectivePath.replace(/\/$/u, ''));
+      if (path !== 'package' && !path.startsWith('package/')) invalid('member outside the canonical package');
+      if (!this.selectFile(path)) return;
+      if (type === '5' || this.files.has(path)) invalid('ambiguous static file');
+      this.capturedBytes += effectiveSize;
+      if (effectiveSize > 1024 * 1024 || this.capturedBytes > 8 * 1024 * 1024)
+        invalid('static file byte budget exceeded');
+      const bytes = Buffer.alloc(effectiveSize);
+      this.files.set(path, bytes);
+      if (effectiveSize) this.captured = bytes;
+    }
   }
 
   finish(): void {
@@ -223,9 +243,13 @@ class TarReader {
   }
 }
 
-/** Validate archive format and member paths before invoking platform tar. */
-export async function preflightPluginArchive(archivePath: string, signal?: AbortSignal): Promise<void> {
-  const reader = new TarReader();
+/** Validate the whole archive and optionally collect selected inert files without extracting a tree. */
+export async function preflightPluginArchive(
+  archivePath: string,
+  signal?: AbortSignal,
+  selectFile?: (path: string) => boolean,
+): Promise<ReadonlyMap<string, Buffer>> {
+  const reader = new TarReader(selectFile);
   const sink = new Writable({
     write(chunk: Buffer, _encoding, callback) {
       try {
@@ -248,4 +272,5 @@ export async function preflightPluginArchive(archivePath: string, signal?: Abort
   await pipeline(createReadStream(archivePath), createGunzip(), sink, {
     signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
   });
+  return reader.files;
 }

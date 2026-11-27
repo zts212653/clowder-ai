@@ -5,7 +5,11 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { type PluginIconSpec, type PluginPdlFragment, pluginPdlSchema } from '@cat-cafe/shared';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { parse as parseYaml } from 'yaml';
-import type { VerifiedPluginPackage, VerifiedPluginStaticFile } from '../../external-runtime/types.js';
+import type {
+  VerifiedPluginConsoleFiles,
+  VerifiedPluginPackage,
+  VerifiedPluginStaticFile,
+} from '../../external-runtime/types.js';
 import type { PluginPackageRecord } from '../../host-inventory/types.js';
 import { type PluginManagerPackageAsset, PluginManagerPackageAssetError } from './contract.js';
 
@@ -231,11 +235,46 @@ function decodePackageReadme(bytes: Uint8Array): string {
 }
 
 const MAX_PLUGIN_CONSOLE_BYTES = 512 * 1024;
+type ConsoleProjection = { pdl?: PluginPdlFragment } & Pick<PluginPdlFragment, 'components' | 'i18n'>;
+
+function parseConsolePdl(text: string): PluginPdlFragment {
+  const parsed = pluginPdlSchema.safeParse(parseYaml(text));
+  if (!parsed.success) throw new PluginManagerPackageAssetError('INVALID_ASSET', 'console pdl.yaml is invalid');
+  return parsed.data;
+}
+
+export function readStaticPackageConsole(
+  { manifest, files }: VerifiedPluginConsoleFiles,
+  expected: PackageIdentity,
+): ConsoleProjection {
+  if (!packageIdentityMatches(manifest, expected)) {
+    throw new PluginManagerPackageAssetError('INVALID_ASSET', 'package console identity does not match Host truth');
+  }
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  const text = (bytes: Buffer) => {
+    if (bytes.length > MAX_PLUGIN_CONSOLE_BYTES) {
+      throw new PluginManagerPackageAssetError('INVALID_ASSET', 'console file exceeds its size limit');
+    }
+    return decoder.decode(bytes);
+  };
+  const pdl = files.get('pdl.yaml');
+  const out: ConsoleProjection = pdl ? { pdl: parseConsolePdl(text(pdl)) } : {};
+  const components = [...files].filter(([name]) => name.startsWith('components/')).sort(([a], [b]) => (a < b ? -1 : 1));
+  if (components.length) {
+    const of = (ext: string) => components.filter(([name]) => name.endsWith(ext)).map(([, bytes]) => text(bytes));
+    out.components = { js: of('.js'), css: of('.css') };
+  }
+  const i18n = [...files].filter(([name]) => name.startsWith('i18n/'));
+  if (i18n.length)
+    out.i18n = Object.fromEntries(i18n.map(([name, bytes]) => [name.slice(5, -5), parseYaml(text(bytes))]));
+  return out;
+}
+
 /** A package's console: console/pdl.yaml, console/i18n/<language>.yaml and optional console/components (js, css). */
 export async function readVerifiedConsole(
   located: VerifiedPluginPackage,
   expected: PackageIdentity,
-): Promise<{ pdl?: PluginPdlFragment } & Pick<PluginPdlFragment, 'components' | 'i18n'>> {
+): Promise<ConsoleProjection> {
   if (!packageIdentityMatches(located.manifest, expected)) {
     throw new PluginManagerPackageAssetError('INVALID_ASSET', 'package console identity does not match Host truth');
   }
@@ -250,12 +289,10 @@ export async function readVerifiedConsole(
     );
   };
   const names = await readdir(dir).catch(() => [] as string[]);
-  const out: { pdl?: PluginPdlFragment } & Pick<PluginPdlFragment, 'components' | 'i18n'> = {};
+  const out: ConsoleProjection = {};
   // The console is the host's: console/pdl.yaml, never the manifest the plugin's own runtime validates.
   if (names.includes('pdl.yaml')) {
-    const parsed = pluginPdlSchema.safeParse(parseYaml(await text('pdl.yaml')));
-    if (!parsed.success) throw new PluginManagerPackageAssetError('INVALID_ASSET', 'console pdl.yaml is invalid');
-    out.pdl = parsed.data;
+    out.pdl = parseConsolePdl(await text('pdl.yaml'));
   }
   if (names.includes('components')) {
     const files = (await readdir(resolve(dir, 'components'))).sort();

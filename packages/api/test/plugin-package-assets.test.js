@@ -30,7 +30,7 @@ function metadataContractRuntime() {
   };
 }
 
-async function fixture({ icon, iconBytes, readme, catalogOnly = false }) {
+async function fixture({ icon, iconBytes, readme, consoleFiles, catalogOnly = false }) {
   const packageManifest = manifest({
     description: 'Verified package asset fixture',
     icon,
@@ -41,6 +41,7 @@ async function fixture({ icon, iconBytes, readme, catalogOnly = false }) {
     extraFiles: {
       [icon.src]: iconBytes,
       ...(readme === undefined ? {} : { 'README.md': Buffer.from(readme) }),
+      ...consoleFiles,
     },
   });
   const entry = catalogEntry(archive.integrity, {
@@ -152,6 +153,25 @@ describe('F202 Plugin Manager package assets', () => {
       throw new Error('executable staging must not run for documentation');
     };
     assert.equal(await assets.readReadme(packageManifest.pluginId), readme);
+  });
+
+  it('reads the installed sidebar declaration and translations without staging the executable tree', async () => {
+    const { assets, locator, packageManifest } = await fixture({
+      icon: { type: 'svg', src: 'assets/icon.svg' },
+      iconBytes: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'),
+      consoleFiles: {
+        'console/pdl.yaml': 'id: memory\nns: memory\n',
+        'console/i18n/zh.yaml': 'title: 记忆插件\n',
+        'console/components/workbench.css': '.memory { color: inherit; }',
+      },
+    });
+    locator.resolveInstalledPackage = () => {
+      throw new Error('executable staging must not run for the sidebar');
+    };
+    const result = await assets.readConsole(packageManifest.pluginId);
+    assert.equal(result.pdl.id, 'memory');
+    assert.deepEqual(result.i18n, { zh: { title: '记忆插件' } });
+    assert.deepEqual(result.components?.css, ['.memory { color: inherit; }']);
   });
 
   it('fails closed when declared PNG bytes do not match their media type', async () => {
