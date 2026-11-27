@@ -29,8 +29,33 @@ function currentSid() {
 }
 
 function aclFor(target) {
-  const acl = execFileSync('icacls.exe', [target], { encoding: 'utf8', windowsHide: true });
-  return { protected: !/\(I\)/.test(acl) };
+  const script = [
+    '$acl = Get-Acl -LiteralPath $env:SG_ACL_PATH',
+    '$owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value',
+    '$rules = @($acl.Access | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value })',
+    '[pscustomobject]@{owner=$owner; protected=$acl.AreAccessRulesProtected; rules=$rules} | ConvertTo-Json -Compress',
+  ].join('; ');
+  return JSON.parse(
+    execFileSync(
+      path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          SG_ACL_PATH: target,
+          PSModulePath: path.join(
+            process.env.SystemRoot || 'C:\\Windows',
+            'System32',
+            'WindowsPowerShell',
+            'v1.0',
+            'Modules',
+          ),
+        },
+        windowsHide: true,
+      },
+    ),
+  );
 }
 
 test('stable install marker remains authoritative after payload replacement', () => {
@@ -226,6 +251,33 @@ test(
       assert.equal(resolved.dataRoot, path.join(fs.realpathSync.native(path.join(app, 'user-state')), sid));
       assert.equal(fs.readFileSync(witness, 'utf8'), 'existing data');
       assert.equal(aclFor(profile).protected, true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'install mode removes explicit external ACL entries from an existing SID profile',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sid-external-acl-'));
+    const app = path.join(root, 'installed');
+    const program = path.join(app, 'desktop-dist', 'Clowder AI.exe');
+    const sid = currentSid();
+    const profile = path.join(app, 'user-state', sid);
+    const witness = path.join(profile, 'existing-conversation');
+    try {
+      configure(app);
+      fs.mkdirSync(profile, { recursive: true });
+      fs.writeFileSync(witness, 'existing data');
+      execFileSync('icacls.exe', [profile, '/grant', '*S-1-5-32-545:(OI)(CI)F'], { stdio: 'pipe' });
+      assert.equal(aclFor(profile).rules.includes('S-1-5-32-545'), true);
+      resolveDesktopRuntime({}, program);
+      const acl = aclFor(profile);
+      assert.equal(acl.protected, true);
+      assert.equal(acl.rules.includes('S-1-5-32-545'), false);
+      assert.equal(fs.readFileSync(witness, 'utf8'), 'existing data');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

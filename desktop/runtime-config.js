@@ -29,81 +29,81 @@ function resolveInstallDataRoot(installRoot) {
 
 function assertPrivateInstallProfile(dataRoot, sid) {
   const created = !fs.existsSync(dataRoot);
-  if (created) {
-    fs.mkdirSync(dataRoot);
-  } else {
-    assertInstallProfileOwner(dataRoot, sid);
+  if (created) fs.mkdirSync(dataRoot);
+  if (fs.lstatSync(dataRoot).isSymbolicLink()) {
+    throw new Error('Install data directory must not be a reparse point');
   }
-  if (created || hasInheritedAcl(dataRoot)) setPrivateProfileAcl(dataRoot, sid);
+  const acl = readInstallProfileAcl(dataRoot);
+  const trusted = [sid, 'S-1-5-18', 'S-1-5-32-544'];
+  if (!trusted.includes(acl.owner)) throw new Error('Install data directory is owned by another account');
+  if (!created && acl.protected && acl.rules.every((rule) => trusted.includes(rule))) return;
+  setPrivateProfileAcl(dataRoot, sid);
 }
 
-function assertInstallProfileOwner(dataRoot, sid) {
-  if (fs.lstatSync(dataRoot).isSymbolicLink()) throw new Error('Install data directory must not be a reparse point');
-  const owner = windowsOwnerSid(dataRoot);
-  if (![sid, 'S-1-5-18', 'S-1-5-32-544'].includes(owner)) {
-    throw new Error('Install data directory is owned by another account');
-  }
-}
-
-function windowsOwnerSid(target) {
-  const script = [
-    '$acl = Get-Acl -LiteralPath $env:SG_OWNER_PATH',
-    '$acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value',
-  ].join('; ');
-  const env = {
-    ...process.env,
-    SG_OWNER_PATH: target,
-    PSModulePath: path.join(
-      process.env.SystemRoot || 'C:\\Windows',
-      'System32',
-      'WindowsPowerShell',
-      'v1.0',
-      'Modules',
-    ),
-  };
-  const candidates = [
-    'pwsh.exe',
+function windowsPowerShell(script, extraEnv = {}) {
+  return execFileSync(
     path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-  ];
-  for (const executable of candidates) {
-    try {
-      const owner = execFileSync(executable, ['-NoProfile', '-NonInteractive', '-Command', script], {
-        encoding: 'utf8',
-        env,
-        windowsHide: true,
-      }).trim();
-      if (/^S-1-\d+(?:-\d+)+$/.test(owner)) return owner;
-    } catch {
-      // Try the next PowerShell host; do not fall back to truncated dir output.
-    }
-  }
-  throw new Error('Install data directory owner cannot be verified');
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        ...extraEnv,
+        PSModulePath: path.join(
+          process.env.SystemRoot || 'C:\\Windows',
+          'System32',
+          'WindowsPowerShell',
+          'v1.0',
+          'Modules',
+        ),
+      },
+      windowsHide: true,
+    },
+  );
 }
 
-function hasInheritedAcl(dataRoot) {
-  return /\(I\)/.test(runWindowsTool('icacls.exe', [dataRoot]));
+function readInstallProfileAcl(dataRoot) {
+  const script = [
+    '$acl = Get-Acl -LiteralPath $env:SG_ACL_PATH',
+    '$owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value',
+    '$rules = @($acl.Access | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value })',
+    '[pscustomobject]@{owner=$owner; protected=$acl.AreAccessRulesProtected; rules=$rules} | ConvertTo-Json -Compress',
+  ].join('; ');
+  try {
+    const parsed = JSON.parse(windowsPowerShell(script, { SG_ACL_PATH: dataRoot }));
+    return {
+      owner: String(parsed.owner || ''),
+      protected: parsed.protected === true,
+      rules: (Array.isArray(parsed.rules) ? parsed.rules : [parsed.rules]).filter(Boolean).map(String),
+    };
+  } catch {
+    throw new Error('Install data directory owner cannot be verified');
+  }
 }
 
 function setPrivateProfileAcl(dataRoot, sid) {
-  runWindowsTool('icacls.exe', [
-    dataRoot,
-    '/inheritance:r',
-    '/grant:r',
-    `*${sid}:(OI)(CI)F`,
-    '/grant:r',
-    '*S-1-5-18:(OI)(CI)F',
-    '/grant:r',
-    '*S-1-5-32-544:(OI)(CI)F',
-  ]);
-}
-
-function runWindowsTool(name, args) {
-  const absolute = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', name);
-  try {
-    return execFileSync(absolute, args, { encoding: 'utf8', windowsHide: true, stdio: 'pipe' });
-  } catch (error) {
-    if (!['ENOENT', 'EPERM'].includes(error.code)) throw error;
-    return execFileSync(name, args, { encoding: 'utf8', windowsHide: true, stdio: 'pipe' });
+  const script = [
+    '$path = $env:SG_ACL_PATH',
+    '$owner = New-Object System.Security.Principal.SecurityIdentifier($env:SG_ACL_SID)',
+    '$acl = New-Object System.Security.AccessControl.DirectorySecurity',
+    '$acl.SetOwner($owner)',
+    '$acl.SetAccessRuleProtection($true, $false)',
+    'foreach ($trusted in @($env:SG_ACL_SID, "S-1-5-18", "S-1-5-32-544")) {',
+    '  $identity = New-Object System.Security.Principal.SecurityIdentifier($trusted)',
+    '  $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($identity, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")',
+    '  $acl.AddAccessRule($rule)',
+    '}',
+    'Set-Acl -LiteralPath $path -AclObject $acl',
+  ].join('\n');
+  windowsPowerShell(script, { SG_ACL_PATH: dataRoot, SG_ACL_SID: sid });
+  const verified = readInstallProfileAcl(dataRoot);
+  const trusted = [sid, 'S-1-5-18', 'S-1-5-32-544'];
+  if (
+    !verified.protected ||
+    !trusted.includes(verified.owner) ||
+    !verified.rules.every((rule) => trusted.includes(rule))
+  ) {
+    throw new Error('Install data directory ACL verification failed');
   }
 }
 

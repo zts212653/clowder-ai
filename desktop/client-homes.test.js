@@ -77,7 +77,7 @@ test('ordinary desktop launches resolve the current user client homes without co
     );
     assert.equal(resolved.CLAUDE_CONFIG_DIR, fs.realpathSync.native(claude));
     assert.equal(resolved.CODEX_HOME, fs.realpathSync.native(codex));
-    assert.equal(resolved.GEMINI_CLI_HOME, fs.realpathSync.native(gemini));
+    assert.equal(resolved.GEMINI_CLI_HOME, fs.realpathSync.native(home));
     assert.equal(Object.hasOwn(resolved, 'HOME'), false);
 
     const explicitGemini = path.join(root, 'explicit-gemini');

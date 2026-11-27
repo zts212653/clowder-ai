@@ -509,7 +509,7 @@ test(
         { envOverrides: manager._buildApiEnv(business) },
       );
       assert.equal(await new Promise((resolve) => manager.procs.api.once('exit', resolve)), 0);
-      assert.equal(JSON.parse(fs.readFileSync(capture, 'utf8')), fs.realpathSync.native(gemini));
+      assert.equal(JSON.parse(fs.readFileSync(capture, 'utf8')), fs.realpathSync.native(originalProfile));
     } finally {
       process.execPath = execPath;
       if (previousGemini === undefined) delete process.env.GEMINI_CLI_HOME;
