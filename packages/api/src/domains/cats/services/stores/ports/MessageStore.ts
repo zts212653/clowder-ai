@@ -325,6 +325,8 @@ export interface StoredMessage {
   metadata?: MessageMetadata;
   /** F022+F052+F098-C1+F153-F: Extensible extra data (rich blocks, stream metadata, cross-post origin, explicit targets, tracing pointers) */
   extra?: {
+    /** Server-captured protected-title revision when this user message was accepted; immutable on replay. */
+    userTitleRevisionAtRequest?: number;
     watcher?: { kind: 'nudge'; sourceInvocationId: string; sourceMessageId: string; watcherInvocationId: string };
     /** Authenticated cloud-return scope, never a replacement for native delivery history. */
     cloudBridgeReturn?: import('@cat-cafe/shared').CloudBridgeReturnV1;

@@ -28,6 +28,8 @@ import { mergeThreadRoadmap, type RoadmapMutation, type ThreadRoadmap, threadRoa
 /** Default thread ID for the lobby (backwards-compatible single-thread mode) */
 export const DEFAULT_THREAD_ID = 'default';
 
+export type UserRequestedTitleResult = 'applied' | 'revision_conflict' | 'not_found' | 'deleted';
+
 /** Stable, user-scoped identity for a first-run thread retry. */
 export function onboardingThreadId(userId: string, journeyId: string): string {
   // Preserve every code point in a reversible, key-safe representation. The
@@ -232,6 +234,8 @@ export interface Thread {
   title: string | null;
   titleSource?: 'user' | 'temporary' | 'cat';
   titleCatId?: string;
+  /** Protected (user-source) naming decisions; automatic naming/progress does not increment this. */
+  userTitleRevision?: number;
   /** Successful import coordinate; the chain record remains the origin authority. */
   sessionImport?: { sessionId: string; catId: string };
   createdBy: string;
@@ -808,7 +812,13 @@ export interface IThreadStore {
     title: string,
     source: 'temporary' | 'cat',
     catId?: string,
+    intent?: 'name' | 'update',
   ): boolean | Promise<boolean>;
+  setUserRequestedTitle(
+    threadId: string,
+    title: string,
+    expectedUserTitleRevision: number,
+  ): UserRequestedTitleResult | Promise<UserRequestedTitleResult>;
   /** Exact title CAS used to scrub/restore message-derived copies without clobbering user edits. */
   compareAndSetTitle(threadId: string, expectedTitle: string, nextTitle: string): boolean | Promise<boolean>;
   /** ISSUE-16: backfill projectPath for threads created before the fix */
@@ -1299,6 +1309,7 @@ export class ThreadStore implements IThreadStore {
       thread.title = title;
       thread.titleSource = 'user';
       delete thread.titleCatId;
+      thread.userTitleRevision = (thread.userTitleRevision ?? 0) + 1;
     }
   }
 
@@ -1307,15 +1318,34 @@ export class ThreadStore implements IThreadStore {
     if (thread) thread.sessionImport = value;
   }
 
-  setAutomaticTitle(threadId: string, title: string, source: 'temporary' | 'cat', catId?: string): boolean {
+  setAutomaticTitle(
+    threadId: string,
+    title: string,
+    source: 'temporary' | 'cat',
+    catId?: string,
+    intent: 'name' | 'update' = 'name',
+  ): boolean {
     const thread = this.get(threadId);
-    if (!thread || thread.deletedAt || (thread.titleSource ?? (thread.title ? 'user' : 'temporary')) !== 'temporary')
-      return false;
+    if (!thread || thread.deletedAt) return false;
+    const currentSource = thread.titleSource ?? (thread.title ? 'user' : 'temporary');
+    const effectiveIntent = source === 'cat' ? intent : 'name';
+    if (effectiveIntent === 'name' && currentSource !== 'temporary') return false;
+    if (effectiveIntent === 'update' && currentSource === 'user') return false;
     if (source === 'temporary' && thread.title !== null) return false;
     thread.title = title;
     thread.titleSource = source;
-    if (source === 'cat' && catId) thread.titleCatId = catId;
+    if (thread.titleSource === 'cat' && catId) thread.titleCatId = catId;
+    else delete thread.titleCatId;
     return true;
+  }
+
+  setUserRequestedTitle(threadId: string, title: string, expectedUserTitleRevision: number): UserRequestedTitleResult {
+    const thread = this.get(threadId);
+    if (!thread) return 'not_found';
+    if (thread.deletedAt) return 'deleted';
+    if ((thread.userTitleRevision ?? 0) !== expectedUserTitleRevision) return 'revision_conflict';
+    this.updateTitle(threadId, title);
+    return 'applied';
   }
 
   compareAndSetTitle(threadId: string, expectedTitle: string, nextTitle: string): boolean {

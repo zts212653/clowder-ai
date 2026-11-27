@@ -44,7 +44,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAckMentions",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_act_artifact_review",
@@ -1318,7 +1318,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleAdmitEntrustedWork",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_advance_evolution_program_change",
@@ -2186,7 +2186,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleBootcampEnvCheck",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_bring_to_desk",
@@ -2937,7 +2937,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCloseEntrustedWork",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_constitute_evolution_program",
@@ -3155,7 +3155,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleContinueApprovedTask",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_create_rich_block",
@@ -3285,7 +3285,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateRichBlock",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_create_task",
@@ -3379,7 +3379,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCreateTask",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_cross_post_message",
@@ -3715,7 +3715,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleCrossPostMessage",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_development_return",
@@ -4386,7 +4386,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDisposeDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_drill_person_memory",
@@ -4483,7 +4483,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleDrillPersonMemory",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_edit_office_document",
@@ -4673,7 +4673,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleFeatIndex",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_finance_query",
@@ -4830,7 +4830,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGenerateDocument",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_get_available_guides",
@@ -4866,7 +4866,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetAvailableGuides",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_get_custody_events",
@@ -4917,7 +4917,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetCustodyEvents",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_get_evolution_program",
@@ -5056,7 +5056,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetHoldStatus",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_get_message",
@@ -5122,7 +5122,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetMessage",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_get_pending_decisions",
@@ -5171,7 +5171,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingDecisions",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_get_pending_mentions",
@@ -5218,7 +5218,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingMentions",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_get_person_memory_proposal_status",
@@ -5269,7 +5269,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetPersonMemoryProposalStatus",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_get_recall_metrics",
@@ -5395,7 +5395,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetRunningWork",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_get_thread_cats",
@@ -5452,7 +5452,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadCats",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_get_thread_context",
@@ -5558,7 +5558,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadContext",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_get_thread_metadata",
@@ -5592,7 +5592,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadMetadata",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_get_workflow_sop",
@@ -5641,7 +5641,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGetWorkflowSop",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_guide_control",
@@ -5689,7 +5689,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleGuideControl",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_hold_ball",
@@ -5837,7 +5837,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleHoldBall",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_home_action",
@@ -6748,7 +6748,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListLabels",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_list_paw_feel_inbox",
@@ -7031,7 +7031,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListTasks",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_list_threads",
@@ -7109,7 +7109,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleListThreads",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_manage_conversation_decision",
@@ -7668,7 +7668,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleMultiMention",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_offer_custody",
@@ -7728,7 +7728,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleOfferCustody",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_offer_suggestion",
@@ -9969,7 +9969,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handlePostMessage",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_prepare_artifact_review",
@@ -10105,7 +10105,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handlePrepareMemoryContext",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_prepare_request_review_consumption",
@@ -10724,7 +10724,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeSessionHandoff",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_propose_thread",
@@ -10850,7 +10850,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleProposeThread",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_publish_harness_history",
@@ -13177,7 +13177,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecallPersonRelationship",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_record_eval_lifecycle",
@@ -13701,7 +13701,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRecordMemoryCueOutcome",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_record_request_review_consumption",
@@ -14197,7 +14197,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRegisterDeploymentWait",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_register_external_runtime_session",
@@ -17255,7 +17255,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRetryCustodyAdmission",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_revise_person_memory",
@@ -17558,7 +17558,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleRevisePersonMemory",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_run_perspective",
@@ -17922,7 +17922,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetReadMode",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_set_thread_metadata",
@@ -17932,10 +17932,10 @@
         "update"
       ],
       "activeState": "canonical",
-      "description": "Write low-frequency metadata anchors for the current thread. Merge semantics: title names an untitled conversation once; labels REPLACE; worktrees/prs/issues/features APPEND with dedupe (use remove* fields to remove); notes MERGE (string sets, null deletes key). roadmap binds one original file or records a revocation tombstone, with expectedRevision concurrency protection. Notes limits: keys at most 100 and string values at most 2000 UTF-16 code units, without trimming; at most 50 keys per request including null deletions, and 200 surviving keys after merge. Oversize updates are rejected without truncation. Use when: naming an untitled conversation, recording an association, or explicitly choosing/revoking the original roadmap for a long work line. NOT for: renaming an already named conversation, taking over a Task or storing derived progress. Output: updated metadata; roadmapBinding returns normalized persistent coordinates and revision, roadmap returns current file/version/as-of or revoked/invalid/unavailable. Later activity means needs checking, never automatically obsolete. File readers retain their own access checks. Title requests include titleApplied and titleSource. If titleApplied=false, report that the title was not changed. SCOPE: current thread only (no threadId param); cross-thread writes are impossible. GOTCHA: the legacy title parameter hint does not authorize replacement. User and previously cat-named titles are protected; check titleApplied.",
-      "descriptionDigest": "sha256:f14819695896eccf8b2667685450d0c29af582798ca504cec57d03c21aec9244",
-      "descriptionCharacters": 1482,
-      "descriptionTokensCl100kBase": 286,
+      "description": "Write low-frequency metadata anchors for the current thread. Merge semantics: titleIntent defaults to name (first naming); update revises cat titles as work progresses; user_requested honors an explicit user rename and saves a protected user title. labels REPLACE; worktrees/prs/issues/features APPEND with dedupe (use remove* fields to remove); notes MERGE (string sets, null deletes key). roadmap binds one original file or records a revocation tombstone, with expectedRevision concurrency protection. Notes limits: keys at most 100 and string values at most 2000 UTF-16 code units, without trimming; at most 50 keys per request including null deletions, and 200 surviving keys after merge. Oversize updates are rejected without truncation. Use when: naming or updating this conversation title, honoring a user rename request, recording an association, or explicitly choosing/revoking the original roadmap for a long work line. NOT for: automatic changes to user-chosen titles, taking over a Task or storing derived progress. Output: updated metadata; roadmapBinding returns normalized persistent coordinates and revision, roadmap returns current file/version/as-of or revoked/invalid/unavailable. Later activity means needs checking, never automatically obsolete. File readers retain their own access checks. Title requests include titleApplied, titleSource and titleReason. A newer protected decision returns titleApplied=false/newer_protected_title. An unbound user request or missing message snapshot returns 403/409. Report the actual result; do not silently retry an old rename. SCOPE: current thread only (no threadId param); cross-thread writes are impossible. GOTCHA: supply titleIntent for later renames; user_requested requires a current direct user-message instruction and its server snapshot, not an A2A/automatic turn. No model-supplied revision is accepted. Check titleApplied before reporting success.",
+      "descriptionDigest": "sha256:5b16c7efbba8e2164abcee642e4caf2a0bb66bf75695f380accfda8ac2c0304b",
+      "descriptionCharacters": 1919,
+      "descriptionTokensCl100kBase": 373,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -18139,8 +18139,17 @@
             "description": "Bind one original work-line roadmap in this thread, or retain a revocation tombstone. Active: existing project root + repository-relative Markdown path. sourceRef=thread:<currentThreadId>#<messageId> must be readable here. expectedRevision=null for first bind; otherwise use roadmapBinding.revision from get_thread_metadata. Server normalizes disposable worktrees to a persistent root and derives actor/time/version; a pointer grants no read or work authority."
           },
           "title": {
-            "description": "Update thread title (replaces existing)",
+            "description": "Thread title to save; use titleIntent for later renames",
             "minLength": 1,
+            "type": "string"
+          },
+          "titleIntent": {
+            "description": "Requires title. Default name: name a temporary title once. update: revise a cat title only after a material change in task stage, issue/PR association or focus; preserve user titles. user_requested: only for the current user message explicitly requesting this rename. The server binds that message and its protected-title decision revision; a newer protected decision, including saving the same name, rejects the old request. Saves a protected user title. Do not retry a rejected old request with newly read state.",
+            "enum": [
+              "name",
+              "update",
+              "user_requested"
+            ],
             "type": "string"
           },
           "worktrees": {
@@ -18153,7 +18162,7 @@
         },
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:14058cf662bf298b5ca502d1159c4e5b310760950a4fa9e77b2068cc6ff502f3",
+      "inputSchemaDigest": "sha256:cb866221ef2fc8ee4d7e955c2f4d148626eed28f7940d4207bc3c98a79a88819",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -18167,7 +18176,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleSetThreadMetadata",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_settle_present_loop",
@@ -18869,7 +18878,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartGuide",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_start_vote",
@@ -18947,7 +18956,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleStartVote",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_submit_evolution_preparation",
@@ -20685,7 +20694,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateBootcampState",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_update_entrusted_work",
@@ -20870,7 +20879,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateEntrustedWork",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_update_evolution_program",
@@ -21217,7 +21226,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateGuideState",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_update_scheduled_task_params",
@@ -21370,7 +21379,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateTask",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_update_workflow",
@@ -21520,7 +21529,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateWorkflow",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_video_project_command",
@@ -22241,7 +22250,7 @@
         "policy": "host-default"
       },
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawThreadProposal",
-      "protectedImplementationDigest": "sha256:8a7d7a91917d316c3fab27d1b7acd217591ba7b0f721c9cacf825c381e4c53c9"
+      "protectedImplementationDigest": "sha256:de171b2f7fc969047207b496b6b4704c2273391a17a444c58cadf7f161b77581"
     },
     {
       "name": "cat_cafe_work",
