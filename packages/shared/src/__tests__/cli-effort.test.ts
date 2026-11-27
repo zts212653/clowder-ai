@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getCliEffortOptionsForProvider,
   getDefaultCliEffortForProvider,
+  inferGoogleModelEffort,
   isValidCliEffortForProvider,
   normalizeCliEffortForProvider,
   normalizeModelSlug,
@@ -110,6 +111,34 @@ describe('CLI effort capabilities', () => {
 
   it('keeps Anthropic effort options unchanged', () => {
     expect(getCliEffortOptionsForProvider('anthropic', 'claude-opus-4-6')).toEqual(['low', 'medium', 'high', 'max']);
+  });
+
+  it('exposes xhigh effort options and suffix inference for Gemini 4 Neon and Hydrogen', () => {
+    for (const model of [
+      'gemini-4-neon',
+      'gemini-4-neon-low',
+      'gemini-4-neon-medium',
+      'gemini-4-neon-high',
+      'gemini-4-neon-xhigh',
+      'Gemini 4 Neon (XHigh)',
+      'Gemini 4 Neon (High)',
+      'gemini-4-hydrogen-xhigh',
+    ]) {
+      expect(getCliEffortOptionsForProvider('google', model)).toEqual(['low', 'medium', 'high', 'xhigh']);
+      expect(isValidCliEffortForProvider('google', 'xhigh', model)).toBe(true);
+      expect(isValidCliEffortForProvider('google', 'max', model)).toBe(false);
+    }
+    expect(normalizeCliEffortForProvider('google', 'xhigh', 'gemini-4-neon-high')).toBe('xhigh');
+    expect(inferGoogleModelEffort('gemini-4-neon-xhigh')).toBe('xhigh');
+    expect(inferGoogleModelEffort('Gemini 4 Neon (XHigh)')).toBe('xhigh');
+    expect(inferGoogleModelEffort('gemini-4-argon-high')).toBe('high');
+    expect(inferGoogleModelEffort('gemini-4-neon')).toBeNull();
+    expect(inferGoogleModelEffort('gemini-4-argon-xhigh')).toBeNull();
+    expect(resolveCliEffortOverride('google', 'gemini-4-neon-high', 'high', 'xhigh')).toEqual({
+      effective: 'xhigh',
+      source: 'thread_override',
+      compatibility: 'compatible',
+    });
   });
 
   it('resolves a compatible thread override above the inherited effort', () => {

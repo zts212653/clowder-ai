@@ -38,6 +38,8 @@ export function useRuntimeCatalog(
     runtimeId === 'pi' ||
     runtimeId === 'kimi' ||
     runtimeId === 'claude' ||
+    runtimeId === 'agy-native' ||
+    runtimeId === 'agy-acp' ||
     runtimeId?.startsWith('acp:') ||
     plugin
       ? model

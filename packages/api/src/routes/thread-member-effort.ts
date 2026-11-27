@@ -5,6 +5,7 @@ import {
   catRegistry,
   createCatId,
   getCliEffortOptionsForProvider,
+  inferGoogleModelEffort,
   resolveCliEffortOverride,
   type ThreadMemberEffortRow,
 } from '@cat-cafe/shared';
@@ -30,6 +31,15 @@ function getParticipantIds(thread: Pick<Thread, 'participants'>): Set<string> {
   return new Set(thread.participants.map(String));
 }
 
+function resolveEffectiveModelForEffort(catId: string): string {
+  const config = catRegistry.tryGet(catId)?.config;
+  if (config?.agyProfile?.carrier === 'native' || config?.agyProfile?.carrier === 'acp') {
+    const profileModel = config.agyProfile.model?.trim();
+    if (profileModel) return profileModel;
+  }
+  return getCatModel(catId);
+}
+
 function buildEffortRow(
   catId: string,
   rawOverride: CliEffortPreset | null | undefined,
@@ -38,11 +48,16 @@ function buildEffortRow(
   const config = catRegistry.tryGet(catId)?.config;
   if (!config || !isCatAvailable(catId)) return null;
 
-  const effectiveModel = getCatModel(catId);
+  const effectiveModel = resolveEffectiveModelForEffort(catId);
   const options = getCliEffortOptionsForProvider(config.clientId, effectiveModel);
   if (!options) return null;
 
-  const inherited = getCatEffort(catId, undefined, config.clientId, effectiveModel);
+  const rawInherited = getCatEffort(catId, undefined, config.clientId, effectiveModel);
+  const inherited =
+    rawInherited ||
+    (config.clientId === 'google' || config.clientId === 'antigravity'
+      ? (inferGoogleModelEffort(effectiveModel) ?? 'high')
+      : rawInherited);
   const resolution = resolveCliEffortOverride(config.clientId, effectiveModel, inherited, rawOverride);
   return {
     catId: createCatId(catId),
@@ -117,7 +132,7 @@ export const threadMemberEffortRoutes: FastifyPluginAsync<ThreadMemberEffortRout
 
       const catId = createCatId(String(catResult.data));
       const config = catRegistry.tryGet(catId)?.config;
-      const effectiveModel = config ? getCatModel(catId) : null;
+      const effectiveModel = config ? resolveEffectiveModelForEffort(catId) : null;
       const options = config ? getCliEffortOptionsForProvider(config.clientId, effectiveModel) : null;
       if (!config || !isCatAvailable(catId) || !options) {
         reply.status(400);

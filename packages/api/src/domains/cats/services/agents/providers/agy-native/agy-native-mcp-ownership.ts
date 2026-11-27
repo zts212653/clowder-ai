@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { lstatSync, realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import {
   CAT_CAFE_SPLIT_ENTRYPOINTS,
   resolveCatCafeNodeCommand,
@@ -37,7 +37,18 @@ export function commonGitDirectory(root: string): string {
   if (realpathSync(git('rev-parse', '--show-toplevel')) !== root)
     throw new Error('AGY MCP binding is not a repository root');
   const common = realpathSync(git('rev-parse', '--path-format=absolute', '--git-common-dir'));
-  if (!git('worktree', 'list', '--porcelain').split('\n').includes(`worktree ${root}`)) {
+  const worktrees = git('worktree', 'list', '--porcelain')
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => {
+      const candidate = line.slice('worktree '.length).trim();
+      try {
+        return realpathSync(candidate);
+      } catch {
+        return candidate;
+      }
+    });
+  if (!worktrees.includes(root)) {
     throw new Error('AGY MCP binding is not a registered repository worktree');
   }
   return common;
@@ -74,7 +85,7 @@ export function assertExistingServerIsHostOwned(
   const values = env as Record<string, unknown>;
   const path = Array.isArray(server.args) && server.args.length === 1 ? server.args[0] : undefined;
   const credential = values.CAT_CAFE_CREDENTIAL_FILE;
-  const suffix = `/packages/mcp-server/dist/${entrypoint}`;
+  const suffix = `${sep}packages${sep}mcp-server${sep}dist${sep}${entrypoint}`;
   if (
     Object.keys(server).sort().join(',') !== 'args,command,env' ||
     server.command !== realpathSync(resolveCatCafeNodeCommand()) ||

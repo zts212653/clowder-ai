@@ -68,7 +68,7 @@ function getGoogleEffortOptions(model: string | null | undefined): readonly CliE
   const modelId = normalizeModelSlug(model);
   if (!modelId) return CLI_EFFORT_OPTIONS_BY_PROVIDER.google;
   const base = modelId.replace(/-(?:low|medium|high|xhigh|max)$/, '');
-  if (base.startsWith('gemini-4-hydrogen')) return GOOGLE_XHIGH_EFFORT_OPTIONS;
+  if (base.startsWith('gemini-4-hydrogen') || base.startsWith('gemini-4-neon')) return GOOGLE_XHIGH_EFFORT_OPTIONS;
   if (base.startsWith('gemini-3.1-pro')) return GOOGLE_PRO_EFFORT_OPTIONS;
   if (
     base.startsWith('gemini-4-carbon') ||
@@ -78,6 +78,20 @@ function getGoogleEffortOptions(model: string | null | undefined): readonly CliE
     return CLI_EFFORT_OPTIONS_BY_PROVIDER.google;
   }
   return null;
+}
+
+/**
+ * Extract the explicit effort tier encoded in a Google/AGY model selector
+ * (e.g. `gemini-4-neon-xhigh` or `Gemini 4 Neon (XHigh)` → `'xhigh'`),
+ * validated against that model's supported effort tiers.
+ */
+export function inferGoogleModelEffort(model: string | null | undefined): CliEffortPreset | null {
+  const modelId = normalizeModelSlug(model);
+  if (!modelId) return null;
+  const suffix = modelId.match(/-(low|medium|high|xhigh|max)$/)?.[1] as CliEffortPreset | undefined;
+  if (!suffix) return null;
+  const options = getGoogleEffortOptions(modelId);
+  return options?.includes(suffix) ? suffix : null;
 }
 
 function getOpenAiEffortOptions(model: string | null | undefined): readonly CliEffortPreset[] {

@@ -5,6 +5,7 @@ import {
   resolveCatCafeDataRoot,
   sameUnixProcess,
 } from '../../../../../../utils/cli-process-ownership.js';
+import { currentWindowsApiJob } from '../../../../../../utils/windows-job-owner.js';
 import { acquireAgyNativeProfileTurnAsync } from './profile-turn/async.js';
 import {
   AgyNativeProfileBusyError,
@@ -16,6 +17,7 @@ import {
   parseNativeTurnOwner,
   retireOrphanCredentials,
 } from './profile-turn/store.js';
+import { isWin32NativeTurnRetiredSync, readWin32ProcessIdentitySync } from './profile-turn/win32-process-identity.js';
 
 export { AgyNativeProfileBusyError, type AgyNativeTurnScope } from './profile-turn/store.js';
 
@@ -38,6 +40,7 @@ export async function waitForAgyNativeProfileTurn(
 }
 
 function isRetired(owner: ProfileTurnOwner, home: string): boolean {
+  if (process.platform === 'win32') return isWin32NativeTurnRetiredSync(owner, home);
   const exact = readUnixProcessSnapshotSync({ pids: [owner.identity.pid] });
   if (!exact || sameUnixProcess(owner.identity, exact.get(owner.identity.pid))) return false;
   const snapshot = readUnixProcessSnapshotSync({
@@ -53,7 +56,10 @@ export function acquireAgyNativeProfileTurn(
   invocationId?: string,
   scope: AgyNativeTurnScope = {},
 ): () => void {
-  const identity = readUnixProcessSnapshotSync({ pids: [process.pid] })?.get(process.pid);
+  const identity =
+    process.platform === 'win32'
+      ? (readWin32ProcessIdentitySync(process.pid) ?? undefined)
+      : readUnixProcessSnapshotSync({ pids: [process.pid] })?.get(process.pid);
   if (!identity) throw new Error('Native profile ownership requires a verified process birth identity');
   const { db, table, key, value } = openNativeTurnStore(home, scope);
   const token = randomUUID();
@@ -70,12 +76,21 @@ export function acquireAgyNativeProfileTurn(
         // that fences the successor. Never retire a live turn's MCP credential.
         if (!owner.preparation) retireOrphanCredentials(owner.runHome ?? home, home);
       }
+      const activeWinJob = process.platform === 'win32' ? currentWindowsApiJob() : null;
       const owner: ProfileTurnOwner = {
         identity,
         dataRoot: resolveCatCafeDataRoot(),
         ...(invocationId ? { invocationId } : {}),
         ...(scope.runHome ? { runHome: scope.runHome } : {}),
         ...(scope.preparation ? { preparation: true } : {}),
+        ...(activeWinJob
+          ? {
+              windowsJob: {
+                jobName: activeWinJob.record.jobName,
+                sessionId: activeWinJob.record.sessionId,
+              },
+            }
+          : {}),
       };
       db.prepare(
         `INSERT INTO ${table} (${key}, token, owner) VALUES (?, ?, ?) ON CONFLICT(${key}) DO UPDATE SET token = excluded.token, owner = excluded.owner`,
