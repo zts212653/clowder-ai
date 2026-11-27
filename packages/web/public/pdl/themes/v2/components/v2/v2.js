@@ -103,9 +103,9 @@ PDL_COMPONENTS.v2ThreadSignals = function (p, sc, root) {
 PDL_COMPONENTS.v2Threads = function (p, sc, root) {
   return pvList(p.from, sc, root).map(function draw(s) {
     if (s.other) return s.other.open ? s.other.sections.map(draw).join('') : '';
-    const hd = s.head, isRecent = hd.kind === 'sec', isGroup = hd.kind === 'group', show = !isRecent && !s.collapsed;
-    const headAct = isGroup ? 'setStatus' : 'fold';
-    const headArgs = isGroup ? { entity: 'group', id: hd.id, field: 'open' } : { f: 'sec', k: s.key };
+    const hd = s.head, isRecent = hd.kind === 'sec', isGroup = hd.kind === 'group', isProject = hd.kind === 'proj', show = !isRecent && (isProject ? hd.open : !s.collapsed);
+    const headAct = isGroup ? 'setStatus' : isProject ? 'toggle' : 'fold';
+    const headArgs = isGroup ? { entity: 'group', id: hd.id, field: 'open' } : isProject ? { path: 'cs.projOpen.{id}', id: hd.id } : { f: 'sec', k: s.key };
     const headMore = isGroup && p.groupMore ? '<button type="button" class="shell-focusable p-0.5 rounded transition-all flex h-5 w-5 flex-none items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100"' + actAttrs('menu', { menu: menuLive(rowMenuItems(p.groupMore.items, hd, root)), k: hd.id }) + MENU_DECL + ' aria-label="' + pvText(p.groupMore.label, hd, root) + '">' + v2Glyph('more', 'h-3.5 w-3.5') + '</button>' : '';
     const head = isRecent ? '' : '<div class="group flex w-full items-center gap-1 px-3 py-1.5 text-xs"><button type="button" class="shell-focusable flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left" aria-expanded="' + (show ? 'true' : 'false') + '"' + actAttrs(headAct, headArgs) + '>' + (isGroup ? v2Glyph('folder', 'h-3.5 w-3.5 shrink-0') : '') + '<span class="min-w-0 truncate font-medium">' + h(hd.name) + '</span>' + (isGroup && !show && hd.attention > 0 ? '<span class="shrink-0 text-label" style="color:var(--shell-muted)">' + h(tc('threadRow.groupAttention', hd.attention)) + '</span>' : '') + '<span class="ml-auto shrink-0 tabular-nums" style="color:var(--shell-muted)">' + h(hd.n) + '</span>' + v2Glyph(show ? 'chevronDown' : 'chevronRight', 'h-3 w-3 shrink-0') + '</button>' + headMore + '</div>';
     const rows = isRecent || show ? s.rows : s.peek;

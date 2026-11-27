@@ -4,6 +4,7 @@
   "moreHtml": "{0} more"
  },
  "threadRow": {
+  "unassigned": "Uncategorized",
   "groupAttention": "{0} to see",
   "meta": {
    "pending": "Needs decision",

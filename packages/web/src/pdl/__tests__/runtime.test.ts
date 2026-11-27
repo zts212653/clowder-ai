@@ -422,7 +422,11 @@ async function boot(
                                         },
                                         errorHints: [],
                                       }
-                                    : undefined,
+                                    : path === '/api/accounts'
+                                      ? { providers: [] }
+                                      : path.startsWith('/api/accounts/')
+                                        ? { selection: { members: [] } }
+                                        : undefined,
     ),
     post: vi.fn(async () => undefined),
     file: (s: string) => (s ? new URL(s, 'https://api.test').href : ''),
@@ -4511,6 +4515,63 @@ describe('unmodified runtime and project chat bindings', () => {
       await w.__settled();
       expect(w.eval('VM.cafeNavShell().byProject')).toBe(false);
       expect(ui.projOpen?.[alpha]).toBe(false);
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      dom.window.close();
+    }
+  });
+  it.each([
+    ['sys:1', 'zh', '未分类'],
+    ['sys:1', 'en', 'Uncategorized'],
+    ['pkg:v2', 'zh', '未分类'],
+    ['pkg:v2', 'en', 'Uncategorized'],
+  ])('labels the default project group in %s / %s and preserves custom names', async (theme, lang, label) => {
+    const { dom, w, data, action, errors } = await boot(
+      undefined,
+      (data, state) => {
+        state.group = 'project';
+        data.threads[0].projectPath = 'default';
+        data.threads.push({ ...data.threads[0], id: 'sibling', projectPath: '/project/sibling' });
+      },
+      undefined,
+      {},
+      (port) => {
+        const get = port.get;
+        port.get = (path, params) =>
+          path === '/api/config/console-themes'
+            ? Promise.resolve({ themes: { active: theme, customs: [] } })
+            : get(path, params);
+      },
+      { lang },
+    );
+    try {
+      const section = () => w.document.querySelector('[data-sec="proj:default"], [data-section="proj:default"]');
+      const toggle = () => section().querySelector('[aria-expanded]');
+      const head = () => w.eval('VM.navThreads().sections.find(s=>s.key==="proj:default").head');
+      expect(head().name).toBe(label);
+      expect(head().unassigned).toBe(true);
+      expect(toggle().textContent).toContain(label);
+      expect(section().querySelector('[data-tip="default"]')).toBeNull();
+      expect(head().n).toBe(1);
+      expect(toggle().getAttribute('aria-expanded')).toBe('true');
+      expect(w.eval('VM.navThreads().sections.find(s=>s.key==="proj:/project/sibling").head.name')).toBe('sibling');
+
+      toggle().click();
+      await w.__settled();
+      expect(section().hasAttribute('data-collapsed')).toBe(true);
+      expect(toggle().getAttribute('aria-expanded')).toBe('false');
+      expect(toggle().textContent).toContain(label);
+      toggle().click();
+      await w.__settled();
+      section().querySelector('[data-act="thread"][data-id="pdl-test"]').click();
+      await w.__settled();
+      expect(action).toHaveBeenCalledWith('thread', expect.objectContaining({ id: 'pdl-test' }), undefined);
+
+      data.projectNames = new Map([['default', 'My conversations']]);
+      w.clowderChat.pushSidebar(fixtureSidebar(data));
+      await w.__settled();
+      expect(toggle().textContent).toContain('My conversations');
+      expect(head().unassigned).toBe(true);
       expect(errors).not.toHaveBeenCalled();
     } finally {
       dom.window.close();
