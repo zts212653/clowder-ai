@@ -3490,9 +3490,10 @@ async function initializeApi(
       queueProcessor.hasActiveQueueProducer(threadId, userId, catId, executionId),
     reapStalePrestartReservations: (now) => queueProcessor.reapStalePrestartReservations(now),
     listRunningRecords: () => invocationRecordStore.listRunningForRecovery(),
-    reconcileZombie: (zombie) =>
+    reconcileZombie: (zombie, canConvergeQueue) =>
       reconcileZombies([zombie], {
         invocationRecordStore,
+        canConvergeQueue,
         taskProgressStore,
         ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
         log: app.log,

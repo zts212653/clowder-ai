@@ -62,7 +62,7 @@ describe('F264 Gap F true recall contract (Redis store)', { skip: redisIsolation
     );
   }
 
-  it('keeps another input appendable after a draft conflict restores its sibling', async (t) => {
+  it('keeps another input appendable after recall and steer claims are restored', async (t) => {
     const threadId = 'thread-queue-recall-version';
     const userId = 'owner-redis';
     const queue = new InvocationQueue(new RedisQueueLedgerStore(redis));
@@ -135,6 +135,15 @@ describe('F264 Gap F true recall contract (Redis store)', { skip: redisIsolation
     assert.ok(revisionDuringClaim);
     assert.ok(await queue.claimExactAppend(threadId, userId, entryId, revisionDuringClaim, ['codex']));
     assert.equal(await queue.restoreClaimedEntries(threadId, [entryId]), true);
+
+    const steer = await queue.claimExactSteerEntryDurable(threadId, userId, first.entries[0].id, 'codex');
+    assert.equal(steer.outcome, 'claimed');
+    assert.ok(steer.entries[0].delivery.steerRequestedAt);
+    const revisionDuringSteer = queue.snapshotRevision(threadId, userId);
+    assert.equal(await queue.restoreClaimedEntries(threadId, [first.entries[0].id]), true);
+    assert.ok(await queue.claimExactAppend(threadId, userId, entryId, revisionDuringSteer, ['codex']));
+    assert.equal(await queue.restoreClaimedEntries(threadId, [entryId]), true);
+
     assert.equal(await queue.setPositionDurable(threadId, userId, entryId, 0), true);
     assert.equal(await queue.claimExactAppend(threadId, userId, entryId, revision, ['codex']), null);
     assert.ok(

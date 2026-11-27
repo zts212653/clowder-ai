@@ -2455,8 +2455,18 @@ export class InvocationQueue {
     // A claim fences its own row separately. Other rows should see the same
     // revision before and during a reversible claim, and after its restoration.
     const rows = this.list(threadId, userId).map(
-      ({ claimId, claimedAt, claimedTargetIds, claimedFromTargetless, retiringGroupId, status, ...row }) => ({
+      ({
+        claimId,
+        claimedAt,
+        claimedTargetIds,
+        claimedFromTargetless,
+        retiringGroupId,
+        status,
+        delivery: { steerRequestedAt, ...delivery },
+        ...row
+      }) => ({
         ...row,
+        delivery,
         status: status === 'claimed' ? 'queued' : status,
         ...(claimedFromTargetless ? { targets: [] } : {}),
       }),

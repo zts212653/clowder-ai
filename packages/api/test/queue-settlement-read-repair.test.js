@@ -202,9 +202,10 @@ function queueOwnerReaper(h) {
     ownerLeaseTtlMs: 30_000,
     hasActiveQueueProducer: (threadId, userId, catId, executionId) =>
       h.processor.hasActiveQueueProducer(threadId, userId, catId, executionId),
-    reconcileZombie: (zombie) =>
+    reconcileZombie: (zombie, canConvergeQueue) =>
       reconcileZombies([zombie], {
         invocationRecordStore: h.invocationRecordStore,
+        canConvergeQueue,
         invocationQueue: h.queue,
         log: h.log,
       }),
@@ -283,30 +284,59 @@ it('does not publish or retire the source when a reclaimed producer reaches admi
   );
 });
 
-it('leaves a replacement execution and its exact claim in place when the old child arrives', async (t) => {
-  const h = await settlingQueue(t, { pauseBeforeChild: true });
-  const entry = h.queue.list(h.threadId, h.userId)[0];
-  await h.invocationRecordStore.update(h.parentId, { status: 'failed', error: 'zombie_record_detected' });
-  h.processor.releaseExactTerminalExecutionOwner(h.threadId, [h.catId], h.parentId);
-  assert.equal(await h.queue.rollbackProcessingDurable(h.threadId, entry.id, entry.claimId), true);
-  assert.ok(h.invocationTracker.tryStartThread(h.threadId, h.catId, h.userId, [], 'replacement-parent'));
-  const replacement = await h.queue.claimExactAppend(
-    h.threadId,
-    h.userId,
-    entry.id,
-    h.queue.snapshotRevision(h.threadId, h.userId),
-    [h.catId],
-  );
-  assert.ok(replacement);
-  h.resumeProducer();
-  assert.match((await h.lateAdmissionRejected).message, /Lifecycle ActiveRun owner mismatch/);
-  await until(() =>
-    h.log.info.mock.calls.some(({ arguments: args }) => args[1]?.includes('skipped stale completion side effects')),
-  );
-  assert.equal(h.invocationTracker.getExecutionId(h.threadId, h.catId), 'replacement-parent');
-  assert.equal(h.queue.getEntrySnapshot(h.threadId, h.userId, entry.id)?.claimId, replacement.claimId);
-  assert.deepEqual((await h.messageStore.getById(entry.payload.messageId)).lifecycle.dispatchRefs, []);
-});
+for (const replacementTiming of ['before sweep', 'during record update']) {
+  it(`keeps a replacement claim installed ${replacementTiming} through sweep and late admission`, async (t) => {
+    const h = await settlingQueue(t, { pauseBeforeChild: true });
+    const entry = h.queue.list(h.threadId, h.userId)[0];
+    h.processor.releaseExactTerminalExecutionOwner(h.threadId, [h.catId], h.parentId);
+    assert.equal(await h.queue.rollbackProcessingDurable(h.threadId, entry.id, entry.claimId), true);
+    let replacement;
+    const installReplacement = async () => {
+      assert.ok(h.invocationTracker.tryStartThread(h.threadId, h.catId, h.userId, [], 'replacement-parent'));
+      replacement = await h.queue.claimExactAppend(
+        h.threadId,
+        h.userId,
+        entry.id,
+        h.queue.snapshotRevision(h.threadId, h.userId),
+        [h.catId],
+      );
+      assert.ok(replacement);
+    };
+    if (replacementTiming === 'before sweep') {
+      await installReplacement();
+    } else {
+      const update = h.invocationRecordStore.update.bind(h.invocationRecordStore);
+      t.mock.method(h.invocationRecordStore, 'update', async (id, patch) => {
+        const updated = await update(id, patch);
+        if (updated && id === h.parentId && patch.error === 'zombie_record_detected') await installReplacement();
+        return updated;
+      });
+    }
+
+    const sweep = await queueOwnerReaper(h).runOnce();
+    assert.equal(sweep.reaped, 1);
+    assert.equal(sweep.errors, 0);
+    assert.equal((await h.invocationRecordStore.get(h.parentId)).error, 'zombie_record_detected');
+    assert.equal(h.invocationTracker.getExecutionId(h.threadId, h.catId), 'replacement-parent');
+    assert.equal(h.queue.getEntrySnapshot(h.threadId, h.userId, entry.id)?.status, 'claimed');
+    assert.equal(h.queue.getEntrySnapshot(h.threadId, h.userId, entry.id)?.claimId, replacement.claimId);
+
+    h.resumeProducer();
+    assert.match((await h.lateAdmissionRejected).message, /Lifecycle ActiveRun owner mismatch/);
+    await until(() =>
+      h.log.info.mock.calls.some(({ arguments: args }) => args[1]?.includes('skipped stale completion side effects')),
+    );
+    assert.equal(h.invocationTracker.getExecutionId(h.threadId, h.catId), 'replacement-parent');
+    assert.equal(h.queue.getEntrySnapshot(h.threadId, h.userId, entry.id)?.claimId, replacement.claimId);
+    const source = await h.messageStore.getById(entry.payload.messageId);
+    assert.equal(source.deliveryStatus, 'queued');
+    assert.deepEqual(source.lifecycle.dispatchRefs, []);
+    assert.equal(
+      h.messageStore.getRecent(10, h.userId).some((row) => row.lifecycle?.kind === 'response'),
+      false,
+    );
+  });
+}
 
 it('owner sweep recovers an orphan without interrupting a successful Queue settlement in the same cat slot', async (t) => {
   const h = await settlingQueue(t);
