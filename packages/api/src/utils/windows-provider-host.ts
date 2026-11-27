@@ -36,8 +36,42 @@ const READY_TIMEOUT_MS = 20_000;
 // After the host exits the helper still has to close the job, so a present verdict is re-read.
 const CLOSE_QUERY_ATTEMPTS = 5;
 const CLOSE_QUERY_INTERVAL_MS = 300;
+const FINALIZATION_RETRY_MS = 5_000;
 // A descendant can keep the provider's pipes open after it exits; its output gets this long.
 const OUTPUT_GRACE_MS = 2_000;
+
+const finalizingProviders = new Map<string, CliExecutionOwnerRef>();
+
+export function isWindowsProviderFinalizing(execution: CliExecutionOwnerRef): boolean {
+  const current = finalizingProviders.get(execution.invocationId);
+  return (
+    current?.executionId === execution.executionId &&
+    current.threadId === execution.threadId &&
+    current.userId === execution.userId &&
+    current.catId === execution.catId
+  );
+}
+
+/** Keep the original invocation and its queue completion alive until physical stop is verified. */
+export async function waitForWindowsProviderFinalization(
+  execution: CliExecutionOwnerRef,
+  confirmStop: () => Promise<boolean>,
+  options: { retryMs?: number; isShuttingDown?: () => boolean | Promise<boolean>; onPending?: () => void } = {},
+): Promise<boolean> {
+  finalizingProviders.set(execution.invocationId, execution);
+  try {
+    if (await confirmStop()) return true;
+    options.onPending?.();
+    while (!(await options.isShuttingDown?.())) {
+      await delay(options.retryMs ?? FINALIZATION_RETRY_MS);
+      if (await options.isShuttingDown?.()) return false;
+      if (await confirmStop()) return true;
+    }
+    return false;
+  } finally {
+    finalizingProviders.delete(execution.invocationId);
+  }
+}
 
 export interface WindowsProviderLaunch {
   command: string;
@@ -171,14 +205,17 @@ export async function createWindowsProviderHostScope(options: {
     return host;
   };
   let first: WindowsProviderHost | undefined = await prepareLinked();
+  let closing = false;
   return {
     execution: options.execution,
     async take() {
+      if (closing) throw new Error('windows_provider_scope_closing');
       const host = first ?? (await prepareLinked());
       first = undefined;
       return host;
     },
     async close() {
+      closing = true;
       const verdicts = await Promise.all(hosts.map((host) => host.close()));
       return verdicts.every((evidence) => evidence.verdict === 'absent');
     },

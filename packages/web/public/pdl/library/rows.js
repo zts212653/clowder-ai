@@ -238,7 +238,7 @@ function threadRow(v, rn, root, movable) {
   const state = [];
   if (v.hub) state.push({ text: tc('threadRow.meta.hub') });
   if (v.bedroom) state.push({ text: tc('threadRow.meta.bedroom') });
-  if (v.runs && v.runs.length) state.push({ runs: v.runs.map(function (r) { return { who: r.who, status: r.status, tone: 'run', text: tc('threadRow.meta.run', whoInfo(r.who).name, Math.max(1, Math.round((r.secs || 0) / 60))) }; }) });
+  if (v.runs && v.runs.length) state.push({ runs: v.runs.map(function (r) { return { who: r.who, status: r.status, tone: r.finalizing ? 'warn' : 'run', text: r.finalizing ? tc('threadRow.meta.finalizing', whoInfo(r.who).name) : tc('threadRow.meta.run', whoInfo(r.who).name, Math.max(1, Math.round((r.secs || 0) / 60))) }; }) });
   else if (v.failed) state.push({ text: tc('common.status.error'), tone: 'err' });
   else if (v.running && v.who) state.push({ text: tc('threadRow.meta.running', whoInfo(v.who).name) });
   else if (v.pending) state.push({ text: tc('threadRow.meta.pending'), tone: 'warn' });

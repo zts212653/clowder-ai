@@ -28,6 +28,7 @@
 
 import type { DynamicTaskStore } from '../../../../../infrastructure/scheduler/DynamicTaskStore.js';
 import type { CliExecutionOwnerService } from '../../../../../utils/cli-process-ownership.js';
+import { isWindowsProviderFinalizing } from '../../../../../utils/windows-provider-host.js';
 import {
   isPendingHoldBallWakeTask,
   isRetiredWakeWithRunningManagedCommand,
@@ -145,6 +146,7 @@ export interface RunningChildExecutionProjection {
 /** 定性结果 + 完整性。`complete=false` ⇒ 调用方必须 fail-closed。 */
 export interface WorkingPresence {
   readonly catIds: readonly string[];
+  readonly finalizingCats?: readonly string[];
   /** Earliest canonical start across every active execution face. */
   readonly activeSince?: number;
   readonly complete: boolean;
@@ -411,12 +413,26 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
       // 批量路径下 snapshot 已由 buildSnapshot 读好；单 thread 路径才自建。
       const owner = snapshot ?? (await service.buildSnapshot(userId));
       const catIds = new Set<string>(owner.ownerTruthCatIds(threadId));
+      const finalizingCats: string[] = [];
       let activeSince = owner.ownerTruthActiveSince(threadId);
       // 脸一：canonical live invocation classifier —— 只有它必须按 thread 提问。
       // 用 strict 版：GET /queue 的 fail-open 降级会把"读失败"伪装成"确实没有 active"。
       let liveOk = true;
       try {
         for (const execution of await liveExecutions(threadId, userId, owner.ownerSnapshot)) {
+          if (
+            !catIds.has(execution.catId) &&
+            execution.executionId &&
+            execution.turnInvocationId &&
+            isWindowsProviderFinalizing({
+              executionId: execution.executionId,
+              invocationId: execution.turnInvocationId,
+              threadId,
+              userId,
+              catId: execution.catId,
+            })
+          )
+            finalizingCats.push(execution.catId);
           catIds.add(execution.catId);
           activeSince = earliestExecutionStart(activeSince, execution.startedAt);
         }
@@ -425,6 +441,7 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
       }
       return {
         catIds: [...catIds],
+        ...(finalizingCats.length ? { finalizingCats } : {}),
         ...(catIds.size > 0 && activeSince !== undefined ? { activeSince } : {}),
         complete:
           liveOk &&

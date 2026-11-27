@@ -18,6 +18,7 @@ import type { ITurnExecutionStore } from '../domains/cats/services/stores/ports/
 import type { DynamicTaskDef } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import { migrateStoredProjectPath } from '../utils/persistent-project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import { isWindowsProviderFinalizing } from '../utils/windows-provider-host.js';
 import { projectHoldWaits } from './active-hold-wait-projection.js';
 import { nativeControlReceiptHooks, nativeLiveControlCommand } from './native-control-receipts.js';
 
@@ -181,12 +182,27 @@ function canControlLiveExecution(thread: Thread, userId: string, candidate: Live
   return thread.createdBy === userId && (ownerUserId === 'scheduler' || ownerUserId === 'system');
 }
 
+function isFinalizingLiveExecution(threadId: string, userId: string, candidate: LiveExecutionCandidate): boolean {
+  return Boolean(
+    candidate.executionId &&
+      candidate.invocationId &&
+      isWindowsProviderFinalizing({
+        executionId: candidate.executionId,
+        invocationId: candidate.invocationId,
+        threadId,
+        userId: candidate.ownerUserId ?? userId,
+        catId: candidate.catId,
+      }),
+  );
+}
+
 function projectLiveExecution(
   thread: Thread,
   userId: string,
   candidate: LiveExecutionCandidate,
 ): ActiveExecutionProjection {
   const canControl = canControlLiveExecution(thread, userId, candidate);
+  const finalizing = isFinalizingLiveExecution(thread.id, userId, candidate);
   const realExecutionId = candidate.executionId ?? unresolvedExecutionId(thread.id, candidate);
   const executionId = canControl
     ? realExecutionId
@@ -198,23 +214,29 @@ function projectLiveExecution(
     threadTitle: thread.title,
     catId: candidate.catId,
     kind: 'live_invocation',
+    ...(finalizing ? { phase: 'finalizing' as const } : {}),
     ...(canControl && candidate.executionKind ? { executionKind: candidate.executionKind } : {}),
     startedAt: candidate.startedAt,
-    cancelability: canControl
-      ? {
-          state: 'cancelable',
-          target: {
-            kind: 'live_invocation',
-            threadId: thread.id,
-            catId: candidate.catId,
-            executionId: realExecutionId,
-          },
-        }
-      : {
-          state: 'not_cancelable',
-          reason: 'foreign_principal',
-        },
-    ...(canControl && candidate.inputCapabilities ? { inputCapabilities: candidate.inputCapabilities } : {}),
+    cancelability:
+      canControl && finalizing
+        ? { state: 'not_cancelable', reason: 'terminalizing' }
+        : canControl
+          ? {
+              state: 'cancelable',
+              target: {
+                kind: 'live_invocation',
+                threadId: thread.id,
+                catId: candidate.catId,
+                executionId: realExecutionId,
+              },
+            }
+          : {
+              state: 'not_cancelable',
+              reason: 'foreign_principal',
+            },
+    ...(canControl && !finalizing && candidate.inputCapabilities
+      ? { inputCapabilities: candidate.inputCapabilities }
+      : {}),
   };
 }
 
@@ -614,6 +636,9 @@ export function registerActiveExecutionRoutes(app: FastifyInstance, deps: Active
         deps.invocationTracker.getExecutionId?.(threadId, catId) !== candidate.executionId
       )
         return reply.code(409).send({ error: '运行槽已被新的执行替代', code: 'EXECUTION_REPLACED' });
+
+      if (isFinalizingLiveExecution(threadId, access.userId, candidate))
+        return reply.code(409).send({ error: '执行正在收尾', code: 'EXECUTION_TERMINALIZING' });
 
       const result = await deps.cancelExactLiveInvocation({
         threadId,

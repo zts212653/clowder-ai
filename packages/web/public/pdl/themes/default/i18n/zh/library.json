@@ -268,6 +268,7 @@
    "hub": "Hub",
    "bedroom": "猫卧室",
    "run": "{0} 执行中 · {1} 分",
+   "finalizing": "{0} 正在收尾",
    "running": "{0} 已回复",
    "pending": "等你决定",
    "replied": "{0} 回复了",

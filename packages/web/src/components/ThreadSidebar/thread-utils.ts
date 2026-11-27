@@ -30,6 +30,12 @@ export function formatRelativeTime(ts: number, compact = false): string {
 }
 
 export function formatSidebarStatusTime(presence: SidebarPresence, lastActiveAt: number, now = Date.now()): string {
+  if (
+    presence.status === 'working' &&
+    presence.cats?.length &&
+    presence.cats.every((id) => presence.finalizingCats?.includes(id))
+  )
+    return '正在收尾';
   return presence.status === 'working'
     ? presence.activeSince === undefined
       ? '执行中'

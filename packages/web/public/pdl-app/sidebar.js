@@ -186,11 +186,11 @@ function bindSidebar() {
       // the live executions, or the sidebar's working presence before those are read.
       runs: (runs.length
         ? runs.map(function (e) {
-            return { catId: e.catId, since: e.startedAt };
+            return { catId: e.catId, since: e.startedAt, finalizing: e.phase === 'finalizing' };
           })
         : presence && presence.status === 'working'
           ? (presence.cats || []).map(function (c) {
-              return { catId: c, since: presence.activeSince };
+              return { catId: c, since: presence.activeSince, finalizing: (presence.finalizingCats || []).includes(c) };
             })
           : []
       )
@@ -206,6 +206,7 @@ function bindSidebar() {
           return {
             who: r.catId,
             status: '',
+            finalizing: r.finalizing,
             secs: r.since ? Math.max(0, Math.floor((Date.now() - r.since) / 60000)) * 60 : 0,
           };
         }),

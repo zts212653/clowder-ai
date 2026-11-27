@@ -206,6 +206,7 @@ describe('#2067 follow-up fixes across default and v2 themes', () => {
             { ...base, id: 't-done', title: '已回复对话', lastActiveAt: now - 20_000 },
             { ...base, id: 't-at', title: '被艾特对话', lastActiveAt: now - 30_000 },
             { ...base, id: 't-run', title: '活跃执行对话', lastActiveAt: now - 40_000 },
+            { ...base, id: 't-finalize', title: '正在收尾的对话', lastActiveAt: now - 50_000 },
           );
           sidebar.threads = data.threads;
           sidebar.attention = [
@@ -218,6 +219,26 @@ describe('#2067 follow-up fixes across default and v2 themes', () => {
               hasUserMention: false,
               presence: { status: 'working', cats: ['momo'], activeSince: now - 125_000 },
               lastWho: '',
+            },
+            {
+              id: 't-finalize',
+              unreadCount: 0,
+              hasUserMention: false,
+              presence: { status: 'working', cats: ['momo'], activeSince: now - 125_000 },
+              lastWho: '',
+            },
+          ];
+          data.executions = [
+            {
+              executionId: 'settling-run',
+              turnInvocationId: 'settling-turn',
+              threadId: 't-finalize',
+              threadTitle: '正在收尾的对话',
+              catId: 'momo',
+              kind: 'live_invocation',
+              phase: 'finalizing',
+              startedAt: now - 125_000,
+              cancelability: { state: 'not_cancelable', reason: 'terminalizing' },
             },
           ];
         },
@@ -233,6 +254,9 @@ describe('#2067 follow-up fixes across default and v2 themes', () => {
       expect(atRow?.textContent).toContain('@');
       expect(runRow?.textContent).toContain('墨墨');
       expect(runRow?.textContent).toMatch(/2\s*分/);
+      const finalizingRow = w.document.querySelector('[data-tid="t-finalize"]');
+      expect(finalizingRow?.textContent).toContain('墨墨 正在收尾');
+      expect(finalizingRow?.textContent).not.toContain('执行中');
     });
 
     it(`applies collapsed group attention cap (max 3, excludes mere running, shows attention count & overflow) (${themeId})`, async () => {
