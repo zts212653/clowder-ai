@@ -76,6 +76,26 @@ textarea[data-grow] { field-sizing: content; box-sizing: content-box; width: -we
 .send { width: var(--ctl-m); height: var(--ctl-m); flex-shrink: 0; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer; background: var(--accent); color: var(--fg-on-accent); }
 .send[disabled] { background: var(--bg-field); color: var(--fg-faint); cursor: default; }
 .send.stop { background: var(--fg-strong); color: var(--bg-group); }
+
+[data-view="cafe.home"] [data-cells="composer.bar"]:not(:has(> :is([data-ckey="bar.git"], [data-ckey="bar.index"]))) { flex-wrap: nowrap; }
+[data-view="cafe.home"] [data-cells="composer.bar"]::before { content: none; }
+[data-view="cafe.home"] [data-cells="composer.bar"] .target { white-space: nowrap; }
+[data-view="cafe.home"] [data-ckey="bar.pin"] > .target { flex-shrink: 0; }
+[data-view="cafe.home"] :is([data-ckey="bar.proj"], [data-ckey="bar.target"]) > .target { min-width: 0; }
+[data-view="cafe.home"] [data-ckey="bar.target"] .picker-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+@media (width > 640px) {
+  [data-view="cafe.home"] [data-ckey="bar.target"] .target > .hide-sm:not(.picker-value) { display: block; flex-shrink: 0; }
+  [data-view="cafe.home"] [data-ckey="bar.proj"] > .target { flex-shrink: 0; max-width: 33%; }
+}
+
+@media (max-width: 640px) {
+  [data-view="cafe.home"] .vw-hero .composer { width: auto; margin-inline: calc(var(--sp-m) - var(--sp-xl)); }
+  [data-view="cafe.home"] [data-cells="composer.bar"] { gap: var(--sp-xs); }
+  [data-view="cafe.home"] [data-cells="composer.bar"] .target { gap: var(--sp-hair); padding-inline: var(--sp-hair); }
+  [data-view="cafe.home"] [data-ckey="bar.target"] > .target { min-width: min-content; }
+}
+
 .greet { font-family: var(--font-display); line-height: 1.3; margin: 0; text-align: center; text-wrap: balance; }
 /* 伴随对话（插件） */
 .plugin-float { position: fixed; left: 68px; bottom: 16px; width: min(var(--span-5), calc(100vw - calc(21 * var(--unit)))); z-index: var(--z-float); background: var(--bg-raised); border-radius: var(--r-xl); box-shadow: var(--shadow-raised); display: flex; flex-direction: column; max-height: round(down, min(10 * var(--row-h-1), 100% - 2 * var(--sp-l)), var(--row-h-1)); }

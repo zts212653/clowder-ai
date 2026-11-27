@@ -3,6 +3,7 @@
 /* ── 输入框上沿：左边在跑的成员，右边排队 ── */
 .composer-wrap .composer { position: relative; }
 .composer > .lanes { position: absolute; left: var(--sp-m); right: var(--sp-m); bottom: calc(100% + var(--sp-xs)); pointer-events: none; z-index: var(--z-sticky); }
+[data-view="cafe.home"] .vw-hero .composer:has(> .lanes .cnotes) { margin-block-start: var(--sp-l); }
 .lanes > .lane.scroll-x { pointer-events: auto; }
 .lanes > .lane.scroll-x:has(> .lane-in:empty) { pointer-events: none; }   /* 空着的道只占位，不挡下面的内容 */
 .lanes > .lane > .lane-in > :not(.vstack), .lanes > .lane > .lane-in > .vstack > * { pointer-events: auto; }   /* 只有道里的胶囊和按钮接收点击，透明的道盒和留白透传给下方的输入框 */
