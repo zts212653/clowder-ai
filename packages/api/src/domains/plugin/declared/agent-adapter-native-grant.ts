@@ -8,48 +8,14 @@ import { isCliPlainTextResult, spawnCli } from '../../../utils/cli-spawn.js';
 import type { AgentAdapterRuntimeGrant } from './agent-adapter-access.js';
 import { grantAgentAdapterClaudePrint } from './agent-adapter-claude-native-grant.js';
 import { grantAgentAdapterCodexExec } from './agent-adapter-codex-native-grant.js';
-
-const officialNativeClients = [
-  {
-    pluginId: 'official.agent-kimi',
-    contributionId: 'kimi',
-    catalogId: 'agent-kimi',
-    packageName: '@clowder-ai/agent-kimi',
-    command: 'kimi',
-    terminalCommand: '/usage',
-  },
-  {
-    pluginId: 'official.agent-codex',
-    contributionId: 'codex',
-    catalogId: 'agent-codex',
-    packageName: '@clowder-ai/agent-codex',
-    command: 'codex',
-  },
-  {
-    pluginId: 'official.agent-claude-code',
-    contributionId: 'claude-code',
-    catalogId: 'agent-claude-code',
-    packageName: '@clowder-ai/agent-claude-code',
-    command: 'claude',
-  },
-  {
-    pluginId: 'official.agent-agy',
-    contributionId: 'agy',
-    catalogId: 'agent-agy',
-    packageName: '@clowder-ai/agent-agy',
-    command: 'agy',
-  },
-];
+import { matchesOfficialAgentCatalog, officialNativeClients } from './agent-adapter-official-clients.js';
 
 export const grantAgentAdapterNativeRuntime: AgentAdapterRuntimeGrant = (request) => {
-  const source = request.packageProvenance;
-  if (source?.kind !== 'catalog') return;
   const grant = officialNativeClients.find(
     (entry) =>
       entry.pluginId === request.pluginId &&
       entry.contributionId === request.contributionId &&
-      entry.catalogId === source.catalogId &&
-      entry.packageName === source.packageName,
+      matchesOfficialAgentCatalog(entry, request.packageProvenance),
   );
   if (!grant) return;
 

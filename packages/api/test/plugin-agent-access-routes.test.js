@@ -21,12 +21,15 @@ async function fixture(t, agentAdapters) {
     lifecycleRevision: 8,
   };
   let authority;
+  const splitAuthorities = new Map();
   const calls = [];
   let invoke = async () => ({
     candidates: [{ id: 'codex', label: 'Codex', clientId: 'openai', installed: true, models: [] }],
   });
   registerAgentAccessRoutes(app, {
-    inventory: { readCurrentAuthority: async () => authority },
+    inventory: {
+      readCurrentAuthority: async (id) => (id === instance.pluginId ? authority : splitAuthorities.get(id)),
+    },
     agentAdapters,
     runtime: {
       attemptInvoke: async (...args) => {
@@ -46,6 +49,7 @@ async function fixture(t, agentAdapters) {
   return {
     calls,
     request,
+    setSplitAuthority: (id, value) => splitAuthorities.set(id, value),
     setState: (overrides = {}, manifest = {}) => {
       const next = { ...instance, ...overrides };
       authority = { instance: next, packageRecord: { manifest } };
@@ -101,7 +105,7 @@ test('member detection keeps the legacy Desktop descriptor while listing only ac
   const calls = [];
   let enabled = true;
   const f = await fixture(t, {
-    list: async () => [{ ref: failingRef }, ...(enabled ? [{ ref: kimiRef }] : [])],
+    list: async () => (enabled ? [{ ref: failingRef }, { ref: kimiRef }] : []),
     detect: async (ref, { refresh }) => {
       calls.push({ ref, refresh });
       if (ref.pluginId === 'test.discovery') throw new Error('adapter probe failed');
@@ -119,8 +123,22 @@ test('member detection keeps the legacy Desktop descriptor while listing only ac
     dshSetupSupported: true,
     acp: { command: 'C:/DSH/resources/runtime/cli/bin/dsh.cmd', startupArgs: ['--profile', 'acp'] },
   };
+  const legacyKimi = { id: 'kimi', label: 'Kimi', clientId: 'kimi', installed: true, models: [] };
+  const legacyCodex = { id: 'codex', label: 'Codex', clientId: 'openai', installed: true, models: [] };
+  const legacyCandidates = [legacyKimi, legacyCodex, desktop];
+  const splitAuthority = (id, provenance, activationState, lifecycleState = 'installed') => ({
+    instance: { pluginId: `official.agent-${id}`, lifecycleState, activationState },
+    packageRecord: { provenance },
+  });
+  const catalog = (id) => ({ kind: 'catalog', catalogId: `agent-${id}`, packageName: `@clowder-ai/agent-${id}` });
   f.setState();
-  f.setInvoke(async () => ({ candidates: [desktop], partialFailures: [{ id: 'legacy-failure' }] }));
+  f.setInvoke(async () => ({ candidates: legacyCandidates, partialFailures: [{ id: 'legacy-failure' }] }));
+  enabled = false;
+  f.setSplitAuthority(kimi.pluginId, splitAuthority('kimi', { kind: 'local-archive' }, 'disabled'));
+  assert.deepEqual((await f.request()).json().candidates, legacyCandidates);
+  enabled = true;
+  f.setSplitAuthority(kimi.pluginId, splitAuthority('kimi', catalog('kimi'), 'enabled'));
+  f.setSplitAuthority('official.agent-codex', splitAuthority('codex', catalog('codex'), 'disabled'));
   const result = (await f.request({ refresh: true })).json();
   assert.deepEqual(result.readiness, { state: 'ready' });
   assert.deepEqual(result.candidates, [
@@ -137,6 +155,10 @@ test('member detection keeps the legacy Desktop descriptor while listing only ac
   assert.deepEqual(result.partialFailures, [{ id: 'legacy-failure' }, { id: failingRef }]);
   assert.ok(calls.some((call) => call.ref.contributionId === 'kimi' && call.refresh));
   enabled = false;
+  f.setSplitAuthority(kimi.pluginId, splitAuthority('kimi', catalog('kimi'), 'disabled'));
   assert.deepEqual((await f.request()).json().candidates, [desktop]);
   assert.equal(calls.filter((call) => call.ref.contributionId === 'kimi').length, 1);
+
+  f.setSplitAuthority(kimi.pluginId, splitAuthority('kimi', catalog('kimi'), 'disabled', 'retired'));
+  assert.deepEqual((await f.request()).json().candidates, [legacyKimi, desktop]);
 });

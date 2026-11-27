@@ -97,9 +97,33 @@ for (const { id, name, version, archive } of packages) {
       app.addHook('preHandler', async (request) => {
         request.sessionUserId = 'fixture-owner';
       });
+      let legacyCandidates;
+      const sharedId = 'official.agent-access';
       registerAgentAccessRoutes(app, {
-        inventory: runtime.inventoryStore,
-        runtime: { attemptInvoke: () => assert.fail('Selected adapter must not dispatch to the shared plugin') },
+        inventory: {
+          readCurrentAuthority: (pluginId) =>
+            legacyCandidates && pluginId === sharedId
+              ? Promise.resolve({
+                  instance: {
+                    pluginInstanceId: 'shared-discovery-fixture',
+                    packageDigest: 'shared-discovery-digest',
+                    lifecycleRevision: 1,
+                    lifecycleState: 'installed',
+                    activationState: 'enabled',
+                    configReadiness: 'ready',
+                    runtimeState: 'healthy',
+                  },
+                  packageRecord: { manifest: {} },
+                })
+              : runtime.inventoryStore.readCurrentAuthority(pluginId),
+        },
+        runtime: {
+          attemptInvoke: async (_instance, operation) => {
+            assert.ok(legacyCandidates, 'Selected adapter must not dispatch to the shared plugin');
+            assert.equal(operation, 'detect');
+            return { status: 'returned', value: { candidates: legacyCandidates } };
+          },
+        },
         agentAdapters: runtime.agentAdapters,
       });
       const response = await app.inject({
@@ -137,8 +161,23 @@ for (const { id, name, version, archive } of packages) {
             acp: { agentProvider: result.adapterOrigin.ref, command: 'plugin-agent', startupArgs: [] },
           },
         ]);
+        const desktop = {
+          id: 'dsh-desktop',
+          label: 'DSH Desktop',
+          clientId: 'acp',
+          installed: true,
+          models: [],
+          dshDesktop: true,
+          acp: { command: 'C:/DSH/resources/runtime/cli/bin/dsh.cmd', startupArgs: ['--profile', 'acp'] },
+        };
+        legacyCandidates = [{ id: 'kimi', label: 'Kimi', clientId: 'kimi', installed: true, models: [] }, desktop];
+        const coexistence = await detectForMembers();
+        assert.equal(coexistence.json().readiness.state, 'ready');
+        assert.deepEqual(coexistence.json().candidates, [desktop, ...memberDetection.json().candidates]);
         const { plugin: activePlugin } = await manager.get(ref.pluginId);
         await manager.setEnabled(ref.pluginId, { enabled: false, expectedRevision: activePlugin.lifecycleRevision });
+        assert.deepEqual((await detectForMembers()).json(), { readiness: { state: 'ready' }, candidates: [desktop] });
+        legacyCandidates = undefined;
         assert.deepEqual((await detectForMembers()).json(), {
           readiness: { state: 'missing', action: 'install' },
           candidates: [],

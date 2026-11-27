@@ -23,6 +23,10 @@ import {
 } from '../domains/plugin/carrier/plugin-owner-request-context.js';
 import type { PluginRuntimeCarrierRouter } from '../domains/plugin/carrier/runtime-carrier.js';
 import type { createAgentAdapterAccess } from '../domains/plugin/declared/agent-adapter-access.js';
+import {
+  matchesOfficialAgentCatalog,
+  officialNativeClients,
+} from '../domains/plugin/declared/agent-adapter-official-clients.js';
 import type { InventoryAuthority, PluginInventoryStore } from '../domains/plugin/host-inventory/ports.js';
 import type { PluginInstanceRecord } from '../domains/plugin/host-inventory/types.js';
 import { InvalidDshProfile } from './native-dsh-profile.js';
@@ -76,7 +80,23 @@ export function registerAgentAccessRoutes(
     const adapters = agentAdapters;
     try {
       const [legacy, active] = await Promise.all([readDetection(request, reply, operator, input), adapters.list()]);
-      if (!active.length) return legacy;
+      // An installed, trusted split package owns its former discovery entry even while disabled.
+      const legacyCandidates = (
+        await Promise.all(
+          legacy.candidates.map(async (candidate) => {
+            const client = officialNativeClients.find(({ legacyDiscoveryId }) => legacyDiscoveryId === candidate.id);
+            if (!client) return candidate;
+            const authority = await inventory.readCurrentAuthority(client.pluginId);
+            if (
+              authority?.instance.lifecycleState === 'installed' &&
+              matchesOfficialAgentCatalog(client, authority.packageRecord?.provenance)
+            )
+              return undefined;
+            return candidate;
+          }),
+        )
+      ).filter((candidate) => candidate !== undefined);
+      if (!active.length) return { ...legacy, candidates: legacyCandidates };
       const probes = await Promise.all(
         active.map(async ({ ref }) => {
           const target = parsePluginAgentRef(ref);
@@ -113,7 +133,7 @@ export function registerAgentAccessRoutes(
       const adapterIds = new Set(candidates.map(({ id }) => id));
       return {
         readiness: { state: 'ready' },
-        candidates: [...legacy.candidates.filter(({ id }) => !adapterIds.has(id)), ...candidates],
+        candidates: [...legacyCandidates.filter(({ id }) => !adapterIds.has(id)), ...candidates],
         ...(partialFailures.length ? { partialFailures } : {}),
       };
     } finally {
