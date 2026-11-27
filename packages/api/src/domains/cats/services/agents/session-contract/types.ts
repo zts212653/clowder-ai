@@ -50,6 +50,8 @@ export interface OpenSessionInput {
   cwd: string;
   /** Selected by Host invocation admission. Never serialize to a plugin. */
   executionAccount?: Service.AgentServiceOptions['executionAccount'];
+  /** Host-owned account/launch facts; only the native grant sees this. */
+  hostOptions?: Service.AgentServiceOptions;
 }
 
 export type OpenSessionResult =
