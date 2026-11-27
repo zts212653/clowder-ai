@@ -17656,10 +17656,6 @@ pdl:
                 nodes: $.browse.nodes
                 item:
                   cur: "@selected"
-                  slot: pick.folder
-                  actsCtx:
-                    path: "@path"
-                    src: "@source"
                 row: file.row
                 select:
                   act: set
