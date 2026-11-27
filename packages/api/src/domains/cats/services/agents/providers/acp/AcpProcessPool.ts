@@ -63,6 +63,7 @@ export interface AcpAcquireOptions {
 /** Minimal AcpClient interface needed by the pool. */
 export interface AcpPoolClient {
   readonly isAlive: boolean;
+  readonly pid?: number;
   /** True only after the child emitted a real exit; closed/killed/error alone is not proof. */
   readonly hasExited?: boolean;
   /**
@@ -390,7 +391,7 @@ export class AcpProcessPool {
     const pids: number[] = [];
     for (const entries of this.entries.values()) {
       for (const e of entries) {
-        const pid = (e.client as { pid?: number }).pid;
+        const pid = e.client.pid;
         if (pid) pids.push(pid);
       }
     }
@@ -526,7 +527,8 @@ export class AcpProcessPool {
           this._metrics.idleProcessCount++;
           this.startIdleTimer(entry, poolKey);
         }
-        return this.retirements.wait(serializeKey(poolKey)).then(() => false);
+        // This lease did not retire its carrier. Its release is independent of other entries closing.
+        return Promise.resolve(false);
       },
     };
   }
@@ -661,7 +663,7 @@ export class AcpProcessPool {
       this._metrics.liveProcessCount--;
       this._metrics.idleProcessCount--;
       this._metrics.evictionCount++;
-      log.info({ key }, 'Idle TTL eviction');
+      log.info({ key, childPid: entry.client.pid }, 'Idle TTL eviction');
     }, this.config.idleTtlMs);
   }
 

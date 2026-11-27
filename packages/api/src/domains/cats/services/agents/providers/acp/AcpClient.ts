@@ -457,7 +457,7 @@ export class AcpClient {
     });
 
     this.child.on('exit', (code, signal) => {
-      log.info('ACP process exited: code=%s signal=%s', code, signal);
+      log.info({ childPid: this.child?.pid }, 'ACP process exited: code=%s signal=%s', code, signal);
       this.exited = true;
       this.rejectAllPending(new Error(`ACP process exited: code=${code} signal=${signal}`));
     });
