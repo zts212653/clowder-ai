@@ -1562,6 +1562,7 @@ pdl:
         - works
         - work
         - memory
+        - memoryPlugin
         - trash
         - export
       prefix: plug-

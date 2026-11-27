@@ -3983,6 +3983,7 @@ describe('unmodified runtime and project chat bindings', () => {
       expect(w.location.hash).toBe('#memoryPlugin');
       expect(w.document.querySelector('[data-view="cafe.memory"]')).not.toBeNull();
       expect(w.document.querySelector('[data-view="page.ext"]')).toBeNull();
+      expect(w.eval("routeSpace('memoryPlugin')")).toBe('cafe');
       expect(errors).not.toHaveBeenCalled();
     } finally {
       dom.window.close();
