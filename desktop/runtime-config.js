@@ -19,10 +19,10 @@ function resolveInstallDataRoot(installRoot) {
   const dataRoot = path.join(base, windowsUserSid);
   if (validatedInstallRoots.has(dataRoot)) return dataRoot;
   // A sibling account can create a directory named after this SID before the
-  // first launch. Reject payload redirection and require the leaf to be owned
-  // by this SID before any Electron/API data is written there.
-  assertDesktopDataBoundary(dataRoot, installRoot);
+  // first launch. Verify the physical leaf and its ACL before resolving its
+  // path through a restrictive DACL or writing any Electron/API data there.
   assertPrivateInstallProfile(dataRoot, windowsUserSid);
+  assertDesktopDataBoundary(dataRoot, installRoot);
   validatedInstallRoots.add(dataRoot);
   return dataRoot;
 }
@@ -30,14 +30,26 @@ function resolveInstallDataRoot(installRoot) {
 function assertPrivateInstallProfile(dataRoot, sid) {
   const created = !fs.existsSync(dataRoot);
   if (created) fs.mkdirSync(dataRoot);
-  if (fs.lstatSync(dataRoot).isSymbolicLink()) {
-    throw new Error('Install data directory must not be a reparse point');
+  if (!fs.lstatSync(dataRoot).isDirectory()) {
+    throw new Error('Install data directory must be a directory without reparse points');
   }
   const acl = readInstallProfileAcl(dataRoot);
   const trusted = [sid, 'S-1-5-18', 'S-1-5-32-544'];
   if (!trusted.includes(acl.owner)) throw new Error('Install data directory is owned by another account');
-  if (!created && acl.protected && acl.rules.every((rule) => trusted.includes(rule))) return;
+  if (!created && isPrivateInstallProfileAcl(acl, sid, trusted)) return;
   setPrivateProfileAcl(dataRoot, sid);
+  if (!isPrivateInstallProfileAcl(readInstallProfileAcl(dataRoot), sid, trusted)) {
+    throw new Error('Install data directory ACL verification failed');
+  }
+}
+
+function isPrivateInstallProfileAcl(acl, sid, trusted) {
+  return (
+    acl.protected &&
+    trusted.includes(acl.owner) &&
+    acl.rules.every((rule) => rule.allow === true && trusted.includes(rule.sid)) &&
+    acl.rules.some((rule) => rule.sid === sid && rule.fullProfileAccess === true)
+  );
 }
 
 function windowsPowerShell(script, extraEnv = {}) {
@@ -64,18 +76,24 @@ function windowsPowerShell(script, extraEnv = {}) {
 
 function readInstallProfileAcl(dataRoot) {
   const script = [
-    '$acl = Get-Acl -LiteralPath $env:SG_ACL_PATH',
+    '$ErrorActionPreference = "Stop"',
+    '$item = Get-Item -LiteralPath $env:SG_ACL_PATH -Force',
+    'if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Install data directory is a reparse point" }',
+    '$acl = Get-Acl -LiteralPath $item.FullName',
     '$owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value',
-    '$rules = @($acl.Access | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value })',
-    '[pscustomobject]@{owner=$owner; protected=$acl.AreAccessRulesProtected; rules=$rules} | ConvertTo-Json -Compress',
-  ].join('; ');
+    '$full = [System.Security.AccessControl.FileSystemRights]::FullControl',
+    '$children = [System.Security.AccessControl.InheritanceFlags]"ContainerInherit,ObjectInherit"',
+    '$rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object {',
+    '  $allow = $_.AccessControlType -eq "Allow"',
+    '  $fullProfileAccess = $allow -and ($_.FileSystemRights -band $full) -eq $full -and $_.InheritanceFlags -eq $children -and $_.PropagationFlags -eq "None"',
+    '  [pscustomobject]@{sid=$_.IdentityReference.Value; allow=$allow; fullProfileAccess=$fullProfileAccess}',
+    '})',
+    '[pscustomobject]@{owner=$owner; protected=$acl.AreAccessRulesProtected; rules=$rules} | ConvertTo-Json -Depth 4 -Compress',
+  ].join('\n');
   try {
     const parsed = JSON.parse(windowsPowerShell(script, { SG_ACL_PATH: dataRoot }));
-    return {
-      owner: String(parsed.owner || ''),
-      protected: parsed.protected === true,
-      rules: (Array.isArray(parsed.rules) ? parsed.rules : [parsed.rules]).filter(Boolean).map(String),
-    };
+    if (!Array.isArray(parsed.rules)) throw new Error('Missing ACL rules');
+    return parsed;
   } catch {
     throw new Error('Install data directory owner cannot be verified');
   }
@@ -83,6 +101,7 @@ function readInstallProfileAcl(dataRoot) {
 
 function setPrivateProfileAcl(dataRoot, sid) {
   const script = [
+    '$ErrorActionPreference = "Stop"',
     '$path = $env:SG_ACL_PATH',
     '$owner = New-Object System.Security.Principal.SecurityIdentifier($env:SG_ACL_SID)',
     '$acl = New-Object System.Security.AccessControl.DirectorySecurity',
@@ -96,15 +115,6 @@ function setPrivateProfileAcl(dataRoot, sid) {
     'Set-Acl -LiteralPath $path -AclObject $acl',
   ].join('\n');
   windowsPowerShell(script, { SG_ACL_PATH: dataRoot, SG_ACL_SID: sid });
-  const verified = readInstallProfileAcl(dataRoot);
-  const trusted = [sid, 'S-1-5-18', 'S-1-5-32-544'];
-  if (
-    !verified.protected ||
-    !trusted.includes(verified.owner) ||
-    !verified.rules.every((rule) => trusted.includes(rule))
-  ) {
-    throw new Error('Install data directory ACL verification failed');
-  }
 }
 
 function canonicalWithMissingSuffix(value) {

@@ -28,33 +28,40 @@ function currentSid() {
   }).match(/,"(S-1-\d+(?:-\d+)+)"/)?.[1];
 }
 
+function profilePowerShell(target, script, extraEnv = {}) {
+  const systemRoot = process.env.SystemRoot || 'C:\\Windows';
+  const powershell = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0');
+  return execFileSync(path.join(powershell, 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', script], {
+    encoding: 'utf8',
+    env: { ...process.env, ...extraEnv, SG_ACL_PATH: target, PSModulePath: path.join(powershell, 'Modules') },
+    windowsHide: true,
+  });
+}
+
 function aclFor(target) {
   const script = [
     '$acl = Get-Acl -LiteralPath $env:SG_ACL_PATH',
     '$owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value',
-    '$rules = @($acl.Access | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value })',
-    '[pscustomobject]@{owner=$owner; protected=$acl.AreAccessRulesProtected; rules=$rules} | ConvertTo-Json -Compress',
+    '$entries = $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])',
+    '$rules = @($entries | ForEach-Object { $_.IdentityReference.Value })',
+    '$full = [System.Security.AccessControl.FileSystemRights]::FullControl',
+    '$fullGrants = @($entries | Where-Object { $_.AccessControlType -eq "Allow" -and $_.FileSystemRights -eq $full -and $_.InheritanceFlags -eq "ContainerInherit, ObjectInherit" -and $_.PropagationFlags -eq "None" } | ForEach-Object { $_.IdentityReference.Value })',
+    '$denials = @($entries | Where-Object { $_.AccessControlType -eq "Deny" }).Count',
+    '[pscustomobject]@{owner=$owner; protected=$acl.AreAccessRulesProtected; rules=$rules; fullGrants=$fullGrants; denials=$denials} | ConvertTo-Json -Compress',
   ].join('; ');
-  return JSON.parse(
-    execFileSync(
-      path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-      ['-NoProfile', '-NonInteractive', '-Command', script],
-      {
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          SG_ACL_PATH: target,
-          PSModulePath: path.join(
-            process.env.SystemRoot || 'C:\\Windows',
-            'System32',
-            'WindowsPowerShell',
-            'v1.0',
-            'Modules',
-          ),
-        },
-        windowsHide: true,
-      },
-    ),
+  return JSON.parse(profilePowerShell(target, script));
+}
+
+function setProfileDacl(target, dacl) {
+  profilePowerShell(
+    target,
+    [
+      '$ErrorActionPreference = "Stop"',
+      '$acl = Get-Acl -LiteralPath $env:SG_ACL_PATH',
+      '$acl.SetSecurityDescriptorSddlForm($env:SG_TEST_DACL, [System.Security.AccessControl.AccessControlSections]::Access)',
+      'Set-Acl -LiteralPath $env:SG_ACL_PATH -AclObject $acl',
+    ].join('; '),
+    { SG_TEST_DACL: dacl },
   );
 }
 
@@ -283,6 +290,53 @@ test(
     }
   },
 );
+
+for (const [description, rule] of [
+  ['no ACEs', ''],
+  ['an explicit write denial', '(D;;FW;;;{sid})(A;OICI;FA;;;{sid})'],
+  ['only read access for its user', '(A;OICI;FR;;;{sid})(A;OICI;FA;;;BA)'],
+  ['a full grant that only applies to descendants', '(A;OICIIO;FA;;;{sid})(A;OICI;FA;;;BA)'],
+]) {
+  test(
+    `install mode repairs a protected SID profile with ${description}`,
+    { skip: process.platform !== 'win32' },
+    () => {
+      const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'sid-effective-acl-')));
+      assert.equal(path.dirname(root), fs.realpathSync.native(os.tmpdir()));
+      assert.match(path.basename(root), /^sid-effective-acl-/);
+      const sid = currentSid();
+      const profile = path.join(root, 'user-state', sid);
+      const program = path.join(root, 'desktop-dist', 'Clowder AI.exe');
+      try {
+        fs.mkdirSync(profile, { recursive: true });
+        fs.writeFileSync(path.join(root, 'desktop-data-root.json'), '{"mode":"install"}');
+        const witness = path.join(profile, 'existing-conversation');
+        fs.writeFileSync(witness, 'retained');
+        const icacls = path.join(process.env.SystemRoot, 'System32', 'icacls.exe');
+        execFileSync(icacls, [profile, '/setowner', `*${sid}`], { stdio: 'pipe' });
+        setProfileDacl(profile, `D:P${rule.replaceAll('{sid}', sid)}`);
+        const before = aclFor(profile);
+        assert.equal(before.protected, true);
+        assert.ok(before.denials > 0 || !before.fullGrants.includes(sid), 'fixture must lack usable profile access');
+
+        const { dataRoot } = resolveDesktopRuntime({}, program);
+        assert.equal(dataRoot, profile);
+        const after = aclFor(profile);
+        assert.equal(after.protected, true);
+        assert.equal(after.denials, 0);
+        assert.ok(after.fullGrants.includes(sid), 'current SID must have an effective, inheritable FullControl grant');
+        assert.equal(fs.readFileSync(witness, 'utf8'), 'retained');
+        const data = path.join(profile, 'Clowder AI', 'data');
+        fs.mkdirSync(data, { recursive: true });
+        fs.writeFileSync(path.join(data, 'test-record'), 'writable');
+        assert.equal(fs.readFileSync(path.join(data, 'test-record'), 'utf8'), 'writable');
+      } finally {
+        if (fs.existsSync(profile)) setProfileDacl(profile, `D:P(A;OICI;FA;;;${sid})(A;OICI;FA;;;BA)`);
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+}
 
 test(
   'install mode hardens an existing trusted-owner SID profile without moving its data',
