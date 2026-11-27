@@ -125,7 +125,7 @@ export const grantAgentAdapterNativeRuntime: AgentAdapterRuntimeGrant = (request
           cwd: home,
           env,
           signal,
-          timeoutMs: 3_500,
+          timeoutMs: 8_000,
           bindExecutionOwner: false,
           inheritParentEnv: false,
           outputMode: 'plainText',

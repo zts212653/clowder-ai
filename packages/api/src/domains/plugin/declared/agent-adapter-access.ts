@@ -22,10 +22,14 @@ import {
   createAgentAdapterSessionProvider,
 } from './agent-adapter-session-provider.js';
 
-const metadataTimeoutMs = 5_000;
-const quotaTimeoutMs = 16_000;
-const nativeLifecycleTimeoutMs = 60_000;
 type AdapterAction = 'describe' | 'detect' | Parameters<AgentAdapterSessionInvocation>[0] | 'quota';
+const defaultActionTimeoutMs = 5_000;
+const actionTimeoutMs: Partial<Record<AdapterAction, number>> = {
+  detect: 10_000,
+  quota: 16_000,
+  openSession: 60_000,
+  release: 60_000,
+};
 type AgentAdapterAccountScope = {
   readonly projectRoot: string;
   readonly accountRef: string;
@@ -119,11 +123,7 @@ export function createAgentAdapterAccess(
     });
     const timer = setTimeout(
       () => deadline.abort(new DOMException('Agent adapter call timed out', 'TimeoutError')),
-      action === 'openSession' || action === 'release'
-        ? nativeLifecycleTimeoutMs
-        : action === 'quota'
-          ? quotaTimeoutMs
-          : metadataTimeoutMs,
+      actionTimeoutMs[action] ?? defaultActionTimeoutMs,
     );
     timer.unref();
     const response = await Promise.race([
