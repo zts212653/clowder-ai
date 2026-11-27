@@ -69,7 +69,12 @@ for (const batch of [false, true])
       responses.every((id) => h.store.getById(id).lifecycle.status === 'processing'),
       true,
     );
-    assert.equal(h.processor.isThreadBusy('thread-1'), true, 'the existing reservation remains fenced');
+    assert.equal(h.processor.hasProcessingSlotReservation('thread-1', 'opus', 'inv-1'), true);
+    assert.equal(
+      h.processor.hasActiveQueueProducer('thread-1', 'user-1', 'opus', 'inv-1'),
+      false,
+      'the retained reservation must not hide an ownerless parent from recovery',
+    );
     assert.equal(completions.length, 0, 'unknown stop is not a completed task');
     assert.equal(emitted.filter((message) => message.providerTeardown === 'unconfirmed').length, 2);
   });

@@ -15,6 +15,7 @@ export function isClowderJobName(name: string): boolean {
   return name.startsWith(JOB_NAME_PREFIX) || name.startsWith(PROVIDER_JOB_NAME_PREFIX);
 }
 export const HELPER_READY = 'JOB_READY_HELPER_OUTSIDE';
+export const HELPER_TIMEOUT = 'JOB_FAILED_TIMEOUT';
 
 /** Shared C# interop; the helper and the query differ only in what they do with the handle. */
 const JOB_INTEROP = String.raw`
@@ -123,9 +124,10 @@ export function jobOwnerScript(input: {
     `$OwnerRecordPath = ${psLiteral(input.ownerRecordPath)}`,
     `$ControllerPid = ${input.controllerPid ?? 0}`,
   ].join('\n');
-  return `$ErrorActionPreference = 'Stop'\n${JOB_INTEROP}\n${parameters}\n${String.raw`
+  return `$ErrorActionPreference = 'Stop'\nWrite-Output 'JOB_STAGE interop'\n${JOB_INTEROP}\n${parameters}\n${String.raw`
 # Only adopt the exact process this deployment started: exact pid, and the script file name (the
 # recorded CommandLine keeps whatever path form the process was launched with).
+Write-Output 'JOB_STAGE target_identity'
 $targetRow = Get-CimInstance Win32_Process -Filter "ProcessId = $TargetProcessId" -ErrorAction Stop
 if (!$targetRow -or !$targetRow.CommandLine.Contains($ExpectedScript)) { Write-Output 'JOB_FAILED_NOT_OUR_PROCESS'; exit 4 }
 
@@ -134,6 +136,7 @@ if (!$targetRow -or !$targetRow.CommandLine.Contains($ExpectedScript)) { Write-O
 $controller = $null
 if ($ControllerPid -ne 0) {
   if ($targetRow.ParentProcessId -ne $ControllerPid) { Write-Output 'JOB_FAILED_CONTROLLER_NOT_PARENT'; exit 11 }
+  Write-Output 'JOB_STAGE controller_identity'
   $controllerRow = Get-CimInstance Win32_Process -Filter "ProcessId = $ControllerPid" -ErrorAction Stop
   if (!$controllerRow -or !$controllerRow.CreationDate) { Write-Output 'JOB_FAILED_CONTROLLER_IDENTITY'; exit 11 }
   $controller = [ordered]@{
@@ -143,6 +146,7 @@ if ($ControllerPid -ne 0) {
   }
 }
 
+Write-Output 'JOB_STAGE create_job'
 $jobHandle = [ClowderJobInterop]::CreateJobObject([IntPtr]::Zero, $JobName)
 if ($jobHandle -eq [IntPtr]::Zero) { Write-Output 'JOB_FAILED_CREATE'; exit 5 }
 # SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_QUOTA | PROCESS_TERMINATE
@@ -161,10 +165,12 @@ try {
     createdAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   }
   if ($controller) { $record['controller'] = $controller }
+  Write-Output 'JOB_STAGE persist_owner'
   $temporaryPath = $OwnerRecordPath + '.' + $PID + '.tmp'
   [System.IO.File]::WriteAllText($temporaryPath, ($record | ConvertTo-Json -Compress))
   [System.IO.File]::Move($temporaryPath, $OwnerRecordPath)
 
+  Write-Output 'JOB_STAGE assign_job'
   if (-not [ClowderJobInterop]::AssignProcessToJobObject($jobHandle, $targetHandle)) {
     Write-Output "JOB_FAILED_ASSIGN $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
     exit 7
@@ -172,6 +178,7 @@ try {
 
   # From here on an exit also ends the API. Both checks are contradictions of a successful assign,
   # so failing them stops a process whose ownership cannot be trusted rather than admitting writers.
+  Write-Output 'JOB_STAGE membership'
   $hostInside = $false
   $helperInside = $false
   if (-not [ClowderJobInterop]::IsProcessInJob($targetHandle, $jobHandle, [ref]$hostInside)) { Write-Output 'JOB_FAILED_MEMBERSHIP_QUERY'; exit 8 }

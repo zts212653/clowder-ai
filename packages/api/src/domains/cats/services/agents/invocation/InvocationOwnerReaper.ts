@@ -40,6 +40,7 @@ export interface InvocationOwnerReaperOptions extends ExitedChildRecovery {
   listRunningRecords?: () => InvocationRecord[] | Promise<InvocationRecord[]>;
   /** Queue reservations whose tracker owner was installed but later disappeared. */
   listStaleProcessingLeases?: (now?: number) => StaleProcessingOwnerLease[];
+  hasActiveQueueProducer?: (threadId: string, userId: string, catId: string, executionId: string) => boolean;
   /** Pre-provider reservations are safe to recover without probing provider lifecycle. */
   reapStalePrestartReservations?: (now?: number) => number | Promise<number>;
   ownerLeaseTtlMs?: number;
@@ -205,6 +206,27 @@ export class InvocationOwnerReaper {
           return;
         }
       }
+      await this.recordActiveCandidate(candidate, probe, now, result);
+      return;
+    }
+
+    // An in-flight Queue execution owns preparation before the first child and settlement after child success.
+    const parentStatus = probe.record?.status;
+    const preparing = probe.verdict === 'absent' && parentStatus === 'running';
+    const settlingSuccessfulChild =
+      probe.verdict === 'terminal' &&
+      (parentStatus === 'running' || parentStatus === 'succeeded') &&
+      probe.children.some((child) => child.status === 'succeeded');
+    if (
+      (preparing || settlingSuccessfulChild) &&
+      [...candidate.targetCats].some(
+        (catId) =>
+          this.options.hasActiveQueueProducer?.(candidate.threadId, candidate.userId, catId, candidate.executionId) &&
+          (!preparing ||
+            this.options.invocationTracker.classifyExecutionId(candidate.threadId, catId, candidate.executionId) ===
+              'matching'),
+      )
+    ) {
       await this.recordActiveCandidate(candidate, probe, now, result);
       return;
     }
