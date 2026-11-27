@@ -51,6 +51,7 @@ import { PluginRuntimeCarrierRouter } from './carrier/runtime-carrier.js';
 import { ContentEditorPluginRuntime } from './content-editor-runtime/runtime.js';
 import { ContentEditorSemanticWorker } from './content-editor-runtime/semantic-worker.js';
 import { type AgentAdapterRuntimeGrant, createAgentAdapterAccess } from './declared/agent-adapter-access.js';
+import { grantAgentAdapterDetection } from './declared/agent-adapter-native-detection.js';
 import { recoverAgentClientMetadata } from './declared/agent-client-metadata.js';
 import type { CloudConversationHostRegistry } from './declared/cloud-conversation-host-registry.js';
 import type { AgentSessionProviderLifecycle } from './declared/declared-agent-session-providers.js';
@@ -648,7 +649,11 @@ export function createDormantPluginRuntimeComposition(
     ...(options.lifecycleTriggerMessageId === undefined ? {} : { triggerMessageId: options.lifecycleTriggerMessageId }),
     onError: (fields) => moduleLogger.error(fields, 'lifecycle delivery failed'),
   });
-  const agentAdapters = createAgentAdapterAccess(inventoryStore, moduleRuntime, options.grantAgentAdapterNativeRuntime);
+  const agentAdapters = createAgentAdapterAccess(
+    inventoryStore,
+    moduleRuntime,
+    options.grantAgentAdapterNativeRuntime ?? grantAgentAdapterDetection,
+  );
   const registry = options.agentSessionImplementations;
   const supervisor = new PluginRuntimeCarrierRouter(
     inventoryStore,

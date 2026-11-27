@@ -14,7 +14,7 @@ import type { ModulePluginRuntime } from '../builtin-runtime/carriers/module-plu
 import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
-import type { PluginInstanceRecord } from '../host-inventory/types.js';
+import type { PluginInstanceRecord, PluginPackageProvenance } from '../host-inventory/types.js';
 
 import {
   type AgentAdapterSessionInvocation,
@@ -36,6 +36,7 @@ export type AgentAdapterRuntimeGrant = (request: {
   readonly contributionId: string;
   readonly packageDigest: string;
   readonly pluginInstanceId: string;
+  readonly packageProvenance?: PluginPackageProvenance;
   readonly action: AdapterAction;
   readonly catId?: string;
   readonly account?: AgentAdapterAccountScope;
@@ -72,7 +73,8 @@ export function createAgentAdapterAccess(
       hostSession?: AgentAdapterSessionScope;
     },
   ) {
-    const active = resolve((await inventory.readCurrentAuthority(ref.pluginId))?.instance);
+    const authority = await inventory.readCurrentAuthority(ref.pluginId);
+    const active = resolve(authority?.instance);
     if (
       !active ||
       active.declaration.id !== ref.contributionId ||
@@ -81,10 +83,12 @@ export function createAgentAdapterAccess(
       throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', 'Agent adapter is not active');
     if (!active.declaration.operations.includes(action))
       throw new ExternalPluginRuntimeError('PROTOCOL_VIOLATION', 'Agent adapter did not declare the requested action');
+    const provenance = authority?.packageRecord?.provenance;
     const nativeRuntime = grantNativeRuntime?.({
       ...ref,
       packageDigest: active.instance.packageDigest,
       pluginInstanceId: active.instance.pluginInstanceId,
+      ...(provenance === undefined ? {} : { packageProvenance: provenance }),
       action,
       ...(options?.catId === undefined ? {} : { catId: options.catId }),
       ...(options?.account === undefined ? {} : { account: options.account }),

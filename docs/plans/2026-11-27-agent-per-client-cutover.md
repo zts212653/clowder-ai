@@ -114,7 +114,9 @@ flowchart LR
 
 插件仓按 Node 24.18.0 和 npm 11.16.0 打包 `packages/agent-kimi`。Host 运行 `test/plugin-agent-kimi-local-archive.test.js` 时，`CLOWDER_KIMI_CANDIDATE_ARCHIVE` 指向该归档，`CLOWDER_KIMI_CANDIDATE_EXECUTABLE` 指向已经核定的本机 CLI。测试使用独立项目和原生 HOME，用真 CLI 查询版本。额度、原生续接回执与模型事件使用注入的进程或终端数据。安装、Worker 调用与停用使用实际 Host 管理器。
 
-隔离 HTTP 回归使用实际归档完成显式 adapterRef 检测和已选账号的额度读取。测试用 Host 授权端口以及账号选择器注入隔离配置。检测响应由 Host 标注实例和摘要；无原生端口时 HTTP 503，并保留适配器报告的原因。额度请求先核实账号归属和凭据代际，再投影插件观测值并持久化；停用后两个入口均拒绝，旧探测调用为零。额度捕获使用 PTY 输出夹具。正式 Host 暂缺独立适配器授权来源和账号选择器，当前默认额度路径仍使用旧实现。
+隔离 HTTP 回归使用实际归档完成显式 adapterRef 检测和已选账号的额度读取。Host 标注检测结果的实例和摘要；无原生端口时 HTTP 503，并保留适配器报告的原因。默认 Host 组合仅向受信目录安装、完整标识匹配的 Kimi 和 Codex 归档授予版本探测。探测只运行 Host 解析的命令和固定的 `--version`，使用独立临时 HOME。目录用例以隔离目录快照安装实际摘要，通过默认组合读出真实版本，并验证同一份本地上传归档得不到该权限。线上目录上架与本地隔离目录测试分别验收。
+
+额度测试将账号选择器和 PTY 输出夹具注入隔离 Host。额度请求核对账号归属和凭据代际，再投影插件观测值并持久化。停用后两个入口均拒绝，旧探测调用为零。默认额度路径仍走旧实现，正式账号选择和 PTY 授权待接入。
 
 原生会话回归 `packages/api/test/plugin-agent-kimi-native-archive.test.js` 使用实际 Kimi CLI 和回环模型端点。旧 CLI 先生成会话与回复，并写旧格式 L0 指纹。指纹一致时归档复用同一原生会话及历史。角色编辑后，严格续接在模型请求前失败，允许回退的请求报告 `l0_resume_fresh_start` 并开启新会话。新 L0 只进入 system，新指纹单独登记，旧记录保持。工作目录和账号仅进入 Host 授权上下文。测试在独立 HOME 中运行，模型回复和账号使用本地夹具。
 
