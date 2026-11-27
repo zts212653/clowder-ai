@@ -904,6 +904,7 @@ window.clowderChat = {
       'stop',
       'cafeRunStop',
       'cafeQueue',
+      'cafeLegacyDraftRecover',
       'cafeReadAll',
       'cafeWhisper',
       'cafePick',

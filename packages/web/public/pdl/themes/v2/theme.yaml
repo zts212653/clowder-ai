@@ -17132,6 +17132,21 @@ pdl:
                 when: $.home
             field:
               - type: component
+                use: v2Each
+                props:
+                  from: $.notices
+                  control:
+                    type: component
+                    use: v2Action
+                    props:
+                      label: "@text"
+                      link: true
+                      act: "@act"
+                      args: {threadId: "@args.threadId"}
+                    when:
+                      of: "@id"
+                      map: {legacy-draft: true}
+              - type: component
                 use: v2Chip
                 props:
                   icon: reply
@@ -21847,6 +21862,10 @@ pdl:
               - type: component
                 use: v2Media
                 props: "@media"
+    dlg.legacyDraftRestore:
+      title: t:chat.legacyDraftRestore.title
+      text: t:chat.legacyDraftRestore.text
+      ok: t:chat.legacyDraftRestore.ok
     dlg.queueRecallAppend:
       title: t:chat.queueRecallAppend.title
       text: t:chat.queueRecallAppend.text

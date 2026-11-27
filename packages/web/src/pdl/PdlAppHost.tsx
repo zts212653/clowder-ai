@@ -68,7 +68,9 @@ import { ThreadChatRuntimeProvider, useThreadChatRuntime } from '@/components/th
 import {
   getContextAttachmentDraft,
   getThreadDraft,
+  hasLegacyThreadDraft,
   hasPendingThreadDraft,
+  readVerifiedLegacyThreadDraft,
   subscribeContextAttachmentDrafts,
   subscribeThreadDrafts,
   syncContextAttachmentDraftToStorage,
@@ -509,6 +511,10 @@ function ChatBinding({
   const pluginTargets = usePluginTargets(need('chat.pluginTargets'));
   // One draft per conversation, kept in browser storage (thread-drafts): read when it opens, written as it changes.
   const drafting = exportMids === undefined;
+  const legacyDraft = useMemo(
+    () => !!(drafting && session.ownerUserId && hasLegacyThreadDraft(threadId)),
+    [drafting, session, threadId],
+  );
   const inputChanged = useRef<() => void>();
   const serverDraft = useRef<ReturnType<typeof useServerComposerDraft>>();
   const leaving = useThreadDraftMarker(threadId, session);
@@ -865,6 +871,7 @@ function ChatBinding({
       threadsLoading: store.threadsLoading,
       messages: history.messages,
       drafts,
+      legacyDraft,
       cats,
       me,
       get input() {
@@ -910,6 +917,7 @@ function ChatBinding({
       store.threadsLoading,
       history.messages,
       drafts,
+      legacyDraft,
       cats,
       me,
       images,
@@ -1364,6 +1372,51 @@ function ChatBinding({
         homeDirtyRef.current.pinned = true;
         admissionRef.current?.updatePinned(ui.current.homePin);
         return;
+      case 'cafeLegacyDraftRecover': {
+        const stillHere = () =>
+          args.threadId === threadId &&
+          current.current.threadId === threadId &&
+          apiSessionIdentity.getSnapshot() === session;
+        if (!stillHere() || !drafting || connection.isReadonly) return;
+        const legacy = await readVerifiedLegacyThreadDraft(threadId, session).catch(() => undefined);
+        if (!stillHere()) return;
+        if (!legacy) {
+          useToastStore.getState().addToast({
+            type: 'info',
+            title: '旧草稿仍保留在本机',
+            message: '无法核验这份旧草稿的归属。请用原账号打开原会话。共享会话或归属不明的记录由本机维护者核实后处置。',
+            duration: 8000,
+          });
+          return;
+        }
+        if (!(await window.clowderChat.confirm('legacyDraftRestore', {})) || !stillHere()) return;
+        const host = current.current;
+        if (
+          composingRef.current ||
+          host.input.trim() ||
+          host.images.length ||
+          host.contexts.length ||
+          host.reply ||
+          !serverDraft.current?.holdRecoveredDraft({
+            text: legacy.text,
+            images: [],
+            contexts: legacy.contexts,
+            replyTo: legacy.reply?.id,
+          })
+        ) {
+          useToastStore.getState().addToast({
+            type: 'info',
+            title: '请先处理当前草稿',
+            message: '当前草稿和旧记录均保留在本机。空输入框可以恢复旧稿。',
+            duration: 6000,
+          });
+          return;
+        }
+        setInput(legacy.text);
+        setContexts(legacy.contexts);
+        if (legacy.reply) useChatStore.getState().setReplyTo(legacy.reply);
+        return;
+      }
       case 'compose': {
         const nextComposing = args.composing === '1';
         if (composingRef.current !== nextComposing) {

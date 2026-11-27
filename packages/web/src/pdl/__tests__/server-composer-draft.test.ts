@@ -886,3 +886,27 @@ it('keeps a late first read behind a send that already consumed its revision', a
   expect(restore).not.toHaveBeenCalled();
   expect(JSON.parse(String(writes()[0][2]))).toEqual({ expectedRevision: 2, text: 'after send' });
 });
+
+it('keeps an explicitly recovered local draft across reload after the first read failed', async () => {
+  vi.mocked(apiFetch).mockResolvedValue(new Response(null, { status: 503 }));
+  const empty = { text: '', images: [], contexts: [] };
+  const chosen = { text: 'recovered old words', images: [], contexts: [quote], replyTo: 'm1' };
+  const first = mount(empty);
+  await flushed();
+  expect(first.hook.result.current.holdRecoveredDraft(chosen)).toBe(true);
+  expect(writes()).toHaveLength(0);
+  await cleanup();
+
+  vi.mocked(apiFetch).mockImplementation(async (_path, init) =>
+    init?.method === 'PUT' ? Response.json({ draft: { revision: 1 } }) : Response.json({ draft: null, revision: 0 }),
+  );
+  const again = mount(empty);
+  await waitFor(() => expect(again.state.draft).toEqual(chosen));
+  await waitFor(() => expect(writes()).toHaveLength(1));
+  expect(JSON.parse(String(writes()[0][2]))).toEqual({
+    expectedRevision: 0,
+    text: chosen.text,
+    replyTo: 'm1',
+    contentBlocks: [{ type: 'context_attachment', attachment: quote }],
+  });
+});

@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, expect, it, vi } from 'vitest';
 
+vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
+
 const load = async () => {
   const { observeApiSessionOwner } = await import('@/utils/api-session-identity');
   observeApiSessionOwner('test-owner');
@@ -83,4 +85,35 @@ it('keeps draft text, attachments and replies separate on account switches and r
   expect(drafts.getContextAttachmentDraft('thread-a')).toEqual([quote]);
   expect(drafts.threadReplyDrafts.get('thread-a')?.id).toBe('old');
   expect(drafts.threadImageDrafts.get('thread-a')).toEqual([file]);
+});
+
+it('offers legacy records for explicit recovery while keeping the account maps and old keys untouched', async () => {
+  const threadId = 'thread-a';
+  const reply = { id: 'm-1', content: 'parent', senderCatId: null, threadId };
+  const legacy = {
+    'cat-cafe:thread-drafts': [[threadId, 'unsent offline words']],
+    'cat-cafe:thread-reply-drafts': [[threadId, reply]],
+    'cat-cafe:thread-context-attachment-drafts': [[threadId, [quote]]],
+  };
+  Object.entries(legacy).forEach(([key, value]) => localStorage.setItem(key, JSON.stringify(value)));
+  const drafts = await load();
+  const { apiSessionIdentity, observeApiSessionOwner } = await import('@/utils/api-session-identity');
+  const { apiFetch } = await import('@/utils/api-client');
+  vi.mocked(apiFetch).mockImplementation(async (path) =>
+    Response.json({ id: path === '/api/threads/default' ? 'default' : threadId, createdBy: 'test-owner' }),
+  );
+  expect(drafts.hasLegacyThreadDraft(threadId)).toBe(true);
+  expect(drafts.hasPendingThreadDraft(threadId)).toBe(false);
+  const owner = apiSessionIdentity.getSnapshot();
+  expect(await drafts.readVerifiedLegacyThreadDraft(threadId, owner)).toEqual({
+    text: 'unsent offline words',
+    contexts: [quote],
+    reply,
+  });
+
+  observeApiSessionOwner('second');
+  expect(await drafts.readVerifiedLegacyThreadDraft(threadId, owner)).toBeUndefined();
+  expect(await drafts.readVerifiedLegacyThreadDraft(threadId, apiSessionIdentity.getSnapshot())).toBeUndefined();
+  expect(drafts.hasPendingThreadDraft(threadId)).toBe(false);
+  Object.entries(legacy).forEach(([key, value]) => expect(localStorage.getItem(key)).toBe(JSON.stringify(value)));
 });

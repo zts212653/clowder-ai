@@ -265,6 +265,14 @@ export function useServerComposerDraft(input: {
   }, [scope]);
 
   return {
+    holdRecoveredDraft: (draft: ComposerDraft): boolean => {
+      if (!enabled || !scope.session.ownerUserId || !currentSession(scope) || latest.current.holdWrites) return false;
+      if (!isEmpty(latest.current.draft) || scope.sends.has(threadId) || readEdit(scope, threadId)) return false;
+      const known = scope.known.get(threadId);
+      if (known && known.signature !== emptySignature) return false;
+      rememberEdit(scope, threadId, { draft, base: emptyDraft });
+      return true;
+    },
     /** Accepted sends consume an exact revision captured by the message route, even before the browser's first read. */
     send: async (
       sent: string,

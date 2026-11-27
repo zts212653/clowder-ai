@@ -49,6 +49,11 @@
     }
   },
   "chat": {
+    "legacyDraftRestore": {
+      "title": "Restore a local draft",
+      "text": "Your account owns this conversation. Restore the draft only if you wrote it. The original copy stays on this device.",
+      "ok": "This is my draft. Restore it"
+    },
     "projectGit": {
       "true": "Git not initialized",
       "false": "Git unavailable"
