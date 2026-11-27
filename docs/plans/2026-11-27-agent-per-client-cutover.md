@@ -13,9 +13,16 @@ Architecture cell 为 identity-session 与插件运行时。Map delta 是把具�
 | 原生 client | CLI、Desktop、SDK 或上游协议 | 保留原生状态与协议。Host 对工作区、账号和原生会话的授权不能由插件自行授予。 |
 | 产品 UI | 现有成员、设置、账户额度和聊天页面 | 消费 Host 结构化状态、实际字段选项和消息，不按各 Agent 写一套通用控件。 |
 
-计划中的发行 ID 为 official.agent-codex、official.agent-claude-code、official.agent-dsh、official.agent-agy、official.agent-kimi。每个归档有 manifest.json、版本化 agent-adapter.json 和独立 Worker 入口。均可通过 Manager 单独安装。五包随兼容 Host 的官方目录及首启初始化一同提供，每包仍有独立版本、实例和安装动作。保留原 agent-provider.json 声明和稳定绑定。原官方 agent-access.json 和共享包仅用于存量迁移与未切换承载，不能算五个独立包的验收。
+计划中的发行 ID 为 official.agent-codex、official.agent-claude-code、official.agent-dsh、official.agent-agy、official.agent-kimi。每个归档有 manifest.json、版本化 agent-adapter.json 和独立 Worker 入口。均可通过 Manager 单独安装。五包从插件仓独立构建和分发。兼容 Host 通过官方目录和首启初始化提供五包，每包保留独立版本、实例和安装动作。保留原 agent-provider.json 声明和稳定绑定。原官方 agent-access.json 和共享包仅用于存量迁移与未切换承载，不能算五个独立包的验收。
 
 采用版本化声明和 Worker 动作，Host 以包实例、摘要、生命周期版本绑定操作。包声明与动作表在准入/激活检查，旧代际回调撤销。Host 通过现有 AgentSessionProvider / AgentService 与 AgentSessionEvent / AgentMessage 向业务层输出一致形状。Worker 不传入 AgentServiceOptions、原始凭据、任意 Host 执行对象。第三方同一机制须通过明确准入，不能借 SDK/CLI 的名字隐式提权。独立包没有导入 Host 私有实现的依赖。
+
+### 两个仓的交付物
+
+- [Host PR #2030](https://github.com/zts212653/clowder-ai/pull/2030) 持有安装与执行通用接口、激活实例、调用权限、角色目录、会话与回执，并保留从旧入口切换和回退的机制。
+- [插件 PR #258](https://github.com/zts212653/clowder-ai-plugins/pull/258) 持有 Codex、Claude Code、DSH、AGY、Kimi 各自的源码、规范声明、版本和独立归档。Host 不导入具体插件包。
+- 两仓用确切 SHA、兼容范围和归档摘要组成待验收版本。开发候选用本地归档装进隔离 Host。目录上架和发布各自按仓库流程。
+- 当前 Worker 与 Host 属于同一 OS 进程。独立 Worker 管理包调用生命周期，不提供操作系统权限隔离。首批 native 执行端口只给经过 Host 核验的受信包和调用。第三方 ACP 声明沿现有路径。扩展到其他可执行插件须另证隔离与授权边界。
 
 ## Phase 0：公共接入先交付
 
@@ -102,3 +109,9 @@ flowchart LR
 - API 归档用例 `packages/api/test/plugin-agent-adapter-admission.test.js` 使用真实 Manager、归档与 Worker，覆盖 E00、E07 的不兼容与启动失败分支，以及 E09 的能力数据校验。第二个包必须有不同的实例和稳定贡献引用，替换失败必须恢复原摘要。
 - 浏览器入口 `packages/web/test/browser/agent-per-client-cutover.journey.mjs` 是五包候选的目标用例，目前尚无产品接线和实跑证明。用例包括单装到装齐、检测、创建角色及读回、四个既有额度入口、真实发送、旧线程与原生会话续接、单包替换及停用隔离。E04 的异常账户、DSH 无额度、E05 的审批与取消、E06 的逐载体与重启、E08/E10 授权回归仍需逐包补运行用例。候选的检测、角色绑定、额度和消息回执必须从实际 dispatch 投影 adapterOrigin。它包含完整 ref、包实例、摘要、生命周期版本和 active 切换状态。未切换、空壳包、旧执行路径或仅有状态标签均不能通过。仍需写入一条运行行为为空但声明齐全的整包负例。
 - 浏览器运行方式为 `node --test packages/web/test/browser/agent-per-client-cutover.journey.mjs`。沿用 `native-team-live.harness.mjs` 的独立实例 URL、证据目录、真实调用授权及 Codex 历史隔离前置条件。环境变量 `CAT_CAFE_PER_CLIENT_CUTOVER_FIXTURE` 指向独立环境的绝对 JSON 路径，`clients` 按五个发行键保存 `archive`、`upgradeArchive`、`detectId`、`adapterRef`、`member`、所需的 `account.id/expectedRef` 和 `legacy.threadId/catId/sessionId/historyMarker/messageIds/mention`。JSON 只记录引用和测试数据，不存凭据。旧版先在隔离实例用真实客户端生成历史及原生会话，停写后再导入候选验证。首启安装测试和手工单装测试分别使用新隔离库。后者关闭首启自动安装，用已完成产品切换接线的候选运行，切换命令在该版本接入后补到脚本。
+
+### Kimi 候选的跨仓验证
+
+插件仓按 Node 24.18.0 和 npm 11.16.0 打包 `packages/agent-kimi`。Host 运行 `test/plugin-agent-kimi-local-archive.test.js` 时，`CLOWDER_KIMI_CANDIDATE_ARCHIVE` 指向该归档，`CLOWDER_KIMI_CANDIDATE_EXECUTABLE` 指向已经核定的本机 CLI。测试使用独立项目和原生 HOME，用真 CLI 查询版本。额度、原生续接回执与模型事件使用注入的进程或终端数据。安装、Worker 调用与停用使用实际 Host 管理器。
+
+这条验收只覆盖跨仓归档与端口协议。正常产品还要完成真实账号 PTY 额度、角色创建、会话、历史续接、切换及回退。其余四个包仍须独立封装和验收。

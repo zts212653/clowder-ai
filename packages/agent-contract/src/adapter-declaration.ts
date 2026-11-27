@@ -96,3 +96,24 @@ export type AgentAdapterDetection = z.infer<typeof detectionSchema>;
 export function parseAgentAdapterDetection(input: unknown) {
   return detectionSchema.safeParse(input);
 }
+
+const quotaSchema = z.strictObject({
+  source: z.enum(['native-command', 'provider-response', 'account-api']),
+  observedAt: z.number().int().nonnegative(),
+  windows: z
+    .array(
+      z.strictObject({
+        id: z.string().min(1).max(128),
+        label: z.string().min(1).max(120),
+        unit: z.literal('ratio'),
+        used: z.number().min(0).max(1),
+        resetsAt: z.string().datetime().optional(),
+      }),
+    )
+    .min(1)
+    .max(30),
+});
+
+export function parseAgentAdapterQuota(input: unknown) {
+  return quotaSchema.safeParse(input);
+}

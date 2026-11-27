@@ -17,7 +17,15 @@ export {
   parseAgentAdapterDeclaration,
   parseAgentAdapterDescription,
   parseAgentAdapterDetection,
+  parseAgentAdapterQuota,
 } from './adapter-declaration.js';
+export type { AgentAdapterNativeRuntime } from './adapter-native-runtime.js';
+export {
+  agentAdapterCancelResultSchema,
+  agentAdapterEventSchema,
+  agentAdapterOpenResultSchema,
+  agentAdapterReleaseResultSchema,
+} from './adapter-session.js';
 
 export const AGENT_ACCESS_PLUGIN_ID = 'official.agent-access';
 export const AGENT_ACCESS_DECLARATION_FILE = 'agent-access.json';

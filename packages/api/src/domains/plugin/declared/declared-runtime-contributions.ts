@@ -44,6 +44,7 @@ export interface DeclaredScheduleTaskRunner {
 
 export interface DeclaredRuntimeContributionHost {
   readonly agentSessionProviders?: AgentSessionProviderLifecycle;
+  readonly registerAgentAdapterSession?: (admission: PluginRuntimeAdmission) => (() => void) | undefined;
   readonly packages: VerifiedPluginPackageLocator;
   readonly limbRegistry?: LimbRegistry;
   readonly taskRunner?: DeclaredScheduleTaskRunner;
@@ -55,6 +56,7 @@ export interface DeclaredRuntimeContributionHost {
 
 interface ActiveRuntimeContributions {
   readonly releaseAgentProvider?: () => Promise<void>;
+  readonly releaseAgentAdapterSession?: () => void;
   readonly lifetime: AbortController;
   readonly pluginId: string;
   readonly pluginInstanceId: string;
@@ -117,6 +119,7 @@ export class DeclaredRuntimeContributions {
     const scheduleTaskIds: string[] = [];
     const cloudHostLeases: CloudConversationHostLease[] = [];
     const cloudHostRegistry = this.host.cloudConversationHosts;
+    let releaseAgentAdapterSession: (() => void) | undefined;
     let releaseAgentProvider: (() => Promise<void>) | undefined;
     try {
       if (schedules.length > 0 && !this.host.taskRunner) {
@@ -135,7 +138,9 @@ export class DeclaredRuntimeContributions {
       }
       registerCloudConversationHosts(admission, cloudHosts, cloudHostRegistry, actions, cloudHostLeases);
       releaseAgentProvider = await this.host.agentSessionProviders?.activate(admission);
+      releaseAgentAdapterSession = this.host.registerAgentAdapterSession?.(admission);
       this.#active.set(pluginInstanceId, {
+        releaseAgentAdapterSession,
         releaseAgentProvider,
         lifetime: new AbortController(),
         pluginId: admission.packageRecord.pluginId,
@@ -150,6 +155,7 @@ export class DeclaredRuntimeContributions {
         webhook,
       });
     } catch (error) {
+      releaseAgentAdapterSession?.();
       await releaseAgentProvider?.();
       this.#remove({ limbNodeIds, scheduleTaskIds, cloudHostLeases });
       throw error;
@@ -161,6 +167,7 @@ export class DeclaredRuntimeContributions {
     if (!active) return;
     this.#active.delete(pluginInstanceId);
     active.lifetime.abort();
+    active.releaseAgentAdapterSession?.();
     this.#remove(active);
     await active.releaseAgentProvider?.();
   }

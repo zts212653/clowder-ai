@@ -19,6 +19,8 @@
  * call itself, never an error code: the action can throw anything, a Host error included.
  */
 
+import { Readable } from 'node:stream';
+import type { AgentAdapterNativeRuntime } from '@clowder-ai/agent-contract';
 import {
   attemptPluginAction,
   type HostPluginInvocationPort,
@@ -37,6 +39,7 @@ import {
   withCurrentOwnerOperation,
 } from '../../carrier/plugin-owner-operation-context.js';
 import { snapshotPluginProtocolData } from '../../carrier/plugin-protocol-data.js';
+import { RetainedRemoteValue } from '../../execution-worker/protocol.js';
 import { ExternalPluginRuntimeError } from '../../external-runtime/types.js';
 
 export interface ModuleHostInvocationDeps {
@@ -49,6 +52,7 @@ export interface ModuleHostInvocationDeps {
 
 export interface ModuleActionControl {
   readonly signal: AbortSignal;
+  readonly nativeRuntime?: AgentAdapterNativeRuntime;
 }
 
 export interface ModuleHostInvocation extends Pick<HostPluginInvocationPort, 'invoke'> {
@@ -133,7 +137,19 @@ export function createModuleHostInvocation(deps: ModuleHostInvocationDeps): Modu
     // The boundary: from here the package's own code runs.
     const caller = currentPluginCallContext(targetId);
     const nativeContext = projectNativeContext(caller);
-    const publicContext = control ? Object.freeze({ ...nativeContext, signal: control.signal }) : nativeContext;
+    const nativeRuntime = control?.nativeRuntime;
+    const run = nativeRuntime?.run?.bind(nativeRuntime);
+    // A native stream is consumed over several Worker pulls. Keep its transferred readable
+    // until the consumer closes it or the activation ends, independently of any one pull.
+    const port = run
+      ? {
+          ...nativeRuntime,
+          run: async (...args: Parameters<typeof run>) => new RetainedRemoteValue(Readable.from(await run(...args))),
+        }
+      : nativeRuntime;
+    const publicContext = control
+      ? Object.freeze({ ...nativeContext, signal: control.signal, ...(port ? { nativeRuntime: port } : {}) })
+      : nativeContext;
     const ownerHttpContext = projectOwnerHttpContext(targetId);
     return attemptPluginAction(() =>
       consumeOwnerOperationInvocation(

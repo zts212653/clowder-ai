@@ -1,20 +1,42 @@
 import { addAbortListener } from 'node:events';
 import {
   AGENT_ADAPTER_OPTIONAL_OPERATIONS,
+  type AgentAdapterNativeRuntime,
   parseAgentAdapterDescription,
   parseAgentAdapterDetection,
+  parseAgentAdapterQuota,
 } from '@clowder-ai/agent-contract';
-import { sessionImplementationKey } from '../../cats/services/agents/session-contract/implementation-registry.js';
+import {
+  type SessionImplementationRegistry,
+  sessionImplementationKey,
+} from '../../cats/services/agents/session-contract/implementation-registry.js';
 import type { ModulePluginRuntime } from '../builtin-runtime/carriers/module-plugin-runtime.js';
+import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 import type { PluginInstanceRecord } from '../host-inventory/types.js';
 
+import {
+  type AgentAdapterSessionInvocation,
+  createAgentAdapterSessionProvider,
+} from './agent-adapter-session-provider.js';
+
 const metadataTimeoutMs = 5_000;
+type AdapterAction = 'describe' | 'detect' | Parameters<AgentAdapterSessionInvocation>[0] | 'quota';
+
+export type AgentAdapterRuntimeGrant = (request: {
+  readonly pluginId: string;
+  readonly contributionId: string;
+  readonly packageDigest: string;
+  readonly pluginInstanceId: string;
+  readonly action: AdapterAction;
+  readonly catId?: string;
+}) => AgentAdapterNativeRuntime | undefined;
 
 export function createAgentAdapterAccess(
   inventory: Pick<PluginInventoryStore, 'readCurrentAuthority' | 'snapshot'>,
   runtime: Pick<ModulePluginRuntime, 'agentAdapter' | 'invoke' | 'operationActivationSignal'>,
+  grantNativeRuntime?: AgentAdapterRuntimeGrant,
 ) {
   const resolve = (instance: PluginInstanceRecord | undefined) => {
     if (instance?.activationState !== 'enabled' || instance.runtimeState !== 'healthy') return undefined;
@@ -31,14 +53,30 @@ export function createAgentAdapterAccess(
   });
   async function read(
     ref: { pluginId: string; contributionId: string },
-    action: 'describe' | 'detect',
+    action: AdapterAction,
     input: Readonly<Record<string, unknown>>,
     callerSignal?: AbortSignal,
+    expectedLifetime?: AbortSignal,
+    catId?: string,
   ) {
     const active = resolve((await inventory.readCurrentAuthority(ref.pluginId))?.instance);
-    if (!active || active.declaration.id !== ref.contributionId)
+    if (
+      !active ||
+      active.declaration.id !== ref.contributionId ||
+      (expectedLifetime && expectedLifetime !== active.lifetime)
+    )
       throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', 'Agent adapter is not active');
-    const signals = [active.lifetime, AbortSignal.timeout(metadataTimeoutMs)];
+    if (!active.declaration.operations.includes(action))
+      throw new ExternalPluginRuntimeError('PROTOCOL_VIOLATION', 'Agent adapter did not declare the requested action');
+    const nativeRuntime = grantNativeRuntime?.({
+      ...ref,
+      packageDigest: active.instance.packageDigest,
+      pluginInstanceId: active.instance.pluginInstanceId,
+      action,
+      ...(catId === undefined ? {} : { catId }),
+    });
+    const deadline = new AbortController();
+    const signals = [active.lifetime, deadline.signal];
     if (callerSignal) signals.push(callerSignal);
     const signal = AbortSignal.any(signals);
     signal.throwIfAborted();
@@ -46,10 +84,21 @@ export function createAgentAdapterAccess(
     const cancellation = new Promise<never>((_resolve, reject) => {
       listener = addAbortListener(signal, () => reject(signal.reason));
     });
+    const timer = setTimeout(
+      () => deadline.abort(new DOMException('Agent adapter call timed out', 'TimeoutError')),
+      metadataTimeoutMs,
+    );
+    timer.unref();
     const response = await Promise.race([
-      runtime.invoke(active.instance.pluginInstanceId, action, input, { signal }),
+      runtime.invoke(active.instance.pluginInstanceId, action, input, {
+        signal,
+        ...(nativeRuntime ? { nativeRuntime } : {}),
+      }),
       cancellation,
-    ]).finally(() => listener?.[Symbol.dispose]());
+    ]).finally(() => {
+      clearTimeout(timer);
+      listener?.[Symbol.dispose]();
+    });
     signal.throwIfAborted();
     const current = resolve((await inventory.readCurrentAuthority(ref.pluginId))?.instance);
     if (
@@ -62,6 +111,27 @@ export function createAgentAdapterAccess(
     return { active, response };
   }
   return {
+    registerSession(admission: PluginRuntimeAdmission, registry: SessionImplementationRegistry) {
+      const instance = admission.instance;
+      const declaration = runtime.agentAdapter(instance.pluginInstanceId, instance.packageDigest);
+      const lifetime = runtime.operationActivationSignal(instance.pluginInstanceId);
+      if (!declaration || !lifetime) return;
+      const ref = { pluginId: instance.pluginId, contributionId: declaration.id };
+      const providers = new Map<string, ReturnType<typeof createAgentAdapterSessionProvider>>();
+      return registry.register(
+        ref,
+        ({ catId }) => {
+          const existing = providers.get(catId);
+          if (existing) return existing;
+          const invoke: AgentAdapterSessionInvocation = async (action, args, signal) =>
+            (await read(ref, action, args, signal, lifetime, catId)).response;
+          const provider = createAgentAdapterSessionProvider(invoke, lifetime);
+          providers.set(catId, provider);
+          return provider;
+        },
+        JSON.stringify([sessionImplementationKey(ref), declaration.protocolVersion]),
+      );
+    },
     async list() {
       const { instances } = await inventory.snapshot({ currentOnly: true });
       return instances.flatMap((instance) => {
@@ -78,6 +148,16 @@ export function createAgentAdapterAccess(
       if (!result.success)
         throw new ExternalPluginRuntimeError('PROTOCOL_VIOLATION', 'Agent adapter returned invalid detection data');
       return { ...result.data, binding: binding(active.instance, active.declaration.id) };
+    },
+    async quota(ref: { pluginId: string; contributionId: string }, options?: { signal?: AbortSignal }) {
+      const { active, response } = await read(ref, 'quota', {}, options?.signal);
+      const quota = parseAgentAdapterQuota(response);
+      if (!quota.success)
+        throw new ExternalPluginRuntimeError(
+          'PROTOCOL_VIOLATION',
+          'Agent adapter returned an invalid quota observation',
+        );
+      return { observation: quota.data, binding: binding(active.instance, active.declaration.id) };
     },
     async describe(ref: { pluginId: string; contributionId: string }, options?: { signal?: AbortSignal }) {
       const { active, response } = await read(ref, 'describe', {}, options?.signal);
