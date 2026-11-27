@@ -1,1 +1,8 @@
-export * from '@clowder-ai/agent-access/runtime/acp/session-configuration';
+export {
+  applySessionConfiguration,
+  replayableSessionPreferences,
+  reportedSessionModel,
+  resolveSessionModelConfigOption,
+  resolveSessionOption,
+  type SessionConfigurationClient,
+} from '@clowder-ai/agent-contract/acp';

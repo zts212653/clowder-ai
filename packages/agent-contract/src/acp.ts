@@ -396,3 +396,20 @@ export const agentAccessDshConnectionInputSchema = z.object({
   effort: z.string().min(1).max(160).optional(),
 });
 export type AgentAccessDshConnectionInput = z.infer<typeof agentAccessDshConnectionInputSchema>;
+
+export {
+  AcpImageInputError,
+  type AcpImageInputErrorCode,
+  type AcpPromptInput,
+  requireAcpImageCapability,
+  toAcpPromptContent,
+} from './acp-prompt-content.js';
+
+export {
+  applySessionConfiguration,
+  replayableSessionPreferences,
+  reportedSessionModel,
+  resolveSessionModelConfigOption,
+  resolveSessionOption,
+  type SessionConfigurationClient,
+} from './acp-session-configuration.js';

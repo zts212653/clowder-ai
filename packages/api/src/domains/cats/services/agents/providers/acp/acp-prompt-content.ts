@@ -1,1 +1,7 @@
-export * from '@clowder-ai/agent-access/runtime/acp/acp-prompt-content';
+export {
+  AcpImageInputError,
+  type AcpImageInputErrorCode,
+  type AcpPromptInput,
+  requireAcpImageCapability,
+  toAcpPromptContent,
+} from '@clowder-ai/agent-contract/acp';

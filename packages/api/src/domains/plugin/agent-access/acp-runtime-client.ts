@@ -4,13 +4,13 @@ import { Readable } from 'node:stream';
 import { isDeepStrictEqual } from 'node:util';
 import { configuredCredentialValues } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import { AcpCwdIdentityTracker } from '@clowder-ai/agent-access/runtime/acp/acp-cwd-identity';
-import type { AcpPromptInput } from '@clowder-ai/agent-access/runtime/acp/acp-prompt-content';
 import {
   ACP_METHODS,
   type AcpInitializeResult,
   type AcpMcpServer,
   type AcpNewSessionResult,
   type AcpPromptCapabilities,
+  type AcpPromptInput,
   type AcpSessionUpdate,
   type AcpStopReason,
   type AgentAccessAcpSessionFailure,
