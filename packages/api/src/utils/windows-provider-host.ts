@@ -21,6 +21,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { type CliExecutionOwnerRef, resolveCatCafeDataRoot } from './cli-process-ownership.js';
 import { clearWindowsJobExecutionLink, recordWindowsJobExecutionLink } from './windows-job-execution-links.js';
+import { HELPER_TIMEOUT } from './windows-job-native.js';
 import {
   adoptWindowsApiJob,
   clearWindowsJobOwner,
@@ -33,6 +34,7 @@ import {
 const HOST_SCRIPT = fileURLToPath(import.meta.url);
 // Adoption is one PowerShell start plus Add-Type, about a second; the helper's own bound is 10s.
 const READY_TIMEOUT_MS = 20_000;
+const RETRY_EXIT_TIMEOUT_MS = 2_000;
 // After the host exits the helper still has to close the job, so a present verdict is re-read.
 const CLOSE_QUERY_ATTEMPTS = 5;
 const CLOSE_QUERY_INTERVAL_MS = 300;
@@ -72,31 +74,60 @@ function readyJob(message: unknown, hostPid: number | undefined): WindowsJobOwne
  * Start a provider host and wait until its job owns it. Throws a recoverable error when the host
  * cannot be owned in time; nothing has been launched then, and the host is already ended.
  */
-export async function prepareWindowsProviderHost(options: { dataDir?: string } = {}): Promise<WindowsProviderHost> {
+export async function prepareWindowsProviderHost(
+  options: { dataDir?: string; spawnHost?: typeof spawn } = {},
+): Promise<WindowsProviderHost> {
   const dataDir = resolveCatCafeDataRoot(options.dataDir);
   const nodeArgs = HOST_SCRIPT.endsWith('.ts') ? [...process.execArgv, HOST_SCRIPT] : [HOST_SCRIPT];
-  const host = spawn(process.execPath, [...nodeArgs, dataDir], {
-    stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
-    windowsHide: true,
-  });
-  const exited = new Promise<void>((resolve) => host.once('exit', () => resolve()));
-  const ready = await new Promise<WindowsJobOwnerEntry | string>((resolve) => {
-    const timer = setTimeout(() => resolve('host_ready_timeout'), READY_TIMEOUT_MS);
-    const finish = (value: WindowsJobOwnerEntry | string): void => {
-      clearTimeout(timer);
-      resolve(value);
-    };
-    host.once('message', (message) => {
-      finish(readyJob(message, host.pid) ?? `host_not_ready:${JSON.stringify(message).slice(0, 500)}`);
+  const prepareAttempt = async () => {
+    const host = (options.spawnHost ?? spawn)(process.execPath, [...nodeArgs, dataDir], {
+      stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      windowsHide: true,
     });
-    host.once('exit', (code) => finish(`host_exited:${code}`));
-    host.once('error', (error) => finish(`host_spawn_failed:${error.message}`));
-  });
-  if (typeof ready === 'string') {
+    const exited = new Promise<void>((resolve) => host.once('exit', () => resolve()));
+    type NotReady = { failure: string; helperTimedOut?: boolean };
+    const ready = await new Promise<WindowsJobOwnerEntry | NotReady>((resolve) => {
+      const timer = setTimeout(() => resolve({ failure: 'host_ready_timeout' }), READY_TIMEOUT_MS);
+      const finish = (value: WindowsJobOwnerEntry | NotReady): void => {
+        clearTimeout(timer);
+        resolve(value);
+      };
+      host.once('message', (message: unknown) => {
+        const job = readyJob(message, host.pid);
+        if (job) {
+          finish(job);
+          return;
+        }
+        const helperTimedOut =
+          typeof message === 'object' &&
+          message !== null &&
+          'type' in message &&
+          message.type === 'failed' &&
+          'reason' in message &&
+          typeof message.reason === 'string' &&
+          (message.reason === HELPER_TIMEOUT || message.reason.startsWith(`${HELPER_TIMEOUT}:`));
+        finish({ failure: `host_not_ready:${JSON.stringify(message).slice(0, 500)}`, helperTimedOut });
+      });
+      host.once('exit', (code) => finish({ failure: `host_exited:${code}` }));
+      host.once('error', (error) => finish({ failure: `host_spawn_failed:${error.message}` }));
+    });
     // A host that the helper already assigned takes its job down with it; nothing was launched.
-    host.kill();
-    throw new Error(`windows_provider_host_unavailable:${ready}`);
+    if ('failure' in ready && host.exitCode === null && host.signalCode === null) host.kill();
+    return { host, ready, exited };
+  };
+  let attempt = await prepareAttempt();
+  if ('failure' in attempt.ready && attempt.ready.helperTimedOut) {
+    const stopped = await Promise.race([
+      attempt.exited.then(() => true),
+      delay(RETRY_EXIT_TIMEOUT_MS, false, { ref: false }),
+    ]);
+    if (stopped) {
+      console.warn(`[windows-provider-host] retrying ownership setup after ${attempt.ready.failure}`);
+      attempt = await prepareAttempt();
+    }
   }
+  const { host, ready, exited } = attempt;
+  if ('failure' in ready) throw new Error(`windows_provider_host_unavailable:${ready.failure}`);
 
   let launched = false;
   return {
