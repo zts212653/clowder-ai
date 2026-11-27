@@ -201,7 +201,7 @@ test('a repeat that outlasts its window is stopped, and the search still answers
     elapsed >= 1_000 && elapsed < 20_000,
     `the repeat had its own window, not the caller's 60 s: ${elapsed} ms`,
   );
-  assert.ok(seen.repeats[0].repeatMs >= 1_000, `${seen.repeats[0].repeatMs} ms`);
+  assert.equal(probes, 2, 'the repeat reached the stalled provider before degrading');
   assert.deepEqual(seen.reads, ['search', 'search', 'search']);
 });
 
