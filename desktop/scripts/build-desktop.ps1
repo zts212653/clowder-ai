@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Builds the Clowder AI Windows installer package.
 
@@ -493,15 +493,15 @@ Write-Host "  Archive tool: $archiveTar"
 
 foreach ($t in $archiveTargets) {
     if (-not (Test-Path $t.Src)) {
-        Write-Warn "$($t.Src) not found — skipping $($t.Name).tar.gz"
+        Write-Warn "$($t.Src) not found — skipping $($t.Name).tar"
         continue
     }
-    $archivePath = Join-Path $archiveDir "$($t.Name).tar.gz"
+    $archivePath = Join-Path $archiveDir "$($t.Name).tar"
     if ($t.Name -ne 'node') {
         node (Join-Path $ProjectRoot 'desktop/scripts/create-runtime-archive.mjs') $t.Src $archivePath
         if ($LASTEXITCODE -ne 0) { throw "Runtime archive failed: $($t.Name)" }
         if ($t.Name -eq 'deploy-api') {
-            $entries = @(& (Join-Path $env:SystemRoot 'System32/tar.exe') -tzf $archivePath)
+            $entries = @(& (Join-Path $env:SystemRoot 'System32/tar.exe') -tf $archivePath)
             foreach ($requiredEntry in @('./dist/index.desktop.js', './dist/agent-hooks/index.desktop.js', './dist/.startup-read-ahead.json')) {
                 if (-not ($entries -contains $requiredEntry) -and -not ($entries -contains $requiredEntry.TrimStart('./'))) {
                     throw "deploy-api archive missing required entry: $requiredEntry"
@@ -517,19 +517,19 @@ foreach ($t in $archiveTargets) {
         $previousArchivePath = $env:PATH
         try {
             $env:PATH = "$(Split-Path -Parent $archiveTar);$env:PATH"
-            $tarOutput = & $archiveTar @archiveTarPrefix -czf $archivePath -C $t.Src . 2>&1
+            $tarOutput = & $archiveTar @archiveTarPrefix -cf $archivePath -C $t.Src . 2>&1
         } finally { $env:PATH = $previousArchivePath }
         $tarExit = $LASTEXITCODE
     } finally { $ErrorActionPreference = $oldErrorPreference }
     $tarOutput | ForEach-Object { Write-Host $_ }
     if ($tarExit -ne 0) { throw "tar failed for $($t.Name), exit=$tarExit, source=$($t.Src)" }
-    & (Join-Path $env:SystemRoot 'System32/tar.exe') -tzf $archivePath > $null
+    & (Join-Path $env:SystemRoot 'System32/tar.exe') -tf $archivePath > $null
     if ($LASTEXITCODE -ne 0) {
         Write-Err "tar failed for $($t.Name)"
         exit 1
     }
     $sizeMB = [math]::Round((Get-Item $archivePath).Length / 1MB, 2)
-    Write-Ok "$($t.Name).tar.gz ($sizeMB MB)"
+    Write-Ok "$($t.Name).tar ($sizeMB MB)"
 }
 & node (Join-Path $ProjectRoot 'desktop/scripts/verify-runtime-archives.mjs') $ProjectRoot
 if ($LASTEXITCODE -ne 0) { throw 'Runtime archive gate failed; no installer may be compiled.' }
@@ -782,7 +782,7 @@ if (-not $SkipPortableZip) {
 # Step 9: Build identity manifest (P2-6). Release evidence must succeed before
 # any output can be delivered. Only files produced by this invocation belong
 # to its source revision. The manifest records: source
-# SHA, generation time, Setup/portable ZIP path+sha256, every tar.gz archive
+# SHA, generation time, Setup/portable ZIP path+sha256, every runtime archive
 # with its serialized manifest, API/Web .build-commit identities, and the
 # working-tree state of every input that the installer packages (including
 # desktop/ source and untracked files that are bundled along, e.g. docs/).
@@ -867,11 +867,11 @@ if (-not $NoManifest) {
         $archives = @()
         $archiveDirManifest = Join-Path (Join-Path $ProjectRoot 'bundled') 'archives'
         if (Test-Path -LiteralPath $archiveDirManifest) {
-            foreach ($archive in (Get-ChildItem -LiteralPath $archiveDirManifest -Filter '*.tar.gz' -File | Sort-Object Name)) {
+            foreach ($archive in (Get-ChildItem -LiteralPath $archiveDirManifest -Filter '*.tar' -File | Sort-Object Name)) {
                 $archives += [ordered]@{
                     name     = $archive.Name
                     archive  = Get-ArtifactRecord $archive.FullName
-                    manifest = if ($archive.Name -eq 'node.tar.gz') { $null } else { Get-ArtifactRecord ($archive.FullName + '.json') }
+                    manifest = if ($archive.Name -eq 'node.tar') { $null } else { Get-ArtifactRecord ($archive.FullName + '.json') }
                 }
             }
         }

@@ -59,10 +59,10 @@ test('desktop distributions include the API that owns plugin installation', () =
   const ps1 = readFileSync(path.join(SCRIPTS_DIR, 'build-desktop.ps1'), 'utf8');
   assert.match(ps1, /Copy-ToStaging \(Join-Path \$deployRoot "api"\)\s+"packages\\api"/);
   const iss = readFileSync(path.join(INSTALLER_DIR, 'cat-cafe.iss'), 'utf8');
-  assert.match(iss, /Source:.*deploy-api\.tar\.gz/);
+  assert.match(iss, /Source:.*deploy-api\.tar/);
   // The branch extracts archives through the packaged extractor (integrity +
   // progress) instead of a literal tar Parameters line.
-  assert.match(iss, /AfterInstall: ExtractRuntimeArchive\('deploy-api\.tar\.gz'\)/);
+  assert.match(iss, /AfterInstall: ExtractRuntimeArchive\('deploy-api\.tar'\)/);
   const extractor = readFileSync(path.join(SCRIPTS_DIR, 'extract-runtime-archive.cjs'), 'utf8');
   assert.match(extractor, /'deploy-api': \['packages\/api'/);
 });

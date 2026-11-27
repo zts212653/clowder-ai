@@ -4,12 +4,12 @@ import path from 'node:path';
 const root = path.resolve(process.argv[2] ?? process.cwd());
 const archiveDir = path.join(root, 'bundled', 'archives');
 const required = [
-  { name: 'node.tar.gz', manifest: false },
-  { name: 'deploy-dependencies.tar.gz', manifest: true },
-  { name: 'deploy-api.tar.gz', manifest: true },
-  { name: 'deploy-web.tar.gz', manifest: true },
-  { name: 'deploy-mcp-server.tar.gz', manifest: true },
-  { name: 'electron.tar.gz', manifest: true },
+  { name: 'node.tar', manifest: false },
+  { name: 'deploy-dependencies.tar', manifest: true },
+  { name: 'deploy-api.tar', manifest: true },
+  { name: 'deploy-web.tar', manifest: true },
+  { name: 'deploy-mcp-server.tar', manifest: true },
+  { name: 'electron.tar', manifest: true },
 ];
 
 const failures = [];

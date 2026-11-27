@@ -205,3 +205,234 @@ test('native Setup timeout reaps its bootstrap child before fixture removal', na
     // withTempRoot must actually remove the fixture; EPERM remains a failure.
   });
 });
+
+test(
+  'native Setup deletes each extracted .tar and sidecar before unpacking the next and fails closed on incomplete node.tar',
+  native,
+  async () => {
+    const { createRequire } = require('node:module');
+    const { createHash } = require('node:crypto');
+    const npmCli = path.join(
+      path.dirname(process.execPath),
+      process.platform === 'win32' ? 'node_modules/npm/bin/npm-cli.js' : '../lib/node_modules/npm/bin/npm-cli.js',
+    );
+    const tar = createRequire(npmCli)('tar');
+    const extractProcedure = installerSource.slice(installerSource.indexOf('procedure ExtractRuntimeArchive('));
+    assert.match(extractProcedure, /DeleteFile\(AppDir \+ '\\bundled\\archives\\' \+ ArchiveName\)/);
+
+    async function makeTar(srcDir, archivePath, withSidecar) {
+      await tar.c({ file: archivePath, gzip: false, cwd: srcDir, portable: true }, ['.']);
+      if (!withSidecar) return null;
+      let entries = 0;
+      await tar.t({ file: archivePath, strict: true, onReadEntry: () => entries++ });
+      const manifest = {
+        archive: path.basename(archivePath),
+        bytes: fs.statSync(archivePath).size,
+        entries,
+        sha256: createHash('sha256').update(fs.readFileSync(archivePath)).digest('hex'),
+      };
+      fs.writeFileSync(archivePath + '.json', JSON.stringify(manifest));
+      return manifest;
+    }
+
+    await withTempRoot('pr2070-archive-cleanup-', async (root) => {
+      const staging = path.join(root, 'staging');
+      const nodeInput = path.join(staging, 'node');
+      const depsInput = path.join(staging, 'deps');
+      const electronInput = path.join(staging, 'electron');
+      const archiveInput = path.join(staging, 'archives');
+      fs.mkdirSync(nodeInput, { recursive: true });
+      fs.mkdirSync(depsInput, { recursive: true });
+      fs.mkdirSync(electronInput, { recursive: true });
+      fs.mkdirSync(archiveInput, { recursive: true });
+
+      fs.copyFileSync(process.execPath, path.join(nodeInput, 'node.exe'));
+      fs.writeFileSync(path.join(depsInput, '.runtime-lock.json'), '{"ok":true}');
+      fs.writeFileSync(path.join(depsInput, 'pad.bin'), Buffer.alloc(256 * 1024, 0x41));
+      fs.writeFileSync(path.join(electronInput, 'Clowder AI.exe'), 'electron-entry');
+      fs.writeFileSync(path.join(electronInput, 'pad.bin'), Buffer.alloc(192 * 1024, 0x42));
+
+      const nodeTar = path.join(archiveInput, 'node.tar');
+      const depsTar = path.join(archiveInput, 'deploy-dependencies.tar');
+      const electronTar = path.join(archiveInput, 'electron.tar');
+      await makeTar(nodeInput, nodeTar, false);
+      await makeTar(depsInput, depsTar, true);
+      await makeTar(electronInput, electronTar, true);
+
+      // Wrapper delegates to the real production extractor while resolving npm's tar from the test host.
+      const extractorBridge = path.join(staging, 'extract-runtime-archive.cjs');
+      fs.writeFileSync(
+        extractorBridge,
+        `const { createRequire } = require('node:module');
+const { extractRuntimeArchive } = require(${JSON.stringify(require.resolve('./scripts/extract-runtime-archive.cjs'))});
+const tar = createRequire(${JSON.stringify(npmCli)})('tar');
+const [rootDir, name] = process.argv.slice(2);
+extractRuntimeArchive(rootDir, name, tar, { engine: 'native' }).catch((error) => {
+  console.error(error.message);
+  process.exitCode = 1;
+});
+`,
+        'utf8',
+      );
+
+      const snapshotPath = path.join(root, 'archive-snapshots.txt');
+      const programDir = path.join(root, 'program');
+      const script = path.join(root, 'cleanup-probe.iss');
+      fs.writeFileSync(
+        script,
+        `[Setup]
+AppName=PR2070 Archive Cleanup Probe
+AppVersion=1.0.0
+DefaultDirName=${programDir}
+CreateAppDir=yes
+Uninstallable=no
+PrivilegesRequired=lowest
+UsePreviousAppDir=no
+OutputDir=${root}
+OutputBaseFilename=cleanup-probe
+Compression=none
+SetupLogging=yes
+[Dirs]
+Name: "{app}\\node"
+Name: "{app}\\node_modules"
+Name: "{app}\\desktop-dist"
+Name: "{app}\\bundled\\archives"
+[Files]
+Source: "${extractorBridge}"; DestDir: "{app}\\scripts"
+Source: "${depsTar}.json"; DestDir: "{app}\\bundled\\archives"
+Source: "${electronTar}.json"; DestDir: "{app}\\bundled\\archives"
+Source: "${nodeTar}"; DestDir: "{app}\\bundled\\archives"; AfterInstall: ProbeExtract('node.tar')
+Source: "${depsTar}"; DestDir: "{app}\\bundled\\archives"; AfterInstall: ProbeExtract('deploy-dependencies.tar')
+Source: "${electronTar}"; DestDir: "{app}\\bundled\\archives"; AfterInstall: ProbeExtract('electron.tar')
+[Code]
+function GetTickCount: Cardinal;
+  external 'GetTickCount@kernel32.dll stdcall setuponly';
+#include "${path.join(__dirname, 'installer/runtime-failure.iss')}"
+${extractionOutput}
+${extractProcedure}
+procedure SnapshotArchives(const Stage: String);
+var
+  FindRec: TFindRec;
+  Listing: String;
+  ArchivesDir: String;
+begin
+  ArchivesDir := ExpandConstant('{app}\\bundled\\archives');
+  Listing := '';
+  if FindFirst(ArchivesDir + '\\*', FindRec) then begin
+    try
+      repeat
+        if (FindRec.Name <> '.') and (FindRec.Name <> '..') then begin
+          if Listing <> '' then Listing := Listing + ',';
+          Listing := Listing + FindRec.Name;
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+  SaveStringToFile('${snapshotPath.replaceAll('\\', '\\\\')}', Stage + '=' + Listing + #13#10, True);
+end;
+
+procedure ProbeExtract(const ArchiveName: String);
+begin
+  SnapshotArchives('before:' + ArchiveName);
+  ExtractRuntimeArchive(ArchiveName);
+  SnapshotArchives('after:' + ArchiveName);
+end;
+`,
+        'utf8',
+      );
+      const compiled = await runNativeCommand(root, 'compile-cleanup', compiler, ['/Q', script]);
+      assert.equal(compiled.status, 0, compiled.stdout + compiled.stderr);
+      const installed = await runNativeCommand(
+        root,
+        'run-cleanup',
+        path.join(root, 'cleanup-probe.exe'),
+        ['/SP-', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${path.join(root, 'cleanup.log')}`],
+        { timeoutMs: 120000 },
+      );
+      assert.equal(installed.status, 0, installed.stdout + installed.stderr);
+
+      const snapshots = Object.fromEntries(
+        fs
+          .readFileSync(snapshotPath, 'utf8')
+          .trim()
+          .split(/\r?\n/)
+          .map((line) => {
+            const idx = line.indexOf('=');
+            const names = line
+              .slice(idx + 1)
+              .split(',')
+              .filter(Boolean)
+              .sort();
+            return [line.slice(0, idx), names];
+          }),
+      );
+      // At every extraction step, at most one .tar file exists in bundled/archives.
+      for (const name of ['node.tar', 'deploy-dependencies.tar', 'electron.tar']) {
+        const presentTars = snapshots[`before:${name}`].filter((f) => f.endsWith('.tar'));
+        assert.deepEqual(presentTars, [name], `only ${name} may be resident before its extraction`);
+        assert.equal(
+          snapshots[`after:${name}`].includes(name),
+          false,
+          `${name} must be deleted immediately after extraction`,
+        );
+        assert.equal(
+          snapshots[`after:${name}`].includes(`${name}.json`),
+          false,
+          `${name}.json must be deleted immediately after extraction`,
+        );
+      }
+      assert.deepEqual(fs.readdirSync(path.join(programDir, 'bundled/archives')), []);
+      assert.equal(fs.readFileSync(path.join(programDir, 'node_modules/.runtime-lock.json'), 'utf8'), '{"ok":true}');
+      assert.equal(fs.readFileSync(path.join(programDir, 'desktop-dist/Clowder AI.exe'), 'utf8'), 'electron-entry');
+
+      // Bootstrap special case: node.tar without node.exe must fail closed with exit code 20.
+      const badNodeInput = path.join(staging, 'bad-node');
+      fs.mkdirSync(badNodeInput, { recursive: true });
+      fs.writeFileSync(path.join(badNodeInput, 'README.txt'), 'missing node.exe');
+      const badNodeTar = path.join(archiveInput, 'bad-node.tar');
+      await makeTar(badNodeInput, badNodeTar, false);
+      const badScript = path.join(root, 'bad-node-probe.iss');
+      fs.writeFileSync(
+        badScript,
+        `[Setup]
+AppName=PR2070 Bad Node Probe
+AppVersion=1.0.0
+DefaultDirName=${path.join(root, 'bad-program')}
+CreateAppDir=yes
+Uninstallable=no
+PrivilegesRequired=lowest
+UsePreviousAppDir=no
+OutputDir=${root}
+OutputBaseFilename=bad-node-probe
+Compression=none
+SetupLogging=yes
+[Dirs]
+Name: "{app}\\node"
+Name: "{app}\\bundled\\archives"
+[Files]
+Source: "${badNodeTar}"; DestDir: "{app}\\bundled\\archives"; DestName: "node.tar"; AfterInstall: ExtractRuntimeArchive('node.tar')
+[Code]
+function GetTickCount: Cardinal;
+  external 'GetTickCount@kernel32.dll stdcall setuponly';
+#include "${path.join(__dirname, 'installer/runtime-failure.iss')}"
+${extractionOutput}
+${extractProcedure}
+`,
+        'utf8',
+      );
+      const badCompiled = await runNativeCommand(root, 'compile-bad-node', compiler, ['/Q', badScript]);
+      assert.equal(badCompiled.status, 0, badCompiled.stdout + badCompiled.stderr);
+      const badInstalled = await runNativeCommand(
+        root,
+        'run-bad-node',
+        path.join(root, 'bad-node-probe.exe'),
+        ['/SP-', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', `/LOG=${path.join(root, 'bad-node.log')}`],
+        { timeoutMs: 120000 },
+      );
+      assert.equal(badInstalled.status, 20, badInstalled.stdout + badInstalled.stderr);
+      assert.match(fs.readFileSync(path.join(root, 'bad-node.log'), 'utf8'), /Bundled Node\.js is incomplete/);
+    });
+  },
+);

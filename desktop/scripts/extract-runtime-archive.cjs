@@ -21,8 +21,9 @@ async function extractRuntimeArchive(
   { onProgress = () => {}, intervalMs = 1000, allowLegacy = false, runId = randomUUID(), engine = 'node' } = {},
 ) {
   const root = path.resolve(installRoot);
-  const name = archiveName.replace(/\.tar\.gz$/, '');
-  if (!targets[name] || archiveName !== `${name}.tar.gz`) throw new Error('Unknown runtime archive');
+  const name = archiveName.replace(/\.tar(?:\.gz)?$/, '');
+  if (!targets[name] || (archiveName !== `${name}.tar` && archiveName !== `${name}.tar.gz`))
+    throw new Error('Unknown runtime archive');
   const tar = tarImplementation ?? createRequire(path.join(root, 'node/node_modules/npm/bin/npm-cli.js'))('tar');
   const cwd = path.join(root, targets[name][0]);
   const expectedEntry = path.join(cwd, targets[name][1]);
