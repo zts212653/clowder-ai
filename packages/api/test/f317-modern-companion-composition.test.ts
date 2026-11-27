@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { CONCIERGE_CONFIG_DEFAULTS } from '@cat-cafe/shared';
 import { COMPANION_ARCHIVE_CONTRACTS } from '../src/domains/plugin/desktop-window-runtime/published-companion-v2.js';
+import { COMPANION_DEFAULTS } from './helpers/companion-configuration-fixture.js';
 import { modernCompanionInstallFixture as fixture } from './helpers/f317-companion-install-fixture.js';
 
 test('subtitle-return archive keeps beta.24 through installation and loads its verified return control', async (t) => {
@@ -71,7 +72,11 @@ test('modern archive selects one ABI through installation, Broker, Bridge and ke
     'disable preserves the installed archive',
   );
   assert.equal((await f.messages.getById(f.saved.id))?.content, 'preserved');
-  assert.deepEqual(f.config, { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: 'composition-selected' });
+  assert.deepEqual(f.config, {
+    ...CONCIERGE_CONFIG_DEFAULTS,
+    ...COMPANION_DEFAULTS,
+    dutyCatProfileId: 'composition-selected',
+  });
   assert.equal((await request({ kind: 'settings.read' })).kind, 'error', 'old authority cannot read after disable');
 });
 

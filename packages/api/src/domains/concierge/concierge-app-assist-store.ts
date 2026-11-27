@@ -9,8 +9,20 @@ export interface AppAssistDay {
   keys: string[];
 }
 
-export function appAssistAllowed(config: ConciergeConfig): boolean {
-  return config.appAssistEnabled === true && config.enabled !== false && config.muted !== true;
+/** A record saved before the companion's on/off became its plugin switch may still say the ball was turned off
+ * (`enabled: false`) or hidden (`muted: true`); that choice keeps app assistance off until the owner turns it on
+ * here, which is saved as `appAssistOverridesLegacy` beside those two fields, so an older host still reads them. */
+export type SavedConciergeConfig = Partial<ConciergeConfig> & {
+  enabled?: unknown;
+  muted?: unknown;
+  appAssistOverridesLegacy?: boolean;
+};
+
+export function appAssistAllowed(config: SavedConciergeConfig): boolean {
+  return (
+    config.appAssistEnabled === true &&
+    (config.appAssistOverridesLegacy === true || (config.enabled !== false && config.muted !== true))
+  );
 }
 
 export function validateAppAssistClaim(appKey: string, day: string): void {
@@ -28,7 +40,7 @@ const CLAIM_DAY = `
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 'disabled' end
 local config = cjson.decode(raw)
-if config.appAssistEnabled ~= true or config.enabled == false or config.muted == true then return 'disabled' end
+if config.appAssistEnabled ~= true or (config.appAssistOverridesLegacy ~= true and (config.enabled == false or config.muted == true)) then return 'disabled' end
 local rawDay = redis.call('GET', KEYS[2])
 local current = rawDay and cjson.decode(rawDay) or {day=ARGV[1], keys={}}
 if ARGV[1] < current.day then return 'clock_rollback' end
@@ -41,17 +53,21 @@ return 'claimed'
 `;
 
 // Preserve concurrent partial settings changes, including a newer opt-out.
+// Turning app assistance on is the owner's explicit choice: it overrides an older record's off / hidden state,
+// which stays saved for an older host.
 // Publication is in the same Redis operation; it carries one boolean only.
 const WRITE_CONFIG = `
 local config = cjson.decode(ARGV[1])
+local optIn = ARGV[3] == 'patch' and config.appAssistEnabled == true
 if ARGV[3] == 'patch' then
   local current = redis.call('GET', KEYS[1])
   local merged = cjson.decode(current or ARGV[4])
   for key, value in pairs(config) do merged[key] = value end
   config = merged
 end
+if optIn then config.appAssistOverridesLegacy = true end
 redis.call('SET', KEYS[1], cjson.encode(config))
-local allowed = config.appAssistEnabled == true and config.enabled ~= false and config.muted ~= true
+local allowed = config.appAssistEnabled == true and (config.appAssistOverridesLegacy == true or (config.enabled ~= false and config.muted ~= true))
 redis.call('PUBLISH', ARGV[2], allowed and 'enabled' or 'disabled')
 return 1
 `;

@@ -1,0 +1,17 @@
+.v2-popover:has(#composer-add-menu),
+.v2-popover:has([data-testid="message-disposition-panel"]) { width:304px; }
+
+[data-v2-preferred-options][hidden],
+[data-v2-recall-body][hidden],
+[data-v2-collection-detail][hidden],
+[data-v2-organizer-fields][hidden] { display:none; }
+
+[data-key="composer"] { anchor-name:--v2-chat-composer; }
+.pop-host[data-pop="v2.history"] [data-testid="history-search"] {
+  position:fixed;
+  position-anchor:--v2-chat-composer;
+  top:auto;
+  bottom:calc(100vh - anchor(top));
+  left:anchor(left);
+  right:calc(100vw - anchor(right));
+}

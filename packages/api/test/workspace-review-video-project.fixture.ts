@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { VideoProjectDocumentV1 } from '@cat-cafe/shared';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { WorkspaceContentReviewError } from '../src/domains/collaborative-content/workspace-review/errors.js';
 import { VideoProjectReviewService } from '../src/domains/collaborative-content/workspace-review/video-project-review-service.js';
 import type { ContentSettlementReceiptV1 } from '../src/domains/video-studio/content-owner/types.js';

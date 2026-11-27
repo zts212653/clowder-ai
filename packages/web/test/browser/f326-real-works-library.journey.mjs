@@ -32,7 +32,7 @@ export async function verifyParagraphOpinion({ page, surface, evidence, referenc
   assert.ok((await place.innerText()).includes(expected.storyEvidence.quote));
   const readDraft = () =>
     page.evaluate((id) => {
-      const drafts = JSON.parse(sessionStorage.getItem('cat-cafe:thread-context-attachment-drafts') || '[]');
+      const drafts = JSON.parse(localStorage.getItem('cat-cafe:thread-context-attachment-drafts') || '[]');
       return drafts.find(([key]) => key === id)?.[1]?.find((item) => item.kind === 'media');
     }, threadId);
   const draft = await readDraft();

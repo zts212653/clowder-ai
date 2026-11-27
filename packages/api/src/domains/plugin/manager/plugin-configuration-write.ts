@@ -1,4 +1,4 @@
-import { isPluginConfigurationFieldRequired, type PluginManagerConfigureRequest } from '@cat-cafe/shared';
+import { catRegistry, isPluginConfigurationFieldRequired, type PluginManagerConfigureRequest } from '@cat-cafe/shared';
 import {
   declaresConfigurationVariants,
   effectiveConfiguration,
@@ -47,6 +47,20 @@ async function currentPackage(
 
 type ValueValidator = (field: ContractConfigurationField, value: string) => void;
 
+/** The ids a member / thread value names: one id, or a JSON array of ids when the field is multiple. */
+export function configurationIds(field: ContractConfigurationField, value: string): readonly string[] {
+  if (!field.multiple) return [value];
+  let ids: unknown;
+  try {
+    ids = JSON.parse(value);
+  } catch {
+    throw configError(`Configuration field ${field.key} must be a JSON array of ids`);
+  }
+  if (!Array.isArray(ids) || !ids.every((id) => typeof id === 'string' && id.length > 0))
+    throw configError(`Configuration field ${field.key} must be a JSON array of ids`);
+  return ids;
+}
+
 const VALUE_VALIDATORS: Partial<Record<ContractConfigurationField['kind'], ValueValidator>> = {
   select: (field, value) => {
     if (!field.options?.some((option) => option.value === value)) {
@@ -62,6 +76,14 @@ const VALUE_VALIDATORS: Partial<Record<ContractConfigurationField['kind'], Value
     if (value.trim().length === 0 || !Number.isFinite(Number(value))) {
       throw configError(`Configuration field ${field.key} must be a finite number`);
     }
+  },
+  member: (field, value) => {
+    if (!configurationIds(field, value).every((id) => catRegistry.has(id)))
+      throw configError(`Configuration field ${field.key} is not a member`);
+  },
+  // thread ids are checked against the thread store when the configuration is saved
+  thread: (field, value) => {
+    configurationIds(field, value);
   },
   url: (field, value) => {
     let parsed: URL;

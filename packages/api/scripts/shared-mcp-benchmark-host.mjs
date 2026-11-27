@@ -80,7 +80,7 @@ process.on('message', async (message) => {
         CAT_CAFE_USER_ID: 'fixture-user',
         CAT_CAFE_THREAD_ID: `fixture-thread-${message.index}`,
       };
-      const prepared = prepareSessionCredentialFile('f333-benchmark', env);
+      const prepared = await prepareSessionCredentialFile('f333-benchmark', env);
       if (!prepared) throw new Error('fixture credential projection failed');
       scopes.set(message.index, { ...credentials, path: prepared.path });
       process.send({ id: message.id, ok: true, value: { apiUrl, workspaceRoot, credentialFile: prepared.path } });

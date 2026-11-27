@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import type { ArtifactReview, ReviewedMediaAsset } from '@cat-cafe/shared';
 import Database from 'better-sqlite3';
 import { appendRespondedVersion } from '../src/domains/collaborative-content/artifact-review/reducer.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 
 const now = '2026-10-20T20:00:00.000Z';
 const actor = { kind: 'cat' as const, actorId: 'director' };

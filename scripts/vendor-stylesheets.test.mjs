@@ -11,7 +11,6 @@ test('CSS publication binds the complete cascade to immutable bytes and preserve
   const root = mkdtempSync(join(tmpdir(), 'vendor-stylesheet-identity-'));
   const web = join(root, 'web');
   const ui = join(root, 'ui/src/styles.css');
-  const xterm = join(root, 'xterm.css');
   const manifest = join(web, 'src/generated/vendor-stylesheets.json');
   mkdirSync(join(web, 'src/app'), { recursive: true });
   mkdirSync(join(root, 'ui/src'), { recursive: true });
@@ -22,10 +21,9 @@ test('CSS publication binds the complete cascade to immutable bytes and preserve
     );
   }
   writeFileSync(ui, '.cafe-world-rail { display: flex; width: 52px; }');
-  writeFileSync(xterm, '.xterm { position: relative; }');
   try {
-    const before = syncStylesheets(web, xterm);
-    assert.equal(before.length, 10);
+    const before = syncStylesheets(web);
+    assert.equal(before.length, appGlobalCssFiles.length);
     assert.deepEqual(JSON.parse(readFileSync(manifest, 'utf8')), before);
     const contents = before.map((url) => readFileSync(join(web, 'public', url), 'utf8'));
     for (const [index, url] of before.entries()) {
@@ -36,11 +34,11 @@ test('CSS publication binds the complete cascade to immutable bytes and preserve
     assert.ok(contents[shellIndex].includes('width: 52px'));
     assert.ok(!contents[shellIndex].includes('@cat-cafe/ui'));
     const manifestTime = statSync(manifest).mtimeMs;
-    assert.deepEqual(syncStylesheets(web, xterm), before);
+    assert.deepEqual(syncStylesheets(web), before);
     assert.equal(statSync(manifest).mtimeMs, manifestTime, 'unchanged sync must not trigger a module reload');
 
     writeFileSync(ui, '.cafe-world-rail { display: flex; width: 60px; }');
-    const after = syncStylesheets(web, xterm);
+    const after = syncStylesheets(web);
     assert.notEqual(after[shellIndex], before[shellIndex], 'a transitive shared UI change gets a new URL');
     assert.deepEqual(
       after.filter((_, index) => index !== shellIndex),
@@ -54,8 +52,8 @@ test('CSS publication binds the complete cascade to immutable bytes and preserve
     assert.match(readFileSync(join(web, 'public/vendor/app/shell-v2.css'), 'utf8'), /width: 60px/);
     assert.deepEqual(JSON.parse(readFileSync(manifest, 'utf8')), after);
 
-    rmSync(xterm);
-    assert.throws(() => syncStylesheets(web, xterm), /ENOENT/);
+    rmSync(join(web, 'src/app', appGlobalCssFiles[0]));
+    assert.throws(() => syncStylesheets(web), /ENOENT/);
     assert.deepEqual(
       JSON.parse(readFileSync(manifest, 'utf8')),
       after,

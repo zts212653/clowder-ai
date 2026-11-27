@@ -1,8 +1,8 @@
 import type { ArtifactReview, WorkCommand } from '@cat-cafe/shared';
 import type { ContentSettlementReceiptV1 } from '../../video-studio/content-owner/types.js';
 import { ArtifactReviewError } from '../artifact-review/errors.js';
-import type { ArtifactReviewStore } from '../artifact-review/store.js';
-import { receiptReference } from '../artifact-review/store-support.js';
+import type { ArtifactReviewStore } from '../artifact-review/storage/store.js';
+import { receiptReference } from '../artifact-review/storage/store-support.js';
 
 export type WorkResponseResolution = Extract<WorkCommand, { action: 'resolve-review-submission' }>;
 /** A concurrent authorized reader may already have projected the receipt before the resolver takes its lock. */

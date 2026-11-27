@@ -1,19 +1,6 @@
 import type { PreviewVisiblePageAdmission, PreviewVisiblePageAttestation } from '@cat-cafe/shared';
 
-/**
- * F120 × F284: Preview auto-open delivery decision (client side).
- *
- * Admission ≠ visible. The socket handler must answer every accepted event
- * with an explicit receipt so the API can tell the cat whether a Hub client
- * actually applied the preview:
- * - applied  — the active thread received it; panel + browser surface updated.
- * - queued   — the event targets another thread; written into that thread's
- *              ThreadState so returning to it reveals the preview.
- * - blocked  — presentation lock freezes the visible workspace.
- * - skipped  — this client is out of scope (hidden tab or worktree mismatch).
- *              Skipped answers promptly so an ineligible tab never stalls the
- *              server's ack collection, but it never wins aggregation.
- */
+/** Preview commands apply to the current visible thread and return the backend's delivery receipt. */
 
 export interface PreviewAutoOpenEvent {
   port: number;
@@ -74,85 +61,27 @@ export function shouldAcceptAutoOpen(
   return isPreviewWorktreeScopeAcceptable(sessionWorktreeId, eventWorktreeId);
 }
 
+export interface PreviewOpenCommand {
+  data: PreviewAutoOpenEvent;
+  ran: boolean;
+}
+
 export function deliverPreviewAutoOpenEvent(input: {
   data: PreviewAutoOpenEvent;
   activeThreadId: string | null;
-  /** Only the browser tab visible to the user may apply or accept queue custody. */
   clientVisible: boolean;
   presentationLocked: boolean;
   sessionWorktreeId: string | null;
-  /**
-   * Resolve the canonical worktree scope of an INACTIVE target thread from its
-   * own ThreadState (F063/F284: workspaceWorktreeId is per-thread). Returns
-   * `undefined` when the target's scope cannot be proven (no saved state) —
-   * callers must fail closed. `null` = the thread exists but has no worktree.
-   */
-  resolveTargetWorktreeId: (threadId: string) => string | null | undefined;
-  apply: (data: PreviewAutoOpenEvent) => void;
-  queueForThread: (threadId: string, preview: { port: number; path: string }) => void;
+  apply: (data: PreviewAutoOpenEvent) => boolean | void;
 }): PreviewAutoOpenReceipt {
   const { data } = input;
   const eventId = data.eventId ?? '';
-
-  if (!input.clientVisible) {
-    // Visible-page admission requires attestation from a rendered visible
-    // iframe; hidden tabs cannot provide it — fail fast.
-    if (data.visiblePageAdmission) {
-      return { status: 'skipped', eventId, reason: 'client_inactive' };
-    }
-    // Hidden tab: cannot interactively confirm, but CAN stage the preview
-    // so it appears when the user returns. This prevents no_matching_client
-    // when all Hub tabs are merely behind the terminal window.
-    //
-    // Active thread: use apply() (setPendingPreviewAutoOpen) so the F307
-    // workbench surface dispatch fires — queueThreadPreview does NOT set
-    // pendingPreviewAutoOpen and would leave the workbench stale.
-    // presentationLock must be checked here (apply no-ops under lock,
-    // so an unchecked receipt would claim custody while persisting nothing).
-    //
-    // Inactive thread: use queueForThread (ThreadState) — the thread-switch
-    // mechanism hydrates state + dispatches when the user navigates to it.
-    const targetThreadId = data.threadId ?? input.activeThreadId;
-    if (targetThreadId) {
-      if (targetThreadId === input.activeThreadId) {
-        if (input.presentationLocked) return { status: 'skipped', eventId, reason: 'client_inactive' };
-        if (!isPreviewWorktreeScopeAcceptable(input.sessionWorktreeId, data.worktreeId)) {
-          return { status: 'skipped', eventId, reason: 'client_inactive' };
-        }
-        input.apply(data);
-        return { status: 'queued', eventId, reason: 'client_inactive' };
-      }
-      const scopeWorktreeId = input.resolveTargetWorktreeId(targetThreadId);
-      if (scopeWorktreeId !== undefined && isPreviewWorktreeScopeAcceptable(scopeWorktreeId, data.worktreeId)) {
-        input.queueForThread(targetThreadId, { port: data.port, path: data.path ?? '/' });
-        return { status: 'queued', eventId, reason: 'client_inactive' };
-      }
-    }
+  if (!input.clientVisible || (data.threadId && data.threadId !== input.activeThreadId))
     return { status: 'skipped', eventId, reason: 'client_inactive' };
-  }
-
-  if (input.presentationLocked) {
-    return { status: 'blocked', eventId, reason: 'presentation_lock' };
-  }
-
-  if (data.threadId && data.threadId !== input.activeThreadId) {
-    // Inactive target: judge scope by the TARGET thread's canonical worktree,
-    // never by the foreground thread's (review round-3 P1 — a legit event for
-    // inactive thread A must not be rejected just because foreground B sits in
-    // another worktree). Unprovable scope fails closed with zero writes.
-    const targetWorktreeId = input.resolveTargetWorktreeId(data.threadId);
-    if (targetWorktreeId === undefined || !isPreviewWorktreeScopeAcceptable(targetWorktreeId, data.worktreeId)) {
-      return { status: 'skipped', eventId, reason: 'worktree_mismatch' };
-    }
-    input.queueForThread(data.threadId, { port: data.port, path: data.path ?? '/' });
-    return { status: 'queued', eventId, reason: 'thread_inactive' };
-  }
-
-  // Active target: scope is the foreground session's worktree.
-  if (!isPreviewWorktreeScopeAcceptable(input.sessionWorktreeId, data.worktreeId)) {
+  if (input.presentationLocked) return { status: 'blocked', eventId, reason: 'presentation_lock' };
+  if (!isPreviewWorktreeScopeAcceptable(input.sessionWorktreeId, data.worktreeId))
     return { status: 'skipped', eventId, reason: 'worktree_mismatch' };
-  }
-
-  input.apply(data);
-  return { status: 'applied', eventId };
+  return input.apply(data) === false
+    ? { status: 'skipped', eventId, reason: 'client_inactive' }
+    : { status: 'applied', eventId };
 }

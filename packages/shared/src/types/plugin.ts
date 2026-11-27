@@ -191,6 +191,7 @@ export type PluginManagerCapabilityKind =
   | 'service'
   | 'ui'
   | 'content-editor-provider'
+  | 'content-preview-provider'
   | 'media-source'
   | 'cloud-conversation-host'
   | 'external-request'
@@ -252,7 +253,9 @@ export type PluginManagerConfigFieldKind =
   | 'number'
   | 'url'
   | 'list'
-  | 'operation';
+  | 'operation'
+  | 'member'
+  | 'thread';
 
 export interface PluginManagerConfigOption {
   value: string;
@@ -285,6 +288,8 @@ export interface PluginManagerConfigField {
   label: string;
   description?: string;
   kind: PluginManagerConfigFieldKind;
+  /** member / thread only: the value is a JSON array of ids. */
+  multiple?: boolean;
   required: boolean;
   hidden?: boolean;
   requiredWhen?: {
@@ -395,6 +400,8 @@ export interface PluginManagerListItem {
   capabilitySummary: Array<Pick<PluginManagerCapability, 'id' | 'kind' | 'name' | 'active'>>;
   actions: PluginManagerActions;
   diagnostic?: PluginManagerDiagnostic;
+  /** Install / update / uninstall request still running for this plugin. */
+  operation?: PluginManagerOperation;
 }
 
 /** A mention recipient that has no member model/client configuration. */
@@ -410,6 +417,8 @@ export interface PluginMentionTarget {
   displayName: string;
   lifecycleRevision: number;
 }
+
+export type PluginManagerOperation = 'install' | 'update' | 'uninstall';
 
 export interface PluginManagerDetail extends PluginManagerListItem {
   /** Owner-scoped Host bindings; absent when this projection is unavailable. */

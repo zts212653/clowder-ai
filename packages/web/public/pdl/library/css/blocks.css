@@ -1,0 +1,61 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 视图块：间距、布局、分栏；区域占用 */
+/* ───────── 视图块（pdl-view）：块之间的间距和几种布局，块本身都是组件库里的组件 ───────── */
+/* 视图容器不参与布局：块直接是所在容器（页面、面板、浮窗）的子元素，块与块之间用容器自己的间距 */
+.vw-view:not(.page), .vw-stay { display: contents; }
+/* 工具条、脚注、计数、原样文本、统计 */
+.vw-counters > .grow { flex: 1; }
+.vw-counters { display: flex; align-items: center; gap: var(--sp-l); padding: var(--sp-hair) var(--sp-xs) var(--sp-s); font-size: var(--fs-s); color: var(--fg-muted); }
+.vw-counter { display: inline-flex; align-items: baseline; gap: var(--sp-xs); }
+.vw-counter b { font-size: var(--fs-title); font-weight: 500; color: var(--fg-strong); }
+.vw-counter.vw-t-warn b { color: var(--warn); }
+.vw-code { margin: var(--sp-xs) 0 0; padding: var(--sp-s); font-size: var(--fs-xs); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: var(--r-m); background: var(--bg-code); color: var(--fg-muted); }
+.vw-stats { display: flex; gap: var(--sp-l); font-size: var(--fs-m); color: var(--fg-muted); padding: var(--sp-hair) 0 var(--sp-s); }
+.vw-stats b { color: var(--fg-strong); font-weight: 500; margin-left: var(--sp-xs); }
+.vw-actions { display: flex; gap: var(--sp-s); padding: var(--sp-s) 0; }
+/* 片段色调；行首图标默认淡色，带色调时用色调 */
+.lr-lead > :where(.vw-ic) { color: var(--fg-faint); }
+/* 视图块用到的小修饰（替代行内样式） */
+.vw-ic { display: inline-flex; }
+.vw-12 { font-size: var(--fs-s); } .vw-13 { font-size: var(--fs-m); } .vw-w400 { font-weight: 400; }
+.vw-pad8 { padding: var(--sp-s); } .vw-left { text-align: left; } .vw-15 { font-size: var(--fs-xl); } .vw-pad14 { padding: var(--sp-m); } .group.vw-pad-cats { padding: var(--sp-xs) var(--sp-s); }
+
+.vw-para { margin: var(--sp-xs) 0 var(--sp-m); line-height: 1.6; }   /* 一段正文：正文墨色 */
+.vw-split { display: grid; grid-template-columns: var(--span-5) minmax(0, 1fr); gap: var(--g-gap); align-items: start; }   /* 列表占 5 列，详情占剩下的（容器网格） */
+.vw-split-l { position: sticky; top: 0; display: flex; flex-direction: column; gap: var(--sp-s); }
+.vw-split-l > * { flex: none; }   /* 左栏是一列：头、搜索、筛选都只占自己的高度（搜索框在行里是 flex: 1，在这一列里不能把剩下的高度吃掉） */
+.vw-split-l > .vw-scroll { flex: 0 1 auto; min-height: 0; }   /* 只有列表能收：长了在自己里面滚，短了就短（下面空着，不拉伸） */
+.vw-split-r { min-width: 0; display: flex; flex-direction: column; gap: var(--page-gap); }
+.vw-split-r > .page-head { margin-bottom: calc(-1 * var(--page-gap) + var(--sp-s)); }
+.vw-split-r > .vw-para { margin: 0; }
+.vw-search { max-width: none; }
+.vw-md { padding: var(--sp-m) var(--sp-l); }
+.vw-split[data-mode="collapsed"] { grid-template-columns: minmax(0, 1fr); }
+.vw-split[data-mode="collapsed"] > .vw-split-l { position: static; }
+.vw-split[data-mode="collapsed"][data-picked] > .vw-split-l, .vw-split[data-mode="collapsed"]:not([data-picked]) > .vw-split-r { display: none; }   /* 收起（窄屏）：分栏变成“列表 → 详情”，选了一项详情就放进分栏本身、盖住列表 */
+/* 列表的组标题、可单独滚动的列表、左右分栏页、栏头、折叠、步骤 */
+.lr-list > .lr-section-label { height: auto; margin: 0; padding: var(--sp-s) var(--sp-m) var(--sp-xs); }   /* 分组列表里一组的标题：同一个组标签，贴着列表底的内边距 */
+.vw-scroll { min-height: 0; }
+.vw-page-split, .page:has(> .vw-split), .page:has(> .frame.tall), .page:has(> .vw-widget[src].tall) { max-inline-size: none; margin: 0; padding: var(--sp-l) var(--g-pad) calc(30 * var(--unit)); }   /* 分栏是应用布局的两列，不是阅读页：铺满容器（列表从左边距开始，详情一直到右边距），不居中。页里是分栏就是这样（分栏组件自己的样子，视图不声明） */
+.page:is(:has(> .frame.tall), :has(> .vw-widget[src].tall)) { display: flex; flex-direction: column; min-block-size: 100%; padding-block-end: var(--sp-l); }   /* 整页的插件 / 内置空间：框占满这一层剩下的高度 */
+.page > :is(.frame.tall, .vw-widget[src].tall) { flex: 1; }
+.cover-in:has(> .vw-page-full) { display: flex; flex-direction: column; position: relative; }   /* 铺满的页（page: full，比如猫猫星球）：整块都是它，不留边距、不留圆角、不超出窗口 */
+.cover-in:has(> .vw-page-full) > .back-head { position: absolute; z-index: var(--z-raised); top: var(--page-gap); left: var(--page-gap); }
+.cover-in:has(> .vw-page-full) > .back-head > .back { margin-left: 0; background: var(--surf-float); box-shadow: var(--shadow-float); }   /* 盖在别人画的页面上（框里的页面什么底色都有）：返回自己带浮层的面，不是一条横带 */   /* 它没有标题行：返回（图标 + 名字）浮在左上角，不另占一行 */
+.cover-in > .vw-page-full.page:has(> .vw-widget[src]) { flex: 1; min-block-size: 0; padding: 0; }
+.vw-page-full > .vw-widget[src] { border-radius: 0; }
+.page > .vw-split > .vw-split-r > * { max-inline-size: var(--g-w); }   /* 阅读宽度只限详情栏里的内容（靠左），不限分栏本身 */
+.page > .vw-split > .vw-split-r > .page-head:first-child { margin-top: 0; }
+/* 并排的分栏占满页面的高度，两栏各自滚动：页面本身不滚（详情栏是 .scroll，列表栏里的列表是 .scroll） */
+.page:has(> .vw-split[data-mode="side"]) { height: 100%; padding-bottom: 0; }
+.page > .vw-split[data-mode="side"] { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+.page > .vw-split[data-mode="side"] > .vw-split-l { position: static; min-height: 0; }
+.page > .vw-split[data-mode="side"] > .vw-split-r { min-height: 0; padding-bottom: var(--sp-xl); }
+.page > .vw-split[data-mode="side"] > .vw-split-r > * { flex: none; }   /* 滚动容器里的子元素不被压扁 */
+.vw-steps { margin: var(--sp-xs) 0 0; padding: 0 0 0 var(--sp-xl); color: var(--fg-strong); line-height: 1.7; }
+.page > .vw-split[data-mode="collapsed"] { grid-template-columns: minmax(0, 1fr); }
+/* ───────── 区域占用（pdl.js 的 pdlOcc）：被占用的区域画占用它的内容；返回、遮罩 ───────── */
+.occ-host { min-height: 0; }
+.occ { position: relative; min-height: 100%; }
+.app.occ-focus .occ { z-index: var(--z-float-top); background: var(--bg-page); }
+.app.occ-focus > .rail { position: relative; z-index: var(--z-float-top); }

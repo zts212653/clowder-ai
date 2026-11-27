@@ -52,6 +52,7 @@ interface DesktopBridge {
   getUpdateSettings(): Promise<DesktopUpdateSettings>;
   setUpdateAutoCheck(enabled: boolean): Promise<DesktopUpdateSettings>;
   updatePromptReady(): Promise<DesktopUpdatePromptPayload | null>;
+  checkForUpdates(): Promise<void>;
   sendUpdatePromptAction(action: DesktopUpdatePromptAction, version: string): void;
 }
 

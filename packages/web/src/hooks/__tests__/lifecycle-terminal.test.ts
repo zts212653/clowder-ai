@@ -102,6 +102,7 @@ describe('lifecycle snapshot: background terminal alerts', () => {
     expect(toasts()).toHaveLength(1);
     expect(toasts()[0]).toMatchObject({ type: 'success', title: 'opus 完成', threadId: 'thread-bg' });
     expect(toasts()[0].message).toBe(message.content);
+    expect(toasts()[0].reply).toEqual({ catId: message.catId, messageId: message.id });
   });
 
   it('projects the cached member name', () => {

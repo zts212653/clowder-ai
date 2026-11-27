@@ -5,7 +5,7 @@ import { mapScreeningMediaRange } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { type AppendMessageInput, MessageStore } from '../../src/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../../src/domains/cats/services/stores/ports/ThreadStore.js';
-import { ArtifactReviewStore } from '../../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { WorkspaceContentReviewError } from '../../src/domains/collaborative-content/workspace-review/errors.js';
 import { VideoProjectMessageImporter } from '../../src/domains/collaborative-content/workspace-review/project-message/import.js';
 import { createProjectMessageProducer } from '../../src/domains/collaborative-content/workspace-review/project-message/producer.js';

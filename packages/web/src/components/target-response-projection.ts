@@ -94,24 +94,3 @@ export function projectTargetReply(
     showFrame,
   };
 }
-
-export function targetReplyNotice(status: TargetResponseStatus): string {
-  switch (status) {
-    case 'delivering':
-      return '正在投递…';
-    case 'waiting':
-      return '已接收，等待回复…';
-    case 'processing':
-      return '正在回复…';
-    case 'unconfirmed':
-      return '投递结果未确认，请检查连接。';
-    case 'completed':
-      return '已完成，没有返回可显示内容。';
-    case 'failed':
-      return '回复失败。';
-    case 'canceled':
-      return '已停止回复。';
-    case 'interrupted':
-      return '回复已中断。';
-  }
-}

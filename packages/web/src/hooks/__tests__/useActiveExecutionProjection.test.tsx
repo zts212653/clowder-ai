@@ -85,9 +85,9 @@ describe('F295 canonical execution hydration', () => {
     vi.useRealTimers();
   });
 
-  it('preserves verified project work during navigation and hides it while scope is unresolved', async () => {
+  it('preserves the all-project snapshot and pending controls across conversation navigation without rereading', async () => {
     const execution = liveExecution();
-    mocks.apiFetch.mockResolvedValueOnce(Response.json({ projectPath: '/project/cafe', executions: [execution] }));
+    mocks.apiFetch.mockResolvedValueOnce(Response.json({ scope: 'all', executions: [execution] }));
     await act(async () => {
       root.render(<Harness threadId="thread-a" connected={false} />);
     });
@@ -106,10 +106,11 @@ describe('F295 canonical execution hydration', () => {
       root.render(<Harness threadId="thread-missing" connected={false} />);
     });
     expect(useActiveExecutionStore.getState()).toMatchObject({
-      hydration: 'loading',
-      projectPath: null,
-      executionsByKey: {},
+      hydration: 'ready',
+      projectPath: '/project/cafe',
+      executionsByKey: { [activeExecutionKey(execution)]: execution },
     });
+    expect(mocks.apiFetch).toHaveBeenCalledTimes(1);
   });
 
   it('cold-discovers another project without a sidebar start event or a current project', async () => {
@@ -154,7 +155,7 @@ describe('F295 canonical execution hydration', () => {
     });
   });
 
-  it('switches exact thread resource identity and rejects the late generation', async () => {
+  it('keeps one all-project request in flight across navigation and uses the new anchor on reconnect', async () => {
     let resolveThreadA!: (response: Response) => void;
     let resolveThreadB!: (response: Response) => void;
     mocks.apiFetch
@@ -177,6 +178,10 @@ describe('F295 canonical execution hydration', () => {
     await act(async () => {
       root.render(<Harness threadId="thread-b" connected={false} />);
     });
+    expect(mocks.apiFetch).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      root.render(<Harness threadId="thread-b" connected />);
+    });
 
     const threadBExecution = {
       ...liveExecution(),
@@ -195,14 +200,14 @@ describe('F295 canonical execution hydration', () => {
     };
     await act(async () => {
       resolveThreadB(
-        new Response(JSON.stringify({ projectPath: '/project/cafe', executions: [threadBExecution] }), {
+        new Response(JSON.stringify({ scope: 'all', executions: [threadBExecution] }), {
           status: 200,
         }),
       );
     });
     await act(async () => {
       resolveThreadA(
-        new Response(JSON.stringify({ projectPath: '/project/cafe', executions: [liveExecution()] }), {
+        new Response(JSON.stringify({ scope: 'all', executions: [liveExecution()] }), {
           status: 200,
         }),
       );
@@ -293,7 +298,7 @@ describe('F295 canonical execution hydration', () => {
       executions,
     });
 
-    await Promise.all(executions.map(cancelProjectedExecution));
+    await Promise.all(executions.map((execution) => cancelProjectedExecution(execution)));
 
     const cancels = mocks.apiFetch.mock.calls.filter(([, init]) => init?.method === 'POST');
     expect(cancels).toEqual(
@@ -306,6 +311,67 @@ describe('F295 canonical execution hydration', () => {
         },
       ]),
     );
+  });
+
+  it('releases cancelPendingByKey after a 202 pending cancel so a still-active command can be stopped again', async () => {
+    const execution: ActiveExecutionProjection = {
+      executionId: 'hold-ball-parked',
+      threadId: 'thread-a',
+      threadTitle: 'Thread A',
+      catId: 'codex-sol',
+      kind: 'managed_command',
+      startedAt: 400,
+      cancelability: {
+        state: 'cancelable',
+        target: { kind: 'managed_command', taskId: 'hold-ball-parked' },
+      },
+    };
+    const key = activeExecutionKey(execution);
+    const store = useActiveExecutionStore.getState();
+    store.applySnapshot('thread-a', store.beginHydration('thread-a', '/project/cafe'), {
+      projectPath: '/project/cafe',
+      executions: [execution],
+    });
+
+    let deleteCount = 0;
+    const refreshGate = { release: () => {} };
+    mocks.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'DELETE' && url === '/api/callbacks/hold-ball/hold-ball-parked') {
+        deleteCount += 1;
+        if (deleteCount === 1) {
+          return new Response(JSON.stringify({ status: 'pending', cancelled: false, cancellationRequested: true }), {
+            status: 202,
+          });
+        }
+        return new Response(JSON.stringify({ status: 'ok', cancelled: true }), { status: 200 });
+      }
+      if (deleteCount === 1) {
+        await new Promise<void>((resolve) => {
+          refreshGate.release = resolve;
+        });
+        return new Response(JSON.stringify({ projectPath: '/project/cafe', executions: [execution] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ projectPath: '/project/cafe', executions: [] }), { status: 200 });
+    });
+
+    const firstCancel = cancelProjectedExecution(execution);
+    await Promise.resolve();
+    await Promise.resolve();
+    // Concurrent click while 202 + refresh is in flight stays fenced.
+    await cancelProjectedExecution(execution);
+    expect(deleteCount).toBe(1);
+    expect(useActiveExecutionStore.getState().cancelPendingByKey[key]).toBe(true);
+
+    refreshGate.release();
+    await firstCancel;
+
+    expect(useActiveExecutionStore.getState().executionsByKey[key]).toEqual(execution);
+    expect(useActiveExecutionStore.getState().cancelPendingByKey).toEqual({});
+
+    await cancelProjectedExecution(execution);
+    expect(deleteCount).toBe(2);
+    expect(useActiveExecutionStore.getState().executionsByKey).toEqual({});
+    expect(useActiveExecutionStore.getState().cancelPendingByKey).toEqual({});
   });
 });
 beforeAll(() => {

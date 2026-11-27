@@ -1,12 +1,9 @@
 import { apiFetch } from '@/utils/api-client';
 
-type ActionResult = { kind: 'confirm' } | { kind: 'blocked'; message: string } | { kind: 'done'; message: string };
-function collectedMessage(payload: Record<string, unknown>, targetName: string | undefined): string {
-  const result = payload.materialized;
-  if (!result || typeof result !== 'object' || !('outputPath' in result) || typeof result.outputPath !== 'string')
-    return '已批准 · 收录结果暂时读不到';
-  return 'reindexed' in result && result.reindexed === true ? `已收录到 ${targetName}` : '已写入文档，索引稍后更新';
-}
+type ActionResult =
+  | { kind: 'confirm' }
+  | { kind: 'blocked'; message: string }
+  | { kind: 'done'; status: 'approved' | 'rejected'; materialized: { outputPath: string; reindexed: boolean } | null };
 export async function writeLibraryCandidate(
   action: 'approve' | 'reject',
   markerId: string,
@@ -34,9 +31,23 @@ export async function writeLibraryCandidate(
     )
       return { kind: 'confirm' };
     if (typeof payload.error === 'string' && payload.error.startsWith('visibility-widening blocked:'))
-      return { kind: 'blocked', message: '来源可见范围无法确认，暂不能收录。' };
+      return { kind: 'blocked', message: payload.error };
     throw new Error('Write unavailable');
   }
   if (payload.status !== (action === 'approve' ? 'approved' : 'rejected')) throw new Error('Invalid write response');
-  return { kind: 'done', message: action === 'reject' ? '已选择不收录' : collectedMessage(payload, target?.name) };
+  const materialized = payload.materialized;
+  return {
+    kind: 'done',
+    status: action === 'approve' ? 'approved' : 'rejected',
+    materialized:
+      materialized &&
+      typeof materialized === 'object' &&
+      'outputPath' in materialized &&
+      typeof materialized.outputPath === 'string'
+        ? {
+            outputPath: materialized.outputPath,
+            reindexed: 'reindexed' in materialized && materialized.reindexed === true,
+          }
+        : null,
+  };
 }

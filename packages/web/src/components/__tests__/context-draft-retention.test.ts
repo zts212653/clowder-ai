@@ -22,31 +22,31 @@ function comments(count: number, text = 'quoted text'): ContextAttachment[] {
 }
 afterEach(() => {
   threadContextAttachmentDrafts.clear();
-  sessionStorage.clear();
+  localStorage.clear();
 });
 
-it('retains all fifteen comments through a session mirror round trip', () => {
+it('retains all fifteen comments through a browser-storage round trip', () => {
   const draft = comments(15);
   syncContextAttachmentDraftToStorage(thread, draft);
   expect(getContextAttachmentDraft(thread)).toEqual(draft);
-  expect(parseContextAttachmentDrafts(sessionStorage.getItem(key)).get(thread)).toEqual(draft);
+  expect(parseContextAttachmentDrafts(localStorage.getItem(key)).get(thread)).toEqual(draft);
 });
 
 it('keeps a structurally valid draft even when it is too large to send', () => {
   const draft = comments(3, 'x'.repeat(17_000));
   syncContextAttachmentDraftToStorage(thread, draft);
   expect(getContextAttachmentDraft(thread)).toEqual(draft);
-  expect(parseContextAttachmentDrafts(sessionStorage.getItem(key)).get(thread)).toEqual(draft);
+  expect(parseContextAttachmentDrafts(localStorage.getItem(key)).get(thread)).toEqual(draft);
 });
 
 it('does not reinterpret invalid input as an explicit draft deletion', () => {
   const saved = comments(1);
   syncContextAttachmentDraftToStorage(thread, saved);
-  const before = sessionStorage.getItem(key);
+  const before = localStorage.getItem(key);
   syncContextAttachmentDraftToStorage(thread, [{ ...saved[0], v: 2 }] as unknown as ContextAttachment[]);
   expect(getContextAttachmentDraft(thread)).toEqual(saved);
-  expect(sessionStorage.getItem(key)).toBe(before);
+  expect(localStorage.getItem(key)).toBe(before);
   syncContextAttachmentDraftToStorage(thread, []);
   expect(getContextAttachmentDraft(thread)).toEqual([]);
-  expect(sessionStorage.getItem(key)).toBeNull();
+  expect(localStorage.getItem(key)).toBeNull();
 });

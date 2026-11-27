@@ -330,7 +330,7 @@ export function resolveAgySpawnCwd(agyProfile: AgyProfile | null, catId: string,
     }
   }
   mkdirSync(sandbox, { recursive: true });
-  return sandbox;
+  return realpathSync(sandbox);
 }
 
 function isRealUserAntigravitySettingsPath(path: string): boolean {

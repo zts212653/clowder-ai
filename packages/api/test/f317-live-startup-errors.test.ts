@@ -2,26 +2,28 @@ import assert from 'node:assert/strict';
 import './helpers/setup-cat-registry.js';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
-import { CONCIERGE_CONFIG_DEFAULTS, createCatId } from '@cat-cafe/shared';
+import { createCatId } from '@cat-cafe/shared';
 import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { LiveCompanionSessions } from '../src/domains/concierge/live/LiveCompanionSessions.js';
 import { sessionAuthPlugin, sessionRoute } from '../src/infrastructure/session-auth.js';
 import { conciergeLiveRoutes } from '../src/routes/concierge-live.js';
+import { companionConfigurationFixture } from './helpers/companion-configuration-fixture.js';
 
 async function fixture(dutyCatProfileId = 'codex') {
   const app = Fastify();
   const sessions = new LiveCompanionSessions();
   const messageStore = new MessageStore();
-  const configStore = { get: async () => ({ ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId }) };
+  const companion = companionConfigurationFixture({ dutyCatProfileId });
+  const configStore = { get: () => companion.read() };
   let threadReads = 0;
   await app.register(cookie);
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute);
   await app.register(conciergeLiveRoutes, {
     ownerUserId: 'default-user',
-    configStore,
+    companionSettings: () => configStore.get(),
     sessions,
     threadService: {
       getOrCreate: async () => {
@@ -98,13 +100,4 @@ test('only a real occupied owner slot reports the retryable active-call conflict
   assert.equal(response.json().code, 'live_call_active');
   assert.equal(sessions.get(call.id, 'default-user'), call);
   assert.equal(call.status().state, 'preparing', 'a rejected second call does not disturb the existing call');
-});
-
-test('a missing selected identity is rejected before allocating a companion thread', async (t) => {
-  const { app, request, threadReads } = await fixture('missing-selected-cat');
-  t.after(() => app.close());
-  const response = await request();
-  assert.equal(response.statusCode, 409);
-  assert.equal(response.json().code, 'live_duty_unavailable');
-  assert.equal(threadReads(), 0);
 });

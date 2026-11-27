@@ -15,7 +15,7 @@ export async function prepareKimiMcpCredentialLease(callbackEnv: Record<string, 
     return { env: {}, dispose: async () => {} };
   const directory = await mkdtemp(join(tmpdir(), 'cat-cafe-kimi-mcp-auth-'));
   const path = join(directory, 'credentials.json');
-  if (!writeSessionCredentialFile(callbackEnv, path)) {
+  if (!(await writeSessionCredentialFile(callbackEnv, path))) {
     await rm(directory, { recursive: true, force: true });
     throw new Error('kimi_mcp_callback_credentials_unavailable');
   }

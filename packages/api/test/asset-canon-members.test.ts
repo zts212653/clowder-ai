@@ -3,7 +3,7 @@ import { unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { AssetCanonItem } from '@cat-cafe/shared';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { MemberCanonService } from '../src/domains/collaborative-content/asset-canon/member-service.js';
 import { canonCat, canonFixture, canonHuman } from './helpers/asset-canon-fixture.js';
 

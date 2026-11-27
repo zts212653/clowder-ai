@@ -43,3 +43,14 @@ export function resolveChatBackground(
 ): ChatBackground {
   return (threadId ? preferences.threads[threadId] : undefined) ?? preferences.global ?? NO_CHAT_BACKGROUND;
 }
+
+export const appearanceImageIdSchema = z.string().regex(/^user\.[0-9a-f-]{36}$/);
+export const appearanceImageSchema = z
+  .object({
+    id: appearanceImageIdSchema,
+    name: z.string().min(1).max(255),
+    mime: z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp']),
+    source: z.string().regex(/^\/api\/config\/chat-background\/images\/user\.[0-9a-f-]{36}$/),
+  })
+  .strict();
+export type AppearanceImage = z.infer<typeof appearanceImageSchema>;

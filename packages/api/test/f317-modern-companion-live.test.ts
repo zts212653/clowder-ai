@@ -9,6 +9,7 @@ import type { StoredMessage } from '../src/domains/cats/services/stores/ports/Me
 import { CompanionHostBridge } from '../src/domains/concierge/live/CompanionHostBridge.js';
 import { projectLiveTranscript } from '../src/domains/concierge/live/live-transcript-projection.js';
 import { sessionAuthPlugin, sessionRoute } from '../src/infrastructure/session-auth.js';
+import { COMPANION_DEFAULTS } from './helpers/companion-configuration-fixture.js';
 
 async function fixture() {
   const owner = 'modern-live-owner';
@@ -55,7 +56,7 @@ async function fixture() {
     row('old-call-a', { liveCompanion: { ...source, callId: randomUUID() } }, carrier.id),
   ];
   app.get('/api/concierge/config', async (request) => ({
-    config: { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: carrier.id },
+    config: { ...CONCIERGE_CONFIG_DEFAULTS, ...COMPANION_DEFAULTS, dutyCatProfileId: carrier.id },
     behaviorEnabled: true,
     ...((request.query as { view?: string }).view === 'settings'
       ? {

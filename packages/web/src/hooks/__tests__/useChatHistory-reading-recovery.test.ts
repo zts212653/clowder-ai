@@ -209,7 +209,9 @@ describe('reading recovery across cold history and obsolete callbacks', () => {
           ok: true,
           json: async () =>
             path.startsWith('/api/messages')
-              ? { messages: [message('older-reading', 1)], hasMore: false }
+              ? path.includes('before=')
+                ? { messages: [message('older-reading', 1)], hasMore: false }
+                : { messages: [message('latest', 100)], hasMore: true }
               : { tasks: [], activeInvocations: [] },
         }) as Response,
     );
@@ -275,7 +277,9 @@ describe('reading recovery across cold history and obsolete callbacks', () => {
           ok: true,
           json: async () =>
             path.startsWith('/api/messages')
-              ? { messages: [message(`older-${++pages}`, 100 - pages * 20)], hasMore: pages < 8 }
+              ? path.includes('before=')
+                ? { messages: [message(`older-${++pages}`, 100 - pages * 20)], hasMore: pages < 8 }
+                : { messages: [message('latest', 100)], hasMore: true }
               : { tasks: [], activeInvocations: [] },
         }) as Response,
     );
@@ -317,7 +321,9 @@ describe('reading recovery across cold history and obsolete callbacks', () => {
           ok: true,
           json: async () =>
             path.startsWith('/api/messages')
-              ? { messages: [message('message-1', 100), message('message-2', 100)], hasMore: false }
+              ? path.includes('before=')
+                ? { messages: [message('message-1', 100), message('message-2', 100)], hasMore: false }
+                : { messages: [message('message-3', 100)], hasMore: true }
               : { tasks: [], activeInvocations: [] },
         }) as Response,
     );

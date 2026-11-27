@@ -5,6 +5,7 @@ import { approvalReconcileCopy } from '@/components/shell/mailbox/approval-recon
 import { useShellCopy } from '@/components/shell/shell-copy';
 import { useShellLanguage } from '@/components/shell/shell-language';
 import { UNIFIED_ATTENTION_INVALIDATION_EVENTS } from '@/components/shell/use-unified-attention';
+import { useOriginalApprovalRead } from '@/lib/use-original-approval-read';
 import { isScheduleDriftBlocked } from '@/stores/approval-decision-attempts';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { apiFetch } from '@/utils/api-client';
@@ -16,16 +17,22 @@ import {
   schedulePublicationCandidate,
 } from './read-schedule-approval';
 import { scheduleApprovalCopy } from './schedule-approval.shell-copy';
-import { useOriginalApprovalRead } from './use-original-approval-read';
 
 export interface ScheduleApprovalProps {
   block?: RichCardBlock;
   item?: ApprovalHubItem;
   coordinate?: ScheduleCoordinate;
   messageId?: string;
+  readEnabled?: boolean;
 }
 /** One original card read generation and one original writer. Closing/replacing the card invalidates preparation. */
-export function useScheduleApprovalController({ block, item, coordinate, messageId }: ScheduleApprovalProps) {
+export function useScheduleApprovalController({
+  block,
+  item,
+  coordinate,
+  messageId,
+  readEnabled = true,
+}: ScheduleApprovalProps) {
   const t = useShellCopy(scheduleApprovalCopy),
     language = useShellLanguage();
   // Equal host data is the same read binding; a fresh object must not cancel an in-flight preparation.
@@ -54,6 +61,7 @@ export function useScheduleApprovalController({ block, item, coordinate, message
         ? readScheduleSource(proposalId, { threadId, messageId: cardMessageId }, readItem, fresh)
         : null,
     item?.ownerUserId,
+    readEnabled,
   );
   const remembered = useRef<{ owner: string | null; value: ScheduleMutationProposal } | null>(null);
   if (remembered.current?.owner !== original.ownerUserId) remembered.current = null;
@@ -73,16 +81,24 @@ export function useScheduleApprovalController({ block, item, coordinate, message
     proposal?.mutation.kind === 'update' ? driftCopy.scheduleUpdateDrift : driftCopy.scheduleDeleteDrift;
   const live = useRef<ScheduleMutationProposal | null>(null),
     mounted = useRef(true),
-    inFlight = useRef(false);
-  live.current = original.value && !checking && !original.failed ? original.value : null;
+    inFlight = useRef(false),
+    refreshSeq = useRef(0);
+  const currentProposal = original.value && !checking && !original.failed ? original.value : null;
+  live.current = currentProposal;
   const guardedWrite = useGuardedWrite(),
     blocked = useWriteBlocked(busy || checking || unknown || !original.value || original.failed);
   const refresh = useCallback(async () => {
+    if (!original.ownerUserId) return null;
+    const seq = ++refreshSeq.current;
     const next = (await original.refresh()) ?? null;
+    if (seq !== refreshSeq.current) return next;
     live.current = next;
     if (mounted.current) setError(next ? null : t.unavailable);
     return next;
-  }, [original.refresh, t.unavailable]);
+  }, [original.ownerUserId, original.refresh, t.unavailable]);
+  useEffect(() => {
+    if (currentProposal && error === t.unavailable) setError(null);
+  }, [currentProposal, error, t.unavailable]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -187,12 +203,18 @@ export function useScheduleApprovalController({ block, item, coordinate, message
     proposal,
     checking,
     busy,
-    error: drifted && proposal?.status === 'pending' ? driftMessage : error,
+    error:
+      drifted && proposal?.status === 'pending'
+        ? driftMessage
+        : currentProposal && error === t.unavailable
+          ? null
+          : error,
     unknown,
     blocked,
     drifted,
     decide,
     reread,
     retained: original.retained,
+    ownerUserId: original.ownerUserId,
   };
 }

@@ -14,7 +14,7 @@ import type { PublishedMediaService } from '../../../video-studio/content-owner/
 import { isTaskPublicationScope } from '../../../video-studio/content-owner/types.js';
 import { assertMediaAnchor } from '../../artifact-review/anchors.js';
 import type { ArtifactReviewService } from '../../artifact-review/service.js';
-import type { ArtifactReviewStore } from '../../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../../artifact-review/storage/store.js';
 import type { WorkspaceContentReviewService } from '../../workspace-review/service.js';
 import type { ModificationContentPort } from '../service.js';
 import { ModificationTextError } from '../text/text-store.js';

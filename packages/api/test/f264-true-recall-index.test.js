@@ -113,12 +113,29 @@ describe('F264 Gap F recalled-body evidence purge', () => {
     assert.equal((await store.search(recalledBody)).length, 0);
     const docAnchor = `thread-${threadId}`;
     const passageKey = JSON.stringify([docAnchor, `msg-${messageId}`]);
-    const currentDocument = db.prepare('SELECT embedding FROM evidence_vectors WHERE anchor=?').get(docAnchor);
-    assert.equal(currentDocument.embedding.readFloatLE(0), 0, 'only sanitized document input survives preparation');
+    assert.equal(
+      db.prepare('SELECT embedding FROM evidence_vectors WHERE anchor=?').get(docAnchor),
+      undefined,
+      'stale document vector is invalidated immediately during preparation',
+    );
     assert.equal(
       db.prepare('SELECT 1 FROM passage_vectors WHERE passage_key=?').get(passageKey),
       undefined,
       'the recalled source has no persisted passage vector before CAS',
+    );
+    assert.equal(vectorOps.docUpserts.length, 0, 'preparation does not block recall on synchronous document embedding');
+    assert.equal(
+      vectorOps.passageUpserts.length,
+      0,
+      'preparation does not block recall on synchronous passage embedding',
+    );
+
+    await builder.flushDirtyThreads();
+    const currentDocument = db.prepare('SELECT embedding FROM evidence_vectors WHERE anchor=?').get(docAnchor);
+    assert.equal(
+      currentDocument.embedding.readFloatLE(0),
+      0,
+      'only sanitized document input survives background flush',
     );
     assert.equal(vectorOps.passageUpserts.length, 0, 'suppressed body is not re-embedded');
     assert.ok(

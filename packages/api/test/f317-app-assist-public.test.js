@@ -2,7 +2,6 @@ import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import test from 'node:test';
-import { CONCIERGE_CONFIG_DEFAULTS } from '@cat-cafe/shared';
 import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
@@ -16,6 +15,7 @@ import {
 } from '../dist/domains/plugin/desktop-window-runtime/admission.js';
 import { sessionAuthPlugin, sessionRoute } from '../dist/infrastructure/session-auth.js';
 import { conciergeRoutes } from '../dist/routes/concierge.js';
+import { companionConfigurationFixture } from './helpers/companion-configuration-fixture.js';
 
 const require = createRequire(import.meta.url);
 const { createManagedWindow } = require('../../../desktop/plugin-window/window.cjs');
@@ -33,13 +33,18 @@ test('the exact new public pair exposes the original independent owner setting w
     if (previous === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
     else process.env.DEFAULT_OWNER_USER_ID = previous;
   });
-  await store.put(owner, { ...CONCIERGE_CONFIG_DEFAULTS, dutyCatProfileId: 'opus' });
+  const companion = companionConfigurationFixture({ dutyCatProfileId: 'opus' });
   await app.register(cookie);
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute, { ownerUserId: owner });
+  companion.register(app);
   await app.register(conciergeRoutes, {
     conciergeConfigStore: store,
-    conciergeThreadService: new ConciergeThreadService({ conciergeConfigStore: store, threadStore: new ThreadStore() }),
+    companionSettings: companion.read,
+    conciergeThreadService: new ConciergeThreadService({
+      companionSettings: companion.read,
+      threadStore: new ThreadStore(),
+    }),
   });
   const port = { request: async () => ({ status: 'off' }), watch: async () => async () => {} };
   const options = {
@@ -59,7 +64,7 @@ test('the exact new public pair exposes the original independent owner setting w
   const saved = await current.request({ kind: 'settings.update', field: 'appAssistEnabled', value: true });
   assert.equal(saved.outcome, 'saved');
   assert.equal(saved.callStatus, 'unchanged');
-  assert.equal((await store.getSaved(owner)).appAssistEnabled, true);
+  assert.equal((await store.get(owner)).appAssistEnabled, true);
   assert.equal(current.appAssist, port);
   assert.equal(older.appAssist, undefined);
   const state = await current.request({ kind: 'state' });
@@ -85,6 +90,7 @@ test('the exact new public pair exposes the original independent owner setting w
   const native = fixture();
   const internalOwner = new CompanionAppAssistOwner({
     store,
+    companionSettings: companion.read,
     ownerUserId: owner,
     timeZone: () => 'Pacific/Honolulu',
     now: () => Date.parse('2030-01-02T12:00:00Z'),

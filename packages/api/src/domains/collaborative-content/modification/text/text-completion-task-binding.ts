@@ -1,5 +1,5 @@
 import type { ContentModificationRecord, TaskItem } from '@cat-cafe/shared';
-import type { ArtifactReviewStore } from '../../artifact-review/store.js';
+import type { ArtifactReviewStore } from '../../artifact-review/storage/store.js';
 
 /** A continuation may keep A's Task signal while B supplies its actual adopted result. */
 export function textCompletionTaskBinding(

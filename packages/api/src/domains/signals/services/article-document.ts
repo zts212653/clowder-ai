@@ -6,6 +6,8 @@ import type { InboxRecord } from './inbox-records.js';
 
 export interface SignalArticleDetail extends SignalArticle {
   readonly content: string;
+  /** The original page's full text has been fetched (enrich ran); before that the content is the feed summary. */
+  readonly enriched?: boolean;
 }
 
 export interface ParsedArticleDocument {

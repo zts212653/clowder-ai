@@ -1,5 +1,5 @@
 import type { CatData } from '@/hooks/useCatData';
-import { buildAgyProfilePatch, usesAgyAcp } from './hub-cat-editor.agy';
+import { buildAgyProfilePatch, usesAgyAcp, usesAgyNative } from './hub-cat-editor.agy';
 import {
   type ClientId,
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
@@ -194,9 +194,10 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
   // #712: always send the form's mcpSupport value so the user can toggle it explicitly
   const mcpSupportPatch = { mcpSupport: form.mcpSupport };
   const cliCarrier = usesCliCarrier(form);
+  const agyNativeCarrier = usesAgyNative(form);
   const trimmedCliEffort = trimText(form.cliEffort);
   const cliFields: Record<string, unknown> = {};
-  if ((cliCarrier || nativeTool) && trimmedCliEffort.length > 0) {
+  if ((cliCarrier || agyNativeCarrier || nativeTool) && trimmedCliEffort.length > 0) {
     cliFields.effort = trimmedCliEffort;
   } else if (cat?.cli?.effort) {
     cliFields.effort = null as null;
@@ -281,7 +282,13 @@ function normalizeOptionalText(value: unknown): string | null {
 
 export function buildCatPatchPayload(form: HubCatEditorFormState, cat: CatData, context: CatPayloadContext = {}) {
   const payload = buildCatPayload(form, cat, context) as Record<string, unknown>;
-  if (form.accountBindingMode && form.accountBindingMode !== cat.accountBindingMode)
+  if (
+    ['openai', 'anthropic'].includes(form.clientId) &&
+    usesCliCarrier(form) &&
+    resolveFormAccountRef(form).length > 0 &&
+    form.accountBindingMode &&
+    form.accountBindingMode !== cat.accountBindingMode
+  )
     payload.accountBindingMode = form.accountBindingMode;
 
   if (form.clientId === cat.clientId) {

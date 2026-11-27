@@ -1,12 +1,12 @@
 'use client';
 
 import { useCallback, useState } from 'react';
+import { unlockAutoplay } from '@/components/voice-autoplay';
 import { useChatStore } from '@/stores/chatStore';
 import { type PlaybackState, useVoiceSessionStore } from '@/stores/voiceSessionStore';
 import { HeadphonesIcon } from './icons/HeadphonesIcon';
 import { MicIcon } from './icons/MicIcon';
 import { InstallPreviewModal } from './settings/InstallPreviewModal';
-import { unlockAutoplay } from './VoiceCompanionButton';
 import {
   ensureVoiceServiceEnabled,
   FEATURE_SERVICES,

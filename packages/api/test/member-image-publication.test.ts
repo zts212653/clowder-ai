@@ -8,7 +8,7 @@ import sharp from 'sharp';
 import { InvocationRegistry } from '../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { ArtifactReviewService } from '../src/domains/collaborative-content/artifact-review/service.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { registerCallbackAuthHook } from '../src/routes/callback-auth-prehandler.js';
 import { registerCallbackImageRoutes } from '../src/routes/callback-image-routes.js';
 import { createReviewFixture, reviewCat } from './helpers/artifact-review-fixture.js';

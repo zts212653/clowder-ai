@@ -9,7 +9,7 @@ import Fastify from 'fastify';
 import sharp from 'sharp';
 import { inspectArtifactReview } from '../src/domains/collaborative-content/artifact-review/inspection.js';
 import { ArtifactReviewService } from '../src/domains/collaborative-content/artifact-review/service.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { registerArtifactReviewRoutes } from '../src/routes/artifact-review-routes.js';
 import { artifactReviewSchema as legacyReader } from './fixtures/artifact-review-v1-schema.js';
 import { createReviewFixture, reviewCat, reviewHuman } from './helpers/artifact-review-fixture.js';

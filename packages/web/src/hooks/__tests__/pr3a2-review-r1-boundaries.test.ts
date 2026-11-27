@@ -3,7 +3,7 @@
  * replay, relay, coalescer and History merge; deletes go through the real API MessageStore. The
  * first group is Astra's probes ported onto the production read issue/land timing.
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, RichBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { beginThreadRecovery, currentRecoveryGeneration } from '@/stores/thread-recovery';
@@ -15,6 +15,7 @@ import { handleBackgroundAgentMessage } from '../agent-messages/background-handl
 import type { BackgroundAgentMessage } from '../agent-messages/types';
 import { writePostRichBlock, writeStoredSnapshot, writeStreamText } from '../named-message-writer';
 import { applyResponseStreamReplay, isRunningResponse, type StreamReplay } from '../response-stream-replay';
+import { STREAM_GAP_EVENT } from '../stream-position';
 import { issueReplaceRead, mergeReplaceHydrationMessages } from '../useChatHistory';
 import { createAgentMessageCoalescer } from '../useSocket-message-coalescer';
 import { createStreamReplayRelay, dispatchAgentQueueItem } from '../useSocket-stream-replay';
@@ -137,7 +138,7 @@ beforeEach(() => {
 
 describe('Astra R1 probes', () => {
   for (const missing of [false, true]) {
-    it(`retains incomplete protection after the first confirmed recovery read (missing record=${missing})`, () => {
+    it(`keeps writing what arrives after the first confirmed recovery read (missing record=${missing})`, () => {
       writeStoredSnapshot(T, response('A|'));
       beginThreadRecovery(T);
       applyResponseStreamReplay(missing ? noResponses() : replay([], false));
@@ -145,8 +146,9 @@ describe('Astra R1 probes', () => {
       writeStreamText(target, { content: 'C|' });
       land([response('A|B|')]);
       writeStreamText(target, { content: 'D|' });
+      // A gap does not freeze the reply: what arrives is written; the terminal snapshot is the final body.
       expect({ content: shown()?.content, prefix: shown()?.streamPrefix }).toEqual({
-        content: 'A|B|',
+        content: 'A|C|D|',
         prefix: 'incomplete',
       });
     });
@@ -273,27 +275,40 @@ describe('stream position decides whether the page holds a reply from its start'
     expect(shown()?.content).toBe('A|B|');
   });
 
-  it('skips positions it holds and stops splicing after a gap', async () => {
+  it('skips positions it holds, keeps writing after a gap and asks once for the full event list', async () => {
     const room = liveRoom();
     await room.drain();
-    text('A|', 0);
-    text('A|', 0);
-    text('B|', 1);
-    expect({ content: shown()?.content, next: shown()?.streamNextIndex }).toEqual({ content: 'A|B|', next: 2 });
-    text('D|', 3);
-    expect({ content: shown()?.content, prefix: shown()?.streamPrefix }).toEqual({
-      content: 'A|B|',
-      prefix: 'incomplete',
-    });
+    const gaps: unknown[] = [];
+    const target = new EventTarget();
+    target.addEventListener(STREAM_GAP_EVENT, (event) => gaps.push((event as CustomEvent).detail));
+    vi.stubGlobal('window', target);
+    try {
+      text('A|', 0);
+      text('A|', 0);
+      text('B|', 1);
+      expect({ content: shown()?.content, next: shown()?.streamNextIndex }).toEqual({ content: 'A|B|', next: 2 });
+      expect(gaps).toEqual([]);
+      text('D|', 3);
+      expect({ content: shown()?.content, prefix: shown()?.streamPrefix }).toEqual({
+        content: 'A|B|D|',
+        prefix: 'incomplete',
+      });
+      // the socket rejoins the thread room once; the join's replay rebuilds the reply
+      expect(gaps).toEqual([{ threadId: T, messageId: 'r' }]);
+      text('F|', 5);
+      expect(gaps).toHaveLength(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
-  it('cannot hold a reply first seen mid-stream', async () => {
+  it('writes a reply first seen mid-stream from what it sees', async () => {
     const room = liveRoom();
     await room.drain();
     text('mid-reply|', 5, { messageId: 'r2' });
-    expect(shown('r2')).toMatchObject({ content: '', streamPrefix: 'incomplete' });
+    expect(shown('r2')).toMatchObject({ content: 'mid-reply|', streamPrefix: 'incomplete' });
     text('more|', 6, { messageId: 'r2' });
-    expect(shown('r2')?.content).toBe('');
+    expect(shown('r2')?.content).toBe('mid-reply|more|');
   });
 
   it('marks a reply no record vouches for incomplete on its first unrecorded event', async () => {
@@ -303,7 +318,7 @@ describe('stream position decides whether the page holds a reply from its start'
     useChatStore.getState().replaceThreadMessages(T, [response('draft|')]);
     text('mid|');
     expect({ content: shown()?.content, prefix: shown()?.streamPrefix }).toEqual({
-      content: 'draft|',
+      content: 'draft|mid|',
       prefix: 'incomplete',
     });
   });
@@ -531,17 +546,17 @@ describe('Astra R2: a write proves only the part it changed', () => {
     );
   }
 
-  it('refreshes an incomplete body from the draft even when a refused delta touched its activity', () => {
+  it('writes a delta into an incomplete body, and a later draft does not take it back', () => {
     writeStoredSnapshot(T, response('A|'));
     beginThreadRecovery(T);
     markThreadRoomLive(T, true);
     applyResponseStreamReplay(replay([], false));
     const land = issueRead();
     backgroundText('C|');
-    expect(shown()?.content).toBe('A|');
+    expect(shown()?.content).toBe('A|C|');
     land([response('A|B|')]);
     expect({ content: shown()?.content, prefix: shown()?.streamPrefix }).toEqual({
-      content: 'A|B|',
+      content: 'A|C|',
       prefix: 'incomplete',
     });
   });

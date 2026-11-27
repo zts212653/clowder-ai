@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import sharp from 'sharp';
 import { ArtifactReviewService } from '../src/domains/collaborative-content/artifact-review/service.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { buildMessageContentBlocks, sendMessageSchema } from '../src/routes/messages.schema.js';
 import { createReviewFixture, reviewHuman } from './helpers/artifact-review-fixture.js';
 

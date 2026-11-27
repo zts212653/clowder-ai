@@ -5,7 +5,7 @@ import type {
   ActiveExecutionProjection,
   ActiveHoldWaitProjection,
 } from '@cat-cafe/shared';
-import { useEffect, useLayoutEffect } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
@@ -58,7 +58,27 @@ export async function refreshActiveExecutionProjection(
   }
 }
 
-export async function cancelProjectedExecution(execution: ActiveExecutionProjection): Promise<void> {
+/**
+ * DELETE a hold-ball task; withFeedback also tells the member why. When the task is already gone (404) and feedback
+ * was asked for, the feedback is posted on its own, as the hold card always did.
+ */
+async function deleteHold(taskId: string, owner: { threadId: string; catId: string }, withFeedback: boolean) {
+  const response = await apiFetch(
+    `/api/callbacks/hold-ball/${encodeURIComponent(taskId)}${withFeedback ? '?withFeedback=1' : ''}`,
+    { method: 'DELETE' },
+  );
+  if (response.status !== 404 || !withFeedback) return response;
+  return apiFetch('/api/callbacks/hold-ball/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ threadId: owner.threadId, taskId, catId: owner.catId }),
+  });
+}
+
+export async function cancelProjectedExecution(
+  execution: ActiveExecutionProjection,
+  withFeedback = false,
+): Promise<void> {
   if (execution.cancelability.state !== 'cancelable') {
     throw new Error('This execution is not cancelable');
   }
@@ -69,11 +89,15 @@ export async function cancelProjectedExecution(execution: ActiveExecutionProject
     const response =
       target.kind === 'live_invocation'
         ? await postLiveExecutionCancel(target)
-        : await apiFetch(`/api/callbacks/hold-ball/${encodeURIComponent(target.taskId)}`, { method: 'DELETE' });
+        : await deleteHold(target.taskId, execution, withFeedback);
     await requireCancelConvergence(response);
-    useActiveExecutionStore.getState().settleCancellation(execution);
+    if (response.status !== 202) useActiveExecutionStore.getState().settleCancellation(execution);
     const { anchorThreadId, projectPath } = useActiveExecutionStore.getState();
-    if (anchorThreadId) await refreshActiveExecutionProjection(anchorThreadId, projectPath);
+    try {
+      if (anchorThreadId) await refreshActiveExecutionProjection(anchorThreadId, projectPath);
+    } finally {
+      if (response.status === 202) useActiveExecutionStore.getState().releaseCancellation(execution);
+    }
   } catch (error) {
     useActiveExecutionStore.getState().releaseCancellation(execution);
     throw error;
@@ -84,10 +108,9 @@ export async function cancelProjectedExecution(execution: ActiveExecutionProject
  * Cancel a held ball through the same DELETE the hold card uses. A 404 means the hold already ended (fired,
  * replaced or cancelled elsewhere), which is the state the user asked for. Returns whether the hold is gone.
  */
-export async function cancelHoldWait(wait: ActiveHoldWaitProjection): Promise<boolean> {
+export async function cancelHoldWait(wait: ActiveHoldWaitProjection, withFeedback = false): Promise<boolean> {
   if (wait.cancelability.state !== 'cancelable') return false;
-  const { taskId } = wait.cancelability.target;
-  const response = await apiFetch(`/api/callbacks/hold-ball/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
+  const response = await deleteHold(wait.cancelability.target.taskId, wait, withFeedback);
   if (!response.ok && response.status !== 404) return false;
   const store = useActiveExecutionStore.getState();
   store.settleWaitCancellation(wait.waitId);
@@ -120,7 +143,11 @@ export async function cancelUnverifiedLegacyExecution(target: {
  * poll narrowly so a background start that emitted no local socket event is
  * still discovered. The store retains the last good snapshot on transient error.
  */
-export function useActiveExecutionProjection(anchorThreadId: string, socketConnected: boolean | null): void {
+export function useActiveExecutionProjection(
+  anchorThreadId: string,
+  socketConnected: boolean | null,
+  needed: boolean | number = true,
+): void {
   const canonicalProjectPath = useSidebarProjectionStore(
     (state) => state.rows.find((row) => row.id === anchorThreadId)?.projectPath,
   );
@@ -129,9 +156,19 @@ export function useActiveExecutionProjection(anchorThreadId: string, socketConne
   );
   const projectPath = canonicalProjectPath ?? compatibilityProjectPath ?? null;
 
+  const current = useRef({ anchorThreadId, projectPath });
+  current.current = { anchorThreadId, projectPath };
   useLayoutEffect(() => {
+    if (!needed) return;
     const controller = new AbortController();
-    const refresh = () => void refreshActiveExecutionProjection(anchorThreadId, projectPath, controller.signal);
+    const refresh = () => {
+      if (!document.hidden)
+        void refreshActiveExecutionProjection(
+          current.current.anchorThreadId,
+          current.current.projectPath,
+          controller.signal,
+        );
+    };
     refresh();
     const interval = window.setInterval(refresh, ACTIVE_EXECUTION_REFRESH_MS);
     const refreshWhenVisible = () => {
@@ -145,12 +182,16 @@ export function useActiveExecutionProjection(anchorThreadId: string, socketConne
       window.removeEventListener('online', refresh);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
-  }, [anchorThreadId, projectPath]);
+  }, [needed]);
 
   useEffect(() => {
-    if (socketConnected !== true) return;
+    if (!needed || socketConnected !== true) return;
     const controller = new AbortController();
-    void refreshActiveExecutionProjection(anchorThreadId, projectPath, controller.signal);
+    void refreshActiveExecutionProjection(
+      current.current.anchorThreadId,
+      current.current.projectPath,
+      controller.signal,
+    );
     return () => controller.abort();
-  }, [anchorThreadId, projectPath, socketConnected]);
+  }, [needed, socketConnected]);
 }

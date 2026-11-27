@@ -1,0 +1,43 @@
+/* 边界：一个含义一个组件、不为接口定制、不按位置推导样式 */
+/* 悬停规则、执行中与排队的底 */
+/* ───────── 悬停规则（统一）─────────
+   操作卡（工具条、行操作、更多、图钉）：悬停停 --reveal-delay 才出现（指针只是划过、在对话之间点来点去时不闪）；离开后停 --reveal-hold 再淡出，停留期间仍然可以点。
+   新画出来的节点已经在指针下面时也一样要等（@starting-style：从收着的样子开始过渡，不会一画出来就是露出的）。
+   纯提示（只显示信息）：悬停约 0.5 秒后出现，离开立刻消失——用原生 title。 */
+.cafe-acts, .lr-acts, .cafe-hov, .nav-pin {
+  pointer-events: auto; visibility: hidden;
+  transition: opacity var(--reveal-fade) ease var(--reveal-hold), visibility 0s linear calc(var(--reveal-hold) + var(--reveal-fade)), color var(--dur-fast), background var(--dur-fast);
+}
+.cafe-ghead:hover .cafe-hov, .cafe-ghead:focus-within .cafe-hov,
+.cafe-m:hover .cafe-acts, .cafe-m:focus-within .cafe-acts, .cafe-m.tap-on .cafe-acts,
+.nav-row:hover .nav-pin, .nav-pin:focus-visible, .nav-pin[aria-pressed="true"],
+.lr-head:hover > .lr-aside > .lr-acts, .lr-head:focus-visible > .lr-aside > .lr-acts, .lr-aside > .lr-acts:focus-within, .lr.tap-on > .lr-head > .lr-aside > .lr-acts,
+.lr-head:hover > .lr-end > .lr-acts, .lr-head:focus-visible > .lr-end > .lr-acts, .lr-head > .lr-end > .lr-acts:focus-within, .lr.tap-on > .lr-head > .lr-end > .lr-acts {
+  visibility: visible; opacity: 1;
+  transition: opacity var(--dur-fast) ease var(--reveal-delay), visibility 0s linear var(--reveal-delay), color var(--dur-fast), background var(--dur-fast);
+}
+@starting-style {
+  .cafe-ghead:hover .cafe-hov, .cafe-m:hover .cafe-acts, .nav-row:hover .nav-pin, .lr-head:hover > .lr-end > .lr-acts, .lr-head:hover > .lr-aside > .lr-acts { visibility: hidden; opacity: 0; }
+  [data-swap]:hover .swap-d { opacity: 1; }
+}
+/* 停留期间标题区也晚一点再收回让出的宽度，避免图标压字 */
+.lr-main { flex: 1 1 0%; min-width: min(4em, 100%); display: flex; flex-direction: column; gap: var(--sp-hairline); padding-right: var(--sp-s); transition: padding-right 0s linear var(--reveal-hold); }
+.lr-head:hover > .lr-main { transition-delay: var(--reveal-delay); }
+/* 列表行的次行允许换行（lrow 的 wrap） */
+.lr-sub.clamp { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--sub-lines); }   /* 行模板声明 subLines：副行最多这么多行，超出省略 */
+
+/* 正在执行的成员：头像和展开内容在同一个底上。收起时这个底就是和头像同大的圆；
+   悬停时同一个底向右伸长成两端半圆的长条（头像 · 名字 · 状态 · 操作），浮在上层，不挤开旁边的头像；离开后停 1 秒再收回 */
+/* 排队中：同一个底的形变。收起时裁成右下角“排队中 · n”这一行的大小；悬停时以右下角为基点，同时向上、向左长成面板；离开后停 1 秒再收回 */
+.qwrap { position: relative; width: var(--qcw, calc(21 * var(--unit))); height: var(--qch, var(--ctl-s)); margin-inline-start: auto; }
+.qbox { position: absolute; right: 0; bottom: 0; width: min(var(--span-10), var(--qmax, calc(100vw - var(--g-mod)))); z-index: var(--z-bar); display: flex; flex-direction: column; background: var(--surf-float); border-radius: var(--r-l); box-shadow: var(--shadow-low);
+  clip-path: inset(calc(100% - var(--qch, 26px)) 0 0 calc(100% - var(--qcw, 84px)) round calc(var(--qch, 26px) / 2)); transition: clip-path var(--dur-med) ease var(--reveal-hold); }
+.qwrap:hover .qbox, .qwrap[data-open="true"] .qbox { clip-path: inset(-24px -24px -24px -24px round var(--r-l)); transition-delay: 0s; }
+.qbox > .fold-tg { visibility: hidden; transition: visibility 0s linear calc(var(--reveal-hold) + var(--dur-med)); }
+.qwrap:hover .qbox > .fold-tg, .qwrap[data-open="true"] .qbox > .fold-tg { visibility: visible; transition-delay: 0s; }
+.qwrap[data-open="false"] .qitem:nth-child(n + 2) { display: none; }
+.qwrap[data-open="false"]:not(:hover) .qitem:nth-child(n + 2) { transition: display calc(var(--reveal-hold) + var(--dur-med)) allow-discrete; }   /* 外部关闭：整块裁剪结束后再隐藏条目，不先缩成一条。 */
+.qbox > .lr-list { padding: var(--sp-xs) var(--sp-xs) 0; background: none; border-radius: 0; box-shadow: none; }
+.qbox > .lr-list > .lr { --hl-in: 0px; }
+.qbox-foot { display: flex; justify-content: flex-end; }
+.qchip { height: var(--ctl-s); line-height: var(--ctl-s); padding: 0 var(--sp-s); border: 0; border-radius: var(--r-full); background: none; white-space: nowrap; }   /* 数字胶囊只展示计数，底色仍来自同一个队列浮层。 */

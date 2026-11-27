@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AssetCanonRecord, WorkVideoContext } from '@cat-cafe/shared';
-import { ArtifactReviewStore } from '../../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { AssetCanonService } from '../../src/domains/collaborative-content/asset-canon/service.js';
 import { WorkVideoContextService } from '../../src/domains/collaborative-content/works/video-context.js';
 import { MediaOwnerError } from '../../src/domains/video-studio/content-owner/media-errors.js';

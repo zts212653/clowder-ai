@@ -1025,11 +1025,15 @@ export class InventoryPluginManagerInstalledPackages implements PluginManagerIns
 
 export interface PluginManagerRuntimeCompositionOptions {
   readonly additionalStateProjection?: PluginManagerStateProjectionPort;
+  /** Told when a plugin's install / update / uninstall starts or ends. */
+  readonly pluginOperationChanged?: (pluginId: string) => void;
   readonly runtime: DormantPluginRuntimeComposition;
   readonly catalogProvider: OfficialPluginCatalogProvider;
   /** Catalog authority used by the pre-Manager official routes during Train B compatibility. */
   readonly officialRouteCatalogProvider?: OfficialPluginCatalogProvider;
   readonly catalogManifests: readonly unknown[];
+  /** Thread ids saved in a plugin's thread configuration fields must exist here. */
+  readonly threads: Pick<IThreadStore, 'get'>;
   readonly fetchOfficialArchive?: (entry: OfficialPluginCatalogEntry) => Promise<Uint8Array>;
   readonly prepareDesktopComponent?: () => Promise<void>;
   readonly now?: () => number;
@@ -1055,6 +1059,8 @@ export interface PluginManagerRuntimeComposition {
   readonly quarantines: FilePluginPackageQuarantineStore;
 }
 
+const lifecycleLog = createModuleLogger('plugin/lifecycle');
+
 function lifecycleFailure(error: unknown): never {
   if (error instanceof PluginManagerServiceError) throw error;
   if (error instanceof Error && 'code' in error) {
@@ -1069,6 +1075,16 @@ function lifecycleFailure(error: unknown): never {
       throw new PluginManagerServiceError('RUNTIME_START_FAILED', error.message);
     }
   }
+  // the underlying code and error type only (messages can carry plugin text or paths)
+  lifecycleLog.warn(
+    {
+      cause: {
+        code: (error as { code?: unknown })?.code,
+        type: error instanceof Error ? error.name : typeof error,
+      },
+    },
+    'Plugin lifecycle operation failed',
+  );
   throw new PluginManagerServiceError('LIFECYCLE_UNAVAILABLE', 'Plugin lifecycle operation failed');
 }
 
@@ -1143,6 +1159,7 @@ export function createPluginManagerRuntimeComposition(
     lifecycle: options.runtime.lifecycle,
     projectRoot: options.runtime.projectRoot,
     inventory: options.runtime.inventoryStore,
+    threads: options.threads,
     now,
   });
   const addressedTargets = new PluginAddressedTargets({
@@ -1154,7 +1171,9 @@ export function createPluginManagerRuntimeComposition(
   });
   const manager = new PluginManagerService({
     addressedTargets,
+    consoleFiles: (pluginId) => assets.readConsole(pluginId),
     delivery: options.runtime.supervisor,
+    ...(options.pluginOperationChanged ? { operationChanged: options.pluginOperationChanged } : {}),
     catalog,
     inventory: options.runtime.inventoryStore,
     installedPackages,

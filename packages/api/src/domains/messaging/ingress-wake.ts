@@ -1,4 +1,10 @@
-import { type CatId, type ConnectorSource, getConnectorDefinition, type MessageContent } from '@cat-cafe/shared';
+import {
+  type CatId,
+  type ConnectorSource,
+  getConnectorDefinition,
+  type MessageContent,
+  type RichMessageExtra,
+} from '@cat-cafe/shared';
 import { emitStoredMessageUpdated } from '../cats/services/agents/invocation/lifecycle-message-update.js';
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
 import { MessagingError } from './contract/host-types.js';
@@ -61,6 +67,7 @@ export function broadcastIngress(
     readonly contentBlocks?: readonly MessageContent[];
     readonly source: ConnectorSource;
     readonly timestamp: number;
+    readonly rich?: RichMessageExtra;
   },
 ): void {
   deps.socketManager?.broadcastToRoom(`thread:${input.threadId}`, 'connector_message', {
@@ -74,6 +81,7 @@ export function broadcastIngress(
       ...(input.replyTo === undefined ? {} : { replyTo: input.replyTo }),
       ...(input.contentBlocks === undefined ? {} : { contentBlocks: input.contentBlocks }),
       source: input.source,
+      ...(input.rich === undefined ? {} : { extra: { rich: input.rich } }),
       timestamp: input.timestamp,
     },
   });
@@ -107,6 +115,8 @@ export async function deliverIngressEffectsOnce(
     contentBlocks?: readonly MessageContent[];
     sender?: { readonly id: string; readonly name?: string };
     timestamp: number;
+    /** The stored message's `extra.rich`, as the store read returns it. */
+    rich?: RichMessageExtra;
     ingress: ResolvedIngress;
     messageStore?: IMessageStore;
   },
@@ -147,6 +157,7 @@ export async function deliverIngressEffectsOnce(
         ...(input.contentBlocks === undefined ? {} : { contentBlocks: input.contentBlocks }),
         source: ingress.source,
         timestamp: input.timestamp,
+        ...(input.rich === undefined ? {} : { rich: input.rich }),
       });
     }
   }

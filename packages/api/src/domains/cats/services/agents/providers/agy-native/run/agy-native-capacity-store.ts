@@ -11,7 +11,12 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { agyOAuthFile } from '../../../../../../../config/agy-account.js';
+import { AGY_OAUTH_FILE, agyOAuthFile } from '../../../../../../../config/agy-account.js';
+import {
+  canonicalWin32Path,
+  hasOnlyControlledWin32Hardlinks,
+  isControlledAgyOAuthAlias,
+} from '../../../../../../../config/win32-fs-security.js';
 import { createModuleLogger } from '../../../../../../../infrastructure/logger.js';
 import type { ObservedContextWindow } from '../../../../types.js';
 import { type AgyVersionProbeOptions, readAgyVersion } from './agy-native-version-probe.js';
@@ -68,17 +73,19 @@ export async function resolveAgyCapacityScope(
       versions.set(executable, cliVersion);
     }
     input.signal?.throwIfAborted();
-    const profileHome = realpathSync(input.profileHome);
+    const profileHome = canonicalWin32Path(input.profileHome);
     const config = join(profileHome, '.gemini/config');
-    if (realpathSync(config) !== config) return undefined;
-    const account = realpathSync(input.credentialHome ?? profileHome);
+    if (canonicalWin32Path(config) !== config) return undefined;
+    const account = canonicalWin32Path(input.credentialHome ?? profileHome);
     const credential = agyOAuthFile(account);
     const credentialStat = lstatSync(credential);
     if (
       !credentialStat.isFile() ||
       credentialStat.isSymbolicLink() ||
-      credentialStat.nlink !== 1 ||
-      (credentialStat.mode & 0o077) !== 0 ||
+      (credentialStat.nlink !== 1 &&
+        (process.platform !== 'win32' ||
+          !hasOnlyControlledWin32Hardlinks(credential, isControlledAgyOAuthAlias(account, AGY_OAUTH_FILE)))) ||
+      (process.platform !== 'win32' && (credentialStat.mode & 0o077) !== 0) ||
       credentialStat.size > 16384
     )
       return undefined;

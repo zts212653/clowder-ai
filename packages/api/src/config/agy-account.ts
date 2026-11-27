@@ -1,16 +1,28 @@
-import { lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import type { AccountConfig } from '@cat-cafe/shared';
 import { resolveCliCommand } from '../utils/cli-resolve.js';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { resolveAccountWriteRoot } from './account-store-topology.js';
+import {
+  areWin32DirectoriesAclPrivate,
+  canonicalWin32Path,
+  escapePowerShellSingleQuotedLiteral,
+  hardenWin32PrivateDirectoryAcl,
+  hasOnlyControlledWin32Hardlinks,
+  isControlledAgyOAuthAlias,
+} from './win32-fs-security.js';
 
 export const AGY_OAUTH_FILE = 'antigravity-oauth-token';
 export type AgyLoginStatus = 'ready' | 'refreshable' | 'not_logged_in' | 'unreadable';
 
 export function agyOAuthFile(home: string): string {
   return join(home, '.gemini', 'antigravity-cli', AGY_OAUTH_FILE);
+}
+
+function hasUnsafePosixPermissions(mode: number): boolean {
+  return process.platform !== 'win32' && (mode & 0o077) !== 0;
 }
 
 /** Only new account-owned directories. Never import an existing profile or system keychain. */
@@ -23,32 +35,50 @@ export function prepareAgyAccount(projectRoot: string, accountRef: string): NonN
   mkdirSync(parent, { recursive: true });
   const base = join(parent, 'agy-accounts');
   const home = join(base, accountRef);
-  for (const path of [base, home, join(home, '.gemini'), join(home, '.gemini', 'antigravity-cli')]) {
+  const dirs = [base, home, join(home, '.gemini'), join(home, '.gemini', 'antigravity-cli')];
+  const existingDirs: string[] = [];
+  for (const path of dirs) {
     const stat = lstatSync(path, { throwIfNoEntry: false });
-    if (stat && (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0))
-      throw new Error('agy_account_directory_unsafe');
-    mkdirSync(path, { recursive: true, mode: 0o700 });
+    if (stat) {
+      if (!stat.isDirectory() || stat.isSymbolicLink() || hasUnsafePosixPermissions(stat.mode))
+        throw new Error('agy_account_directory_unsafe');
+      existingDirs.push(path);
+    } else {
+      mkdirSync(path, { recursive: true, mode: 0o700 });
+      hardenWin32PrivateDirectoryAcl(path);
+    }
   }
-  return { storage: 'cli_file', credentialHome: realpathSync(home) };
+  if (existingDirs.length > 0 && !areWin32DirectoriesAclPrivate(existingDirs))
+    throw new Error('agy_account_directory_unsafe');
+  return { storage: 'cli_file', credentialHome: canonicalWin32Path(home) };
 }
 
 export function assertAgyCredentialHome(home: string): void {
   if (!isAbsolute(home) || resolve(home) === resolve(homedir())) throw new Error('agy_account_directory_unsafe');
-  for (const path of [home, join(home, '.gemini'), join(home, '.gemini', 'antigravity-cli')]) {
+  const dirs = [home, join(home, '.gemini'), join(home, '.gemini', 'antigravity-cli')];
+  for (const path of dirs) {
     const stat = lstatSync(path);
-    if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0)
+    if (!stat.isDirectory() || stat.isSymbolicLink() || hasUnsafePosixPermissions(stat.mode))
       throw new Error('agy_account_directory_unsafe');
   }
+  if (!areWin32DirectoriesAclPrivate(dirs)) throw new Error('agy_account_directory_unsafe');
 }
 
 /** Observes the official file only; expiry alone does not invalidate a refreshable login. */
 export function inspectAgyLogin(home: string): AgyLoginStatus {
   try {
     assertAgyCredentialHome(home);
-    const path = agyOAuthFile(home);
+    const canonicalHome = canonicalWin32Path(home);
+    const path = agyOAuthFile(canonicalHome);
     const stat = lstatSync(path, { throwIfNoEntry: false });
     if (!stat) return 'not_logged_in';
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || (stat.mode & 0o077) !== 0) return 'unreadable';
+    if (!stat.isFile() || stat.isSymbolicLink() || hasUnsafePosixPermissions(stat.mode)) return 'unreadable';
+    if (
+      stat.nlink !== 1 &&
+      (process.platform !== 'win32' ||
+        !hasOnlyControlledWin32Hardlinks(path, isControlledAgyOAuthAlias(canonicalHome, AGY_OAUTH_FILE)))
+    )
+      return 'unreadable';
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
       auth_method?: unknown;
       token?: { access_token?: unknown; refresh_token?: unknown; expiry?: unknown };
@@ -71,7 +101,9 @@ export function inspectAgyLogin(home: string): AgyLoginStatus {
 }
 
 function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
+  return process.platform === 'win32'
+    ? escapePowerShellSingleQuotedLiteral(value)
+    : `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 /** Official remote/SSH auth selects the CLI's file store. No OS keychain setup or token transport. */

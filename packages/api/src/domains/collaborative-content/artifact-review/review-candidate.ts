@@ -1,6 +1,6 @@
 import type { ArtifactReview, ReviewedMediaAsset, TaskItem } from '@cat-cafe/shared';
-import { publicationLedgerId } from './canonical-ledger.js';
 import { reviewIdentity } from './review-authority.js';
+import { publicationLedgerId } from './storage/canonical-ledger.js';
 
 /** No writes: the request coordinator can bind this candidate inside its ledger/outbox transaction. */
 export function createReviewCandidate(input: {

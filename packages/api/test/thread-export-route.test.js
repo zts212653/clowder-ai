@@ -5,15 +5,20 @@
 
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import { runInNewContext } from 'node:vm';
 import Fastify from 'fastify';
 import sharp from 'sharp';
 
 await import('tsx/esm');
 const { threadExportRoutes, resolveFrontendBaseUrl } = await import('../src/routes/thread-export.ts');
 const { resolveFrontendCorsOrigins } = await import('../src/config/frontend-origin.ts');
-const { ImageExporter, buildImageExportUrl, resolveExportCaptureHeight, stitchImageExportChunks } = await import(
-  '../src/services/ImageExporter.ts'
-);
+const {
+  ImageExporter,
+  buildImageExportUrl,
+  readThreadExportSnapshot,
+  resolveExportCaptureHeight,
+  stitchImageExportChunks,
+} = await import('../src/services/ImageExporter.ts');
 const {
   captureVerifiedImageExportCandidate,
   HTML_WIDGET_EXPORT_OPERATION_MAX_WAIT_MS,
@@ -124,7 +129,7 @@ describe('POST /api/threads/:threadId/export-image', () => {
 
     assert.equal(res.statusCode, 200);
     assert.equal(captures.length, 1);
-    assert.equal(captures[0].url, 'http://localhost:3003/thread/thread-1');
+    assert.equal(captures[0].url, 'http://localhost:3003/#export-thread-1');
     assert.equal(captures[0].userId, 'user-1');
   });
 
@@ -142,7 +147,7 @@ describe('POST /api/threads/:threadId/export-image', () => {
 
     assert.equal(res.statusCode, 200);
     assert.equal(captures.length, 1);
-    assert.equal(captures[0].url, 'http://localhost:4101/thread/thread-1');
+    assert.equal(captures[0].url, 'http://localhost:4101/#export-thread-1');
   });
 
   it('uses FRONTEND_URL when present (higher priority than FRONTEND_PORT)', async () => {
@@ -159,7 +164,7 @@ describe('POST /api/threads/:threadId/export-image', () => {
 
     assert.equal(res.statusCode, 200);
     assert.equal(captures.length, 1);
-    assert.equal(captures[0].url, 'https://cat-cafe.example.com/thread/thread-1');
+    assert.equal(captures[0].url, 'https://cat-cafe.example.com/#export-thread-1');
   });
 
   it('closes ImageExporter browser when app.close() fires (BACKLOG #86)', async () => {
@@ -202,7 +207,7 @@ describe('POST /api/threads/:threadId/export-image', () => {
 
     assert.equal(res.statusCode, 200);
     assert.equal(captures.length, 1);
-    assert.equal(captures[0].url, 'http://localhost:3003/thread/thread-1');
+    assert.equal(captures[0].url, 'http://localhost:3003/#export-thread-1');
   });
 
   it('resolves selection before capture and passes only timeline-normalized IDs', async () => {
@@ -285,12 +290,13 @@ describe('POST /api/threads/:threadId/export-image', () => {
 describe('buildImageExportUrl', () => {
   it('appends export identity and repeated validated selection parameters', () => {
     const result = new URL(
-      buildImageExportUrl('http://localhost:3003/thread/thread-1', 'user-1', {
+      buildImageExportUrl('http://localhost:3003/#export-thread-1', 'user-1', {
         selectionMessageIds: ['message-1', 'message-2'],
       }),
     );
 
-    assert.equal(result.searchParams.get('export'), 'true');
+    assert.equal(result.hash, '#export-thread-1');
+    assert.equal(result.searchParams.has('export'), false);
     assert.equal(result.searchParams.get('userId'), 'user-1');
     assert.deepEqual(result.searchParams.getAll('messageId'), ['message-1', 'message-2']);
   });
@@ -408,154 +414,275 @@ describe('buildImageExportUrl', () => {
     assert.deepEqual(events, ['proof', 'screenshot', 'proof']);
   });
 
-  it('rejects a fresh widget proof delivered after the parent deadline without leaking PNG or page', async () => {
+  it('rejects an engine settle delivered after the capture deadline and closes the page', async () => {
     const originalNow = Date.now;
-    let now = 1_000;
-    let proofRequestId = null;
-    let delayedFirstProof = true;
-    let screenshotCalls = 0;
-    let pageCloseCalls = 0;
+    let now = 1000,
+      screenshots = 0,
+      closed = 0;
     const page = {
       async setExtraHTTPHeaders() {},
       async setViewport() {},
       async goto() {},
       async waitForSelector() {},
-      async addStyleTag() {},
+      async waitForFunction() {
+        now += 12001;
+      },
       async screenshot() {
-        screenshotCalls += 1;
-        return Buffer.from('candidate-png');
+        screenshots++;
+        return Buffer.from('invalid');
       },
       async close() {
-        pageCloseCalls += 1;
-      },
-      async evaluate(fn, ...args) {
-        if (args[0] === 'catcafe:html-widget-export-proof-request') {
-          proofRequestId = args[1];
-          if (delayedFirstProof) {
-            delayedFirstProof = false;
-            now += HTML_WIDGET_EXPORT_OPERATION_MAX_WAIT_MS + 1;
-          }
-          return undefined;
-        }
-        if (args[0] === 'data-html-widget-proof-request-id') {
-          return {
-            height: 100,
-            pendingContentIds: [],
-            widgets: [
-              {
-                widgetId: 'late-proof-widget',
-                layoutState: 'ready',
-                expanded: true,
-                proofRequestId,
-              },
-            ],
-          };
-        }
-
-        const source = String(fn);
-        if (source.includes('[data-export-root]')) {
-          return { documentHeight: 100, exportRootHeight: 100 };
-        }
-        if (source.includes('[data-message-id]')) return 1;
-        if (source.includes('requestAnimationFrame')) return undefined;
-        throw new Error(`Unexpected browser evaluation: ${source}`);
+        closed++;
       },
     };
-    const browserSession = {
-      browser: null,
+    const exporter = new ImageExporter();
+    exporter.browserSession = {
       async openPage() {
         return page;
       },
       async close() {},
     };
-    const exporter = new ImageExporter();
-    exporter.browserSession = browserSession;
     Date.now = () => now;
-
     try {
-      await assert.rejects(
-        () => exporter.capture('http://example.test/thread/thread-1', 'user-1'),
-        /deadline|timed out|did not become export-ready/i,
-      );
-      assert.equal(screenshotCalls, 0, 'an ACK after the parent deadline must never produce a PNG candidate');
-      assert.equal(pageCloseCalls, 1, 'the rejected capture must close its browser page');
+      await assert.rejects(() => exporter.capture('http://example.test/#export-thread-1', 'user-1'), /deadline/);
+      assert.equal(screenshots, 0);
+      assert.equal(closed, 1);
     } finally {
       Date.now = originalNow;
       await exporter.close();
     }
   });
 
-  it('shares one export deadline across widget readiness, height stability, and screenshot proof', async () => {
-    const originalNow = Date.now;
-    let now = 1_000;
-    let proofRequestId = null;
-    let screenshotCalls = 0;
-    let pageCloseCalls = 0;
+  it('shares one deadline across engine settles and rejects a PNG whose message identities changed', async () => {
+    let captures = 0,
+      closed = 0,
+      reads = 0;
     const page = {
       async setExtraHTTPHeaders() {},
       async setViewport() {},
       async goto() {},
-      async waitForSelector() {},
-      async addStyleTag() {},
+      async waitForSelector(selector) {
+        assert.match(selector, /data-stream/);
+      },
+      async waitForFunction(fn) {
+        assert.match(String(fn), /__settled/);
+      },
+      async evaluate(fn) {
+        if (String(fn).includes('image.loading')) return true;
+        if (String(fn).includes('mids:')) {
+          reads++;
+          return { height: 100, mids: reads > 2 ? ['changed'] : ['message-1'] };
+        }
+      },
       async screenshot() {
-        screenshotCalls += 1;
-        return Buffer.from('candidate-png');
+        captures++;
+        return Buffer.from('candidate');
       },
       async close() {
-        pageCloseCalls += 1;
-      },
-      async evaluate(fn, ...args) {
-        if (args[0] === 'catcafe:html-widget-export-proof-request') {
-          proofRequestId = args[1];
-          now += 2_500;
-          return undefined;
-        }
-        if (args[0] === 'data-html-widget-proof-request-id') {
-          return {
-            height: 100,
-            pendingContentIds: [],
-            widgets: [
-              {
-                widgetId: 'cumulative-deadline-widget',
-                layoutState: 'ready',
-                expanded: true,
-                proofRequestId,
-              },
-            ],
-          };
-        }
-
-        const source = String(fn);
-        if (source.includes('[data-export-root]')) {
-          return { documentHeight: 100, exportRootHeight: 100 };
-        }
-        if (source.includes('[data-message-id]')) return 1;
-        if (source.includes('requestAnimationFrame')) return undefined;
-        throw new Error(`Unexpected browser evaluation: ${source}`);
+        closed++;
       },
     };
-    const browserSession = {
-      browser: null,
+    const exporter = new ImageExporter();
+    exporter.browserSession = {
       async openPage() {
         return page;
       },
       async close() {},
     };
-    const exporter = new ImageExporter();
-    exporter.browserSession = browserSession;
-    Date.now = () => now;
+    await assert.rejects(() => exporter.capture('http://example.test/#export-thread-1', 'user-1'), /content changed/);
+    assert.equal(captures, 1);
+    assert.equal(closed, 1);
+    await exporter.close();
+  });
 
-    try {
-      await assert.rejects(
-        () => exporter.capture('http://example.test/thread/thread-1', 'user-1'),
-        /deadline|timed out|did not stabilize/i,
-      );
-      assert.equal(screenshotCalls, 0, 'later phases must not receive a fresh screenshot deadline');
-      assert.equal(pageCloseCalls, 1, 'the globally expired capture must close its browser page');
-    } finally {
-      Date.now = originalNow;
-      await exporter.close();
-    }
+  it('captures an empty loaded stream without waiting for a nonexistent first message', async () => {
+    let closed = false;
+    const page = {
+      async setExtraHTTPHeaders() {},
+      async setViewport() {},
+      async goto() {},
+      async waitForSelector(selector) {
+        assert.equal(selector, '[data-view="thread.export"] [data-stream]');
+      },
+      async waitForFunction() {},
+      async evaluate(fn) {
+        if (String(fn).includes('image.loading')) return true;
+        if (String(fn).includes('mids:')) return { height: 64, mids: [] };
+      },
+      async screenshot() {
+        return sharp({ create: { width: 1280, height: 64, channels: 4, background: 'white' } })
+          .png()
+          .toBuffer();
+      },
+      async close() {
+        closed = true;
+      },
+    };
+    const exporter = new ImageExporter();
+    exporter.browserSession = {
+      async openPage() {
+        return page;
+      },
+      async close() {},
+    };
+    const png = await exporter.capture('http://example.test/#export-empty', 'user-1');
+    assert.equal((await sharp(png).metadata()).height, 64);
+    assert.equal(closed, true);
+    await exporter.close();
+  });
+
+  it('measures the message stream without counting nested reply/action data-mid attributes or the viewport floor', async () => {
+    const messages = [
+      {
+        getAttribute() {
+          return 'a';
+        },
+      },
+      {
+        getAttribute() {
+          return 'b';
+        },
+      },
+    ];
+    const stream = {
+      scrollHeight: 120,
+      getBoundingClientRect() {
+        return { top: 50 };
+      },
+      querySelectorAll(selector) {
+        assert.equal(selector, ':scope > [data-mid]');
+        return messages;
+      },
+    };
+    const view = {
+      scrollHeight: 4000,
+      getBoundingClientRect() {
+        return { top: 20, height: 4000 };
+      },
+      querySelector(selector) {
+        assert.equal(selector, '[data-stream]');
+        return stream;
+      },
+    };
+    const browser = {
+      document: {
+        querySelector(selector) {
+          assert.equal(selector, '[data-view="thread.export"]');
+          return view;
+        },
+      },
+      getComputedStyle() {
+        return { paddingBottom: '10px' };
+      },
+    };
+    const page = {
+      async evaluate(fn, ...args) {
+        return runInNewContext(`(${fn})(...args)`, { ...browser, args });
+      },
+    };
+    const result = await readThreadExportSnapshot(page);
+    assert.equal(result.height, 160);
+    assert.deepEqual(Array.from(result.mids), ['a', 'b']);
+  });
+
+  it('captures the full frame stream in exact chunks after engine settling and retains authentication', async () => {
+    let viewport = { width: 1280, height: 900 },
+      closed = false,
+      settles = 0;
+    const offsets = [],
+      heights = [],
+      mids = ['a', 'b'];
+    const stream = {
+      scrollHeight: 4510,
+      getBoundingClientRect() {
+        return { top: 0 };
+      },
+      querySelectorAll() {
+        return mids.map((mid) => ({
+          getAttribute() {
+            return mid;
+          },
+        }));
+      },
+    };
+    const view = {
+      parentElement: null,
+      scrollHeight: 4510,
+      get clientHeight() {
+        return viewport.height;
+      },
+      set scrollTop(value) {
+        offsets.push(value);
+      },
+      getBoundingClientRect() {
+        return { top: 0, height: viewport.height };
+      },
+      querySelector() {
+        return stream;
+      },
+    };
+    const browser = {
+      document: {
+        querySelector() {
+          return view;
+        },
+        querySelectorAll(selector) {
+          assert.equal(selector, '[data-view="thread.export"] img');
+          return [];
+        },
+      },
+      getComputedStyle() {
+        return { overflowY: 'auto', paddingBottom: '0px' };
+      },
+      async __settled() {
+        settles++;
+      },
+    };
+    const page = {
+      async setExtraHTTPHeaders(headers) {
+        assert.equal(headers['X-Cat-Cafe-User'], 'user-1');
+      },
+      async setViewport(value) {
+        viewport = value;
+      },
+      async goto(url) {
+        assert.equal(new URL(url).hash, '#export-thread-1');
+      },
+      async waitForSelector(selector) {
+        assert.match(selector, /data-stream/);
+      },
+      async waitForFunction(fn) {
+        await runInNewContext(`(${fn})()`, browser);
+      },
+      async evaluate(fn, ...args) {
+        return runInNewContext(`(${fn})(...args)`, { ...browser, args });
+      },
+      async screenshot() {
+        heights.push(viewport.height);
+        return sharp({ create: { width: viewport.width, height: viewport.height, channels: 4, background: 'white' } })
+          .png()
+          .toBuffer();
+      },
+      async close() {
+        closed = true;
+      },
+    };
+    const exporter = new ImageExporter();
+    exporter.browserSession = {
+      async openPage() {
+        return page;
+      },
+      async close() {},
+    };
+    const png = await exporter.capture('http://example.test/#export-thread-1', 'user-1', {
+      selectionMessageIds: ['a', 'b'],
+    });
+    assert.equal((await sharp(png).metadata()).height, 4510);
+    assert.deepEqual(heights, [4000, 510]);
+    assert.deepEqual(offsets, [0, 4000]);
+    assert.ok(settles >= 5);
+    assert.equal(closed, true);
+    await exporter.close();
   });
 
   it('stitches exact chunk boundaries without repeating or dropping boundary content', async () => {
