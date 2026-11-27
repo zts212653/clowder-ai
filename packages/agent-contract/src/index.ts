@@ -10,6 +10,13 @@ import type {
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 
+export type { AgentAdapterDeclaration, AgentAdapterDescription } from './adapter-declaration.js';
+export {
+  AGENT_ADAPTER_DECLARATION_FILE,
+  parseAgentAdapterDeclaration,
+  parseAgentAdapterDescription,
+} from './adapter-declaration.js';
+
 export const AGENT_ACCESS_PLUGIN_ID = 'official.agent-access';
 export const AGENT_ACCESS_DECLARATION_FILE = 'agent-access.json';
 export const AGENT_ACCESS_PROTOCOL_VERSION = 1;

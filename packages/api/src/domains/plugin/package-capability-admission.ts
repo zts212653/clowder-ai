@@ -2,6 +2,7 @@ import {
   AGENT_ACCESS_PLUGIN_ID,
   OFFICIAL_AGENT_ACCESS_OPERATIONS,
   parseAgentAccessDeclaration,
+  parseAgentAdapterDeclaration,
 } from '@clowder-ai/agent-contract';
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import { parseAgentProviderDeclaration } from '../cats/services/agents/session-contract/plugin-agent-provider.js';
@@ -12,6 +13,7 @@ export function packageCapabilityRejection(
   agentProvider: unknown,
   packageRoot: string,
   agentAccess?: unknown,
+  agentAdapter?: unknown,
 ): string | undefined {
   if (manifest.runtime && !['builtin', 'stdio'].includes(manifest.runtime.transport))
     return 'Package has no supported Host runtime';
@@ -19,6 +21,16 @@ export function packageCapabilityRejection(
   if (agentProvider !== undefined) {
     const result = parseAgentProviderDeclaration(agentProvider, { packageRoot });
     if (!result.ok) return `Invalid ACP declaration: ${result.reason}`;
+  }
+  if (agentAdapter !== undefined) {
+    const parsed = parseAgentAdapterDeclaration(agentAdapter);
+    if (!parsed.success) {
+      if (parsed.error.issues.some((issue) => issue.path[0] === 'protocolVersion'))
+        return 'Unsupported Agent adapter protocol version';
+      return 'Invalid Agent adapter declaration';
+    }
+    if (manifest.runtime?.transport !== 'builtin' || !manifest.runtime.entrypoint)
+      return 'Agent adapter requires an executable plugin module';
   }
   if (agentAccess === undefined)
     return manifest.pluginId === AGENT_ACCESS_PLUGIN_ID ? 'Agent access protocol declaration is missing' : undefined;

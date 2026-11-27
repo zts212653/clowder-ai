@@ -49,6 +49,7 @@ import { StaticPluginRuntime } from './builtin-runtime/carriers/static-plugin-ru
 import { PluginRuntimeCarrierRouter } from './carrier/runtime-carrier.js';
 import { ContentEditorPluginRuntime } from './content-editor-runtime/runtime.js';
 import { ContentEditorSemanticWorker } from './content-editor-runtime/semantic-worker.js';
+import { createAgentAdapterAccess } from './declared/agent-adapter-access.js';
 import { recoverAgentClientMetadata } from './declared/agent-client-metadata.js';
 import type { CloudConversationHostRegistry } from './declared/cloud-conversation-host-registry.js';
 import type { AgentSessionProviderLifecycle } from './declared/declared-agent-session-providers.js';
@@ -263,6 +264,7 @@ export interface DormantPluginRuntimeComposition {
   readonly inventory: HostInventoryControlPlane;
   readonly broker: HostBrokerControlPlane;
   readonly supervisor: PluginRuntimeCarrierRouter;
+  readonly agentAdapters: ReturnType<typeof createAgentAdapterAccess>;
   readonly externalAccess: PluginExternalAccessService;
   readonly sharedExtension?: PluginSharedExtensionService;
   /** The child-process carrier itself. Exposed so the Host's one pre-active budget
@@ -733,6 +735,7 @@ export function createDormantPluginRuntimeComposition(
     configuration,
     broker,
     supervisor,
+    agentAdapters: createAgentAdapterAccess(inventoryStore, moduleRuntime),
     externalAccess,
     ...(sharedExtension ? { sharedExtension } : {}),
     settingsInvocation: moduleRuntime.invokeSettings,
