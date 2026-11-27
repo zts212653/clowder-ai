@@ -102,7 +102,7 @@ import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { initSidebarWidth, useSidebarStore } from '@/stores/sidebarStore';
 import { useToastStore } from '@/stores/toastStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
-import { apiSessionIdentity } from '@/utils/api-session-identity';
+import { type ApiSessionIdentity, apiSessionIdentity } from '@/utils/api-session-identity';
 import { notifyHandledMentionRead } from '@/utils/mention-read-receipt';
 import { invalidateSidebarProjection, refreshSidebarThreadSnapshot } from '@/utils/sidebar-thread-snapshot';
 import { invalidateThreadAttentionPreferences } from '@/utils/thread-attention-invalidation';
@@ -262,19 +262,21 @@ function writeSendAttempt(threadId: string, attempt: SendAttempt | null) {
  */
 export async function sendHeldDraft(input: {
   threadId: string;
+  owner?: string;
   signature: string;
   keyed: boolean;
   send: (attemptKey: string) => Promise<unknown>;
   hold: (on: boolean) => void;
   clear: () => void;
 }): Promise<boolean> {
-  const prior = readSendAttempt(input.threadId);
+  const attemptScope = JSON.stringify([input.owner, input.threadId]);
+  const prior = readSendAttempt(attemptScope);
   const key = prior?.signature === input.signature ? prior.key : crypto.randomUUID();
-  if (input.keyed) writeSendAttempt(input.threadId, { key, signature: input.signature });
+  if (input.keyed) writeSendAttempt(attemptScope, { key, signature: input.signature });
   input.hold(true);
   try {
     if ((await input.send(key)) === false) return false;
-    writeSendAttempt(input.threadId, null);
+    writeSendAttempt(attemptScope, null);
     input.clear();
     return true;
   } finally {
@@ -353,10 +355,15 @@ export function PdlAppHost() {
 }
 
 /** Mark the conversation being left without notifying the sidebar on each edit. */
-export function useThreadDraftMarker(threadId: string) {
-  const leaving = useMemo(() => ({ current: false, hasCommittedText: false }), [threadId]);
+export function useThreadDraftMarker(threadId: string, session = apiSessionIdentity.getSnapshot()) {
+  const leaving = useMemo(() => ({ current: false, hasCommittedText: false }), [threadId, session]);
   const setThreadHasDraft = useChatStore((state) => state.setThreadHasDraft);
-  useLayoutEffect(() => () => setThreadHasDraft(threadId, leaving.current), [threadId, leaving, setThreadHasDraft]);
+  useLayoutEffect(
+    () => () => {
+      if (apiSessionIdentity.getSnapshot() === session) setThreadHasDraft(threadId, leaving.current);
+    },
+    [threadId, leaving, session, setThreadHasDraft],
+  );
   return leaving;
 }
 
@@ -374,6 +381,12 @@ function ChatBinding({
   pendingJump: MutableRefObject<PendingThreadJump | null>;
 }) {
   const { socketConnected, registerIndexEventHandler } = useThreadChatRuntime([threadId]);
+  const session = useSyncExternalStore(
+    apiSessionIdentity.subscribe,
+    apiSessionIdentity.getSnapshot,
+    apiSessionIdentity.getSnapshot,
+  );
+  const displayedSession = useRef(session);
   const neededNow = useRef(needed);
   neededNow.current = needed;
   // Reconnect makes the same needed sources appear again without losing their held data.
@@ -433,7 +446,7 @@ function ChatBinding({
   );
   const drafts = useMemo(
     () => ({
-      ...flaggedDrafts,
+      ...(displayedSession.current === session ? flaggedDrafts : {}),
       ...Object.fromEntries(
         keptDrafts
           .split('\u0000')
@@ -441,7 +454,7 @@ function ChatBinding({
           .map((id) => [id, true]),
       ),
     }),
-    [flaggedDrafts, keptDrafts],
+    [flaggedDrafts, keptDrafts, session],
   );
   const invocations = useChatStore((s) => s.getThreadState(threadId).catInvocations);
   const live = useChatStore(
@@ -498,7 +511,7 @@ function ChatBinding({
   const drafting = exportMids === undefined;
   const inputChanged = useRef<() => void>();
   const serverDraft = useRef<ReturnType<typeof useServerComposerDraft>>();
-  const leaving = useThreadDraftMarker(threadId);
+  const leaving = useThreadDraftMarker(threadId, session);
   // IME composition is transient: keep it in the input state, but do not persist it as a draft.
   const composingRef = useRef(false);
   const [composing, setComposing] = useState(false);
@@ -559,12 +572,13 @@ function ChatBinding({
     },
     [writeInput],
   );
-  const [conversation, setConversation] = useState(threadId);
-  if (conversation !== threadId) {
+  const [conversation, setConversation] = useState({ threadId, session });
+  if (conversation.threadId !== threadId || conversation.session !== session) {
     const text = drafting ? getThreadDraft(threadId) : '';
-    setConversation(threadId);
+    setConversation({ threadId, session });
     composingRef.current = false;
     setComposing(false);
+    if (conversation.session !== session) setSendingThreads({});
     setImages(threadImageDrafts.get(threadId) ?? []);
     setContexts(drafting ? [...getContextAttachmentDraft(threadId)] : []);
     setContextQuery('');
@@ -583,18 +597,19 @@ function ChatBinding({
   }
   // Picked images stay with their conversation for this session (the five most recent).
   useLayoutEffect(() => {
+    if (apiSessionIdentity.getSnapshot() !== session) return;
     if (images.length) {
       threadImageDrafts.delete(threadId);
       threadImageDrafts.set(threadId, images);
       for (const oldest of [...threadImageDrafts.keys()].slice(0, -5)) threadImageDrafts.delete(oldest);
     } else threadImageDrafts.delete(threadId);
-  }, [threadId, images]);
-  const reply = store.replyToMessage;
+  }, [threadId, images, session]);
+  const reply = displayedSession.current === session ? store.replyToMessage : null;
   useEffect(() => {
-    if (!drafting) return;
+    if (!drafting || apiSessionIdentity.getSnapshot() !== session) return;
     syncContextAttachmentDraftToStorage(threadId, contexts);
     syncReplyDraftToStorage(threadId, reply);
-  }, [drafting, threadId, contexts, reply]);
+  }, [drafting, threadId, contexts, reply, session]);
   // The same draft is kept on the server, so a refresh or another device continues it.
   const restoreDraft: Parameters<typeof useServerComposerDraft>[0]['restore'] = (saved, isCurrent) => {
     setInput(saved.text);
@@ -949,7 +964,6 @@ function ChatBinding({
       ui.current.homeTitle = '';
       ui.current.homePin = false;
     }
-    if (sent !== 'default') serverDraft.current?.clear(sent);
     if (current.current.threadId === sent) {
       setInput('');
       setImages([]);
@@ -999,8 +1013,15 @@ function ChatBinding({
       kept = threadReplyDrafts.get(threadId);
     state.setCurrentThread(threadId);
     // Opening a conversation clears the quoted reply; its draft's reply comes back.
+    if (displayedSession.current !== session) {
+      displayedSession.current = session;
+      state.clearReplyTo();
+      for (const id of new Set([...Object.keys(state.threadStates), state.currentThreadId])) {
+        if (state.getThreadState(id).hasDraft) state.setThreadHasDraft(id, false);
+      }
+    }
     if (drafting && kept) state.setReplyTo(kept);
-  }, [drafting, threadId]);
+  }, [drafting, threadId, session]);
   useEffect(() => {
     initSidebarWidth();
   }, []);
@@ -1362,6 +1383,7 @@ function ChatBinding({
         pushThreadRouteWithHistory(args.id, window);
         return;
       case 'send': {
+        if (!session.ownerUserId || apiSessionIdentity.getSnapshot() !== session) return false;
         const input = ui.current.draft!['chat-input'];
         if (runtimeAnswerContext.current) {
           const id = runtimeAnswerContext.current,
@@ -1400,6 +1422,7 @@ function ChatBinding({
         }
         await sendHeldDraft({
           threadId: sentThread,
+          owner: session.ownerUserId ?? undefined,
           signature: JSON.stringify([
             input.trim(),
             images.map((file) => [file.name, file.size, file.lastModified]),
@@ -1420,24 +1443,39 @@ function ChatBinding({
                     ? { whisper: { visibility: 'whisper', whisperTo: ui.current.whisperTo } }
                     : {}),
                 })
-              : handleSend(
-                  input.trim(),
-                  images.length ? images : undefined,
-                  sentThread,
-                  ui.current.whisper ? { visibility: 'whisper', whisperTo: ui.current.whisperTo } : undefined,
-                  state.replyToMessage?.id,
-                  contexts.length ? contexts : undefined,
-                  ui.current.target ? [ui.current.target] : undefined,
-                  { idempotencyKey: attemptKey },
-                ),
-          hold: (on) =>
+              : (serverDraft.current?.send(sentThread, async (composerDraftRevision, signal) => {
+                  let revision: number | undefined;
+                  const accepted = await handleSend(
+                    input.trim(),
+                    images.length ? images : undefined,
+                    sentThread,
+                    ui.current.whisper ? { visibility: 'whisper', whisperTo: ui.current.whisperTo } : undefined,
+                    state.replyToMessage?.id,
+                    contexts.length ? contexts : undefined,
+                    ui.current.target ? [ui.current.target] : undefined,
+                    {
+                      idempotencyKey: attemptKey,
+                      composerDraftRevision,
+                      composerDraftConsumed: (value) => {
+                        revision = value;
+                      },
+                      signal,
+                    },
+                  );
+                  return accepted ? { revision } : false;
+                }) ?? Promise.resolve(false)),
+          hold: (on) => {
+            if (apiSessionIdentity.getSnapshot() !== session) return;
             setSendingThreads((all) => {
               const next = { ...all };
               if (on) next[sentThread] = true;
               else delete next[sentThread];
               return next;
-            }),
-          clear: () => clearSentDraft(sentThread),
+            });
+          },
+          clear: () => {
+            if (apiSessionIdentity.getSnapshot() === session) clearSentDraft(sentThread);
+          },
         });
         return;
       }
@@ -2375,6 +2413,7 @@ function ChatBinding({
         serverDraft={serverDraft}
         composing={composing}
         draftRevision={draftRevision.current}
+        session={session}
         images={images}
         contexts={contexts}
         reply={reply}
@@ -2469,6 +2508,7 @@ export function ComposerInputBinding({
   serverDraft,
   composing = false,
   draftRevision = 0,
+  session = apiSessionIdentity.getSnapshot(),
   images,
   contexts,
   reply,
@@ -2485,6 +2525,7 @@ export function ComposerInputBinding({
   serverDraft: MutableRefObject<ReturnType<typeof useServerComposerDraft> | undefined>;
   composing?: boolean;
   draftRevision?: number;
+  session?: ApiSessionIdentity;
   images: File[];
   contexts: ContextAttachment[];
   reply: ChatData['reply'];
@@ -2510,8 +2551,8 @@ export function ComposerInputBinding({
   );
   useEffect(() => {
     // Uncommitted IME text is not a draft; the next committed edit writes the complete text.
-    if (enabled && !composing) syncDraftToStorage(threadId, input);
-  }, [enabled, threadId, input, composing]);
+    if (enabled && !composing && apiSessionIdentity.getSnapshot() === session) syncDraftToStorage(threadId, input);
+  }, [enabled, threadId, input, composing, session]);
   const draft = useServerComposerDraft({
     threadId,
     enabled: enabled && threadId !== 'default',

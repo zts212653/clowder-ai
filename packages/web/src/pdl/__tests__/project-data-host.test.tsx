@@ -4,6 +4,7 @@ import { getThreadDraft } from '@/components/thread-drafts';
 import type { useWorkspace } from '@/hooks/useWorkspace';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { request } from '../owner-api';
 import {
@@ -188,6 +189,7 @@ it('hydrates the first-message admission once across 30 parent commits', async (
 });
 
 it('keeps draft typing in its leaf, persists it, and publishes only a changed routing result', async () => {
+  observeApiSessionOwner('composer-leaf-owner');
   const ui = { current: fixtureUi() };
   ui.current.draft!['chat-input'] = 'a';
   const inputChanged: { current: (() => void) | undefined } = { current: undefined };

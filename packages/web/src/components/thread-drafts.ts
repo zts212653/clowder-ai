@@ -1,4 +1,5 @@
 import { type ContextAttachment, ContextAttachmentDraftsSchema, type ReplyPreview } from '@cat-cafe/shared';
+import { apiSessionIdentity } from '@/utils/api-session-identity';
 
 const STORAGE_KEY = 'cat-cafe:thread-drafts';
 const REPLY_STORAGE_KEY = 'cat-cafe:thread-reply-drafts';
@@ -6,6 +7,9 @@ const CONTEXT_STORAGE_KEY = 'cat-cafe:thread-context-attachment-drafts';
 const EMPTY_CONTEXT_ATTACHMENTS: readonly ContextAttachment[] = [];
 const threadDraftListeners = new Set<() => void>();
 const contextAttachmentDraftListeners = new Set<() => void>();
+let owner = apiSessionIdentity.getSnapshot().ownerUserId;
+const imagesByOwner = new Map<string, Map<string, File[]>>();
+const ownerKey = (key: string) => (owner ? `${key}:${encodeURIComponent(owner)}` : null);
 
 /**
  * Reply context persisted alongside the text draft so quoted messages survive
@@ -19,9 +23,10 @@ export interface DraftReplyContext extends ReplyPreview {
 
 /** Each map is one browser-storage entry; a draft lasts until it is sent or the site data is cleared. */
 function readEntries(key: string): unknown[] {
-  if (typeof window === 'undefined') return [];
+  const scoped = ownerKey(key);
+  if (!scoped || typeof window === 'undefined') return [];
   try {
-    const entries: unknown = JSON.parse(window.localStorage.getItem(key) ?? '[]');
+    const entries: unknown = JSON.parse(window.localStorage.getItem(scoped) ?? '[]');
     return Array.isArray(entries) ? entries : [];
   } catch {
     return [];
@@ -29,8 +34,10 @@ function readEntries(key: string): unknown[] {
 }
 
 function writeEntries(key: string, map: Map<string, unknown>): void {
-  if (map.size === 0) window.localStorage.removeItem(key);
-  else window.localStorage.setItem(key, JSON.stringify([...map.entries()]));
+  const scoped = ownerKey(key);
+  if (!scoped || typeof window === 'undefined') return;
+  if (map.size === 0) window.localStorage.removeItem(scoped);
+  else window.localStorage.setItem(scoped, JSON.stringify([...map.entries()]));
 }
 
 function hydrateTextDrafts(): Map<string, string> {
@@ -72,10 +79,21 @@ function hydrateContextAttachmentDrafts(): Map<string, ContextAttachment[]> {
   return parseContextAttachmentDrafts(JSON.stringify(readEntries(CONTEXT_STORAGE_KEY)));
 }
 
-export const threadDrafts = hydrateTextDrafts();
-export const threadImageDrafts = new Map<string, File[]>();
-export const threadReplyDrafts = hydrateReplyDrafts();
-export const threadContextAttachmentDrafts = hydrateContextAttachmentDrafts();
+export let threadDrafts = hydrateTextDrafts();
+export let threadImageDrafts = new Map<string, File[]>();
+export let threadReplyDrafts = hydrateReplyDrafts();
+export let threadContextAttachmentDrafts = hydrateContextAttachmentDrafts();
+
+apiSessionIdentity.subscribe(() => {
+  if (owner) imagesByOwner.set(owner, threadImageDrafts);
+  owner = apiSessionIdentity.getSnapshot().ownerUserId;
+  threadDrafts = hydrateTextDrafts();
+  threadReplyDrafts = hydrateReplyDrafts();
+  threadContextAttachmentDrafts = hydrateContextAttachmentDrafts();
+  threadImageDrafts = (owner ? imagesByOwner.get(owner) : undefined) ?? new Map();
+  for (const listener of threadDraftListeners) listener();
+  for (const listener of contextAttachmentDraftListeners) listener();
+});
 
 export function getThreadDraft(threadId: string | undefined): string {
   return threadId ? (threadDrafts.get(threadId) ?? '') : '';
