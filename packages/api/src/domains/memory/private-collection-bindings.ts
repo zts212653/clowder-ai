@@ -268,8 +268,11 @@ async function registerOneExternalCollection(
         // Separate selected-generation SQLite coverage from physical-vector lexical mutation isolation:
         // MemoryEmbeddingLifecycle.enabledStores() selects cohort members via physical hasVectorGeneration(db),
         // so any lexical mutation on a store carrying physical vector tables (including an inactive G1 shadow)
-        // must isolate the store as stale, while zero-change boots honor activeId intent alone.
-        const vectorsStale = vectorStateAfter === 'stale' || (hadPhysicalVectors && lexicalChanged);
+        // must isolate the store as stale, and subsequent zero-change boots must preserve that persisted
+        // 'stale' isolation whenever SQLite cannot prove active-generation readiness (vectorStateAfter === 'none').
+        const vectorsStale =
+          vectorStateAfter === 'stale' ||
+          (hadPhysicalVectors && (lexicalChanged || (vectorStateAfter === 'none' && manifest.status === 'stale')));
         finalStatus = result.blocked ? 'blocked' : vectorsStale ? 'stale' : 'active';
         console.info('[memory] external collection startup autoRebuild', {
           id: manifest.id,

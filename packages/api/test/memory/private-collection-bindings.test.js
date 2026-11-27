@@ -7,7 +7,16 @@
  */
 
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
@@ -1425,5 +1434,47 @@ describe('private-collection-bindings: corpus indexing (INV-9)', () => {
       'isolated external store must not have an unexpected G0 vector table created during main activation',
     );
     svc2.embeddingLifecycle.deactivate();
+    for (const s of new Set([svc2.store, ...svc2.collectionStores.values()])) s.close();
+
+    // Phase 3: Zero-change restart must preserve persisted `'stale'` isolation instead of
+    // flipping back to `'active'` and pulling the G1-shadow store into the G0 cohort.
+    const svc3 = await boot();
+    for (const s of new Set([svc3.store, ...svc3.collectionStores.values()])) storesToClose.push(s);
+    assert.equal(
+      svc3.catalog.get('research:shadow-lex')?.status,
+      'stale',
+      'zero-change restart must keep physical-vector shadow collection isolated as stale',
+    );
+    const persistedManifests = JSON.parse(readFileSync(join(extDataDir, 'library', 'collections.json'), 'utf-8'));
+    assert.equal(
+      persistedManifests.find((m) => m.id === 'research:shadow-lex')?.status,
+      'stale',
+      'collections.json must stay stale across zero-change restarts',
+    );
+
+    let phase3EmbedCalls = 0;
+    svc3.embeddingLifecycle.getDeployment = () => deployment;
+    svc3.embeddingLifecycle.createEmbeddingService = () => ({
+      ...g0Encoder,
+      embed: async () => {
+        phase3EmbedCalls++;
+        throw new Error('Zero-change restart must not re-admit stale G1-shadow store into G0 cohort');
+      },
+    });
+    const activation3 = await svc3.embeddingLifecycle.activate('on');
+    assert.equal(activation3.ok, true, 'ready main G0 activation must stay green on zero-change restart');
+    assert.equal(phase3EmbedCalls, 0, 'embed() must not be invoked on zero-change restart');
+    assert.equal(svc3.store.searchEmbedding()?.getModelInfo().generationId, 'g0');
+    assert.equal(svc3.collectionStores.get('research:shadow-lex')?.searchEmbedding(), undefined);
+    assert.equal(
+      svc3.collectionStores
+        .get('research:shadow-lex')
+        .getDb()
+        .prepare("SELECT 1 FROM sqlite_master WHERE name='evidence_vectors'")
+        .get(),
+      undefined,
+      'zero-change restart must not create unexpected G0 evidence_vectors on isolated external store',
+    );
+    svc3.embeddingLifecycle.deactivate();
   });
 });
