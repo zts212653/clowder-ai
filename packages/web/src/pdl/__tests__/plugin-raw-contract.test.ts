@@ -77,6 +77,13 @@ it('projects package descriptions, documentation and provided capabilities witho
     pcfDirty: () => false,
     pcfModel: () => ({}),
     tc: (key: string) => key,
+    PDL_COMPONENTS: {},
+    document: { addEventListener: vi.fn() },
+    pv: (_data: unknown, value: unknown) => value,
+    h: String,
+    v2Glyph: () => '',
+    v2HubGlyph: () => '',
+    actAttrs: () => '',
     pdlPlace: () => ({}),
     PDL_SLOT_REJECTS: {},
     PDL_INSERT_SKIPS: {},
@@ -85,6 +92,17 @@ it('projects package descriptions, documentation and provided capabilities witho
   });
   runInContext(readFileSync('public/pdl-app/plugins.js', 'utf8'), context);
   runInContext('bindPluginSpaces()', context);
+  const emptyCounts = { all: 0, attention: 0, installed: 0, available: 0 };
+  runInContext(readFileSync('public/pdl/themes/v2/components/v2/v2d.js', 'utf8'), context);
+  const renderScope = () => runInContext('PDL_COMPONENTS.v2PluginScope({}, VM.ext(), {})', context);
+  expect(renderScope()).toContain('role="menuitemradio"');
+  expect(runInContext('VM.ext()', context)).toMatchObject({ load: 'loading', counts: emptyCounts, browserGroups: [] });
+
+  context.chatPort.action.mockRejectedValueOnce(new Error('Inventory unavailable'));
+  await starts.data[0]();
+  expect(runInContext('VM.ext()', context)).toMatchObject({ load: 'error', counts: emptyCounts, browserGroups: [] });
+  expect(renderScope()).toContain('role="menuitemradio"');
+
   await starts.data[0]();
   const model = runInContext('VM.ext()', context);
   expect(model.groups[0]).toMatchObject({ kind: 'installed' });

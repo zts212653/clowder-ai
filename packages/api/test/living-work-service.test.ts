@@ -10,6 +10,7 @@ import { WorkCatalogue } from '../src/domains/collaborative-content/works/catalo
 import { inspectWorkResult } from '../src/domains/collaborative-content/works/inspection.js';
 import { LivingWorkService, type OpenWorkSource } from '../src/domains/collaborative-content/works/service.js';
 import { ProjectContentOwnerService } from '../src/domains/video-studio/content-owner/service.js';
+import { ProjectContentOwnerStore } from '../src/domains/video-studio/content-owner/store.js';
 
 const actor = { kind: 'cat' as const, actorId: 'director' };
 const principal = { userId: 'operator', threadId: 'production', actor, invocationId: 'running-child' };
@@ -105,6 +106,26 @@ test('common work entry owns explicit versions, independent of messages, Tasks, 
   assert.notEqual(separate.reference.contentRef, first.reference.contentRef);
   const restarted = new LivingWorkService({ ...f.deps, owner: new ProjectContentOwnerService({ dataDir: f.root }) });
   assert.equal((await restarted.read(first.reference, principal)).currentOwnerRevision, 2);
+});
+
+test('work storage directories follow canonical thread ownership', async (t) => {
+  const f = await fixture(t);
+  const { reference } = await f.service.commit(create, principal);
+  const store = new ProjectContentOwnerStore(f.root);
+  const path = join(
+    f.root,
+    'projects',
+    'content-owner-v1',
+    createHash('sha256').update(reference.contentRef).digest('hex'),
+  );
+  assert.deepEqual(
+    await Array.fromAsync(store.retainedThreadStorageDirectories(principal.userId, principal.threadId)),
+    [path],
+  );
+  assert.deepEqual(
+    await Array.fromAsync(store.retainedThreadStorageDirectories('different-owner', principal.threadId)),
+    [],
+  );
 });
 
 test('delivery cards pin the requested version and reauthorize after restart without republishing bytes', async (t) => {

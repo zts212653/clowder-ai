@@ -25,7 +25,7 @@ export async function neutralFixture(t, options = {}) {
   const eventsFile = join(root, 'module-events.jsonl');
   await writeFile(eventsFile, '');
   const manifest = {
-    pluginId: 'dev.clowder.neutral-host',
+    pluginId: options.pluginId ?? 'dev.clowder.neutral-host',
     name: 'Neutral Host fixture',
     version: '1.0.0',
     contractVersion: '0.1.0',
@@ -55,7 +55,13 @@ export async function neutralFixture(t, options = {}) {
         : []),
     ],
     contributions: [
-      { type: 'webhook', id: 'owner', path: 'owner', methods: ['GET', 'POST'], action: { method: 'neutral.http' } },
+      {
+        type: 'webhook',
+        id: 'owner',
+        path: options.webhookPath ?? 'owner',
+        methods: ['GET', 'POST'],
+        action: { method: 'neutral.http' },
+      },
       {
         type: 'mcp',
         id: 'native',
@@ -86,6 +92,7 @@ export async function neutralFixture(t, options = {}) {
     messageStore: messages,
     ...(options.taskStore ? { taskStore: options.taskStore } : {}),
     threadStore: threads,
+    ...(options.conversationStorage ? { conversationStorage: options.conversationStorage } : {}),
     ...(options.threadProjections ? { threadProjections: options.threadProjections } : {}),
     ...(options.members ? { members: options.members } : {}),
     ...(options.memberSessions ? { memberSessions: options.memberSessions } : {}),
@@ -173,7 +180,7 @@ export async function neutralFixture(t, options = {}) {
     http: (service, method, value) =>
       app.inject({
         method: 'POST',
-        url: '/api/plugins/dev.clowder.neutral-host/owner',
+        url: '/api/plugins/' + manifest.pluginId + '/' + (options.webhookPath ?? 'owner'),
         headers: { origin: 'http://localhost:5173' },
         payload: { service, method, ...(value === undefined ? {} : { value }) },
       }),
@@ -181,7 +188,11 @@ export async function neutralFixture(t, options = {}) {
       app.inject({
         method: 'GET',
         url:
-          '/api/plugins/dev.clowder.neutral-host/owner?input=' +
+          '/api/plugins/' +
+          manifest.pluginId +
+          '/' +
+          (options.webhookPath ?? 'owner') +
+          '?input=' +
           encodeURIComponent(JSON.stringify({ service, method, value })),
         headers: { origin: 'http://localhost:5173' },
       }),

@@ -59,13 +59,16 @@ test('ordinary desktop launches resolve the current user client homes without co
     const home = path.join(root, 'user');
     const claude = path.join(home, '.claude');
     const codex = path.join(home, '.codex');
+    const gemini = path.join(home, '.gemini');
     fs.mkdirSync(claude, { recursive: true });
     fs.mkdirSync(codex, { recursive: true });
+    fs.mkdirSync(gemini, { recursive: true });
     const resolved = resolveDefaultClientHomes(
       {
         USERPROFILE: home,
         CLAUDE_CONFIG_DIR: '',
         CODEX_HOME: '',
+        GEMINI_CLI_HOME: '',
         KIMI_CODE_HOME: '',
         PI_CODING_AGENT_DIR: '',
         npm_config_cache: '',
@@ -74,7 +77,26 @@ test('ordinary desktop launches resolve the current user client homes without co
     );
     assert.equal(resolved.CLAUDE_CONFIG_DIR, fs.realpathSync.native(claude));
     assert.equal(resolved.CODEX_HOME, fs.realpathSync.native(codex));
+    assert.equal(resolved.GEMINI_CLI_HOME, fs.realpathSync.native(home));
     assert.equal(Object.hasOwn(resolved, 'HOME'), false);
+
+    const explicitGemini = path.join(root, 'explicit-gemini');
+    fs.mkdirSync(explicitGemini);
+    assert.equal(
+      resolveDefaultClientHomes(
+        {
+          USERPROFILE: home,
+          GEMINI_CLI_HOME: explicitGemini,
+          CLAUDE_CONFIG_DIR: '',
+          CODEX_HOME: '',
+          KIMI_CODE_HOME: '',
+          PI_CODING_AGENT_DIR: '',
+          npm_config_cache: '',
+        },
+        home,
+      ).GEMINI_CLI_HOME,
+      fs.realpathSync.native(explicitGemini),
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

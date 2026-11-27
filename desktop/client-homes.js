@@ -8,6 +8,7 @@ const clientKeys = {
   dsh: 'DSH_HOME',
   kimi: 'KIMI_CODE_HOME',
   pi: 'PI_CODING_AGENT_DIR',
+  gemini: 'GEMINI_CLI_HOME',
   npmCache: 'npm_config_cache',
 };
 
@@ -60,6 +61,7 @@ function resolveDefaultClientHomes(env = process.env, homeDir = os.homedir()) {
     dsh: envOrPath(env, 'DSH_HOME', path.join(profile, '.dsh')),
     kimi: envOrPath(env, 'KIMI_CODE_HOME', path.join(profile, '.kimi-code')),
     pi: envOrPath(env, 'PI_CODING_AGENT_DIR', path.join(profile, '.pi', 'agent')),
+    gemini: envOrPath(env, 'GEMINI_CLI_HOME', profile),
     npmCache: envOrPath(env, 'npm_config_cache', path.join(env.LOCALAPPDATA || '', 'npm-cache')),
   };
   const resolved = {};

@@ -315,3 +315,209 @@ test('explicit client homes reach the real API child while persistence and ordin
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+test('persistent profile gives a real API child G-compatible state paths and host client homes', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-persistent-child-'));
+  const install = path.join(base, 'app');
+  const payload = path.join(install, 'desktop-dist');
+  const profile = path.join(base, 'profile');
+  const host = path.join(base, 'native');
+  const codex = path.join(host, '.codex');
+  fs.mkdirSync(payload, { recursive: true });
+  fs.mkdirSync(profile, { recursive: true });
+  fs.mkdirSync(codex, { recursive: true });
+  const canonicalProfile = fs.realpathSync.native(profile);
+  fs.writeFileSync(path.join(install, 'desktop-data-root.json'), JSON.stringify({ dataRoot: profile }));
+  const clientHome = fs.realpathSync.native(codex);
+  fs.writeFileSync(path.join(profile, 'client-homes.json'), JSON.stringify({ codex, gemini: codex }));
+  const execPath = process.execPath;
+  const stale = {
+    CAT_CAFE_WORKSPACE_ROOT: host,
+    CAT_CAFE_CONFIG_ROOT: host,
+    CAT_CAFE_GLOBAL_CONFIG_ROOT: host,
+    USERPROFILE: host,
+    HOME: host,
+    CODEX_HOME: host,
+    DSH_HOME: host,
+    GEMINI_CLI_HOME: host,
+  };
+  const envKeys = [...Object.keys(stale), 'CAT_CAFE_DESKTOP_INSTANCE_ROOT'];
+  const previous = new Map(envKeys.map((key) => [key, process.env[key]]));
+  Object.assign(process.env, stale);
+  delete process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
+  process.execPath = path.join(payload, 'Clowder AI.exe');
+  try {
+    const manager = new ServiceManager(install, { frontendPort: 3003, apiPort: 3004, redisPort: 6399 });
+    const business = manager._getUserDataDir();
+    assert.equal(business, path.join(canonicalProfile, 'Clowder AI'));
+    fs.mkdirSync(business);
+    const result = path.join(base, 'env.json');
+    const sample = [
+      'HOME',
+      'LOCALAPPDATA',
+      'CAT_CAFE_DATA_DIR',
+      'EVIDENCE_DB',
+      'CODEX_HOME',
+      'REDIS_URL',
+      'CAT_CAFE_WORKSPACE_ROOT',
+      'CAT_CAFE_CONFIG_ROOT',
+      'CAT_CAFE_GLOBAL_CONFIG_ROOT',
+      'DSH_HOME',
+      'GEMINI_CLI_HOME',
+    ];
+    manager._startProcess(
+      'api',
+      execPath,
+      [
+        '-e',
+        `const keys = ${JSON.stringify(sample)}; require('node:fs').writeFileSync(${JSON.stringify(result)}, JSON.stringify(Object.fromEntries(keys.map(k => [k, process.env[k]]))))`,
+      ],
+      { envOverrides: manager._buildApiEnv(business) },
+    );
+    const exitCode = await new Promise((resolve) => manager.procs.api.once('exit', resolve));
+    assert.equal(exitCode, 0);
+    assert.deepEqual(JSON.parse(fs.readFileSync(result, 'utf8')), {
+      HOME: canonicalProfile,
+      LOCALAPPDATA: canonicalProfile,
+      CAT_CAFE_DATA_DIR: path.join(canonicalProfile, '.cat-cafe'),
+      EVIDENCE_DB: path.join(business, 'evidence.sqlite'),
+      CODEX_HOME: clientHome,
+      REDIS_URL: 'redis://localhost:6399',
+      CAT_CAFE_WORKSPACE_ROOT: path.join(business, 'project'),
+      GEMINI_CLI_HOME: clientHome,
+    });
+    manager._isPortOpen = async () => true;
+    await assert.rejects(manager._startRedis(business), /Persistent Redis port 6399 is already occupied/);
+  } finally {
+    process.execPath = execPath;
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test(
+  'new Windows installation keeps Redis and API state in its per-user folder',
+  {
+    skip: process.platform !== 'win32',
+  },
+  async () => {
+    const install = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-selected-drive-'));
+    const client = path.join(install, 'existing-native-home');
+    const geminiClient = path.join(install, 'existing-gemini-home');
+    const execPath = process.execPath;
+    const previousCodex = process.env.CODEX_HOME;
+    const previousGemini = process.env.GEMINI_CLI_HOME;
+    const previousInstance = process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
+    process.execPath = path.join(install, 'desktop-dist', 'Clowder AI.exe');
+    delete process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
+    process.env.CODEX_HOME = client;
+    process.env.GEMINI_CLI_HOME = geminiClient;
+    try {
+      fs.mkdirSync(client);
+      fs.mkdirSync(geminiClient);
+      fs.mkdirSync(path.join(install, 'user-state'));
+      fs.writeFileSync(path.join(install, 'desktop-data-root.json'), '{"mode":"install"}');
+      const manager = new ServiceManager(install, { frontendPort: 3003, apiPort: 3004, redisPort: 6399 });
+      const business = manager._getUserDataDir();
+      const base = fs.realpathSync.native(path.join(install, 'user-state'));
+      const profile = path.dirname(business);
+      assert.equal(path.dirname(profile), base);
+      fs.mkdirSync(business, { recursive: true });
+      const capture = path.join(install, 'api.json');
+      const keys = [
+        'CAT_CAFE_DATA_DIR',
+        'TRANSCRIPT_DATA_DIR',
+        'UPLOAD_DIR',
+        'EVIDENCE_DB',
+        'CODEX_HOME',
+        'GEMINI_CLI_HOME',
+      ];
+      manager._startProcess(
+        'api',
+        execPath,
+        [
+          '-e',
+          `const keys = ${JSON.stringify(keys)}; require('node:fs').writeFileSync(${JSON.stringify(capture)}, JSON.stringify(keys.map(key => process.env[key])))`,
+        ],
+        { envOverrides: manager._buildApiEnv(business) },
+      );
+      assert.equal(await new Promise((resolve) => manager.procs.api.once('exit', resolve)), 0);
+      assert.deepEqual(JSON.parse(fs.readFileSync(capture, 'utf8')), [
+        path.join(profile, '.cat-cafe'),
+        path.join(business, 'data', 'transcripts'),
+        path.join(business, 'uploads'),
+        path.join(business, 'evidence.sqlite'),
+        fs.realpathSync.native(client),
+        fs.realpathSync.native(geminiClient),
+      ]);
+      const starts = [];
+      manager._isPortOpen = async () => false;
+      manager._commandExists = async () => true;
+      manager._waitForPortWithFallback = async () => true;
+      manager._startProcess = (...args) => starts.push(args);
+      await manager._startRedis(business);
+      const [name, , args] = starts[0];
+      assert.equal(name, 'redis');
+      assert.equal(args[args.indexOf('--dir') + 1], path.join(business, 'data', 'redis'));
+    } finally {
+      process.execPath = execPath;
+      if (previousCodex === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previousCodex;
+      if (previousGemini === undefined) delete process.env.GEMINI_CLI_HOME;
+      else process.env.GEMINI_CLI_HOME = previousGemini;
+      if (previousInstance !== undefined) process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT = previousInstance;
+      fs.rmSync(install, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'new Windows installation discovers Gemini from the original profile when its env is unset',
+  {
+    skip: process.platform !== 'win32',
+  },
+  async () => {
+    const install = fs.mkdtempSync(path.join(os.tmpdir(), 'desktop-gemini-default-'));
+    const originalProfile = path.join(install, 'original-profile');
+    const gemini = path.join(originalProfile, '.gemini');
+    const execPath = process.execPath;
+    const previousGemini = process.env.GEMINI_CLI_HOME;
+    const previousProfile = process.env.USERPROFILE;
+    const previousInstance = process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
+    process.execPath = path.join(install, 'desktop-dist', 'Clowder AI.exe');
+    delete process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT;
+    delete process.env.GEMINI_CLI_HOME;
+    process.env.USERPROFILE = originalProfile;
+    try {
+      fs.mkdirSync(gemini, { recursive: true });
+      fs.mkdirSync(path.join(install, 'user-state'));
+      fs.writeFileSync(path.join(install, 'desktop-data-root.json'), '{"mode":"install"}');
+      const manager = new ServiceManager(install, { frontendPort: 3003, apiPort: 3004, redisPort: 6399 });
+      const business = manager._getUserDataDir();
+      fs.mkdirSync(business, { recursive: true });
+      const capture = path.join(install, 'gemini.json');
+      manager._startProcess(
+        'api',
+        execPath,
+        [
+          '-e',
+          `require('node:fs').writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.env.GEMINI_CLI_HOME || null))`,
+        ],
+        { envOverrides: manager._buildApiEnv(business) },
+      );
+      assert.equal(await new Promise((resolve) => manager.procs.api.once('exit', resolve)), 0);
+      assert.equal(JSON.parse(fs.readFileSync(capture, 'utf8')), fs.realpathSync.native(originalProfile));
+    } finally {
+      process.execPath = execPath;
+      if (previousGemini === undefined) delete process.env.GEMINI_CLI_HOME;
+      else process.env.GEMINI_CLI_HOME = previousGemini;
+      if (previousProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousProfile;
+      if (previousInstance !== undefined) process.env.CAT_CAFE_DESKTOP_INSTANCE_ROOT = previousInstance;
+      fs.rmSync(install, { recursive: true, force: true });
+    }
+  },
+);

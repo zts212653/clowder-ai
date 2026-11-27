@@ -335,6 +335,11 @@ import { TasteMemoryProjectionWriter } from './domains/memory/taste/TasteMemoryP
 import { importTasteTakeawayCandidates } from './domains/memory/taste/TasteTakeawayCandidateImporter.js';
 import { tasteDocumentAnchor } from './domains/memory/taste/taste-memory-identity.js';
 import { createOwnerRoomNotifier, type OwnerRoomThreads } from './domains/messaging/owner-room/owner-room-notifier.js';
+import {
+  configuredNativeStorageHomes,
+  conversationStorageTempDir,
+  createConversationStorageSourceReader,
+} from './domains/plugin/host-surface/conversation-storage-sources.js';
 import { publicParticipantAvatar } from './domains/plugin/host-surface/public-participant-avatar.js';
 import { PortDiscoveryService } from './domains/preview/port-discovery.js';
 import { collectRuntimePorts } from './domains/preview/port-validator.js';
@@ -5765,6 +5770,31 @@ async function initializeApi(
       isCatAvailable,
     },
     threadDeepLinkUrl: createThreadDeepLinkUrl(frontendBaseUrl),
+    conversationStorage: createConversationStorageSourceReader({
+      ownerUserId: privateUserId,
+      threads: threadStore,
+      messages: messageStore,
+      sessions: sessionChainStore,
+      transcriptReader,
+      transcriptDir: transcriptDataDir,
+      uploadDir: getDefaultUploadDir(process.env.UPLOAD_DIR),
+      connectorMediaDir: getDefaultConnectorMediaDir(process.env.CONNECTOR_MEDIA_DIR),
+      dataDir: process.env.CAT_CAFE_DATA_DIR ?? join(resolveActiveProjectRoot(), '.cat-cafe'),
+      workspaceRoot: resolveActiveProjectRoot(),
+      logDir: LOG_DIR_PATH,
+      nativeHomes: configuredNativeStorageHomes(),
+      nativeHistoryRoot: join(homedir(), 'native-history'),
+      databasePaths: [
+        process.env.EVIDENCE_DB ?? resolve(repoRoot, 'evidence.sqlite'),
+        process.env.GLOBAL_KNOWLEDGE_DB ??
+          join(
+            process.env.CAT_CAFE_DATA_DIR ?? join(resolveActiveProjectRoot(), '.cat-cafe'),
+            'global_knowledge.sqlite',
+          ),
+      ],
+      cliArchiveDir: resolve(process.env.CLI_RAW_ARCHIVE_DIR ?? './data/cli-raw-archive'),
+      tempDir: conversationStorageTempDir(),
+    }),
     runtimeInfo: () => ({
       version: runtimeDeploymentRevision ?? 'unknown',
       platform: platform(),

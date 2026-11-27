@@ -428,8 +428,13 @@ export class PluginManagerService {
     }
     if (!isCatalogInstallRequest(request)) {
       const installed = await this.options.installer.install({ request });
-      await this.reconcileInstalledConfiguration(installed);
-      return installed;
+      try {
+        await this.reconcileInstalledConfiguration(installed);
+        return installed;
+      } finally {
+        // The installer has committed a new package. Open consoles must reread its fragment.
+        this.options.operationChanged?.(installed.pluginId);
+      }
     }
 
     const catalog = await this.readCatalog();
