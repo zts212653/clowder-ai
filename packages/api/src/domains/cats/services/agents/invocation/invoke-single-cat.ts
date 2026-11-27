@@ -4233,6 +4233,9 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       activeSessionRecordForResume?.externalImport?.cliSessionId === sessionId && Boolean(sessionId);
     const baseOptions: AgentServiceOptions = {
       ...frozenExecutionBinding.providerOptions,
+      ...(service.usesSessionInstructions && frozenExecutionBinding.registeredAcpLaunch
+        ? { registeredAcpLaunch: frozenExecutionBinding.registeredAcpLaunch }
+        : {}),
       ...(frozenExecutionBinding.codexLaunchPolicy
         ? { codexLaunchPolicy: frozenExecutionBinding.codexLaunchPolicy }
         : {}),

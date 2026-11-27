@@ -20,6 +20,7 @@ import {
 } from '../../../../../config/account-resolver.js';
 import { AccountStoreVerdictError } from '../../../../../config/account-store-format.js';
 import { resolveBoundAccountRefForCat } from '../../../../../config/cat-account-binding.js';
+import { getRegisteredAcpConfig } from '../../../../../config/cat-config-loader.js';
 import { resolveCatRuntimeAccount } from '../../../../../config/cat-runtime-account.js';
 import { nativeClaudeQuotaSourceKnown } from '../../../../../config/claude-quota-source.js';
 import { claudeExecutionAccountSnapshot } from '../../../../../config/claude-token-account.js';
@@ -84,6 +85,7 @@ export interface FrozenExecutionBinding {
   readonly resolvedAccount: RuntimeProviderProfile | null;
   readonly codexAccountLaunch?: CodexAccountLaunchDescriptor;
   readonly executionAccount?: ExecutionAccountSnapshot;
+  readonly registeredAcpLaunch?: AgentServiceOptions['registeredAcpLaunch'];
 }
 
 function memberPersonaDigest(profile: RoleProfile): string {
@@ -238,6 +240,14 @@ export function freezeExecutionAccountBinding(input: {
   if (selection?.expectedRevision !== undefined && selection.expectedRevision !== executionAccount?.accountRevision)
     throw new Error('selected execution account revision changed');
   const projectedProfiles = catConfig ? deepFreeze(projectMemberProfiles(catConfig)) : undefined;
+  const acp =
+    catConfig?.carrier === 'acp'
+      ? getRegisteredAcpConfig(input.catId, projectRoot, { persistMigrations: false })
+      : undefined;
+  const registeredAcpLaunch =
+    acp && (catConfig?.agentProvider ?? acp.agentProvider)?.startsWith('plugin:')
+      ? deepFreeze({ projectRoot, config: structuredClone(acp), environment: catConfig?.env })
+      : undefined;
   return Object.freeze({
     catConfig,
     ...(input.providerOptions ? { providerOptions: deepFreeze(input.providerOptions) } : {}),
@@ -255,5 +265,6 @@ export function freezeExecutionAccountBinding(input: {
     ...(Object.keys(accountEnv).length > 0 ? { accountEnv: deepFreeze(accountEnv) } : {}),
     ...(codexAccountLaunch ? { codexAccountLaunch } : {}),
     ...(executionAccount ? { executionAccount } : {}),
+    ...(registeredAcpLaunch ? { registeredAcpLaunch } : {}),
   });
 }

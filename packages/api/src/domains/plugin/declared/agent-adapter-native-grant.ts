@@ -8,6 +8,7 @@ import { isCliPlainTextResult, spawnCli } from '../../../utils/cli-spawn.js';
 import type { AgentAdapterRuntimeGrant } from './agent-adapter-access.js';
 import { grantAgentAdapterClaudePrint } from './agent-adapter-claude-native-grant.js';
 import { grantAgentAdapterCodexExec } from './agent-adapter-codex-native-grant.js';
+import { grantAgentAdapterDshDesktop } from './agent-adapter-dsh-native-grant.js';
 import { grantAgentAdapterKimiPrint } from './agent-adapter-kimi-native-grant.js';
 import { matchesOfficialAgentCatalog, officialNativeClients } from './agent-adapter-official-clients.js';
 
@@ -19,6 +20,7 @@ export const grantAgentAdapterNativeRuntime: AgentAdapterRuntimeGrant = (request
       matchesOfficialAgentCatalog(entry, request.packageProvenance),
   );
   if (!grant) return;
+  if (grant.command === 'dsh') return grantAgentAdapterDshDesktop(request);
 
   if (grant.command === 'codex' && ['openSession', 'startTurn', 'release'].includes(request.action))
     return grantAgentAdapterCodexExec(request);

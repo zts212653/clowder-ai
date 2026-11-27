@@ -34,6 +34,13 @@ export const officialNativeClients = [
     packageName: '@clowder-ai/agent-agy',
     command: 'agy',
   },
+  {
+    pluginId: 'official.agent-dsh',
+    contributionId: 'dsh',
+    catalogId: 'agent-dsh',
+    packageName: '@clowder-ai/agent-dsh',
+    command: 'dsh',
+  },
 ];
 
 export function matchesOfficialAgentCatalog(

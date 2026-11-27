@@ -45,6 +45,7 @@ export type AgentAdapterRuntimeGrant = (request: {
   readonly pluginInstanceId: string;
   readonly activationSignal: AbortSignal;
   readonly packageProvenance?: PluginPackageProvenance;
+  readonly packageRoot?: string;
   readonly action: AdapterAction;
   readonly catId?: string;
   readonly account?: AgentAdapterAccountScope;
@@ -53,7 +54,7 @@ export type AgentAdapterRuntimeGrant = (request: {
 
 export function createAgentAdapterAccess(
   inventory: Pick<PluginInventoryStore, 'readCurrentAuthority' | 'snapshot'>,
-  runtime: Pick<ModulePluginRuntime, 'agentAdapter' | 'invoke' | 'operationActivationSignal'>,
+  runtime: Pick<ModulePluginRuntime, 'agentAdapter' | 'agentAdapterPackageRoot' | 'invoke' | 'operationActivationSignal'>,
   grantNativeRuntime?: AgentAdapterRuntimeGrant,
 ) {
   const resolve = (instance: PluginInstanceRecord | undefined) => {
@@ -106,6 +107,7 @@ export function createAgentAdapterAccess(
       packageDigest: active.instance.packageDigest,
       pluginInstanceId: active.instance.pluginInstanceId,
       activationSignal: active.lifetime,
+      packageRoot: runtime.agentAdapterPackageRoot(active.instance.pluginInstanceId, active.instance.packageDigest),
       ...(provenance === undefined ? {} : { packageProvenance: provenance }),
       action,
       ...(options?.catId === undefined ? {} : { catId: options.catId }),

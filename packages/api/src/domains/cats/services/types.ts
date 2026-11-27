@@ -1196,6 +1196,12 @@ export interface AgentServiceOptions {
   codexGatewayCredentialVersion?: string;
   /** Host-side catalog root used to revalidate the selected account before a native launch. */
   executionAccountProjectRoot?: string;
+  /** Saved, Host-only launch descriptor for an explicitly selected session adapter. */
+  registeredAcpLaunch?: Readonly<{
+    projectRoot: string;
+    config: import('../../../config/cat-config-loader.js').AcpVariantConfig;
+    environment?: Readonly<Record<string, string>>;
+  }>;
   /** Rich content blocks (e.g. images) to pass to the CLI agent */
   contentBlocks?: readonly MessageContent[];
   /** Upload directory for resolving image paths */

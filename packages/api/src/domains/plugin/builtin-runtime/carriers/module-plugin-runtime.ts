@@ -809,6 +809,12 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
     if (loaded?.packageDigest === packageDigest && !loaded.execution.exited) return loaded.agentAdapter;
   }
 
+  agentAdapterPackageRoot(pluginInstanceId: string, packageDigest: string): string | undefined {
+    const loaded = this.#loaded.get(pluginInstanceId);
+    if (loaded?.agentAdapter && loaded.packageDigest === packageDigest && !loaded.execution.exited)
+      return loaded.located.rootDir;
+  }
+
   completion(pluginInstanceId: string): Promise<Error | undefined> | undefined {
     return this.#loaded.get(pluginInstanceId)?.execution.completion;
   }
