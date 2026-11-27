@@ -6118,6 +6118,7 @@ async function initializeApi(
   const { readLegacyNativeRuntimes, readDetection: readAgentAccessDetection } = registerAgentAccessRoutes(app, {
     inventory: pluginRuntime.inventoryStore,
     runtime: pluginRuntime.supervisor,
+    agentAdapters: pluginRuntime.agentAdapters,
   });
   registerAgentClientLibraryRoutes(app, {
     inventory: pluginRuntime.inventoryStore,

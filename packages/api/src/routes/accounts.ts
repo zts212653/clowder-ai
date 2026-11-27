@@ -29,7 +29,11 @@ import { registerClaudeQuotaRoutes } from './accounts-claude-quota.js';
 import { registerCodexBindingRoutes } from './accounts-codex-binding.js';
 import { registerCodexLoginRoutes } from './accounts-codex-login.js';
 import { registerCodexQuotaRoutes } from './accounts-codex-quota.js';
-import { type KimiAccountQuotaSampler, registerKimiQuotaRoutes } from './accounts-kimi-quota.js';
+import {
+  type KimiAccountQuotaDispatch,
+  type KimiAccountQuotaSampler,
+  registerKimiQuotaRoutes,
+} from './accounts-kimi-quota.js';
 import { inspectNativeAccountDefaults } from './accounts-native-view.js';
 import { resolveAccountProjectRoot } from './accounts-project-root.js';
 import { createBodySchema, deleteBodySchema, projectQuerySchema, updateBodySchema } from './accounts-schemas.js';
@@ -70,6 +74,7 @@ export const accountsRoutes: FastifyPluginAsync<{
   loginDriver?: CodexLoginDriver;
   quotaFetcher?: typeof fetch;
   kimiQuotaSampler?: KimiAccountQuotaSampler;
+  kimiQuotaDispatch?: KimiAccountQuotaDispatch;
   agyQuotaSampler?: AgyAccountQuotaSampler;
   agyKeychainIdentityInspector?: AgyKeychainIdentityInspector;
 }> = async (app, options) => {
@@ -81,7 +86,7 @@ export const accountsRoutes: FastifyPluginAsync<{
   registerCodexBindingRoutes(app, options.agentRoleWrite);
   registerCodexQuotaRoutes(app, options.quotaFetcher);
   registerClaudeQuotaRoutes(app);
-  registerKimiQuotaRoutes(app, options.kimiQuotaSampler);
+  registerKimiQuotaRoutes(app, options.kimiQuotaSampler, options.kimiQuotaDispatch);
   registerAgyQuotaRoutes(app, options.agyQuotaSampler, options.agyKeychainIdentityInspector);
   app.addHook('onClose', async () => {
     await loginManager.close();

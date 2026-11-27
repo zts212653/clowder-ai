@@ -114,4 +114,8 @@ flowchart LR
 
 插件仓按 Node 24.18.0 和 npm 11.16.0 打包 `packages/agent-kimi`。Host 运行 `test/plugin-agent-kimi-local-archive.test.js` 时，`CLOWDER_KIMI_CANDIDATE_ARCHIVE` 指向该归档，`CLOWDER_KIMI_CANDIDATE_EXECUTABLE` 指向已经核定的本机 CLI。测试使用独立项目和原生 HOME，用真 CLI 查询版本。额度、原生续接回执与模型事件使用注入的进程或终端数据。安装、Worker 调用与停用使用实际 Host 管理器。
 
-这条验收只覆盖跨仓归档与端口协议。正常产品还要完成真实账号 PTY 额度、角色创建、会话、历史续接、切换及回退。其余四个包仍须独立封装和验收。
+隔离 HTTP 回归使用实际归档完成显式 adapterRef 检测和已选账号的额度读取。检测响应由 Host 标注实例与摘要。额度请求先核实账号归属和凭据代际，再投影插件观测值并持久化；停用后两个入口均拒绝，探测器断言旧路径调用为零。额度捕获使用 PTY 输出夹具，已选账号从测试配置注入。默认产品切换仍待接入。
+
+原生会话回归 `packages/api/test/plugin-agent-kimi-native-archive.test.js` 使用实际 Kimi CLI 和回环模型端点。旧入口先产生会话和回复，随后由独立归档接续同一原生会话，保留回复与创建时的 system L0。编辑后的 L0 由同一归档开启新会话后出现在 system，当轮 user 无 L0 前缀。测试在独立 HOME 中运行，模型回复和账号使用本地夹具。
+
+用户验收仍需真实账号 PTY 额度、正常产品角色创建和发送、生产形态的切换及回退、桌面候选。其余四个包仍须独立封装和验收。

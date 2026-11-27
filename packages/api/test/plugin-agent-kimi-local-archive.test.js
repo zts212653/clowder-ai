@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { promisify } from 'node:util';
 import { validateManifest } from '@clowder-ai/plugin-contract';
+import Fastify from 'fastify';
+import { writeCatalogAccount } from '../dist/config/catalog-accounts.js';
 import { SessionImplementationRegistry } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
 import { RegisteredSessionAgentService } from '../dist/domains/cats/services/agents/session-contract/registered-session-agent-service.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
@@ -13,6 +15,8 @@ import {
   createDormantPluginRuntimeComposition,
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
+import { accountsRoutes } from '../dist/routes/accounts.js';
+import { registerAgentAccessRoutes } from '../dist/routes/agent-access-routes.js';
 
 const archive = process.env.CLOWDER_KIMI_CANDIDATE_ARCHIVE;
 const executable = process.env.CLOWDER_KIMI_CANDIDATE_EXECUTABLE;
@@ -27,10 +31,30 @@ test(
     assert.ok(isAbsolute(archive) && isAbsolute(executable));
     const temp = resolve(tmpdir());
     const projectRoot = await mkdtemp(join(temp, 'kimi-adapter-cross-repo-'));
+    const previousConfigRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = projectRoot;
+    t.after(() => {
+      if (previousConfigRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = previousConfigRoot;
+    });
+    const accountHome = join(projectRoot, 'isolated-account');
+    await mkdir(join(accountHome, 'credentials'), { recursive: true });
+    await writeFile(
+      join(accountHome, 'config.toml'),
+      '[providers.fixture]\ntype = "kimi"\n[providers.fixture.oauth]\nstorage = "file"\nkey = "fixture"\n',
+    );
+    await writeFile(join(accountHome, 'credentials', 'fixture.json'), JSON.stringify({ access_token: 'test-only' }));
+    writeCatalogAccount(projectRoot, 'fixture-kimi', {
+      authType: 'oauth',
+      clientId: 'kimi',
+      displayName: 'Isolated Kimi fixture',
+      envVars: { KIMI_CODE_HOME: accountHome },
+    });
     const ref = { pluginId: 'official.agent-kimi', contributionId: 'kimi' };
     const registry = new SessionImplementationRegistry();
     const observedAt = Date.parse('2026-11-27T00:00:00Z');
     const calls = [];
+    const legacyCalls = [];
     let approvedDigest;
     const runtime = createDormantPluginRuntimeComposition({
       projectRoot,
@@ -67,7 +91,8 @@ test(
               return { status: 'ready', version };
             },
           };
-        if (request.action === 'quota')
+        if (request.action === 'quota') {
+          assert.equal(request.account?.accountRef, 'fixture-kimi');
           return {
             terminal: {
               async capture(input) {
@@ -77,6 +102,7 @@ test(
               },
             },
           };
+        }
         assert.equal(request.catId, 'fixture');
         if (request.action === 'openSession')
           return {
@@ -126,20 +152,66 @@ test(
     const { plugin } = await manager.get(ref.pluginId);
     approvedDigest = plugin.packageDigest;
     await manager.setEnabled(ref.pluginId, { enabled: true, expectedRevision: plugin.lifecycleRevision });
-    const status = await runtime.agentAdapters.detect(ref);
+    const app = Fastify();
+    t.after(() => app.close());
+    app.addHook('preHandler', async (request) => {
+      request.sessionUserId = request.headers['x-test-session-user'];
+    });
+    registerAgentAccessRoutes(app, {
+      inventory: runtime.inventoryStore,
+      runtime: {
+        attemptInvoke() {
+          legacyCalls.push('detection');
+          assert.fail('Explicit detection must never call the shared Agent Access package');
+        },
+      },
+      agentAdapters: runtime.agentAdapters,
+    });
+    await app.register(accountsRoutes, {
+      kimiQuotaSampler: () => {
+        legacyCalls.push('quota');
+        assert.fail('An account selected for the adapter must never use the shared sampler');
+      },
+      kimiQuotaDispatch: {
+        resolveRef: (_root, accountRef) => (accountRef === 'fixture-kimi' ? ref : undefined),
+        quota: runtime.agentAdapters.quota,
+      },
+    });
+    const detect = (authenticated = true) =>
+      app.inject({
+        method: 'POST',
+        url: '/api/agent-access/v1/detect',
+        headers: { host: 'localhost:3004', ...(authenticated ? { 'x-test-session-user': 'owner-user' } : {}) },
+        payload: { adapterRef: 'plugin:official.agent-kimi/kimi', refresh: true },
+      });
+    assert.equal((await detect(false)).statusCode, 401);
+    const detected = await detect();
+    assert.equal(detected.statusCode, 200, detected.body);
+    const status = detected.json();
+    assert.equal(status.readiness.state, 'ready');
     assert.equal(status.candidates[0].state.status, 'ready');
-    assert.equal(status.binding.packageDigest, approvedDigest);
+    assert.equal(status.adapterOrigin.packageDigest, approvedDigest);
+    assert.equal(status.adapterOrigin.ref, 'plugin:official.agent-kimi/kimi');
     t.diagnostic(`Actual Kimi CLI version ${status.candidates[0].state.version}; turn and quota use synthetic IO`);
-    const quota = await runtime.agentAdapters.quota(ref);
-    assert.equal(quota.observation.observedAt, observedAt);
+    const readQuota = () =>
+      app.inject({
+        method: 'POST',
+        url: '/api/accounts/fixture-kimi/kimi/quota',
+        headers: { 'x-cat-cafe-user': 'fixture-user' },
+        payload: { projectPath: projectRoot },
+      });
+    const quotaResponse = await readQuota();
+    assert.equal(quotaResponse.statusCode, 200, quotaResponse.body);
+    const quota = quotaResponse.json();
+    assert.equal(quota.kimiQuota.observedAt, observedAt);
     assert.deepEqual(
-      quota.observation.windows.map(({ id, used }) => [id, used]),
+      quota.kimiQuota.items.map(({ poolId, usedPercent }) => [poolId, usedPercent]),
       [
-        ['kimi-rate-limit', 0.25],
-        ['kimi-weekly', 0.1],
+        ['kimi-rate-limit', 25],
+        ['kimi-weekly', 10],
       ],
     );
-    assert.equal(quota.binding.packageDigest, approvedDigest);
+    assert.equal(quota.adapterOrigin.packageDigest, approvedDigest);
     const service = new RegisteredSessionAgentService({ catId: 'fixture', ref, registry });
     assert.equal(service.implementationSnapshot().key, 'plugin:official.agent-kimi/kimi');
     const messages = await Array.fromAsync(
@@ -156,7 +228,12 @@ test(
     const { plugin: enabled } = await manager.get(ref.pluginId);
     await manager.setEnabled(ref.pluginId, { enabled: false, expectedRevision: enabled.lifecycleRevision });
     assert.equal(registry.has(ref), false);
-    await assert.rejects(runtime.agentAdapters.quota(ref), /not active/i);
+    const disabledDetection = await detect();
+    assert.equal(disabledDetection.statusCode, 503);
+    assert.deepEqual(disabledDetection.json().candidates, []);
+    const disabledQuota = await readQuota();
+    assert.equal(disabledQuota.statusCode, 503);
     assert.deepEqual(calls, ['terminal']);
+    assert.deepEqual(legacyCalls, []);
   },
 );

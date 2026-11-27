@@ -11,28 +11,35 @@ import {
   agentAccessRoleMutationResultSchema,
 } from '@clowder-ai/agent-contract';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 import { MemberConfigurationConflict } from '../config/member-config-revision.js';
 import { MemberCreateConflict } from '../config/member-create-receipt.js';
+import { parsePluginAgentRef } from '../domains/cats/services/agents/session-contract/plugin-agent-provider.js';
 import { AGENT_PROVIDER_UNAVAILABLE } from '../domains/plugin/agent-access/role-store.js';
 import {
   withPluginOwnerRequest,
   withPluginOwnerWebhook,
 } from '../domains/plugin/carrier/plugin-owner-request-context.js';
 import type { PluginRuntimeCarrierRouter } from '../domains/plugin/carrier/runtime-carrier.js';
+import type { createAgentAdapterAccess } from '../domains/plugin/declared/agent-adapter-access.js';
 import type { InventoryAuthority, PluginInventoryStore } from '../domains/plugin/host-inventory/ports.js';
 import type { PluginInstanceRecord } from '../domains/plugin/host-inventory/types.js';
 import { InvalidDshProfile } from './native-dsh-profile.js';
 import { requestLifetime } from './plugin/plugin-webhook-forwarding-routes.js';
 import { pluginAccessError, requirePluginReadAccess } from './plugin-access-guards.js';
 
+const detectionRequestSchema = agentAccessDetectRequestSchema.extend({ adapterRef: z.string().max(200).optional() });
+
 export function registerAgentAccessRoutes(
   app: FastifyInstance,
   {
     inventory,
     runtime,
+    agentAdapters,
   }: {
     inventory: Pick<PluginInventoryStore, 'readCurrentAuthority'>;
     runtime: Pick<PluginRuntimeCarrierRouter, 'attemptInvoke'>;
+    agentAdapters?: Pick<ReturnType<typeof createAgentAdapterAccess>, 'detect'>;
   },
 ) {
   app.get('/api/agent-access/v1/clients', async (request, reply) => {
@@ -49,11 +56,34 @@ export function registerAgentAccessRoutes(
   app.post('/api/agent-access/v1/detect', async (request, reply) => {
     const access = requirePluginReadAccess(request);
     if ('error' in access) return pluginAccessError(reply, access);
-    const parsed = agentAccessDetectRequestSchema.safeParse(request.body ?? {});
+    const parsed = detectionRequestSchema.safeParse(request.body ?? {});
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid Agent access detection request' });
-
-    return readDetection(request, reply, access.operator, parsed.data);
+    const { adapterRef, refresh } = parsed.data;
+    return adapterRef === undefined
+      ? readDetection(request, reply, access.operator, parsed.data)
+      : detectSelectedAdapter(request, reply, adapterRef, refresh);
   });
+
+  async function detectSelectedAdapter(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    adapterRef: string,
+    refresh: boolean | undefined,
+  ) {
+    const ref = parsePluginAgentRef(adapterRef);
+    if (!ref) return reply.code(400).send({ error: 'Invalid Agent adapter reference' });
+    const lifetime = requestLifetime(request, reply);
+    try {
+      const result = await agentAdapters?.detect(ref, { refresh: refresh ?? false, signal: lifetime.signal });
+      if (result)
+        return { readiness: { state: 'ready' }, candidates: result.candidates, adapterOrigin: result.binding };
+    } catch {
+      request.log.warn({ adapterRef }, 'Agent adapter detection unavailable');
+    } finally {
+      lifetime.close();
+    }
+    return reply.code(503).send({ readiness: { state: 'unavailable' }, candidates: [] });
+  }
 
   async function readDetection(
     request: FastifyRequest,

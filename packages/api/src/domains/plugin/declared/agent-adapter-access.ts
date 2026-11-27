@@ -23,6 +23,12 @@ import {
 
 const metadataTimeoutMs = 5_000;
 type AdapterAction = 'describe' | 'detect' | Parameters<AgentAdapterSessionInvocation>[0] | 'quota';
+type AgentAdapterAccountScope = {
+  readonly projectRoot: string;
+  readonly accountRef: string;
+  readonly accountRevision: string;
+  readonly credentialVersion: string;
+};
 
 export type AgentAdapterRuntimeGrant = (request: {
   readonly pluginId: string;
@@ -31,6 +37,7 @@ export type AgentAdapterRuntimeGrant = (request: {
   readonly pluginInstanceId: string;
   readonly action: AdapterAction;
   readonly catId?: string;
+  readonly account?: AgentAdapterAccountScope;
 }) => AgentAdapterNativeRuntime | undefined;
 
 export function createAgentAdapterAccess(
@@ -55,15 +62,18 @@ export function createAgentAdapterAccess(
     ref: { pluginId: string; contributionId: string },
     action: AdapterAction,
     input: Readonly<Record<string, unknown>>,
-    callerSignal?: AbortSignal,
-    expectedLifetime?: AbortSignal,
-    catId?: string,
+    options?: {
+      signal?: AbortSignal;
+      lifetime?: AbortSignal;
+      catId?: string;
+      account?: AgentAdapterAccountScope;
+    },
   ) {
     const active = resolve((await inventory.readCurrentAuthority(ref.pluginId))?.instance);
     if (
       !active ||
       active.declaration.id !== ref.contributionId ||
-      (expectedLifetime && expectedLifetime !== active.lifetime)
+      (options?.lifetime && options.lifetime !== active.lifetime)
     )
       throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', 'Agent adapter is not active');
     if (!active.declaration.operations.includes(action))
@@ -73,11 +83,12 @@ export function createAgentAdapterAccess(
       packageDigest: active.instance.packageDigest,
       pluginInstanceId: active.instance.pluginInstanceId,
       action,
-      ...(catId === undefined ? {} : { catId }),
+      ...(options?.catId === undefined ? {} : { catId: options.catId }),
+      ...(options?.account === undefined ? {} : { account: options.account }),
     });
     const deadline = new AbortController();
     const signals = [active.lifetime, deadline.signal];
-    if (callerSignal) signals.push(callerSignal);
+    if (options?.signal) signals.push(options.signal);
     const signal = AbortSignal.any(signals);
     signal.throwIfAborted();
     let listener: ReturnType<typeof addAbortListener> | undefined;
@@ -124,7 +135,7 @@ export function createAgentAdapterAccess(
           const existing = providers.get(catId);
           if (existing) return existing;
           const invoke: AgentAdapterSessionInvocation = async (action, args, signal) =>
-            (await read(ref, action, args, signal, lifetime, catId)).response;
+            (await read(ref, action, args, { signal, lifetime, catId })).response;
           const provider = createAgentAdapterSessionProvider(invoke, lifetime);
           providers.set(catId, provider);
           return provider;
@@ -143,14 +154,17 @@ export function createAgentAdapterAccess(
       ref: { pluginId: string; contributionId: string },
       options?: { refresh?: boolean; signal?: AbortSignal },
     ) {
-      const { active, response } = await read(ref, 'detect', { refresh: options?.refresh ?? false }, options?.signal);
+      const { active, response } = await read(ref, 'detect', { refresh: options?.refresh ?? false }, options);
       const result = parseAgentAdapterDetection(response);
       if (!result.success)
         throw new ExternalPluginRuntimeError('PROTOCOL_VIOLATION', 'Agent adapter returned invalid detection data');
       return { ...result.data, binding: binding(active.instance, active.declaration.id) };
     },
-    async quota(ref: { pluginId: string; contributionId: string }, options?: { signal?: AbortSignal }) {
-      const { active, response } = await read(ref, 'quota', {}, options?.signal);
+    async quota(
+      ref: { pluginId: string; contributionId: string },
+      options?: { signal?: AbortSignal; account?: AgentAdapterAccountScope },
+    ) {
+      const { active, response } = await read(ref, 'quota', {}, options);
       const quota = parseAgentAdapterQuota(response);
       if (!quota.success)
         throw new ExternalPluginRuntimeError(
@@ -160,7 +174,7 @@ export function createAgentAdapterAccess(
       return { observation: quota.data, binding: binding(active.instance, active.declaration.id) };
     },
     async describe(ref: { pluginId: string; contributionId: string }, options?: { signal?: AbortSignal }) {
-      const { active, response } = await read(ref, 'describe', {}, options?.signal);
+      const { active, response } = await read(ref, 'describe', {}, options);
       const result = parseAgentAdapterDescription(response);
       if (!result.success)
         throw new ExternalPluginRuntimeError('PROTOCOL_VIOLATION', 'Agent adapter returned an invalid description');

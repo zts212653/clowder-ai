@@ -28,12 +28,13 @@ export const describe = (version) => ({
   },
 });
 
-export async function setup(t, agentSessionImplementations) {
+export async function setup(t, agentSessionImplementations, grantAgentAdapterNativeRuntime) {
   const temp = resolve(tmpdir());
   const projectRoot = await mkdtemp(join(temp, 'agent-adapter-admission-'));
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot,
     agentSessionImplementations,
+    grantAgentAdapterNativeRuntime,
     messageStore: new MessageStore(),
     contract: { manifestContractRange: contractVersion, validateManifest },
   });
