@@ -795,10 +795,12 @@ async function initializeApi(
   app.get('/api/health', healthHandler);
 
   // F152: Readiness check — verifies dependencies are reachable.
-  const { MemoryPluginHost } = await import('./domains/plugin/host-surface/memory-plugin-host.js');
-  const { createEntityMemoryProvider } = await import('./domains/plugin/host-surface/entity-memory-provider.js');
-  const { createEventMemoryProvider } = await import('./domains/plugin/host-surface/event-memory-provider.js');
-  const { createProfileMemoryProvider } = await import('./domains/plugin/host-surface/profile-memory-provider.js');
+  const { MemoryPluginHost } = await import('./domains/plugin/host-surface/memory/memory-plugin-host.js');
+  const { createEntityMemoryProvider } = await import('./domains/plugin/host-surface/memory/entity-memory-provider.js');
+  const { createEventMemoryProvider } = await import('./domains/plugin/host-surface/memory/event-memory-provider.js');
+  const { createProfileMemoryProvider } = await import(
+    './domains/plugin/host-surface/memory/profile-memory-provider.js'
+  );
   const memoryProvider = new MemoryPluginHost(app.log);
   const entityMemory = createEntityMemoryProvider(memoryProvider);
   const eventMemoryStore = createEventMemoryProvider(memoryProvider);
@@ -1563,7 +1565,7 @@ async function initializeApi(
   app.log.info(
     `[api] F102: embed mode = ${resolvedEmbedMode} (EMBED_MODE=${process.env.EMBED_MODE ?? '(unset)'}, service.enabled=${embedSvcEnabled})`,
   );
-  const { createMemoryIndexSources } = await import('./domains/cats/services/session/memory-index-sources.js');
+  const { createMemoryIndexSources } = await import('./domains/cats/services/session/memory/memory-index-sources.js');
   const makeMemoryIndexSources = (assertActivation?: () => void) =>
     createMemoryIndexSources({ messageStore, threadStore, ownerUserId: privateUserId, assertActivation });
   const memoryIndexSources = makeMemoryIndexSources();
@@ -1733,7 +1735,7 @@ async function initializeApi(
   }
 
   // F152 Phase B: Expedition Bootstrap — state manager + service
-  const { createProjectIndexProvider } = await import('./domains/plugin/host-surface/project-index-provider.js');
+  const { createProjectIndexProvider } = await import('./domains/plugin/host-surface/memory/project-index-provider.js');
   const { ExpeditionBootstrapService } = await import('./domains/memory/ExpeditionBootstrapService.js');
   const indexStateManager = createProjectIndexProvider(memoryProvider);
   const { execFileSync } = await import('node:child_process');
@@ -3808,7 +3810,7 @@ async function initializeApi(
     tasteMemoryLifecycleStore,
   );
   const { tasteBrowseRoutes } = await import('./routes/taste-browse.js');
-  const { createTasteBrowseProvider } = await import('./domains/plugin/host-surface/taste-browse-provider.js');
+  const { createTasteBrowseProvider } = await import('./domains/plugin/host-surface/memory/taste-browse-provider.js');
   const tasteBrowse = createTasteBrowseProvider(memoryProvider);
   await app.register(tasteBrowseRoutes, {
     ownerUserId: privateUserId,
@@ -5547,7 +5549,9 @@ async function initializeApi(
       onMatterChanged: (ownerUserId) => socketManager?.emitToUser(ownerUserId, 'memory_matter_changed', {}),
       indexSources: makeMemoryIndexSources,
       getSearchEmbedding: () =>
-        memoryServices.embeddingLifecycle.getMode() === 'on' ? memoryServices.embeddingLifecycle.getService() : undefined,
+        memoryServices.embeddingLifecycle.getMode() === 'on'
+          ? memoryServices.embeddingLifecycle.getService()
+          : undefined,
     },
     agentSessionProviders: (packages, configuration) =>
       declaredAgentSessionProviders({

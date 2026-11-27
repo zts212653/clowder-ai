@@ -44,7 +44,7 @@ export interface DeclaredScheduleTaskRunner {
 
 export interface DeclaredRuntimeContributionHost {
   readonly agentSessionProviders?: AgentSessionProviderLifecycle;
-  readonly memoryProvider?: import('../host-surface/memory-plugin-host.js').MemoryPluginHost;
+  readonly memoryProvider?: import('../host-surface/memory/memory-plugin-host.js').MemoryPluginHost;
   readonly packages: VerifiedPluginPackageLocator;
   readonly limbRegistry?: LimbRegistry;
   readonly taskRunner?: DeclaredScheduleTaskRunner;

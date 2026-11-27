@@ -1,12 +1,17 @@
 import { type EntityMemoryOwnerAction, entityOutputSchemas } from '@clowder-ai/plugin-memory-contract/entity';
-import { type MemoryPluginHost, callMemoryOwner } from './memory-plugin-host.js';
+import { callMemoryOwner, type MemoryPluginHost } from './memory-plugin-host.js';
 
 export function createEntityMemoryProvider(provider: MemoryPluginHost) {
   return {
     list: (owner: string) =>
       callMemoryOwner(provider, { operation: 'entity.list', input: {} }, entityOutputSchemas['entity.list'], owner),
     get: (owner: string, entityId: string) =>
-      callMemoryOwner(provider, { operation: 'entity.get', input: { entityId } }, entityOutputSchemas['entity.get'], owner),
+      callMemoryOwner(
+        provider,
+        { operation: 'entity.get', input: { entityId } },
+        entityOutputSchemas['entity.get'],
+        owner,
+      ),
     mutate: (owner: string, entityId: string, command: EntityMemoryOwnerAction, updatedAt: number) =>
       callMemoryOwner(
         provider,

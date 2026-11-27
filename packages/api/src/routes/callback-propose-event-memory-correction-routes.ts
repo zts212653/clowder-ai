@@ -12,7 +12,7 @@ import type { InvocationRegistry } from '../domains/cats/services/agents/invocat
 import { eventMemoryRevision, type StoredEventMemoryLifecycle } from '../domains/memory/EventMemoryStore.js';
 import type { EventMemoryCorrectionProposalStore } from '../domains/memory/event/EventMemoryCorrectionProposalStore.js';
 import type { EventMemoryPort } from '../domains/memory/event/event-memory-port.js';
-import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory-plugin-host.js';
+import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory/memory-plugin-host.js';
 import { registerCallbackAuthHook, requireCallbackAuth } from './callback-auth-prehandler.js';
 import type { EventMemorySourceReaders } from './event-memory-source.js';
 import { readEventMemorySource } from './event-memory-source.js';

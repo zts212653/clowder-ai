@@ -1,6 +1,6 @@
 import type { CollectionManifest, IEvidenceStore, SearchOptions } from '../domains/memory/interfaces.js';
 import type { MessageSearchService } from '../domains/memory/MessageSearchService.js';
-import type { createTasteBrowseProvider } from '../domains/plugin/host-surface/taste-browse-provider.js';
+import type { createTasteBrowseProvider } from '../domains/plugin/host-surface/memory/taste-browse-provider.js';
 
 export type MemorySearchType = 'memory' | 'documents' | 'conversations';
 export interface MemorySearchQuery {

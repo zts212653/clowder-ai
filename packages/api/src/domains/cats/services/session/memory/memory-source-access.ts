@@ -1,7 +1,7 @@
-import type { IMessageStore, StoredMessage } from '../stores/ports/MessageStore.js';
-import type { IThreadStore } from '../stores/ports/ThreadStore.js';
-import { canQuoteInPublicReply, isEligibleReplyParent, type Viewer } from '../stores/visibility.js';
-import { resolveThreadAccess } from './thread-access-policy.js';
+import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
+import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
+import { canQuoteInPublicReply, isEligibleReplyParent, type Viewer } from '../../stores/visibility.js';
+import { resolveThreadAccess } from '../thread-access-policy.js';
 
 export interface MemorySourceActor {
   userId: string;

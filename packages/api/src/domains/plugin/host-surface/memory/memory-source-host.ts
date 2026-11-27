@@ -6,10 +6,10 @@ import {
   type MemorySourceActor,
   type MemorySourceReaders,
   readMemorySourceMessage,
-} from '../../cats/services/session/memory-source-access.js';
-import { messageContentRevision } from '../../cats/services/stores/message-content-projection.js';
-import { messageFrom } from '../../cats/services/stores/message-from.js';
-import { currentPluginCallContext, type PluginCallContext } from '../carrier/plugin-call-context.js';
+} from '../../../cats/services/session/memory/memory-source-access.js';
+import { messageContentRevision } from '../../../cats/services/stores/message-content-projection.js';
+import { messageFrom } from '../../../cats/services/stores/message-from.js';
+import { currentPluginCallContext, type PluginCallContext } from '../../carrier/plugin-call-context.js';
 
 const sourceRef = z.string().min(1).max(200);
 

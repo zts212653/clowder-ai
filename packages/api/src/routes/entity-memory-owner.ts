@@ -3,8 +3,8 @@ import type { EntityMemoryRecord } from '@clowder-ai/plugin-memory-contract/enti
 import type { FastifyPluginAsync } from 'fastify';
 import type { IEntityProposalStore } from '../domains/approval-hub/stores/ports/IEntityProposalStore.js';
 import type { EntityMemoryLifecycleService } from '../domains/memory/entity/EntityMemoryLifecycleService.js';
-import type { createEntityMemoryProvider } from '../domains/plugin/host-surface/entity-memory-provider.js';
-import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory-plugin-host.js';
+import type { createEntityMemoryProvider } from '../domains/plugin/host-surface/memory/entity-memory-provider.js';
+import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory/memory-plugin-host.js';
 import { resolveSessionUserId } from '../utils/request-identity.js';
 import { readEntityMemoryProposals } from './entity-memory-proposals.js';
 import { type EntityMemorySourceReaders, readEntityMemorySource } from './entity-memory-source.js';

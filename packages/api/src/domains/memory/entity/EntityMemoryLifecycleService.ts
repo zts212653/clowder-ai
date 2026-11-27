@@ -1,6 +1,6 @@
 import type { EntityMemoryOwnerAction, MemoryOwnerActionError, MemoryOwnerActionReceipt } from '@cat-cafe/shared';
 import type { EntityMemoryMutation, EntityMemoryRecord } from '@clowder-ai/plugin-memory-contract/entity';
-import type { createEntityMemoryProvider } from '../../plugin/host-surface/entity-memory-provider.js';
+import type { createEntityMemoryProvider } from '../../plugin/host-surface/memory/entity-memory-provider.js';
 import type { OwnerMemoryActionCoordinator } from '../owner/OwnerMemoryActionCoordinator.js';
 
 export class EntityMemoryLifecycleService {

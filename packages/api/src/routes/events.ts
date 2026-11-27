@@ -28,7 +28,7 @@ import { runCorpusBackfill } from '../domains/memory/event-backfill.js';
 import type { MagicWordMeaning } from '../domains/memory/magic-word-meanings.js';
 import { parseMagicWordMeanings } from '../domains/memory/magic-word-meanings.js';
 import type { OwnerMemoryActionCoordinator } from '../domains/memory/owner/OwnerMemoryActionCoordinator.js';
-import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory-plugin-host.js';
+import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory/memory-plugin-host.js';
 import { resolveSessionUserId } from '../utils/request-identity.js';
 import type { AgentKeyAuthRegistry, CallbackAuthRegistry } from './callback-auth-prehandler.js';
 import { registerCallbackAuthHook } from './callback-auth-prehandler.js';

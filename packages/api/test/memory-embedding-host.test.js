@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { withPluginCallContext } from '../dist/domains/plugin/carrier/plugin-call-context.js';
-import { createMemoryEmbeddingHost } from '../dist/domains/plugin/host-surface/memory-embedding-host.js';
+import { createMemoryEmbeddingHost } from '../dist/domains/plugin/host-surface/memory/memory-embedding-host.js';
 
 const instance = 'approved-memory-instance';
 const principal = {
@@ -56,7 +56,9 @@ test('a retired embedding provider cannot return an old vector and caller cancel
     getEmbedding: () => current,
   });
   const call = (signal) =>
-    withPluginCallContext(instance, { ...principal, memorySearch: { query: 'one', signal } }, () => port.embedQuery('one'));
+    withPluginCallContext(instance, { ...principal, memorySearch: { query: 'one', signal } }, () =>
+      port.embedQuery('one'),
+    );
   assert.equal(await call(), null);
 
   current = service(async () => [new Float32Array([1, 0])]);

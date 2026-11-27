@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import type { EmbedModelInfo, IEmbeddingService } from '../../memory/interfaces.js';
-import { createSearchEmbeddingCapability } from '../../memory/search-embedding-capability.js';
-import { currentPluginCallContext } from '../carrier/plugin-call-context.js';
+import type { EmbedModelInfo, IEmbeddingService } from '../../../memory/interfaces.js';
+import { createSearchEmbeddingCapability } from '../../../memory/search-embedding-capability.js';
+import { currentPluginCallContext } from '../../carrier/plugin-call-context.js';
 
 const queryText = z.string().trim().min(1).max(2000);
 

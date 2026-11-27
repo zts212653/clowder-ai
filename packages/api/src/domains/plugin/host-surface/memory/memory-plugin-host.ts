@@ -32,21 +32,21 @@ import {
 } from '@clowder-ai/plugin-memory-contract/recall';
 import { type TasteBrowseDispatchInput, tasteBrowseOutputSchemas } from '@clowder-ai/plugin-memory-contract/taste';
 import { z } from 'zod';
-import type { PersistRecallEvents } from '../../memory/recall-correlation-hook.js';
+import type { PersistRecallEvents } from '../../../memory/recall-correlation-hook.js';
 import {
   invocationNotStarted,
   type PluginInvocationEffect,
   type PluginInvocationOutcome,
-} from '../carrier/host-invocation.js';
+} from '../../carrier/host-invocation.js';
 import {
   type PluginCallContext,
   withoutPluginCallContext,
   withPluginCallContext,
-} from '../carrier/plugin-call-context.js';
-import type { PluginRuntimeAdmission } from '../carrier/runtime-carrier.js';
-import type { DeclaredActionSurface } from '../declared/declared-cloud-conversation-hosts.js';
-import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
-import type { PluginPackageRecord } from '../host-inventory/types.js';
+} from '../../carrier/plugin-call-context.js';
+import type { PluginRuntimeAdmission } from '../../carrier/runtime-carrier.js';
+import type { DeclaredActionSurface } from '../../declared/declared-cloud-conversation-hosts.js';
+import { ExternalPluginRuntimeError } from '../../external-runtime/types.js';
+import type { PluginPackageRecord } from '../../host-inventory/types.js';
 
 export const MEMORY_PLUGIN_ID = 'official.memory';
 export const MEMORY_PACKAGE_NAME = '@clowder-ai/memory-plugin';

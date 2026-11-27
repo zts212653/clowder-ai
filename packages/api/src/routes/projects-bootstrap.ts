@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { BootstrapProgress, ExpeditionBootstrapService } from '../domains/memory/ExpeditionBootstrapService.js';
 import type { ProjectIndexStatePort } from '../domains/memory/IndexStateManager.js';
-import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory-plugin-host.js';
+import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory/memory-plugin-host.js';
 import { resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolveDirectLocalAuthorizationUserId, resolveHeaderUserId } from '../utils/request-identity.js';
 

@@ -1,5 +1,5 @@
 import { tasteBrowseOutputSchemas } from '@clowder-ai/plugin-memory-contract/taste';
-import { type MemoryPluginHost, callMemoryOwner } from './memory-plugin-host.js';
+import { callMemoryOwner, type MemoryPluginHost } from './memory-plugin-host.js';
 
 export function createTasteBrowseProvider(provider: MemoryPluginHost) {
   return {

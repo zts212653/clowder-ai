@@ -1,7 +1,7 @@
 import type { Redis } from 'ioredis';
-import type { IThreadStore } from '../../cats/services/stores/ports/ThreadStore.js';
-import { memoryKey } from '../../cats/services/stores/redis-keys/memory-keys.js';
-import { currentPluginCallContext } from '../carrier/plugin-call-context.js';
+import type { IThreadStore } from '../../../cats/services/stores/ports/ThreadStore.js';
+import { memoryKey } from '../../../cats/services/stores/redis-keys/memory-keys.js';
+import { currentPluginCallContext } from '../../carrier/plugin-call-context.js';
 
 const COMPARE_AND_SET_HASH = `
   local expected = cjson.decode(ARGV[1])

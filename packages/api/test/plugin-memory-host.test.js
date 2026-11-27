@@ -2,14 +2,17 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { memoryDescriptor } from '@clowder-ai/plugin-memory-contract';
 import Fastify from 'fastify';
-import { createMemoryIndexSources } from '../dist/domains/cats/services/session/memory-index-sources.js';
+import { createMemoryIndexSources } from '../dist/domains/cats/services/session/memory/memory-index-sources.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
 import { currentPluginCallContext, withPluginCallContext } from '../dist/domains/plugin/carrier/plugin-call-context.js';
-import { createEventMemoryProvider } from '../dist/domains/plugin/host-surface/event-memory-provider.js';
-import { MEMORY_HOST_REQUIRED_OPERATIONS, MemoryPluginHost } from '../dist/domains/plugin/host-surface/memory-plugin-host.js';
-import { createMemorySourceHost } from '../dist/domains/plugin/host-surface/memory-source-host.js';
-import { createProjectIndexProvider } from '../dist/domains/plugin/host-surface/project-index-provider.js';
+import { createEventMemoryProvider } from '../dist/domains/plugin/host-surface/memory/event-memory-provider.js';
+import {
+  MEMORY_HOST_REQUIRED_OPERATIONS,
+  MemoryPluginHost,
+} from '../dist/domains/plugin/host-surface/memory/memory-plugin-host.js';
+import { createMemorySourceHost } from '../dist/domains/plugin/host-surface/memory/memory-source-host.js';
+import { createProjectIndexProvider } from '../dist/domains/plugin/host-surface/memory/project-index-provider.js';
 import { eventsRoutes } from '../dist/routes/events.js';
 import { evidenceRoutes } from '../dist/routes/evidence.js';
 import { memoryRoutes } from '../dist/routes/memory.js';
@@ -33,15 +36,36 @@ test('recall timeline rejects a row outside the threads authorized for that read
     exposes: async () => true,
     async attempt(_id, method) {
       if (method === 'memory.describe') return { status: 'returned', value: supportedDescriptor() };
-      return { status: 'returned', value: [{
-        key: 'recall:r1', at: 20, thread_id: 'foreign', invocation_id: 'i1', cue_id: null, recall_id: 'r1',
-      }] };
+      return {
+        status: 'returned',
+        value: [
+          {
+            key: 'recall:r1',
+            at: 20,
+            thread_id: 'foreign',
+            invocation_id: 'i1',
+            cue_id: null,
+            recall_id: 'r1',
+          },
+        ],
+      };
     },
   });
   provider.markReady(pluginInstanceId);
-  await assert.rejects(() => provider.readRecallTimeline({
-    threadIds: ['authorized'], from: 10, to: 30, source: 'all', limit: 3,
-  }, 'owner'), { message: 'memory_unavailable', effect: 'unknown' });
+  await assert.rejects(
+    () =>
+      provider.readRecallTimeline(
+        {
+          threadIds: ['authorized'],
+          from: 10,
+          to: 30,
+          source: 'all',
+          limit: 3,
+        },
+        'owner',
+      ),
+    { message: 'memory_unavailable', effect: 'unknown' },
+  );
 });
 
 test('project index writes run as the owner that authorized the Host operation', async () => {
@@ -389,7 +413,11 @@ test('memory dispatch binds embedding to the dispatched search and its Host canc
     memorySearch: { query: 'an unrelated query' },
   };
   const { signal } = new AbortController();
-  await provider.attempt({ operation: 'search.query', input: { query: '  evidence query  ', options: {} } }, caller, signal);
+  await provider.attempt(
+    { operation: 'search.query', input: { query: '  evidence query  ', options: {} } },
+    caller,
+    signal,
+  );
   await provider.attempt({ operation: 'kv.get', input: { threadRef: 'thread', key: 'one' } }, caller);
   assert.deepEqual(observed, [{ query: 'evidence query', signal }, undefined]);
 });

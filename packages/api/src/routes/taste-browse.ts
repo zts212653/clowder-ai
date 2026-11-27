@@ -10,7 +10,7 @@ import type { TasteMemoryLifecycleService } from '../domains/memory/taste/TasteM
 import type { TasteMemoryReadResult } from '../domains/memory/taste/TasteMemoryReader.js';
 import type { TasteObservatorySnapshot } from '../domains/memory/taste/TasteObservatoryReader.js';
 import { tasteSourceAnchor } from '../domains/memory/taste/taste-memory-identity.js';
-import type { createTasteBrowseProvider } from '../domains/plugin/host-surface/taste-browse-provider.js';
+import type { createTasteBrowseProvider } from '../domains/plugin/host-surface/memory/taste-browse-provider.js';
 import { resolveDirectLocalAuthorizationUserId, resolveSessionUserId } from '../utils/request-identity.js';
 import { authorizeOwnerBrowserAction, ownerMemoryActionHttpStatus } from './owner-memory-browser-auth.js';
 import { projectTasteContext, readTasteApproval } from './taste-browse-context.js';

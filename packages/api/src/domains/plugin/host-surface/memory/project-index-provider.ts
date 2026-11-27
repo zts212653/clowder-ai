@@ -1,6 +1,6 @@
 import { memoryProjectIndexResponses } from '@clowder-ai/plugin-memory-contract/maintenance';
-import type { ProjectIndexStatePort } from '../../memory/IndexStateManager.js';
-import { type MemoryPluginHost, callMemoryOwner } from './memory-plugin-host.js';
+import type { ProjectIndexStatePort } from '../../../memory/IndexStateManager.js';
+import { callMemoryOwner, type MemoryPluginHost } from './memory-plugin-host.js';
 
 export function createProjectIndexProvider(provider: MemoryPluginHost): ProjectIndexStatePort {
   return {

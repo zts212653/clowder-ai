@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { PLUGIN_HOST_ENTRIES } from '../host-inventory/plugin-host-layout.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
-import { MEMORY_PACKAGE_NAME, MEMORY_PLUGIN_ID } from '../host-surface/memory-plugin-host.js';
+import { MEMORY_PACKAGE_NAME, MEMORY_PLUGIN_ID } from '../host-surface/memory/memory-plugin-host.js';
 import type { OfficialPluginPackageInstaller } from '../official-package-installer.js';
 import type { DormantPluginRuntimeComposition, PluginManagerRuntimeComposition } from '../runtime-composition.js';
 import { loadMachinePluginCatalog, OFFICIAL_PLUGIN_CATALOG_URL } from './machine-catalog-provider.js';

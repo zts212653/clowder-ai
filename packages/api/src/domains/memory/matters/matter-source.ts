@@ -5,7 +5,7 @@ import {
   type MemorySourceActor,
   type MemorySourceReaders,
   readMemorySourceMessage as readMatterMessage,
-} from '../../cats/services/session/memory-source-access.js';
+} from '../../cats/services/session/memory/memory-source-access.js';
 import { messageFrom } from '../../cats/services/stores/message-from.js';
 import type { StoredMessage } from '../../cats/services/stores/ports/MessageStore.js';
 

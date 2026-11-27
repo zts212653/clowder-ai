@@ -1,5 +1,5 @@
-import type { MemoryIndexStatusResult } from '@clowder-ai/plugin-memory-contract/maintenance';
 import type { ExpansionFunnelMeta, ExpansionHintTargetRef } from '@cat-cafe/shared';
+import type { MemoryIndexStatusResult } from '@clowder-ai/plugin-memory-contract/maintenance';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
@@ -43,7 +43,7 @@ import {
   validateVectorGenerationTables,
   vectorGenerationTables,
 } from '../domains/memory/vector-generation-tables.js';
-import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory-plugin-host.js';
+import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory/memory-plugin-host.js';
 import { resolveDirectLocalAuthorizationUserId } from '../utils/request-identity.js';
 import { buildThreadCrossPostSuggestion, extractThreadIdFromEvidenceResult } from './cross-thread-affordance.js';
 import {
@@ -178,8 +178,8 @@ function readEmbeddedIndexStatus(evidenceStore: IEvidenceStore): MemoryIndexStat
   let generationQuarantined = false;
   try {
     generationQuarantined =
-      db.prepare(`SELECT value FROM ${tables.metadata} WHERE key='vector_invalidation_quarantined'`).get()
-        ?.value === '1';
+      db.prepare(`SELECT value FROM ${tables.metadata} WHERE key='vector_invalidation_quarantined'`).get()?.value ===
+      '1';
   } catch {
     /* A pre-vector database has no quarantine fact. */
   }

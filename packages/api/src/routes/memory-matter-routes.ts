@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { MatterMemoryService } from '../domains/memory/matters/MatterMemoryService.js';
 import { type MatterActor, MatterMemoryError } from '../domains/memory/matters/matter-source.js';
 import type { PluginCallContext } from '../domains/plugin/carrier/plugin-call-context.js';
-import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory-plugin-host.js';
+import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory/memory-plugin-host.js';
 import { resolveSessionUserId } from '../utils/request-identity.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { authorizeOwnerBrowserAction } from './owner-memory-browser-auth.js';

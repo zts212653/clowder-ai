@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import type { MessageEvidenceProjection } from '../stores/message-evidence-projection.js';
-import type { IThreadStore } from '../stores/ports/ThreadStore.js';
+import type { MessageEvidenceProjection } from '../../stores/message-evidence-projection.js';
+import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
 
 const messageRequest = z.tuple([z.string().min(1).max(200), z.number().int().min(1).max(2000)]);
 

@@ -81,14 +81,14 @@ import { HostInventoryControlPlane } from './host-inventory/control-plane.js';
 import type { PackageAdmissionContractRuntime } from './host-inventory/manifest-verifier.js';
 import { PLUGIN_HOST_ENTRIES, pluginHostRoot } from './host-inventory/plugin-host-layout.js';
 import type { PluginInstanceRecord, PluginInventorySnapshot } from './host-inventory/types.js';
-import { createMemoryEmbeddingHost } from './host-surface/memory-embedding-host.js';
-import { isAdmittedMemoryPackage, type MemoryPluginHost } from './host-surface/memory-plugin-host.js';
-import { createMemorySourceHost } from './host-surface/memory-source-host.js';
+import { createMemoryEmbeddingHost } from './host-surface/memory/memory-embedding-host.js';
+import { isAdmittedMemoryPackage, type MemoryPluginHost } from './host-surface/memory/memory-plugin-host.js';
+import { createMemorySourceHost } from './host-surface/memory/memory-source-host.js';
 import {
   createMemoryThreadKvPort,
   redisMemoryThreadKvBacking,
   transientMemoryThreadKvBacking,
-} from './host-surface/memory-thread-kv.js';
+} from './host-surface/memory/memory-thread-kv.js';
 import { pluginDataDirectoryParent } from './host-surface/plugin-data-directory.js';
 import { PluginMediaReadService } from './host-surface/plugin-media-host.js';
 import type { PluginMembersServices } from './host-surface/plugin-members-host.js';
@@ -222,7 +222,7 @@ export interface DormantPluginRuntimeCompositionOptions {
     readonly onMatterChanged?: (ownerUserId: string) => void;
     readonly indexSources?: (
       assertActivation: () => void,
-    ) => ReturnType<typeof import('../cats/services/session/memory-index-sources.js').createMemoryIndexSources>;
+    ) => ReturnType<typeof import('../cats/services/session/memory/memory-index-sources.js').createMemoryIndexSources>;
   };
   readonly agentSessionProviders?: (
     packages: VerifiedPluginPackageLocator,

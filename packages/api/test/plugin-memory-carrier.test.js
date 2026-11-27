@@ -8,7 +8,10 @@ import Fastify from 'fastify';
 import { resolveMemoryDataLocations } from '../dist/config/memory-data-locations.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
-import { MemoryPluginHost } from '../dist/domains/plugin/host-surface/memory-plugin-host.js';
+import {
+  MEMORY_HOST_REQUIRED_OPERATIONS,
+  MemoryPluginHost,
+} from '../dist/domains/plugin/host-surface/memory/memory-plugin-host.js';
 import {
   createDormantPluginRuntimeComposition,
   createPluginManagerRuntimeComposition,
@@ -49,6 +52,7 @@ test('the Manager updates a memory worker and restores the previous worker with 
   const artifacts = new Map();
   let published;
   async function publish(version, storageFormat = 1) {
+    const descriptor = { ...memoryDescriptor(), operations: MEMORY_HOST_REQUIRED_OPERATIONS, storageFormat };
     const archive = await packageArchive({
       packageManifest: manifest({
         pluginId,
@@ -68,7 +72,7 @@ test('the Manager updates a memory worker and restores the previous worker with 
             if (host.memoryData.globalDbPath !== ${JSON.stringify(memoryData.globalDbPath)}) throw Error('wrong global store');
             if (!host.dataPath || host.memoryData.dataDir === host.dataPath) throw Error('deployment paths must stay canonical');
             return {actions: {
-              'memory.describe'() { return ${JSON.stringify({ ...memoryDescriptor(), storageFormat })}; },
+              'memory.describe'() { return ${JSON.stringify(descriptor)}; },
               async 'memory.dispatch'({operation, input}) {
                 const {threadRef, key, value, updatedBy} = input;
                 if (operation === 'kv.get') return JSON.parse(await host.memoryThreadKv.get(threadRef, key));

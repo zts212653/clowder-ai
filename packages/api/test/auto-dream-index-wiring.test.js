@@ -8,18 +8,22 @@ describe('F255 production bootstrap wiring', () => {
   it('routes CAT_CAFE_DATA_DIR into the memory-owned data root', () => {
     assert.match(
       source,
-      /markersDir,\n\s+dataDir: process\.env\.CAT_CAFE_DATA_DIR,\n\s+transcriptDataDir,/,
-      'worktree data-root overrides must reach createMemoryServices instead of falling back to ~/.cat-cafe',
+      /const memoryData = resolveMemoryDataLocations\(\{ sqlitePath: evidenceDbPath, dataDir: process\.env\.CAT_CAFE_DATA_DIR \}\);/,
+      'worktree data-root overrides must be resolved before memory bootstrap',
     );
+    assert.match(source, /createMemoryServices\(\{[^}]*dataLocations: memoryData,/);
   });
 
   it('binds every private memory surface to one normalized startup owner', () => {
     assert.match(source, /const privateUserId = \(process\.env\.CAT_CAFE_USER_ID \?\? 'default-user'\)\.trim\(\);/);
     assert.match(source, /await app\.register\(sessionRoute, \{ ownerUserId: privateUserId \}\);/);
-    assert.match(source, /privateUserId,\n\s+\/\/ Phase E-2/);
     assert.match(
       source,
-      /messageStore\.getThreadEvidenceProjection\(threadId, limit \?\? 2000, privateUserId\)/,
+      /createMemoryServices\(\{[\s\S]*?privateUserId,\n\s+messageListFn: memoryIndexSources\.listMessages,/,
+    );
+    assert.match(
+      source,
+      /createMemoryIndexSources\(\{ messageStore, threadStore, ownerUserId: privateUserId, assertActivation \}\)/,
       'background indexing must retain the startup owner when reading the evidence projection',
     );
     assert.match(source, /privateOwnerUserId: privateUserId/);

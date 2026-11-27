@@ -5,7 +5,7 @@ import {
   createMemoryThreadKvPort,
   redisMemoryThreadKvBacking,
   transientMemoryThreadKvBacking,
-} from '../dist/domains/plugin/host-surface/memory-thread-kv.js';
+} from '../dist/domains/plugin/host-surface/memory/memory-thread-kv.js';
 
 function setup() {
   const calls = [];

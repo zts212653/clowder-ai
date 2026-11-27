@@ -99,12 +99,16 @@ export interface ModulePluginHostShape {
   readonly collectiveArtifactOwner?: PluginNeutralHost['collectiveArtifactOwner'];
   readonly collectiveMaterialSource?: PluginNeutralHost['collectiveMaterialSource'];
   readonly memoryDatabase?: { readonly canonicalPath: string; readonly storageFormat: 1 };
-  readonly memoryEmbedding?: ReturnType<typeof import('../../host-surface/memory-embedding-host.js').createMemoryEmbeddingHost>;
+  readonly memoryEmbedding?: ReturnType<
+    typeof import('../../host-surface/memory/memory-embedding-host.js').createMemoryEmbeddingHost
+  >;
   readonly memoryData?: import('../../../../config/memory-data-locations.js').MemoryDataLocations;
-  readonly memoryThreadKv?: import('../../host-surface/memory-thread-kv.js').MemoryThreadKvPort;
-  readonly memorySource?: ReturnType<typeof import('../../host-surface/memory-source-host.js').createMemorySourceHost>;
+  readonly memoryThreadKv?: import('../../host-surface/memory/memory-thread-kv.js').MemoryThreadKvPort;
+  readonly memorySource?: ReturnType<
+    typeof import('../../host-surface/memory/memory-source-host.js').createMemorySourceHost
+  >;
   readonly memoryIndexSources?: ReturnType<
-    typeof import('../../../cats/services/session/memory-index-sources.js').createMemoryIndexSources
+    typeof import('../../../cats/services/session/memory/memory-index-sources.js').createMemoryIndexSources
   >;
   readonly threads: PluginThreadHost;
   readonly messaging: PluginMessagingHost;
