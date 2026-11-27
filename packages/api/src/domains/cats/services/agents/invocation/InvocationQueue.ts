@@ -2452,9 +2452,18 @@ export class InvocationQueue {
 
   /** Exact process-local Queue snapshot fence used by explicit row actions. */
   snapshotRevision(threadId: string, userId: string): string {
+    // A claim fences its own row separately. Other rows should see the same
+    // revision before and during a reversible claim, and after its restoration.
+    const rows = this.list(threadId, userId).map(
+      ({ claimId, claimedAt, claimedTargetIds, claimedFromTargetless, retiringGroupId, status, ...row }) => ({
+        ...row,
+        status: status === 'claimed' ? 'queued' : status,
+        ...(claimedFromTargetless ? { targets: [] } : {}),
+      }),
+    );
     return createHash('sha256')
       .update(
-        JSON.stringify(this.list(threadId, userId), (_key, value: unknown) => {
+        JSON.stringify(rows, (_key, value: unknown) => {
           // Redis can reorder object keys when it restores a claimed row.
           // Keep queue and target order, but ignore object insertion order.
           if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;

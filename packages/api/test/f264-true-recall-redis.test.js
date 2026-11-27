@@ -86,7 +86,14 @@ describe('F264 Gap F true recall contract (Redis store)', { skip: redisIsolation
     const second = await addInput('append this input');
     const entryId = second.entries[0].id;
     const revision = queue.snapshotRevision(threadId, userId);
-    const rows = queue.list(threadId, userId);
+    const rows = structuredClone(queue.list(threadId, userId));
+    let revisionDuringClaim;
+    const recall = store.recallMessageToComposerDraft.bind(store);
+    t.mock.method(store, 'recallMessageToComposerDraft', (...args) => {
+      assert.equal(queue.list(threadId, userId)[0].status, 'claimed');
+      revisionDuringClaim = queue.snapshotRevision(threadId, userId);
+      return recall(...args);
+    });
 
     const draft = await store.putOwnerComposerDraft(userId, threadId, {
       expectedRevision: 0,
@@ -124,8 +131,15 @@ describe('F264 Gap F true recall contract (Redis store)', { skip: redisIsolation
     assert.equal(response.json().code, 'DRAFT_REVISION_MISMATCH');
     assert.equal((await store.getOwnerComposerDraft(userId, threadId)).text, 'a newer draft');
     assert.deepEqual(queue.list(threadId, userId), rows);
-    assert.ok(await queue.claimExactAppend(threadId, userId, entryId, revision, ['codex']));
-    assert.equal(await queue.claimExactAppend(threadId, userId, rows[0].id, revision, ['codex']), null);
+    assert.equal(queue.snapshotRevision(threadId, userId), revision);
+    assert.ok(revisionDuringClaim);
+    assert.ok(await queue.claimExactAppend(threadId, userId, entryId, revisionDuringClaim, ['codex']));
+    assert.equal(await queue.restoreClaimedEntries(threadId, [entryId]), true);
+    assert.equal(await queue.setPositionDurable(threadId, userId, entryId, 0), true);
+    assert.equal(await queue.claimExactAppend(threadId, userId, entryId, revision, ['codex']), null);
+    assert.ok(
+      await queue.claimExactAppend(threadId, userId, entryId, queue.snapshotRevision(threadId, userId), ['codex']),
+    );
   });
 
   it('rejects foreign owner and thread without mutating either Redis hash', async () => {

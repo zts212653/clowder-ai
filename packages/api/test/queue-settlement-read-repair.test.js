@@ -27,7 +27,7 @@ async function until(predicate) {
   assert.fail('Queue did not reach the expected settlement boundary');
 }
 
-async function settlingQueue(t, { pauseBeforeChild = false } = {}) {
+async function settlingQueue(t, { pauseBeforeChild = false, queuePreparationTimeoutMs } = {}) {
   const threadId = 'settlement-thread';
   const userId = 'settlement-user';
   const catId = pauseBeforeChild ? 'codex' : 'opus';
@@ -46,6 +46,7 @@ async function settlingQueue(t, { pauseBeforeChild = false } = {}) {
   let parentId;
   let producerPaused = false;
   const { promise: barrier, resolve: resumeProducer } = Promise.withResolvers();
+  const { promise: lateAdmissionRejected, resolve: rejectLateAdmission } = Promise.withResolvers();
   const pauseProducer = () => {
     producerPaused = true;
     return barrier;
@@ -65,7 +66,10 @@ async function settlingQueue(t, { pauseBeforeChild = false } = {}) {
         startedAt: Date.now(),
       };
       await turnExecutionStore.createRunning({ ...child, executionKind: 'ordinary' });
-      const admission = await options.onLifecycleInvocationStarted(child);
+      const admission = await options.onLifecycleInvocationStarted(child).catch((error) => {
+        rejectLateAdmission(error);
+        throw error;
+      });
       const content = 'The review is durably delivered.';
       yield { type: 'text', catId, content, timestamp: Date.now() };
       await turnExecutionStore.transitionTerminal(child.invocationId, { status: 'succeeded', endedAt: Date.now() });
@@ -85,17 +89,20 @@ async function settlingQueue(t, { pauseBeforeChild = false } = {}) {
       if (!pauseBeforeChild) await pauseProducer();
     },
   };
-  const processor = new QueueProcessor({
-    queue,
-    invocationTracker,
-    invocationRecordStore,
-    turnExecutionStore,
-    messageStore,
-    draftStore,
-    router,
-    socketManager,
-    log,
-  });
+  const processor = new QueueProcessor(
+    {
+      queue,
+      invocationTracker,
+      invocationRecordStore,
+      turnExecutionStore,
+      messageStore,
+      draftStore,
+      router,
+      socketManager,
+      log,
+    },
+    { queuePreparationTimeoutMs },
+  );
   const thread = { id: threadId, title: 'Settlement', projectPath: '/project/settlement', createdBy: userId };
   const sessionLocks = { forceReleaseByScope: mock.fn(() => ({ releasedHolders: 0, rejectedWaiters: 0, catIds: [] })) };
   const app = Fastify();
@@ -172,6 +179,7 @@ async function settlingQueue(t, { pauseBeforeChild = false } = {}) {
     catId,
     parentId,
     resumeProducer,
+    lateAdmissionRejected,
   };
 }
 
@@ -231,6 +239,32 @@ it('exposes the claimed row as processing without offering append', async (t) =>
   await assertSuccessfulSettlement(h);
 });
 
+it('requeues a preparation that does not resume and fences its late child from a replacement', async (t) => {
+  const h = await settlingQueue(t, { pauseBeforeChild: true, queuePreparationTimeoutMs: 1_000 });
+  const entry = h.queue.list(h.threadId, h.userId)[0];
+
+  await until(() => !h.processor.hasProcessingSlotReservation(h.threadId, h.catId));
+  assert.equal((await h.invocationRecordStore.get(h.parentId)).error, 'queue_preparation_timeout');
+  assert.equal(h.invocationTracker.has(h.threadId, h.catId), false);
+  assert.equal(h.queue.getEntrySnapshot(h.threadId, h.userId, entry.id)?.status, 'queued');
+  assert.equal((await queueOwnerReaper(h).runOnce()).reaped, 0);
+
+  const replacement = h.invocationTracker.tryStartThread(h.threadId, h.catId, h.userId, [], 'replacement-parent');
+  assert.ok(replacement);
+  h.resumeProducer();
+  await until(() => h.turnExecutionStore.get('settlement-child'));
+  assert.match((await h.lateAdmissionRejected).message, /queue_preparation_timeout|Lifecycle ActiveRun owner mismatch/);
+  assert.equal(h.invocationTracker.getExecutionId(h.threadId, h.catId), 'replacement-parent');
+  assert.equal(h.queue.getEntrySnapshot(h.threadId, h.userId, entry.id)?.status, 'queued');
+  const source = await h.messageStore.getById(entry.payload.messageId);
+  assert.equal(source.deliveryStatus, 'queued');
+  assert.deepEqual(source.lifecycle.dispatchRefs, []);
+  assert.equal(
+    h.messageStore.getRecent(10, h.userId).some((row) => row.lifecycle?.kind === 'response'),
+    false,
+  );
+});
+
 it('does not publish or retire the source when a reclaimed producer reaches admission late', async (t) => {
   const h = await settlingQueue(t, { pauseBeforeChild: true });
   const entry = h.queue.list(h.threadId, h.userId)[0];
@@ -247,6 +281,31 @@ it('does not publish or retire the source when a reclaimed producer reaches admi
     h.messageStore.getRecent(10, h.userId).some((row) => row.lifecycle?.kind === 'response'),
     false,
   );
+});
+
+it('leaves a replacement execution and its exact claim in place when the old child arrives', async (t) => {
+  const h = await settlingQueue(t, { pauseBeforeChild: true });
+  const entry = h.queue.list(h.threadId, h.userId)[0];
+  await h.invocationRecordStore.update(h.parentId, { status: 'failed', error: 'zombie_record_detected' });
+  h.processor.releaseExactTerminalExecutionOwner(h.threadId, [h.catId], h.parentId);
+  assert.equal(await h.queue.rollbackProcessingDurable(h.threadId, entry.id, entry.claimId), true);
+  assert.ok(h.invocationTracker.tryStartThread(h.threadId, h.catId, h.userId, [], 'replacement-parent'));
+  const replacement = await h.queue.claimExactAppend(
+    h.threadId,
+    h.userId,
+    entry.id,
+    h.queue.snapshotRevision(h.threadId, h.userId),
+    [h.catId],
+  );
+  assert.ok(replacement);
+  h.resumeProducer();
+  assert.match((await h.lateAdmissionRejected).message, /Lifecycle ActiveRun owner mismatch/);
+  await until(() =>
+    h.log.info.mock.calls.some(({ arguments: args }) => args[1]?.includes('skipped stale completion side effects')),
+  );
+  assert.equal(h.invocationTracker.getExecutionId(h.threadId, h.catId), 'replacement-parent');
+  assert.equal(h.queue.getEntrySnapshot(h.threadId, h.userId, entry.id)?.claimId, replacement.claimId);
+  assert.deepEqual((await h.messageStore.getById(entry.payload.messageId)).lifecycle.dispatchRefs, []);
 });
 
 it('owner sweep recovers an orphan without interrupting a successful Queue settlement in the same cat slot', async (t) => {
