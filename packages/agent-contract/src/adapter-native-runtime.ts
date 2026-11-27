@@ -12,7 +12,7 @@ export interface AgentAdapterNativeRuntime {
     signal: AbortSignal,
   ): Promise<void>;
   run?(
-    input: { hostSessionId: string; args: readonly string[] },
+    input: { hostSessionId: string; args: readonly string[]; stdin?: string },
     signal: AbortSignal,
   ): Promise<AsyncIterable<{ kind: 'record'; value: unknown } | { kind: 'exit'; code: number | null }>>;
   terminal?: {

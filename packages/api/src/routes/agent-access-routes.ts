@@ -75,8 +75,14 @@ export function registerAgentAccessRoutes(
     const lifetime = requestLifetime(request, reply);
     try {
       const result = await agentAdapters?.detect(ref, { refresh: refresh ?? false, signal: lifetime.signal });
-      if (result)
-        return { readiness: { state: 'ready' }, candidates: result.candidates, adapterOrigin: result.binding };
+      if (result) {
+        const observed = result.candidates.some(({ state }) => state.status !== 'unavailable');
+        return reply.code(observed ? 200 : 503).send({
+          readiness: { state: observed ? 'ready' : 'unavailable' },
+          candidates: result.candidates,
+          adapterOrigin: result.binding,
+        });
+      }
     } catch {
       request.log.warn({ adapterRef }, 'Agent adapter detection unavailable');
     } finally {

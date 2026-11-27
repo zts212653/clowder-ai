@@ -198,6 +198,12 @@ test(
     assert.equal(status.adapterOrigin.packageDigest, approvedDigest);
     assert.equal(status.adapterOrigin.ref, 'plugin:official.agent-kimi/kimi');
     t.diagnostic(`Actual Kimi CLI version ${status.candidates[0].state.version}; turn and quota use synthetic IO`);
+    approvedDigest = undefined;
+    const ungrantedDetection = await detect();
+    assert.equal(ungrantedDetection.statusCode, 503);
+    assert.equal(ungrantedDetection.json().readiness.state, 'unavailable');
+    assert.equal(ungrantedDetection.json().candidates[0].state.status, 'unavailable');
+    approvedDigest = plugin.packageDigest;
     const readQuota = () =>
       app.inject({
         method: 'POST',

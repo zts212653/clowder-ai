@@ -41,7 +41,7 @@ export async function setup(t, agentSessionImplementations, grantAgentAdapterNat
   t.after(async () => {
     await runtime.shutdown();
     assert.equal(dirname(projectRoot), temp);
-    await rm(projectRoot, { recursive: true, force: true });
+    await rm(projectRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 400 });
   });
   const { manager } = createPluginManagerRuntimeComposition({
     runtime,

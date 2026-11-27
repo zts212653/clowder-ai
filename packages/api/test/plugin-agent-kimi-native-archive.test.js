@@ -13,6 +13,7 @@ import {
 } from '../dist/domains/cats/services/agents/providers/kimi-l0-session-fingerprint.js';
 import { SessionImplementationRegistry } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
 import { RegisteredSessionAgentService } from '../dist/domains/cats/services/agents/session-contract/registered-session-agent-service.js';
+import { createAgentAdapterNativeProcess } from '../dist/domains/plugin/declared/agent-adapter-native-process.js';
 import { setup } from './helpers/agent-adapter-archive.js';
 
 const archive = process.env.CLOWDER_KIMI_CANDIDATE_ARCHIVE;
@@ -60,17 +61,27 @@ test(
           async recordSessionFingerprint(input) {
             recordKimiL0Fingerprint(home, 'fixture', input.nativeSessionId, input.fingerprint);
           },
-          async run(input, signal) {
-            const records = await startCli(input.args, signal);
-            return (async function* () {
-              for (const value of records) yield { kind: 'record', value };
-              yield { kind: 'exit', code: 0 };
-            })();
-          },
+          run: createAgentAdapterNativeProcess(({ args }) => ({
+            command: executable,
+            args,
+            cwd: root,
+            env: isolatedEnvironment,
+            bindExecutionOwner: false,
+            timeoutMs: 15_000,
+          })),
         };
     });
     const root = runtime.projectRoot;
     const home = join(root, 'kimi');
+    const isolatedEnvironment = {
+      ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+      HOME: home,
+      USERPROFILE: home,
+      KIMI_CODE_HOME: home,
+      KIMI_CODE_EXPERIMENTAL_FLAG: '1',
+      TEMP: root,
+      TMP: root,
+    };
     await mkdir(home);
     const requests = [];
     const server = createServer(async (req, res) => {
@@ -139,15 +150,7 @@ test(
         signal,
         timeout: 15_000,
         windowsHide: true,
-        env: {
-          ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-          HOME: home,
-          USERPROFILE: home,
-          KIMI_CODE_HOME: home,
-          KIMI_CODE_EXPERIMENTAL_FLAG: '1',
-          TEMP: root,
-          TMP: root,
-        },
+        env: isolatedEnvironment,
       });
       return stdout
         .trim()

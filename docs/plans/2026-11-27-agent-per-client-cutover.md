@@ -20,7 +20,7 @@ Architecture cell 为 identity-session 与插件运行时。Map delta 是把具�
 ### 两个仓的交付物
 
 - [Host PR #2030](https://github.com/zts212653/clowder-ai/pull/2030) 持有安装与执行通用接口、激活实例、调用权限、角色目录、会话与回执，并保留从旧入口切换和回退的机制。
-- [插件 PR #258](https://github.com/zts212653/clowder-ai-plugins/pull/258) 当前提供 Kimi 的源码、规范声明、版本和独立归档。Codex、Claude Code、DSH、AGY 将在插件仓交付各自的包及发行记录。Host 通过公共契约调用归档。
+- [插件 PR #258](https://github.com/zts212653/clowder-ai-plugins/pull/258) 提供 Kimi 与 Codex exec 候选的源码、规范声明、版本和独立归档。Codex App Server、Claude Code、DSH、AGY 仍待完善。Host 通过公共契约调用归档。
 - 两仓用确切 SHA、兼容范围和归档摘要组成待验收版本。开发候选用本地归档装进隔离 Host。目录上架和发布各自按仓库流程。
 - 当前 Worker 与 Host 属于同一 OS 进程。独立 Worker 管理包调用生命周期，不提供操作系统权限隔离。首批 native 执行端口只给经过 Host 核验的受信包和调用。第三方 ACP 声明沿现有路径。扩展到其他可执行插件须另证隔离与授权边界。
 
@@ -114,8 +114,14 @@ flowchart LR
 
 插件仓按 Node 24.18.0 和 npm 11.16.0 打包 `packages/agent-kimi`。Host 运行 `test/plugin-agent-kimi-local-archive.test.js` 时，`CLOWDER_KIMI_CANDIDATE_ARCHIVE` 指向该归档，`CLOWDER_KIMI_CANDIDATE_EXECUTABLE` 指向已经核定的本机 CLI。测试使用独立项目和原生 HOME，用真 CLI 查询版本。额度、原生续接回执与模型事件使用注入的进程或终端数据。安装、Worker 调用与停用使用实际 Host 管理器。
 
-隔离 HTTP 回归使用实际归档完成显式 adapterRef 检测和已选账号的额度读取。检测响应由 Host 标注实例与摘要。额度请求先核实账号归属和凭据代际，再投影插件观测值并持久化；停用后两个入口均拒绝，探测器断言旧路径调用为零。额度捕获使用 PTY 输出夹具，已选账号从测试配置注入。默认产品切换仍待接入。
+隔离 HTTP 回归使用实际归档完成显式 adapterRef 检测和已选账号的额度读取。测试用 Host 授权端口以及账号选择器注入隔离配置。检测响应由 Host 标注实例和摘要；无原生端口时 HTTP 503，并保留适配器报告的原因。额度请求先核实账号归属和凭据代际，再投影插件观测值并持久化；停用后两个入口均拒绝，旧探测调用为零。额度捕获使用 PTY 输出夹具。正式 Host 暂缺独立适配器授权来源和账号选择器，当前默认额度路径仍使用旧实现。
 
 原生会话回归 `packages/api/test/plugin-agent-kimi-native-archive.test.js` 使用实际 Kimi CLI 和回环模型端点。旧 CLI 先生成会话与回复，并写旧格式 L0 指纹。指纹一致时归档复用同一原生会话及历史。角色编辑后，严格续接在模型请求前失败，允许回退的请求报告 `l0_resume_fresh_start` 并开启新会话。新 L0 只进入 system，新指纹单独登记，旧记录保持。工作目录和账号仅进入 Host 授权上下文。测试在独立 HOME 中运行，模型回复和账号使用本地夹具。
 
-用户验收仍需真实账号 PTY 额度、正常产品角色创建和发送、生产形态的切换及回退、桌面候选。其余四个包仍须独立封装和验收。
+用户验收仍需真实账号 PTY 额度、正常产品角色创建和发送、生产形态的切换及回退、桌面候选。
+
+### Codex exec 候选的跨仓验证
+
+`packages/api/test/plugin-agent-codex-exec-archive.test.js` 由真实 Manager 装载 `official.agent-codex` 本地归档，检测 Codex CLI 0.169.1。两次受控进程调用经 stdin 提交，使用独立 CODEX_HOME 与回环 Responses 端点。第一次取得原生会话 ID，释放 Host 会话后以原 ID 续接。回环请求保留前轮内容，正常终态与原生 usage 回到 Host 会话服务。测试不依赖真实账号。
+
+此候选只完成 exec 承载的隔离回归。App Server、模型目录、登录、额度、工具审批以及正常产品默认切换仍需要完成。
