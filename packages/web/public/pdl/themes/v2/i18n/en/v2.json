@@ -2832,6 +2832,13 @@
     "file": {
       "openProject": "Open project file",
       "openLocal": "Open with default application",
+      "openWith": "Choose an application…",
+      "openLocalWithName": "Open with default application · {0}",
+      "revealWindows": "Show in File Explorer",
+      "missing": "The file does not exist.",
+      "denied": "You do not have permission to read this file.",
+      "actionFailed": "The system could not complete this file action.",
+      "noDefaultApplication": "Windows has no default application for this file.",
       "noPreview": "This file type cannot be previewed here",
       "collabEdit": "Collaborative edit"
     },

@@ -6,6 +6,9 @@ export { type ArtworkPixelRegion, copyArtworkPixels } from './artwork-pixel-copy
 export type ContentFileInfo = {
   local: boolean;
   canOpen?: boolean;
+  desktopPlatform?: 'win32';
+  canOpenWith?: boolean;
+  noDefaultApplication?: boolean;
   canReveal?: boolean;
   reason?: string;
   path?: string;
@@ -19,6 +22,7 @@ export type ContentFileInfo = {
   createdAt?: string;
   modifiedAt?: string;
 };
+export type LocalFileAction = 'open' | 'open-with' | 'reveal';
 export type FileActionSource =
   | { kind: 'workspace'; worktreeId: string; path: string }
   | { kind: 'url'; url: string }
@@ -49,7 +53,7 @@ export function fileDownloadUrl(raw: string): string | null {
   if (workspaceFileSourceFromUrl(safe)) url.pathname = '/api/workspace/file/download';
   return url.href;
 }
-export function fileActionUrl(source: FileActionSource, action: 'file-info' | 'reveal' | 'open'): string | null {
+export function fileActionUrl(source: FileActionSource, action: 'file-info' | LocalFileAction): string | null {
   if (source.kind === 'owner') return null;
   if (source.kind === 'workspace')
     return (
@@ -97,11 +101,22 @@ export async function contentFileInfo(source: FileActionSource): Promise<Content
     throw new Error('invalid_file_info');
   return info;
 }
-export async function runContentFileAction(source: FileActionSource, action: 'reveal' | 'open') {
+export async function runContentFileAction(source: FileActionSource, action: LocalFileAction) {
   const url = fileActionUrl(source, action);
   if (!url) throw new Error('local_action_unavailable');
   const response = await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-  if (!response.ok) throw new Error('file_action_failed');
+  if (!response.ok) {
+    const failure = await response.json().catch(() => null);
+    const code =
+      response.status === 404
+        ? 'not_found'
+        : failure?.error === 'access_denied'
+          ? 'access_denied'
+          : failure?.error === 'default_application_unavailable'
+            ? 'default_application_unavailable'
+            : 'file_action_failed';
+    throw new Error(code);
+  }
 }
 
 /** Lazy cards copy the same bytes as an open reader; external sources keep their CORS/credential boundary. */

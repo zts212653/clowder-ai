@@ -9,7 +9,10 @@ import {
   resolveWorkspaceContentRoot,
 } from '../domains/workspace/workspace-content-source-factory.js';
 import { readWorkspaceFileLocations } from '../domains/workspace/workspace-file-locations.js';
-import { resolveWorkspaceAbsolutePath } from '../domains/workspace/workspace-path-resolution.js';
+import {
+  normalizeWindowsDriveLinkPath,
+  resolveWorkspaceAbsolutePath,
+} from '../domains/workspace/workspace-path-resolution.js';
 import {
   getWorktreeRoot,
   resolveWorkspaceFilesystemPath,
@@ -70,11 +73,12 @@ export function registerWorkspaceFileSourceRoutes(
           body.data.path,
           body.data.selectionEpoch,
         );
+      let absolutePath = body.data.path;
       if (!body.data.root && !body.data.worktreeId) {
-        const prepared = await prepareAbsoluteFileDirectory(ownerUserId, body.data.path);
+        absolutePath = normalizeWindowsDriveLinkPath(absolutePath);
+        const prepared = await prepareAbsoluteFileDirectory(ownerUserId, absolutePath);
         if (prepared) return prepared;
       }
-      let absolutePath = body.data.path;
       if (body.data.worktreeId)
         absolutePath = await resolveWorkspaceFilesystemPath(
           (await resolveWorkspaceContentRoot(body.data.worktreeId)).root,

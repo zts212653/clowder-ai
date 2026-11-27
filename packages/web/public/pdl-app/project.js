@@ -2117,13 +2117,22 @@ function bindProject() {
       if (!owner)
         return chatAction('fileOpenPath', { p: data.p }).then(function (result) {
           if (!result || !result.w) {
-            toast(
-              tc(
-                result && result.code === 'connection_required'
-                  ? 'workbench.file.needsConnection'
-                  : 'workbench.file.unreadable',
-              ),
-            );
+            const needsConnection = result?.code === 'connection_required';
+            if (needsConnection && result.root) {
+              dialog({
+                title: tc('workbench.file.needsConnection'),
+                text: tc('workbench.file.newProjectFolderSteps'),
+                doc: {
+                  id: 'workspace-connection-directory',
+                  text: result.root,
+                  acts: [{ label: tc('composerPop.copyPath'), act: 'copy', args: { v: result.root } }],
+                },
+                ok: tc('common.close'),
+                ack: true,
+              });
+            } else {
+              toast(tc(needsConnection ? 'workbench.file.needsConnection' : 'workbench.file.unreadable'));
+            }
             return false;
           }
           rtOpen('panel', projectFileKey(result), { preview: !!d.preview });

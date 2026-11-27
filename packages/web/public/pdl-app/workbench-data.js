@@ -280,9 +280,10 @@ function workbenchModels() {
         info = fileInfo.scope === fileScope ? fileInfo : undefined;
       const file = opened?.file;
       const markdown = !!file && !file.binary && /\.(md|markdown)$/i.test(file.path);
+      const html = !!file && !file.binary && /\.html?$/i.test(file.path);
       const draft = fileEdits[fileScope];
       const isEditing = editing.editMode && editing.isTokenValid && !!draft;
-      const rendered = !isEditing && markdown && ui.fileMode !== 'src';
+      const rendered = !isEditing && (markdown || html) && ui.fileMode !== 'src';
       const mediaKind = file?.binary
         ? ['image', 'video', 'audio'].find((kind) => file.mime.startsWith(`${kind}/`))
         : undefined;
@@ -292,6 +293,7 @@ function workbenchModels() {
       const filePage = file
         ? {
             path: file.absolutePath ?? file.path,
+            copyPath: info?.info?.path ?? file.absolutePath ?? file.path,
             name: file.path.split('/').pop(),
             filePath: file.path,
             worktreeId: opened?.worktreeId,
@@ -301,10 +303,18 @@ function workbenchModels() {
             edit: draft ? { ...draft, inputId: 'file-edit-' + fileScope, conflict: editing.saveError ?? '' } : null,
             body: file.content,
             markdown,
+            textPreview: markdown || html,
+            htmlPreview: html && rendered,
             mode: rendered ? 'render' : 'src',
             binary: file.binary,
             documentEditor,
-            documentFrame: (documentEditor || pluginPreview) && fileParams ? '/workspace-document?' + fileParams : null,
+            documentFrame:
+              fileParams &&
+              (html && rendered
+                ? '/workspace-html?' + fileParams
+                : documentEditor || pluginPreview
+                  ? '/workspace-document?' + fileParams
+                  : null),
             hasBody: !file.binary,
             quote: !file.binary,
             media: mediaKind
@@ -316,7 +326,7 @@ function workbenchModels() {
                   marks: [],
                 }
               : null,
-            fileInfo: file.binary && !mediaKind ? fileInfoVM(file) : null,
+            fileInfo: (file.binary && !mediaKind) || html ? fileInfoVM(file) : null,
             actions: {
               load: info?.load ?? 'loading',
               name: file.path.split('/').pop(),
@@ -324,11 +334,24 @@ function workbenchModels() {
               source: api.file('/api/workspace/file/download?' + fileParams),
               canOpen: !!info?.info?.local && !!info.info.canOpen,
               canReveal: !!info?.info?.local && !!info.info.canReveal,
-              defaultApplication: info?.info?.defaultApplication,
+              openLabel: info?.info?.noDefaultApplication
+                ? { t: 'workbench.file.openWith' }
+                : info?.info?.defaultApplication
+                  ? { t: 'workbench.file.openLocalWithName', args: [info.info.defaultApplication] }
+                  : { t: 'workbench.file.openLocal' },
+              openAction: info?.info?.noDefaultApplication ? 'open-with' : 'open',
+              noDefaultApplication: !!info?.info?.noDefaultApplication,
+              revealLabel: {
+                t: info?.info?.desktopPlatform === 'win32' ? 'workbench.file.revealWindows' : 'control.reveal',
+              },
+              error: info?.actionError && {
+                t: 'workbench.file.' + (info.actionError === 'failed' ? 'actionFailed' : info.actionError),
+              },
+              busy: !!info?.busy,
             },
           }
         : source.openFailed
-          ? { load: 'error' }
+          ? { load: 'error', readError: source.openFailed }
           : null;
 
       return filePage;

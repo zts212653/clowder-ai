@@ -112,6 +112,13 @@ beforeEach(() => {
         changedFiles: [{ path: 'note.md', status: 'M' }],
         diff: 'diff --git a/note.md b/note.md\n--- a/note.md\n+++ b/note.md\n@@ -1 +1 @@\n-old\n+new\n',
       });
+    if (url.pathname === '/api/workspace/resolve-file-source')
+      return response({
+        kind: 'connection-required',
+        root: 'G:\\Design Notes %20',
+        path: 'outside.md',
+        connectionProof: 'fixture-proof',
+      });
     if (url.pathname === '/api/workspace/file') return response(file);
     if (url.pathname.endsWith('/file-info'))
       return response({ ...fileAccess, path: '/project/note.md', filename: 'note.md' });
@@ -383,6 +390,22 @@ it('opens and downloads the same admitted file and only exposes actions granted 
   expect(writes.at(-1)).toEqual({ path: '/api/workspace/file/actions/open?worktreeId=wt&path=note.md', body: {} });
   hook.result.current.state.fileMode = 'src';
   expect(hook.result.current.project().filePage).toMatchObject({ mode: 'src', markdown: true, hasBody: true });
+});
+it('reports the exact directory from an unconnected link and keeps the authorized preview open', async () => {
+  const hook = await ready();
+  await act(() => hook.result.current.action('fileOpen', { p: 'note.md', w: 'wt' }));
+  await waitFor(() => expect(hook.result.current.project().filePage?.filePath).toBe('note.md'));
+  const before = hook.result.current.data.opened;
+
+  const path = '/G:/Design Notes %20/outside.md';
+  await act(async () => {
+    expect(await hook.result.current.action('fileOpenPath', { p: path })).toEqual({
+      code: 'connection_required',
+      root: 'G:\\Design Notes %20',
+    });
+  });
+  expect(writes).toEqual([{ path: '/api/workspace/resolve-file-source', body: { path } }]);
+  expect(hook.result.current.data.opened).toBe(before);
 });
 it('keeps reveal in menuActions and hides denied file operations using the same file-info receipt', async () => {
   fileAccess = { local: true, canOpen: false, canReveal: true };

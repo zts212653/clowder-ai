@@ -9,6 +9,7 @@ import { registerWorktrees } from '../src/domains/workspace/workspace-security.j
 import { uploadsRoutes } from '../src/routes/uploads.js';
 import { workspaceRoutes } from '../src/routes/workspace.js';
 
+const desktopActions = ['darwin', 'win32'].includes(process.platform);
 const human = { host: 'localhost', 'x-cat-cafe-user': 'operator' };
 test('Chinese documents, LICENSE, unknown bytes and scripts keep the same local facts through every entry', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'f309-source-capabilities-'));
@@ -43,10 +44,10 @@ test('Chinese documents, LICENSE, unknown bytes and scripts keep the same local 
       const info = response.json();
       assert.equal(info.local, true, `${name} is a confirmed local object, independently of launch permissions`);
       assert.equal(await realpath(info.path), await realpath(join(root, name)));
-      assert.equal(info.canReveal, process.platform === 'darwin');
+      assert.equal(info.canReveal, desktopActions);
       if (name === 'unknown.bin') assert.equal(info.mime, 'application/octet-stream');
       const launchable = name !== 'run.command' && name !== 'unknown.bin' && name !== 'folder.png';
-      assert.equal(info.canOpen, process.platform === 'darwin' && launchable, `${name} launch capability`);
+      assert.equal(info.canOpen, desktopActions && launchable, `${name} launch capability`);
       facts.push({ path: info.path, mime: info.mime, canOpen: info.canOpen, canReveal: info.canReveal });
     }
     assert.deepEqual(facts[0], facts[1]);
@@ -145,10 +146,12 @@ for (const source of ['upload', 'workspace'] as const) {
       const info = await app.inject({ method: 'GET', url: endpoint(name, 'file-info'), headers: human });
       assert.equal(info.statusCode, 200, info.body);
       assert.equal(info.json().local, true);
-      assert.equal(info.json().canReveal, process.platform === 'darwin');
+      assert.equal(info.json().canReveal, desktopActions);
       assert.equal(info.json().canOpen, false, `${name} must not gain launch capability`);
-      const denied = await app.inject({ method: 'POST', url: endpoint(name, 'open'), headers: human, payload: {} });
-      assert.equal(denied.statusCode, 403);
+      for (const action of ['open', 'open-with']) {
+        const denied = await app.inject({ method: 'POST', url: endpoint(name, action), headers: human, payload: {} });
+        assert.equal(denied.statusCode, 403);
+      }
     }
   });
   for (const media of [

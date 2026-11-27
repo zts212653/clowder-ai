@@ -114,12 +114,12 @@ describe('service worker runtime routes', () => {
 
 describe('next.config frame policy', () => {
   for (const mode of ['development', 'production']) {
-    it(`only allows the workspace document in a same-origin frame in ${mode}`, async () => {
+    it(`only allows the workspace document and HTML preview in same-origin frames in ${mode}`, async () => {
       await withEnv({ NODE_ENV: mode }, async (config) => {
         const rules = await config.headers();
         assert.deepEqual(
           rules.map((rule) => rule.source),
-          ['/:path*', '/workspace-document'],
+          ['/:path*', '/workspace-document', '/workspace-html'],
         );
         const [consoleHeaders, documentHeaders] = rules.map(({ headers }) =>
           Object.fromEntries(headers.map(({ key, value }) => [key, value])),

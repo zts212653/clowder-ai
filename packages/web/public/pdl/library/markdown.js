@@ -25,8 +25,32 @@ function mdLinkTarget(u) {
   if (m) return { k: m[1], v: m[2] };
   if (/^\/thread\/[^/?#]+\/?([?#]|$)/.test(u)) { const a = new URL(u, 'https://pdl.invalid'); return { k: 'thread', v: decodeURIComponent(a.pathname.split('/')[2]), mid: a.searchParams.get('message') || a.searchParams.get('messageId') || '', block: a.searchParams.get('block') || '' }; }
   if (/^https?:\/\//.test(u)) return { k: 'url', v: u };
-  if (/^(\/|\.{1,2}\/|~\/)/.test(u) || /^[\w.@-]+(\/[\w.@()-]+)*\.\w+(:\d+(-\d+)?)?$/.test(u)) return { k: 'file', v: u };
+  if (/^(\/|\.{1,2}\/|~\/|[a-z]:[/\\])/i.test(u) || /^[^:/\\<>]+(\/[^:/\\<>]+)*\.\w+(:\d+(-\d+)?)?$/.test(u)) return { k: 'file', v: u };
   return null;
+}
+
+function mdLinkDestination(s, start) {
+  if (s.startsWith('&lt;', start)) {
+    const end = s.indexOf('&gt;)', start + 4);
+    if (end >= 0 && !s.slice(start, end).includes('\n')) return { url: s.slice(start + 4, end), end: end + 5 };
+    return null;
+  }
+  let depth = 1;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (c === ' ' || c === '\n') break;
+    if (c === '(') depth++;
+    else if (c === ')' && --depth === 0) return { url: s.slice(start, i), end: i + 1 };
+  }
+  return null;
+}
+function mdHrefTarget(url) {
+  const target = mdLinkTarget(mdUnesc(url));
+  if (target?.k !== 'file') return target;
+  // Only Markdown hrefs are URL-encoded. Other locators are already native paths.
+  try { target.v = decodeURIComponent(target.v); } catch { /* Keep a literal percent sign. */ }
+  if (/^\/?[a-z]:[/\\]/i.test(target.v)) target.v = '/' + target.v.replace(/^\//, '').replace(/\\/g, '/');
+  return target;
 }
 
 function mdLinks(s, ph) {
@@ -36,12 +60,12 @@ function mdLinks(s, ph) {
     const b = s.indexOf('](', a); if (b < 0) break;
     const tx = s.slice(a + 1, b);
     if (tx.indexOf('[') >= 0 || tx.indexOf('\n') >= 0 || !tx) { out += s.slice(i, a + 1); i = a + 1; continue; }
-    let d = 1, j = b + 2;
-    for (; j < s.length && d; j++) { const c = s[j]; if (c === '(') d++; else if (c === ')') d--; else if (c === ' ' || c === '\n') break; }
-    const url = d ? null : s.slice(b + 2, j - 1), t = url && mdLinkTarget(url.replace(/&amp;/g, '&'));
+    const destination = mdLinkDestination(s, b + 2), url = destination?.url, j = destination?.end;
+    const t = url && mdHrefTarget(url);
     if (!t) { out += s.slice(i, a + 1); i = a + 1; continue; }
     out += s.slice(i, a);
     const chip = mdRef(url); if (chip) { out += ph(chip); i = j; continue; }
+    t.v = h(t.v);
     out += t.k === 'url' ? ph('<a class="md-ext" href="' + url + '" target="_blank" rel="noopener noreferrer">') + tx + ph('</a>')
       : ph(t.k === 'file' ? '<button type="button" class="cafe-link" data-act="fileOpen" data-v="' + t.v + '" data-tip="' + t.v + '">' : t.mid ? '<button type="button" class="cafe-link mono" data-act="msgJump"' + argAttrs(Object.assign({ t: t.v, mid: t.mid }, t.block ? { block: t.block } : {})) + '>' : '<button type="button" class="cafe-link mono" data-act="thread" data-id="' + t.v + '">') + tx + ph('</button>');
     i = j;
