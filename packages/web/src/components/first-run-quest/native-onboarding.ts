@@ -72,7 +72,7 @@ export function hasNativeIdentityConflict(
 
 /** Registry-generated ACP ids change after creation; the launch descriptor does not. */
 function partnerKey(runtime: RuntimeChoice): string {
-  if (!runtime.acp) return runtime.id;
+  if (!runtime.acp || runtime.acp.agentProvider === runtime.id) return runtime.id;
   const descriptor = JSON.stringify([runtime.acp.command, runtime.acp.startupArgs, runtime.acp.transport ?? 'stdio']);
   let hash = 2166136261;
   for (const char of descriptor) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
@@ -98,9 +98,10 @@ export function recommendNativePartners(
       runtime.acp?.startupArgs,
       runtime.acp?.transport ?? 'stdio',
     ]);
-    // Full descriptor equality prevents short-hash collisions in the local partner index.
-    const key = runtime.acp ? `acp:${encodeURIComponent(descriptor)}` : runtime.id;
-    const discoveryIdentity = runtime.dshDesktop ? 'dsh' : runtime.acp ? descriptor : runtime.id;
+    // Plugin adapters share the same launcher placeholder. Direct ACP keeps its descriptor identity.
+    const sharedLaunch = runtime.acp && runtime.acp.agentProvider !== runtime.id;
+    const key = sharedLaunch ? `acp:${encodeURIComponent(descriptor)}` : runtime.id;
+    const discoveryIdentity = runtime.dshDesktop ? 'dsh' : sharedLaunch ? descriptor : runtime.id;
     if (seen.has(discoveryIdentity)) return [];
     seen.add(discoveryIdentity);
     const form = nativePartnerIdentity(runtime, templates, cats);

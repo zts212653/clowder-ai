@@ -1,5 +1,6 @@
 import {
   AGENT_ACCESS_PLUGIN_ID,
+  type AgentAccessDetection,
   type AgentAccessReadiness,
   type AgentAccessRoleCard,
   type AgentAccessRoleMutation,
@@ -39,7 +40,7 @@ export function registerAgentAccessRoutes(
   }: {
     inventory: Pick<PluginInventoryStore, 'readCurrentAuthority'>;
     runtime: Pick<PluginRuntimeCarrierRouter, 'attemptInvoke'>;
-    agentAdapters?: Pick<ReturnType<typeof createAgentAdapterAccess>, 'detect'>;
+    agentAdapters?: Pick<ReturnType<typeof createAgentAdapterAccess>, 'list' | 'detect'>;
   },
 ) {
   app.get('/api/agent-access/v1/clients', async (request, reply) => {
@@ -60,9 +61,65 @@ export function registerAgentAccessRoutes(
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid Agent access detection request' });
     const { adapterRef, refresh } = parsed.data;
     return adapterRef === undefined
-      ? readDetection(request, reply, access.operator, parsed.data)
+      ? detectForMembers(request, reply, access.operator, parsed.data)
       : detectSelectedAdapter(request, reply, adapterRef, refresh);
   });
+
+  async function detectForMembers(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    operator: string,
+    input: { refresh?: boolean },
+  ) {
+    if (!agentAdapters) return readDetection(request, reply, operator, input);
+    const lifetime = requestLifetime(request, reply);
+    const adapters = agentAdapters;
+    try {
+      const [legacy, active] = await Promise.all([readDetection(request, reply, operator, input), adapters.list()]);
+      if (!active.length) return legacy;
+      const probes = await Promise.all(
+        active.map(async ({ ref }) => {
+          const target = parsePluginAgentRef(ref);
+          const result = target
+            ? await adapters.detect(target, { refresh: input.refresh, signal: lifetime.signal }).catch(() => undefined)
+            : undefined;
+          return { ref, rows: result?.candidates ?? [] };
+        }),
+      );
+      const candidates: AgentAccessDetection['candidates'] = [];
+      const partialFailures = [...(legacy.partialFailures ?? [])];
+      probes.forEach(({ ref, rows }) => {
+        const candidate =
+          rows.find(({ state }) => state.status === 'ready') ??
+          rows.find(({ state }) => state.status === 'login-required') ??
+          rows.find(({ state }) => state.status === 'not-installed');
+        if (!candidate) {
+          partialFailures.push({ id: ref });
+          return;
+        }
+        candidates.push({
+          id: ref,
+          label: candidate.label,
+          clientId: 'acp',
+          installed: candidate.state.status !== 'not-installed',
+          models: [],
+          acp: { agentProvider: ref, command: 'plugin-agent', startupArgs: [] },
+          ...(candidate.state.status === 'login-required'
+            ? { readiness: { status: 'login_required', checkedAt: Date.now() } }
+            : {}),
+        });
+      });
+      if (legacy.readiness.state !== 'ready' && !candidates.length) return legacy;
+      const adapterIds = new Set(candidates.map(({ id }) => id));
+      return {
+        readiness: { state: 'ready' },
+        candidates: [...legacy.candidates.filter(({ id }) => !adapterIds.has(id)), ...candidates],
+        ...(partialFailures.length ? { partialFailures } : {}),
+      };
+    } finally {
+      lifetime.close();
+    }
+  }
 
   async function detectSelectedAdapter(
     request: FastifyRequest,
@@ -96,7 +153,7 @@ export function registerAgentAccessRoutes(
     reply: FastifyReply,
     operator: string,
     input: { refresh?: boolean },
-  ) {
+  ): Promise<AgentAccessDetection & { readiness: AgentAccessReadiness }> {
     const result = await readAgentAccess(request, reply, operator, 'detect', input);
     if ('readiness' in result) return { readiness: result.readiness, candidates: [] };
     const detection = agentAccessDetectionSchema.safeParse(result.value);

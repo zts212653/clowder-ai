@@ -28,6 +28,7 @@ import { apiFetch } from '@/utils/api-client';
 import { digest as filmDigest, project as filmDocument } from '../../../../shared/src/__tests__/video-project.fixtures';
 import { screening as filmScreening } from '../../../../shared/src/__tests__/video-project-screening.fixtures';
 import { chatModels, composerTrigger } from '../chat-models';
+import { detectNativeMembers } from '../member-actions';
 import { request } from '../owner-api';
 import { scriptSources } from '../runtime';
 import { opinionComparison } from '../useFilmBindings';
@@ -8617,6 +8618,89 @@ describe('member detect entry', () => {
       },
     );
   }
+
+  it.each(['sys:1', 'pkg:v2'])('keeps legacy DSH when the Kimi adapter is disabled in %s', async (theme) => {
+    const kimi = 'plugin:official.agent-kimi/kimi';
+    const second = 'plugin:test.second/second';
+    const splitCandidate = (ref: string, label: string) => ({
+      id: ref,
+      label,
+      clientId: 'acp',
+      installed: true,
+      models: [],
+      acp: { agentProvider: ref, command: 'plugin-agent', startupArgs: [] },
+    });
+    const desktop = {
+      id: 'dsh-desktop',
+      label: 'DSH Desktop',
+      clientId: 'acp',
+      installed: true,
+      models: [],
+      dshDesktop: true,
+      acp: { command: 'C:/DSH/resources/runtime/cli/bin/dsh.cmd', startupArgs: ['--profile', 'acp'] },
+    };
+    let enabled = true;
+    const payloads: unknown[] = [];
+    const fetchMock = vi.mocked(apiFetch);
+    const previous = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (path, init) => {
+      if (path === '/api/agent-access/v1/detect') {
+        payloads.push(JSON.parse(String(init?.body)));
+        return Response.json({
+          readiness: { state: 'ready' },
+          candidates: [
+            desktop,
+            ...(enabled ? [splitCandidate(kimi, 'Kimi Code')] : []),
+            splitCandidate(second, 'Other split client'),
+          ],
+        });
+      }
+      if (path === '/api/cats') return Response.json({ cats: [] });
+      if (path === '/api/accounts') return Response.json({ providers: [] });
+      if (path === '/api/cat-templates') return Response.json({ templates: [] });
+      throw new Error(String(path));
+    });
+    const { dom, w } = await detectBoot(
+      ({ journeyId, refresh }) => detectNativeMembers(journeyId, refresh === 'true'),
+      theme,
+    );
+    try {
+      if (theme === 'pkg:v2') {
+        const pack = (await builtinThemes.read('v2')) as { components: Record<string, { js: string[] }> };
+        for (const part of Object.values(pack.components)) {
+          for (const js of part.js) runInContext(js, dom.getInternalVMContext(), { filename: 'v2-component.js' });
+        }
+      }
+      w.eval('go("members")');
+      await w.__settled();
+      expect(w.eval('PACK_LOADED')).toBe(theme === 'pkg:v2' ? 'v2' : null);
+      const entry = w.document.querySelector('[data-entry="members.detect"]') as HTMLElement;
+      expect(entry).not.toBeNull();
+      entry.click();
+      await w.__settled();
+      expect(payloads).toEqual([{ refresh: false }]);
+      expect(w.document.body.textContent).toContain('Kimi Code');
+      expect(w.document.body.textContent).toContain('Other split client');
+      expect(w.document.body.textContent).toContain('DSH Desktop');
+      expect(w.eval('S.nativeSetup.partners.map(p=>p.form.acpAgentProvider)')).toEqual([null, kimi, second]);
+      expect(w.document.querySelector('[data-act="nativeReadinessAction"]')).toBeNull();
+
+      enabled = false;
+      const refresh = w.document.querySelector('[data-act="nativeDetect"]') as HTMLElement;
+      expect(refresh).not.toBeNull();
+      refresh.click();
+      await w.__settled();
+      expect(payloads).toEqual([{ refresh: false }, { refresh: true }]);
+      expect(w.document.body.textContent).not.toContain('Kimi Code');
+      expect(w.document.body.textContent).toContain('Other split client');
+      expect(w.document.body.textContent).toContain('DSH Desktop');
+      expect(w.eval('S.nativeSetup.partners[0].form.acpCommand')).toBe(desktop.acp.command);
+    } finally {
+      if (previous) fetchMock.mockImplementation(previous);
+      else fetchMock.mockReset();
+      dom.window.close();
+    }
+  });
 
   it('finishes from the member page without writing the first-run receipt', async () => {
     const { dom, w, action } = await detectBoot(() => []);

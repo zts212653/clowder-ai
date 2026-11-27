@@ -115,6 +115,35 @@ for (const { id, name, version, archive } of packages) {
       assert.equal(result.candidates[0]?.state.status, 'ready', JSON.stringify(result.candidates[0]?.state));
       assert.match(result.candidates[0].state.version, /^\d+\.\d+\.\d+/);
       t.diagnostic(`Verified the native ${name} CLI version ${result.candidates[0].state.version}.`);
+
+      if (id === 'kimi') {
+        const detectForMembers = () =>
+          app.inject({
+            method: 'POST',
+            url: '/api/agent-access/v1/detect',
+            headers: { host: 'localhost:3004' },
+            payload: { refresh: true },
+          });
+        const memberDetection = await detectForMembers();
+        assert.equal(memberDetection.statusCode, 200, memberDetection.body);
+        assert.equal(memberDetection.json().readiness.state, 'ready');
+        assert.deepEqual(memberDetection.json().candidates, [
+          {
+            id: result.adapterOrigin.ref,
+            label: 'Kimi Code',
+            clientId: 'acp',
+            installed: true,
+            models: [],
+            acp: { agentProvider: result.adapterOrigin.ref, command: 'plugin-agent', startupArgs: [] },
+          },
+        ]);
+        const { plugin: activePlugin } = await manager.get(ref.pluginId);
+        await manager.setEnabled(ref.pluginId, { enabled: false, expectedRevision: activePlugin.lifecycleRevision });
+        assert.deepEqual((await detectForMembers()).json(), {
+          readiness: { state: 'missing', action: 'install' },
+          candidates: [],
+        });
+      }
     },
   );
 }

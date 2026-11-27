@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import Fastify from 'fastify';
 import { registerAgentAccessRoutes } from '../dist/routes/agent-access-routes.js';
 
-async function fixture(t) {
+async function fixture(t, agentAdapters) {
   const app = Fastify();
   t.after(() => app.close());
   const owner = process.env.DEFAULT_OWNER_USER_ID ?? 'owner-user';
@@ -27,6 +27,7 @@ async function fixture(t) {
   });
   registerAgentAccessRoutes(app, {
     inventory: { readCurrentAuthority: async () => authority },
+    agentAdapters,
     runtime: {
       attemptInvoke: async (...args) => {
         calls.push(args);
@@ -91,4 +92,51 @@ test('Agent access refuses a detection result from a replaced package generation
     return { candidates: [{ id: 'from-old-package', label: 'Old', clientId: 'openai', installed: true, models: [] }] };
   });
   assert.deepEqual((await f.request()).json(), { readiness: { state: 'starting' }, candidates: [] });
+});
+
+test('member detection keeps the legacy Desktop descriptor while listing only active split adapters', async (t) => {
+  const kimiRef = 'plugin:official.agent-kimi/kimi';
+  const kimi = { pluginId: 'official.agent-kimi', contributionId: 'kimi' };
+  const failingRef = 'plugin:test.discovery/failing';
+  const calls = [];
+  let enabled = true;
+  const f = await fixture(t, {
+    list: async () => [{ ref: failingRef }, ...(enabled ? [{ ref: kimiRef }] : [])],
+    detect: async (ref, { refresh }) => {
+      calls.push({ ref, refresh });
+      if (ref.pluginId === 'test.discovery') throw new Error('adapter probe failed');
+      assert.deepEqual(ref, kimi);
+      return { candidates: [{ id: 'kimi', label: 'Kimi Code', state: { status: 'ready', version: '2.6.3' } }] };
+    },
+  });
+  const desktop = {
+    id: 'dsh-desktop',
+    label: 'DSH Desktop',
+    clientId: 'acp',
+    installed: true,
+    models: [],
+    dshDesktop: true,
+    dshSetupSupported: true,
+    acp: { command: 'C:/DSH/resources/runtime/cli/bin/dsh.cmd', startupArgs: ['--profile', 'acp'] },
+  };
+  f.setState();
+  f.setInvoke(async () => ({ candidates: [desktop], partialFailures: [{ id: 'legacy-failure' }] }));
+  const result = (await f.request({ refresh: true })).json();
+  assert.deepEqual(result.readiness, { state: 'ready' });
+  assert.deepEqual(result.candidates, [
+    desktop,
+    {
+      id: kimiRef,
+      label: 'Kimi Code',
+      clientId: 'acp',
+      installed: true,
+      models: [],
+      acp: { agentProvider: kimiRef, command: 'plugin-agent', startupArgs: [] },
+    },
+  ]);
+  assert.deepEqual(result.partialFailures, [{ id: 'legacy-failure' }, { id: failingRef }]);
+  assert.ok(calls.some((call) => call.ref.contributionId === 'kimi' && call.refresh));
+  enabled = false;
+  assert.deepEqual((await f.request()).json().candidates, [desktop]);
+  assert.equal(calls.filter((call) => call.ref.contributionId === 'kimi').length, 1);
 });
