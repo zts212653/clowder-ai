@@ -42,11 +42,11 @@ function mergeList<T>(base: T[], ours: T[], server: T[], key: (item: T) => strin
   return [...kept, ...ours.filter((item) => !had.has(key(item)) && !seen.has(key(item)))];
 }
 
-/** This tab's draft over the server's: its words and reply stand; attachments merge against what it last knew. */
+/** Apply this tab's edits over the latest server draft. */
 function mergeDraft(base: ComposerDraft, ours: ComposerDraft, server: ComposerDraft): ComposerDraft {
-  const replyTo = ours.replyTo ?? (base.replyTo ? undefined : server.replyTo);
+  const replyTo = ours.replyTo === base.replyTo ? server.replyTo : ours.replyTo;
   return {
-    text: ours.text,
+    text: ours.text === base.text ? server.text : ours.text,
     images: mergeList(base.images, ours.images, server.images, (file) => file.url),
     contexts: mergeList(base.contexts, ours.contexts, server.contexts, (attachment) => attachment.id),
     ...(replyTo ? { replyTo } : {}),
@@ -80,8 +80,9 @@ export function useServerComposerDraft(input: {
 }) {
   const known = useRef<Known>(new Map());
   const pending = useRef<{ threadId: string; draft: ComposerDraft } | null>(null);
-  // The conversation whose server draft the input shows in full (attachments read back). Until then nothing is written:
-  // the input is not yet what the owner left. Each opening starts unshown; a restore after a switch never counts.
+  const opening = useRef<{ threadId: string; images?: { visible: DraftFile[]; complete: DraftFile[] } }>();
+  // An opening starts unshown. A slow restore can queue edits using the saved attachment descriptors,
+  // and only flushes them if the owner leaves before all attachments are available.
   const shown = useRef<string | null>(null);
   const [restoreRevision, setRestoreRevision] = useState(0);
   const latest = useRef(input);
@@ -91,12 +92,12 @@ export function useServerComposerDraft(input: {
   // while its attachments are read back.
   const show: Show = (id, merged) => {
     if (latest.current.threadId !== id) return;
+    const owner = opening.current;
+    const isCurrent = () => opening.current === owner && latest.current.threadId === id;
     shown.current = null;
-    void Promise.resolve(
-      latest.current.restore({ ...merged, text: latest.current.draft.text }, () => latest.current.threadId === id),
-    ).then(
+    void Promise.resolve(latest.current.restore({ ...merged, text: latest.current.draft.text }, isCurrent)).then(
       () => {
-        if (latest.current.threadId === id) shown.current = id;
+        if (isCurrent()) shown.current = id;
       },
       () => undefined,
     );
@@ -105,15 +106,20 @@ export function useServerComposerDraft(input: {
   const holdWrites = input.holdWrites === true;
   useEffect(() => {
     if (!enabled) return;
-    let live = true;
+    const owner: NonNullable<typeof opening.current> = { threadId };
+    opening.current = owner;
+    const isCurrent = () => opening.current === owner && latest.current.threadId === threadId;
     shown.current = null;
     const opened = JSON.stringify(latest.current.draft);
     const openedRevision = latest.current.revision ?? 0;
-    void apiFetch(draftPath(threadId))
+    // Reopening can race the write flushed on the previous departure.
+    const readDraft = () => apiFetch(draftPath(threadId));
+    const previousWrite = writing.get(threadId);
+    void (previousWrite ? previousWrite.then(() => (isCurrent() ? readDraft() : undefined)) : readDraft())
       .then(async (response) => {
-        if (!response.ok) return;
+        if (!response?.ok) return;
         const body = (await response.json()) as { draft: SavedDraft | null; revision: number };
-        if (!live) return;
+        if (!isCurrent()) return;
         const saved = fromSaved(body.draft);
         known.current.set(threadId, { revision: body.revision, signature: JSON.stringify(saved) });
         const now = latest.current.draft;
@@ -121,18 +127,20 @@ export function useServerComposerDraft(input: {
         const typedSinceOpen = openedRevision !== (latest.current.revision ?? 0) || opened !== JSON.stringify(now);
         const merged = typedSinceOpen ? mergeDraft(JSON.parse(opened) as ComposerDraft, now, saved) : saved;
         if (JSON.stringify(now) !== JSON.stringify(merged)) {
-          // A draft whose attachments can't be read back is as unknown as an unreachable one: nothing overwrites it.
-          const ok = await Promise.resolve(latest.current.restore(merged, () => live)).then(
+          owner.images = { visible: now.images, complete: merged.images };
+          // A draft whose attachments can't be read back is as unknown as an unreachable one.
+          const ok = await Promise.resolve(latest.current.restore(merged, isCurrent)).then(
             () => true,
             () => false,
           );
-          // Only this opening's own failure counts: a later opening may already have read a newer draft.
+          if (!isCurrent()) return;
+          owner.images = undefined;
           if (!ok) {
-            if (live) known.current.delete(threadId);
+            known.current.delete(threadId);
+            if (pending.current?.threadId === threadId) pending.current = null;
             return;
           }
         }
-        if (!live) return;
         shown.current = threadId;
         // The restore can queue attachment state in React. Save the committed composer on its next render.
         setRestoreRevision((revision) => revision + 1);
@@ -140,19 +148,24 @@ export function useServerComposerDraft(input: {
       // An unreachable draft leaves this tab's composer as it is; the next edit writes again.
       .catch(() => undefined);
     return () => {
-      live = false;
+      if (opening.current === owner) opening.current = undefined;
     };
   }, [threadId, enabled]);
   useEffect(() => {
     const server = known.current.get(threadId);
-    // Nothing to write until the server's draft is known and shown, or while the composer shows exactly that draft.
+    const restoreImages = opening.current?.images;
     // Keep any previous committed edit queued while the native IME owns its candidate text.
-    if (!enabled || !server || shown.current !== threadId || holdWrites) return;
-    if (server.signature === signature) {
+    if (!enabled || !server || holdWrites || (!restoreImages && shown.current !== threadId)) return;
+    const draft = JSON.parse(signature) as ComposerDraft;
+    if (restoreImages) {
+      draft.images = mergeList(restoreImages.visible, draft.images, restoreImages.complete, (file) => file.url);
+    }
+    if (server.signature === (restoreImages ? JSON.stringify(draft) : signature)) {
       pending.current = null;
       return;
     }
-    pending.current = { threadId, draft: JSON.parse(signature) as ComposerDraft };
+    pending.current = { threadId, draft };
+    if (restoreImages) return;
     const timer = setTimeout(() => flush(pending, known.current, show), 600);
     return () => clearTimeout(timer);
   }, [threadId, enabled, signature, holdWrites, restoreRevision]);
@@ -164,8 +177,14 @@ export function useServerComposerDraft(input: {
   }, []);
   return {
     /** A send the server took: that conversation's saved draft is gone too. */
-    clear: (sent: string) =>
-      void saveDraft(sent, { text: '', images: [], contexts: [] }, known.current, show).catch(() => undefined),
+    clear: (sent: string) => {
+      if (opening.current?.threadId === sent) {
+        opening.current = undefined;
+        shown.current = sent;
+      }
+      if (pending.current?.threadId === sent) pending.current = null;
+      void saveDraft(sent, { text: '', images: [], contexts: [] }, known.current, show).catch(() => undefined);
+    },
   };
 }
 

@@ -14,7 +14,7 @@ export async function renameThreadTitleOptimistic(threadId: string, title: strin
   if (!pending) {
     const confirmed = useChatStore.getState().threads.find((thread) => thread.id === threadId)?.title ?? '';
     const needsSnapshot = Object.values(sidebar.pendingThreadCommands).some(
-      (command) => command.threadId === threadId && command.field === 'title',
+      (command) => command.threadId === threadId && command.field === 'title' && command.confirmed,
     );
     pending = { confirmed, needsSnapshot, tail: Promise.resolve() };
     pendingTitles.set(threadId, pending);
@@ -38,8 +38,8 @@ export async function renameThreadTitleOptimistic(threadId: string, title: strin
       const projection = useSidebarProjectionStore.getState();
       const canonicalTitle = projection.rows.find((row) => row.id === threadId)?.title;
       if (sequence.needsSnapshot && (projection.refreshing || canonicalTitle !== sequence.confirmed)) {
-        // Let a matching canonical snapshot retire the receipt. A stale or failed read leaves it visible.
-        projection.beginSidebarCommand(threadId, 'title', sequence.confirmed);
+        // Keep the receipt visible until a read started after the PATCH can reconcile it.
+        projection.beginSidebarCommand(threadId, 'title', sequence.confirmed, true);
         void invalidateSidebarProjection();
       } else {
         projection.failSidebarCommand(commandId);

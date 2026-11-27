@@ -227,6 +227,13 @@ async function downloadImages(urls: readonly string[], blocks: readonly MessageC
   );
 }
 
+/** Keep newly picked files visible as saved draft attachments finish loading. */
+export function fitRestoredComposerAttachments(restored: File[], added: File[]) {
+  const keptAdded = added.slice(0, 5);
+  const files = [...restored.slice(0, 5 - keptAdded.length), ...keptAdded];
+  return { files, omitted: restored.length + added.length - files.length };
+}
+
 function subscribeDraftOwner(onChange: () => void): () => void {
   const stopText = subscribeThreadDrafts(onChange),
     stopContext = subscribeContextAttachmentDrafts(onChange);
@@ -590,7 +597,7 @@ function ChatBinding({
     syncReplyDraftToStorage(threadId, reply);
   }, [drafting, threadId, contexts, reply]);
   // The same draft is kept on the server, so a refresh or another device continues it.
-  const restoreDraft: Parameters<typeof useServerComposerDraft>[0]['restore'] = (saved, current) => {
+  const restoreDraft: Parameters<typeof useServerComposerDraft>[0]['restore'] = (saved, isCurrent) => {
     setInput(saved.text);
     setContexts(saved.contexts);
     const state = useChatStore.getState();
@@ -609,9 +616,9 @@ function ChatBinding({
       saved.images.map((block) => block.url),
       saved.images.filter((block) => block.type === 'file'),
     ).then((files) => {
-      if (!current()) return;
+      if (!isCurrent()) return;
       files.forEach((file, i) => draftFile.set(file, saved.images[i]));
-      setImages((all) => {
+      const fitFor = (all: File[]) => {
         const currentUrls = new Set(all.flatMap((file) => draftFile.get(file)?.url ?? []));
         const restored = files.filter(
           (_, i) => !previousUrls.has(saved.images[i].url) || currentUrls.has(saved.images[i].url),
@@ -620,8 +627,19 @@ function ChatBinding({
           const url = draftFile.get(file)?.url;
           return !url || (!previousUrls.has(url) && !savedUrls.has(url));
         });
-        return [...restored, ...added].slice(0, 5);
-      });
+        return fitRestoredComposerAttachments(restored, added);
+      };
+      const displayed = current.current.images;
+      const fitted = fitFor(displayed);
+      setImages((all) => (all === displayed ? fitted.files : fitFor(all).files));
+      if (fitted.omitted) {
+        useToastStore.getState().addToast({
+          type: 'info',
+          title: '输入框最多保留 5 个附件',
+          message: `已优先保留新选附件，本次有 ${fitted.omitted} 个附件未加入。`,
+          duration: 6000,
+        });
+      }
     });
   };
   // Words, places and a quote handed to this conversation's input from elsewhere (a file, a work, a recall).

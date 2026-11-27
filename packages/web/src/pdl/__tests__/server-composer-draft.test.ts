@@ -653,3 +653,95 @@ it('persists the owner attachment and reply edits made during a slow draft resto
     contentBlocks: [fileA, fileB, { type: 'context_attachment', attachment: nextQuote }],
   });
 });
+
+it('keeps edits and unopened attachments when leaving during restore and reopening before the write returns', async () => {
+  const loadFirst = Promise.withResolvers<void>();
+  const acceptEdit = Promise.withResolvers<void>();
+  let serverDraft = { text: 'old text', contentBlocks: [fileA], revision: 1 };
+  vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+    if (!String(path).includes('/t1/')) return Response.json({ draft: null, revision: 0 });
+    if (init?.method === 'PUT') {
+      const body = JSON.parse(String(init.body)) as typeof serverDraft;
+      await acceptEdit.promise;
+      serverDraft = { text: body.text, contentBlocks: body.contentBlocks, revision: 2 };
+      return Response.json({ draft: serverDraft });
+    }
+    return Response.json({ draft: serverDraft, revision: serverDraft.revision });
+  });
+
+  const empty = { text: '', images: [], contexts: [] };
+  const { hook, restore, state } = mount(empty);
+  let restorations = 0;
+  restore.mockImplementation((saved) => {
+    restorations += 1;
+    state.draft = restorations === 1 ? { ...saved, images: [] } : saved;
+    hook.rerender();
+    return restorations === 1 ? loadFirst.promise : undefined;
+  });
+  await waitFor(() => expect(state.draft.text).toBe('old text'));
+  state.draft = { ...state.draft, text: 'new user words' };
+  hook.rerender();
+  await flushed();
+  expect(writes()).toEqual([]);
+
+  state.threadId = 't2';
+  state.draft = empty;
+  hook.rerender();
+  await flushed();
+  state.threadId = 't1';
+  state.draft = { ...empty, text: 'new user words' };
+  hook.rerender();
+  await flushed();
+  expect(state.draft.text).toBe('new user words');
+  expect(writes()).toHaveLength(1);
+  expect(JSON.parse(String(writes()[0][2]))).toMatchObject({
+    expectedRevision: 1,
+    text: 'new user words',
+    contentBlocks: [fileA],
+  });
+  acceptEdit.resolve();
+  await waitFor(() => expect(state.draft.images).toEqual([fileA]));
+  loadFirst.resolve();
+  await flushed();
+  expect(state.draft.text).toBe('new user words');
+});
+
+it('keeps only new edits when another device cleared a draft during an interrupted restore', async () => {
+  let clearedElsewhere = false;
+  vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+    if (!String(path).includes('/t1/')) return Response.json({ draft: null, revision: 0 });
+    if (init?.method === 'PUT') {
+      if (!clearedElsewhere) {
+        clearedElsewhere = true;
+        return Response.json({ code: 'DRAFT_REVISION_MISMATCH', actualRevision: 2 }, { status: 409 });
+      }
+      return Response.json({ draft: { revision: 3 } });
+    }
+    return clearedElsewhere
+      ? Response.json({ draft: null, revision: 2 })
+      : Response.json({ draft: { text: 'old text', replyTo: 'old reply', contentBlocks: [fileA] }, revision: 1 });
+  });
+
+  const empty = { text: '', images: [], contexts: [] };
+  const { hook, restore, state } = mount(empty);
+  const download = Promise.withResolvers<void>();
+  restore.mockImplementation((saved) => {
+    state.draft = { ...saved, images: [] };
+    hook.rerender();
+    return saved.images.length ? download.promise : undefined;
+  });
+  await waitFor(() => expect(state.draft.text).toBe('old text'));
+  state.draft = { ...state.draft, contexts: [quote] };
+  hook.rerender();
+  await flushed();
+  state.threadId = 't2';
+  state.draft = empty;
+  hook.rerender();
+  await waitFor(() => expect(writes()).toHaveLength(2));
+  expect(JSON.parse(String(writes()[1][2]))).toEqual({
+    expectedRevision: 2,
+    text: '',
+    contentBlocks: [{ type: 'context_attachment', attachment: quote }],
+  });
+  download.resolve();
+});

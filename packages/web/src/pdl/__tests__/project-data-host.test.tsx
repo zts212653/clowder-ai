@@ -6,7 +6,12 @@ import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { request } from '../owner-api';
-import { ComposerInputBinding, FirstMessageBinding, useThreadDraftMarker } from '../PdlAppHost';
+import {
+  ComposerInputBinding,
+  FirstMessageBinding,
+  fitRestoredComposerAttachments,
+  useThreadDraftMarker,
+} from '../PdlAppHost';
 import { type ProjectBindings, ProjectDataBinding } from '../ProjectDataBinding';
 import type { useServerComposerDraft } from '../useServerComposerDraft';
 import { fixtureData, fixtureUi } from './chat-fixture';
@@ -459,4 +464,16 @@ it('marks the departing conversation using its own draft when switching A to B t
   } finally {
     useChatStore.setState({ setThreadHasDraft: original });
   }
+});
+
+it('keeps a file picked during slow restore when five saved attachments finish loading', () => {
+  const restored = Array.from({ length: 5 }, (_, index) => new File(['old'], `restored-${index}.png`));
+  const picked = new File(['new'], 'new-picked.png');
+  const result = fitRestoredComposerAttachments(restored, [picked]);
+  expect(result.files.map((file) => file.name)).toEqual([
+    ...restored.slice(0, 4).map((file) => file.name),
+    picked.name,
+  ]);
+  expect(result.files.at(-1)).toBe(picked);
+  expect(result.omitted).toBe(1);
 });
