@@ -696,14 +696,16 @@ interface QueueAdmissionAttempt {
   readonly entry?: QueueEntry;
 }
 
-async function* readQueueRouteDuringPreparation(
-  route: AsyncIterable<AgentMessage>,
+async function* readQueueRouteDuringPreparation<T>(
+  route: AsyncIterable<T>,
   signal: AbortSignal,
   isPreparing: () => boolean,
-): AsyncIterable<AgentMessage> {
+): AsyncIterable<T> {
   const iterator = route[Symbol.asyncIterator]();
-  const { promise: deadline, reject } = Promise.withResolvers<never>();
-  const onTimeout = () => reject(signal.reason);
+  let onTimeout!: () => void;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    onTimeout = () => reject(signal.reason);
+  });
   signal.addEventListener('abort', onTimeout, { once: true });
   try {
     while (true) {
