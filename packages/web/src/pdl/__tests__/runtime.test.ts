@@ -3934,6 +3934,60 @@ describe('unmodified runtime and project chat bindings', () => {
       dom.window.close();
     }
   });
+  it('opens the memory workbench from the official plugin sidebar entry', async () => {
+    const plugin = {
+      pluginId: 'official.memory',
+      displayName: 'Memory',
+      artifact: 'installed',
+      intent: 'enabled',
+      actions: {},
+      source: { kind: 'catalog' },
+    };
+    const fragment = {
+      inserts: [
+        {
+          id: 'workbench',
+          anchor: 'nav.cafe',
+          at: 'inside',
+          part: 'kids',
+          after: 'memory',
+          node: { title: 'Memory Plugin', icon: 'puzzle', open: { page: 'memoryPlugin' } },
+        },
+      ],
+    };
+    const owners = ownerData();
+    const { dom, w, errors } = await boot(
+      undefined,
+      undefined,
+      undefined,
+      {},
+      (port) => {
+        const original = port.get;
+        port.get = async (path, params) =>
+          path === '/api/plugin-manager/plugins'
+            ? { plugins: [plugin] }
+            : path === '/api/plugin-manager/pdl'
+              ? { fragments: { [plugin.pluginId]: fragment } }
+              : original(path, params);
+      },
+      {},
+      owners,
+    );
+    try {
+      w.document.querySelector('[data-entry="memory"]').click();
+      await w.__settled();
+      expect(w.location.hash).toBe('#memory');
+      expect(w.document.querySelector('[data-view="cafe.memory"]')).not.toBeNull();
+      w.document.querySelector('[data-entry="plugin:official.memory/workbench"]').click();
+      await w.__settled();
+      expect(w.location.hash).toBe('#memoryPlugin');
+      expect(w.document.querySelector('[data-view="cafe.memory"]')).not.toBeNull();
+      expect(w.document.querySelector('[data-view="page.ext"]')).toBeNull();
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      dom.window.close();
+    }
+  });
   it('keeps a profile opening edit in the declared dialog until its actual writer succeeds and shows its rejection there', async () => {
     let finish!: () => void;
     const project = {

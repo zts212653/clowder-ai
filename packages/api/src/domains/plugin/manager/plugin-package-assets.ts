@@ -17,6 +17,7 @@ import {
   inventoryIdentity,
   objectIcon,
   pluginIconAsset,
+  readStaticPackageReadme,
   readVerifiedConsole,
   readVerifiedIcon,
   readVerifiedReadme,
@@ -180,6 +181,20 @@ export class PluginManagerPackageAssetService
       : undefined;
     if (installed) {
       return this.cached(this.readmeCache, installed.packageDigest, async () => {
+        if (this.options.packages.readInstalledStaticFile) {
+          const file = await this.options.packages
+            .readInstalledStaticFile(installed.packageDigest, () => 'README.md')
+            .catch((error) => {
+              throw new PluginManagerPackageAssetError(
+                'INVALID_ASSET',
+                'installed plugin README could not be verified',
+                {
+                  cause: error,
+                },
+              );
+            });
+          return readStaticPackageReadme(file, inventoryIdentity(installed));
+        }
         const located = await this.options.packages.resolveInstalledPackage(installed.packageDigest).catch((error) => {
           throw new PluginManagerPackageAssetError('INVALID_ASSET', 'installed plugin package could not be verified', {
             cause: error,

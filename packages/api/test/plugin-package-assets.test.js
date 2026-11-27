@@ -91,7 +91,7 @@ async function fixture({ icon, iconBytes, readme, catalogOnly = false }) {
     fetchArchive: async () => archive.bytes,
     validateManifest: metadataContractRuntime().validateManifest,
   });
-  return { archive, assets, entry, packageManifest, root };
+  return { archive, assets, entry, locator, packageManifest, root };
 }
 
 describe('F202 Plugin Manager package assets', () => {
@@ -138,6 +138,19 @@ describe('F202 Plugin Manager package assets', () => {
       catalogOnly: true,
     });
 
+    assert.equal(await assets.readReadme(packageManifest.pluginId), readme);
+  });
+
+  it('reads the installed README without staging the plugin executable tree', async () => {
+    const readme = '# Installed package';
+    const { assets, locator, packageManifest } = await fixture({
+      icon: { type: 'svg', src: 'assets/icon.svg' },
+      iconBytes: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'),
+      readme,
+    });
+    locator.resolveInstalledPackage = () => {
+      throw new Error('executable staging must not run for documentation');
+    };
     assert.equal(await assets.readReadme(packageManifest.pluginId), readme);
   });
 

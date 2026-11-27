@@ -5,7 +5,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { type PluginIconSpec, type PluginPdlFragment, pluginPdlSchema } from '@cat-cafe/shared';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { parse as parseYaml } from 'yaml';
-import type { VerifiedPluginPackage } from '../../external-runtime/types.js';
+import type { VerifiedPluginPackage, VerifiedPluginStaticFile } from '../../external-runtime/types.js';
 import type { PluginPackageRecord } from '../../host-inventory/types.js';
 import { type PluginManagerPackageAsset, PluginManagerPackageAssetError } from './contract.js';
 
@@ -209,6 +209,20 @@ export async function readVerifiedReadme(
   if (readmePath === undefined) return undefined;
   const bytes = await readBoundedStableFile(readmePath, MAX_PLUGIN_README_BYTES);
   await located.verifyIntegrity();
+  return decodePackageReadme(bytes);
+}
+
+export function readStaticPackageReadme(file: VerifiedPluginStaticFile, expected: PackageIdentity): string | undefined {
+  if (!packageIdentityMatches(file.manifest, expected)) {
+    throw new PluginManagerPackageAssetError('INVALID_ASSET', 'package README identity does not match Host truth');
+  }
+  return file.bytes === undefined ? undefined : decodePackageReadme(file.bytes);
+}
+
+function decodePackageReadme(bytes: Uint8Array): string {
+  if (bytes.byteLength > MAX_PLUGIN_README_BYTES) {
+    throw new PluginManagerPackageAssetError('INVALID_ASSET', 'plugin README exceeds its size limit');
+  }
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch {

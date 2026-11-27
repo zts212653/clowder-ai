@@ -138,16 +138,9 @@ export function useSettingsBindings() {
     const { plugin } = await request<PluginManagerDetailResponse>(
       `/api/plugin-manager/plugins/_local/${encodeURIComponent(id)}`,
     );
-    const documentation =
-      plugin.artifact === 'installed'
-        ? await request<PluginManagerDocumentationResponse>(
-            `/api/plugin-manager/plugins/${encodeURIComponent(id)}/documentation`,
-          )
-        : {};
     data.current = {
       ...data.current,
       pluginDetails: { ...data.current.pluginDetails, [id]: plugin },
-      pluginDocumentation: { ...data.current.pluginDocumentation, [id]: documentation },
     };
     data.current = {
       ...data.current,
@@ -283,6 +276,15 @@ export function useSettingsBindings() {
         await readPlugins();
       } else if (name === 'settingsPluginDetailRead') {
         await readPlugin(args.id);
+      } else if (name === 'settingsPluginDocumentationRead') {
+        const id = args.id;
+        const documentation = await request<PluginManagerDocumentationResponse>(
+          `/api/plugin-manager/plugins/${encodeURIComponent(id)}/documentation`,
+        );
+        data.current = {
+          ...data.current,
+          pluginDocumentation: { ...data.current.pluginDocumentation, [id]: documentation },
+        };
       } else if (name === 'settingsPluginToolsRead') {
         const { tools } = await request<PluginManagerContributionToolsResponse>(
           `/api/plugin-manager/plugins/${encodeURIComponent(args.id)}/contributions/tools`,
