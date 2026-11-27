@@ -89,6 +89,7 @@ describe('Account-scoped Kimi quota route (/api/accounts/:profileId/kimi/quota)'
 
     const seenEnvs = [];
     let pendingGate = null;
+    let onProbeStarted = () => {};
     const app = Fastify();
     t.after(async () => {
       await app.close();
@@ -96,7 +97,10 @@ describe('Account-scoped Kimi quota route (/api/accounts/:profileId/kimi/quota)'
     await app.register(accountsRoutes, {
       kimiQuotaSampler: async (launchEnv) => {
         seenEnvs.push({ ...launchEnv });
-        if (pendingGate) await pendingGate;
+        if (pendingGate) {
+          onProbeStarted();
+          await pendingGate;
+        }
         const observedAt = Date.UTC(2026, 10, 16, 15, 0, 0);
         return {
           observedAt,
@@ -168,13 +172,16 @@ describe('Account-scoped Kimi quota route (/api/accounts/:profileId/kimi/quota)'
     pendingGate = new Promise((resolve) => {
       releaseGate = resolve;
     });
+    const probeStarted = new Promise((resolve) => {
+      onProbeStarted = resolve;
+    });
     const inFlightPromise = app.inject({
       method: 'POST',
       url: '/api/accounts/kimi-b/kimi/quota',
       headers: { 'x-cat-cafe-user': 'dev' },
       payload: { projectPath: configRoot },
     });
-    await new Promise((r) => setTimeout(r, 15));
+    await probeStarted;
     writeCatalogAccount(configRoot, 'kimi-b', {
       authType: 'oauth',
       clientId: 'kimi',

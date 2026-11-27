@@ -7438,9 +7438,15 @@ async function initializeApi(
   });
   await app.register(featureDocDetailRoutes);
   const { createAgentAccessCodexLoginDriver } = await import('./domains/plugin/agent-access/codex-login.js');
+  const { createAccountAdapterQuotaDispatch } = await import('./routes/accounts-kimi-quota.js');
   await app.register(accountsRoutes, {
     agentRoleWrite,
     loginDriver: createAgentAccessCodexLoginDriver(pluginRuntime.inventoryStore, pluginRuntime.supervisor),
+    kimiQuotaDispatch: createAccountAdapterQuotaDispatch(
+      process.env.CAT_CAFE_DATA_DIR ?? join(homedir(), '.cat-cafe'),
+      'kimi',
+      pluginRuntime.agentAdapters.quota,
+    ),
   });
   await app.register(claudeRescueRoutes);
   await app.register(auditRoutes, { threadStore });

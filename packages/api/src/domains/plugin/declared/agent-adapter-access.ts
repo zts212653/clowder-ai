@@ -31,6 +31,7 @@ type AgentAdapterAccountScope = {
   readonly accountRevision: string;
   readonly credentialVersion: string;
 };
+type AdapterCatalogIdentity = Pick<Extract<PluginPackageProvenance, { kind: 'catalog' }>, 'catalogId' | 'packageName'>;
 
 export type AgentAdapterRuntimeGrant = (request: {
   readonly pluginId: string;
@@ -71,6 +72,7 @@ export function createAgentAdapterAccess(
       lifetime?: AbortSignal;
       catId?: string;
       account?: AgentAdapterAccountScope;
+      catalog?: AdapterCatalogIdentity;
       hostSession?: AgentAdapterSessionScope;
     },
   ) {
@@ -85,6 +87,14 @@ export function createAgentAdapterAccess(
     if (!active.declaration.operations.includes(action))
       throw new ExternalPluginRuntimeError('PROTOCOL_VIOLATION', 'Agent adapter did not declare the requested action');
     const provenance = authority?.packageRecord?.provenance;
+    if (
+      options?.catalog &&
+      (provenance?.kind !== 'catalog' ||
+        provenance.catalogId !== options.catalog.catalogId ||
+        provenance.packageName !== options.catalog.packageName)
+    ) {
+      throw new ExternalPluginRuntimeError('INSTANCE_NOT_RUNNABLE', 'Agent adapter is outside the selected catalog');
+    }
     const nativeRuntime = grantNativeRuntime?.({
       ...ref,
       packageDigest: active.instance.packageDigest,
@@ -171,7 +181,7 @@ export function createAgentAdapterAccess(
     },
     async quota(
       ref: { pluginId: string; contributionId: string },
-      options?: { signal?: AbortSignal; account?: AgentAdapterAccountScope },
+      options?: { signal?: AbortSignal; account?: AgentAdapterAccountScope; catalog?: AdapterCatalogIdentity },
     ) {
       const { active, response } = await read(ref, 'quota', {}, options);
       const quota = parseAgentAdapterQuota(response);

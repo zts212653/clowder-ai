@@ -20,7 +20,7 @@ Architecture cell 为 identity-session 与插件运行时。Map delta 是把具�
 ### 两个仓的交付物
 
 - [Host PR #2030](https://github.com/zts212653/clowder-ai/pull/2030) 持有安装与执行通用接口、激活实例、调用权限、角色目录、会话与回执，并保留从旧入口切换和回退的机制。
-- [插件 PR #258](https://github.com/zts212653/clowder-ai-plugins/pull/258) 提供 Kimi 与 Codex exec 候选的源码、规范声明、版本和独立归档。Codex App Server、Claude Code、DSH、AGY 仍待完善。Host 通过公共契约调用归档。
+- [插件 PR #258](https://github.com/zts212653/clowder-ai-plugins/pull/258) 提供 Kimi、Codex exec、Claude Code print 模式候选的源码、规范声明、版本和独立归档。Host 通过公共契约调用归档。Codex App Server、Claude Code SDK 与工具、DSH 和 AGY 的独立接入仍待完善。
 - 两仓用确切 SHA、兼容范围和归档摘要组成待验收版本。开发候选用本地归档装进隔离 Host。目录上架和发布各自按仓库流程。
 - 当前 Worker 与 Host 属于同一 OS 进程。独立 Worker 管理包调用生命周期，不提供操作系统权限隔离。首批 native 执行端口只给经过 Host 核验的受信包和调用。第三方 ACP 声明沿现有路径。扩展到其他可执行插件须另证隔离与授权边界。
 
@@ -116,7 +116,9 @@ flowchart LR
 
 隔离 HTTP 回归使用实际归档完成显式 adapterRef 检测和已选账号的额度读取。Host 标注检测结果的实例和摘要；无原生端口时 HTTP 503，并保留适配器报告的原因。默认 Host 组合仅向受信目录安装、完整标识匹配的 Kimi 和 Codex 归档授予版本探测。探测只运行 Host 解析的命令和固定的 `--version`，使用独立临时 HOME。目录用例以隔离目录快照安装实际摘要，通过默认组合读出真实版本，并验证同一份本地上传归档得不到该权限。线上目录上架与本地隔离目录测试分别验收。
 
-额度路由测试将账号选择器和 PTY 输出夹具注入隔离 Host。额度请求核对账号归属和凭据代际，再投影插件观测值并持久化。停用后两个入口均拒绝，旧探测调用为零。默认 Host 承载层已补账号范围内的 PTY 端口，要求官方目录来源、准确的包身份及固定的 `/usage` 输入。Host 在采集前后重新核验账号及凭据代际，插件负责解析额度。实际 PTY 测试使用本地终端夹具验证回显与取消。正式额度路由仍走存量实现，待接持久化切换和账号选择，并完成真实账号额度验收。
+Kimi 的额度路由使用 Host 数据目录中的版本化切换记录，项目请求继续按现有规则选择及校验账号。缺少记录或处于 legacy、validated 时走旧额度入口。active 使用完整插件引用与官方目录来源，并在结果中返回实际实例、摘要、生命周期代际和 active 状态。包停用、来源不符或状态文件无效时返回不可用。归档测试走现有额度 URL，使用隔离目录安装和 PTY 输出夹具。真实 Windows PTY 另以本地夹具验证回显与取消。
+
+默认 Host 的额度端口要求准确的包身份及固定的 `/usage` 输入，采集前后重新核验账号和凭据代际，插件负责解析额度。切换状态的写入仍待接入以会话验收为前提的迁移命令，正式实例维持存量入口。真实账号额度待验。
 
 原生会话回归 `packages/api/test/plugin-agent-kimi-native-archive.test.js` 使用实际 Kimi CLI 和回环模型端点。旧 CLI 先生成会话与回复，并写旧格式 L0 指纹。指纹一致时归档复用同一原生会话及历史。角色编辑后，严格续接在模型请求前失败，允许回退的请求报告 `l0_resume_fresh_start` 并开启新会话。新 L0 只进入 system，新指纹单独登记，旧记录保持。工作目录和账号仅进入 Host 授权上下文。测试在独立 HOME 中运行，模型回复和账号使用本地夹具。
 
@@ -127,3 +129,7 @@ flowchart LR
 `packages/api/test/plugin-agent-codex-exec-archive.test.js` 由真实 Manager 装载 `official.agent-codex` 本地归档，检测 Codex CLI 0.169.1。两次受控进程调用经 stdin 提交，使用独立 CODEX_HOME 与回环 Responses 端点。第一次取得原生会话 ID，释放 Host 会话后以原 ID 续接。回环请求保留前轮内容，正常终态与原生 usage 回到 Host 会话服务。测试不依赖真实账号。
 
 此候选只完成 exec 承载的隔离回归。App Server、模型目录、登录、额度、工具审批以及正常产品默认切换仍需要完成。
+
+### Claude Code print 模式候选
+
+原生 CLI 2.1.327 在隔离目录中使用回环 Anthropic Messages。适配器以 stdin 传提示，通过 Host 交付的身份文件设置 system，以原生 ID 续聊并投影文本、用量和终态。第二轮模型请求保留首轮消息及回复，身份仍位于 system。当前候选关闭工具和 MCP。SDK、交互承载、正常产品接线、模型目录、登录及额度仍待验收。

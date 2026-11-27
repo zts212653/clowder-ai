@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { resolveKimiQuotaExecutionOwner } from '../config/kimi-quota-identity.js';
 import { readKimiQuota, recordKimiQuota } from '../config/kimi-quota-store.js';
 import type { createAgentAdapterAccess } from '../domains/plugin/declared/agent-adapter-access.js';
+import { readActiveAgentAdapter } from '../domains/plugin/declared/agent-adapter-cutover.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { resolveAccountProjectRoot } from './accounts-project-root.js';
 import { type CodexUsageItem, probeKimiQuotaViaCli } from './quota.js';
@@ -14,10 +15,18 @@ export type KimiAccountQuotaSampler = (
 ) => Promise<{ observedAt: number; items: CodexUsageItem[] }>;
 
 type AccountAdapterQuota = ReturnType<typeof createAgentAdapterAccess>['quota'];
-type AccountAdapterRef = Parameters<AccountAdapterQuota>[0];
+type SelectedAdapter = NonNullable<Awaited<ReturnType<typeof readActiveAgentAdapter>>>;
 export interface KimiAccountQuotaDispatch {
-  resolveRef(root: string, accountRef: string): AccountAdapterRef | undefined;
+  resolve(): Promise<SelectedAdapter | undefined>;
   quota: AccountAdapterQuota;
+}
+
+export function createAccountAdapterQuotaDispatch(
+  dataDir: string,
+  client: string,
+  quota: AccountAdapterQuota,
+): KimiAccountQuotaDispatch {
+  return { resolve: () => readActiveAgentAdapter(dataDir, client), quota };
 }
 
 const defaultKimiAccountQuotaSampler: KimiAccountQuotaSampler = async (launchEnv) => {
@@ -35,7 +44,7 @@ export async function queryKimiAccountQuota(
   root: string,
   ref: string,
   sample: KimiAccountQuotaSampler = defaultKimiAccountQuotaSampler,
-  adapter?: { ref: AccountAdapterRef; quota: AccountAdapterQuota },
+  adapter?: SelectedAdapter & { quota: AccountAdapterQuota },
 ) {
   const owner = resolveKimiQuotaExecutionOwner(root, ref);
   if (!owner) throw new Error('kimi_quota_account_required');
@@ -44,6 +53,7 @@ export async function queryKimiAccountQuota(
   const result = adapter
     ? await adapter.quota(adapter.ref, {
         account: { projectRoot: root, accountRef: ref, accountRevision, credentialVersion },
+        catalog: adapter.catalog,
       })
     : undefined;
   const { observedAt, items } = result
@@ -66,7 +76,7 @@ export async function queryKimiAccountQuota(
   return {
     accountRef: ref,
     ...(kimiQuota ? { kimiQuota } : {}),
-    ...(result ? { adapterOrigin: result.binding } : {}),
+    ...(result ? { adapterOrigin: { ...result.binding, cutoverState: 'active' as const } } : {}),
   };
 }
 
@@ -83,16 +93,16 @@ export function registerKimiQuotaRoutes(
     const root = await resolveAccountProjectRoot(parsed.data.projectPath);
     if (!root) return reply.code(400).send({ error: 'Invalid project path' });
     const { profileId } = request.params as { profileId: string };
-    const ref = dispatch?.resolveRef(root, profileId);
-    const key = JSON.stringify([root, profileId, ref]);
     try {
+      const selected = await dispatch?.resolve();
+      const key = JSON.stringify([root, profileId, selected]);
       let query = pending.get(key);
       if (!query) {
         query = queryKimiAccountQuota(
           root,
           profileId,
           sample,
-          dispatch && ref ? { ref, quota: dispatch.quota } : undefined,
+          dispatch && selected ? { ...selected, quota: dispatch.quota } : undefined,
         );
         pending.set(key, query);
       }
@@ -103,9 +113,12 @@ export function registerKimiQuotaRoutes(
       }
     } catch (error) {
       const code = error instanceof Error ? error.message : '';
-      return reply
-        .code(code === 'kimi_quota_credential_changed' ? 409 : 503)
-        .send({ error: code.startsWith('kimi_quota_') ? code : 'kimi_quota_reading_unavailable' });
+      return reply.code(code === 'kimi_quota_credential_changed' ? 409 : 503).send({
+        error:
+          code.startsWith('kimi_quota_') || code === 'agent_adapter_cutover_unavailable'
+            ? code
+            : 'kimi_quota_reading_unavailable',
+      });
     }
   });
 }
