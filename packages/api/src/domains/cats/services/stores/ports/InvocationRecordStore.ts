@@ -79,6 +79,8 @@ export interface InvocationRecord {
   userId: string;
   /** Associated user message ID (null = message not yet written, needs compensation) */
   userMessageId: string | null;
+  /** Exact primary Queue claim owned by this execution attempt. */
+  queueClaimId?: string;
   targetCats: CatId[];
   intent: 'execute' | 'ideate';
   status: InvocationStatus;
@@ -145,6 +147,10 @@ export interface UpdateInvocationInput {
   expectedStatus?: InvocationStatus;
   /** CAS guard for a source binding, including an explicitly unbound null snapshot. */
   expectedUserMessageId?: string | null;
+  /** Bound only on the transition into running. Omission clears the previous attempt's claim. */
+  queueClaimId?: string;
+  /** CAS guard for the exact attempt observed by owner recovery. */
+  expectedQueueClaimId?: string | null;
   /** CAS guard: update only if usageByCat is missing or an empty object. Returns null on mismatch. */
   expectedUsageByCatAbsent?: boolean;
   /** F8: Per-cat token usage (key = catId) */
@@ -323,6 +329,8 @@ export class InvocationRecordStore implements IInvocationRecordStore {
       return null;
     }
     if (input.expectedUserMessageId !== undefined && record.userMessageId !== input.expectedUserMessageId) return null;
+    if (input.expectedQueueClaimId !== undefined && (record.queueClaimId ?? null) !== input.expectedQueueClaimId)
+      return null;
     if (
       input.expectedUsageByCatAbsent === true &&
       record.usageByCat !== undefined &&
@@ -341,6 +349,8 @@ export class InvocationRecordStore implements IInvocationRecordStore {
       // The receipt proves one specific execution attempt. A queued/failed
       // record reclaimed for a new attempt must not inherit the old proof.
       delete record.executionStartedAt;
+      if (input.queueClaimId) record.queueClaimId = input.queueClaimId;
+      else delete record.queueClaimId;
     } else if (input.executionStartedAt !== undefined) {
       record.executionStartedAt = input.executionStartedAt;
     }

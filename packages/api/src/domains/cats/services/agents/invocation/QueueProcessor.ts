@@ -5897,6 +5897,7 @@ export class QueueProcessor {
       const claimedInvocation = await invocationRecordStore.update(invocationId, {
         status: 'running',
         expectedStatus: expectedInvocationStatus,
+        ...(entry.claimId ? { queueClaimId: entry.claimId } : {}),
         ...(expectedInvocationStatus === 'failed' ? { error: '' } : {}),
       });
       if (claimedInvocation === null) {

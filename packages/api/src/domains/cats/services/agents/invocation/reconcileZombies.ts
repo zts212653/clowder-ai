@@ -33,6 +33,7 @@ export interface ZombieRecord {
   catId: CatId | null;
   recordStatus: 'running';
   recordUpdatedAt: number;
+  expectedQueueClaimId?: string | null;
   reason: 'owner_lease_stale_provider_absent';
 }
 
@@ -43,7 +44,7 @@ type QueueConvergedHandler = (info: { threadId: string; userId: string; removedE
 async function convergeZombieQueueEntry(
   deps: ReconcileZombieDeps,
   record: { threadId: string; userId: string; userMessageId?: string | null },
-  zombie: Pick<ZombieRecord, 'invocationId' | 'reason'>,
+  zombie: ZombieRecord,
   log: NonNullable<ReconcileZombieDeps['log']>,
 ): Promise<{ converged: number; errors: number }> {
   const { invocationQueue: queue, canConvergeQueue, onQueueConverged } = deps;
@@ -58,7 +59,12 @@ async function convergeZombieQueueEntry(
           (entry.status === 'claimed' || entry.status === 'processing') && entry.payload.messageId === messageId,
       );
     for (const entry of stale) {
-      if (canConvergeQueue?.() === false) break;
+      if (zombie.expectedQueueClaimId) {
+        if (entry.status !== 'claimed' || entry.claimId !== zombie.expectedQueueClaimId) continue;
+      } else if (canConvergeQueue?.() === false) {
+        // Older parent records have no exact claim receipt.
+        break;
+      }
       const removed = await queue.removeProcessedAcrossUsersDurable(
         record.threadId,
         entry.id,
@@ -203,7 +209,16 @@ async function processZombie(
       status: 'failed',
       error: 'zombie_record_detected',
       expectedStatus: 'running',
+      ...(zombie.expectedQueueClaimId !== undefined ? { expectedQueueClaimId: zombie.expectedQueueClaimId } : {}),
     });
+    const current = updated ?? (await deps.invocationRecordStore.get(zombie.invocationId));
+    if (
+      current &&
+      zombie.expectedQueueClaimId !== undefined &&
+      (current.queueClaimId ?? null) !== zombie.expectedQueueClaimId
+    ) {
+      return { reconciled: false, alreadyTerminal: false, taskProgressCleared: 0, queueConverged: 0, errors: 0 };
+    }
     if (!updated) {
       // Cloud R15 P1: CAS returned null — record is missing OR already non-running.
       // If a concurrent reconcile already flipped it to terminal, that path's
@@ -217,7 +232,6 @@ async function processZombie(
       // race) where the record is STILL running. Mis-classifying that as
       // alreadyTerminal silently drops a real zombie; the next sweep will re-surface
       // it but we should at least count it as transient error so monitors can flag.
-      const current = await deps.invocationRecordStore.get(zombie.invocationId);
       if (current === null || current === undefined) {
         log.info(
           { invocationId: zombie.invocationId, reason: zombie.reason },

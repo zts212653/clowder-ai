@@ -338,6 +338,82 @@ for (const replacementTiming of ['before sweep', 'during record update']) {
   });
 }
 
+it('reaps the old claim when the same member has claimed a different input', async (t) => {
+  const h = await settlingQueue(t, { pauseBeforeChild: true });
+  const old = h.queue.list(h.threadId, h.userId)[0];
+  const otherInput = canonicalTestQueueInput({
+    threadId: h.threadId,
+    userId: h.userId,
+    kind: 'conversation_input',
+    ownerAuthProvenance: 'strict',
+    sourceId: 'other-replacement-input',
+    content: 'Other input',
+    targetCats: [h.catId],
+    intent: 'execute',
+  });
+  const other = await h.queue.send(
+    h.messageStore,
+    canonicalTestMessageInput({
+      threadId: h.threadId,
+      userId: h.userId,
+      catId: null,
+      content: otherInput.content,
+      mentions: [h.catId],
+      timestamp: Date.now(),
+      deliveryStatus: 'queued',
+    }),
+    otherInput,
+  );
+  h.processor.releaseExactTerminalExecutionOwner(h.threadId, [h.catId], h.parentId);
+  assert.ok(h.invocationTracker.tryStartThread(h.threadId, h.catId, h.userId, [], 'other-parent'));
+  const otherEntryId = other.entries[0].id;
+  assert.ok(
+    await h.queue.claimExactAppend(h.threadId, h.userId, otherEntryId, h.queue.snapshotRevision(h.threadId, h.userId), [
+      h.catId,
+    ]),
+  );
+  const reaper = queueOwnerReaper(h);
+  assert.equal((await reaper.runOnce()).reaped, 1);
+  assert.equal((await h.invocationRecordStore.get(h.parentId)).status, 'failed');
+  assert.equal(h.queue.getEntrySnapshot(h.threadId, h.userId, old.id), null);
+  assert.equal(h.invocationTracker.getExecutionId(h.threadId, h.catId), 'other-parent');
+  assert.equal(h.queue.getEntrySnapshot(h.threadId, h.userId, otherEntryId)?.status, 'claimed');
+  h.resumeProducer();
+  assert.match((await h.lateAdmissionRejected).message, /owner mismatch/);
+});
+
+it('rejects the old token when replacement claims the row at the deletion call', async (t) => {
+  const h = await settlingQueue(t, { pauseBeforeChild: true });
+  const old = h.queue.list(h.threadId, h.userId)[0];
+  h.processor.releaseExactTerminalExecutionOwner(h.threadId, [h.catId], h.parentId);
+  const remove = h.queue.removeProcessedAcrossUsersDurable.bind(h.queue);
+  let replacement;
+  const mocked = t.mock.method(h.queue, 'removeProcessedAcrossUsersDurable', async (...args) => {
+    assert.equal(args[5]?.claimId, old.claimId);
+    assert.equal(await h.queue.rollbackProcessingDurable(h.threadId, old.id, old.claimId), true);
+    assert.ok(h.invocationTracker.tryStartThread(h.threadId, h.catId, h.userId, [], 'replacement-parent'));
+    replacement = await h.queue.claimExactAppend(
+      h.threadId,
+      h.userId,
+      old.id,
+      h.queue.snapshotRevision(h.threadId, h.userId),
+      [h.catId],
+    );
+    assert.ok(replacement);
+    const result = await remove(...args);
+    assert.equal(result, null);
+    return result;
+  });
+  const sweep = await queueOwnerReaper(h).runOnce();
+  assert.equal(sweep.reaped, 1);
+  assert.equal(sweep.errors, 0);
+  assert.equal(mocked.mock.callCount(), 1);
+  assert.equal(h.queue.getEntrySnapshot(h.threadId, h.userId, old.id)?.claimId, replacement.claimId);
+  assert.equal(h.invocationTracker.getExecutionId(h.threadId, h.catId), 'replacement-parent');
+  h.resumeProducer();
+  assert.match((await h.lateAdmissionRejected).message, /owner mismatch/);
+});
+
 it('owner sweep recovers an orphan without interrupting a successful Queue settlement in the same cat slot', async (t) => {
   const h = await settlingQueue(t);
   const { invocationId: orphanId } = await h.invocationRecordStore.create({

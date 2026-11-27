@@ -94,7 +94,8 @@ return {'created', ARGV[1]}
  * ARGV[4] = expectedUserId (matches snapshot used to derive KEYS[2])
  * ARGV[5] = expectedUsageByCatAbsent ("1" if usageByCat must be missing/empty)
  * ARGV[6] = expectedUserMessageId (JSON string/null, or empty for no binding guard)
- * ARGV[7..N] = field/value pairs to HSET (always includes updatedAt)
+ * ARGV[7] = expectedQueueClaimId (JSON string/null, or empty for no attempt guard)
+ * ARGV[8..N] = field/value pairs to HSET (always includes updatedAt)
  *
  * Returns:
  *   1  = success
@@ -124,6 +125,13 @@ if ARGV[6] ~= '' then
   if expectedSource == cjson.null then
     if currentSource ~= '' then return 0 end
   elseif currentSource ~= expectedSource then return 0 end
+end
+
+if ARGV[7] ~= '' then
+  local expectedClaim = cjson.decode(ARGV[7])
+  local currentClaim = redis.call('HGET', KEYS[1], 'queueClaimId') or ''
+  if expectedClaim == cjson.null then expectedClaim = '' end
+  if currentClaim ~= expectedClaim then return 0 end
 end
 
 -- F194 Phase B (cloud R13 P1 #2): KEYS[2] is derived from JS-side snapshot of
@@ -163,7 +171,7 @@ end
 
 -- Apply field/value pairs
 local fields = {}
-for i = 7, #ARGV, 2 do
+for i = 8, #ARGV, 2 do
   fields[#fields + 1] = ARGV[i]
   fields[#fields + 1] = ARGV[i + 1]
 end
@@ -367,6 +375,7 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
         before.userId,
         input.expectedUsageByCatAbsent === true ? '1' : '',
         input.expectedUserMessageId === undefined ? '' : JSON.stringify(input.expectedUserMessageId),
+        input.expectedQueueClaimId === undefined ? '' : JSON.stringify(input.expectedQueueClaimId),
         ...pairs,
       )) as number;
 
@@ -386,6 +395,7 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     const pairs: string[] = [];
     pairs.push('updatedAt', String(Date.now()));
     if (input.status !== undefined) pairs.push('status', input.status);
+    if (input.status === 'running') pairs.push('queueClaimId', input.queueClaimId ?? '');
     if (successfulCatIds !== undefined) pairs.push('successfulCatIds', JSON.stringify(successfulCatIds));
     if (input.userMessageId !== undefined) pairs.push('userMessageId', input.userMessageId ?? '');
     if (input.error !== undefined) pairs.push('error', input.error);

@@ -325,6 +325,7 @@ export class InvocationOwnerReaper {
       catId: (targetCats[0] as CatId | undefined) ?? null,
       recordStatus: 'running',
       recordUpdatedAt: probe.record?.updatedAt ?? candidate.startedAt,
+      expectedQueueClaimId: probe.record?.queueClaimId ?? null,
       reason: 'owner_lease_stale_provider_absent',
     };
     try {
