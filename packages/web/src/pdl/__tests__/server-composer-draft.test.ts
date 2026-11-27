@@ -480,3 +480,41 @@ it('edits made while an earlier write is still resolving its conflict are writte
     { expectedRevision: 6, text: 'B', contentBlocks: [fileB] },
   ]);
 });
+
+it('flushes a requested reload using the latest text and keeps the saved attachment', async () => {
+  const before = { text: 'base', images: [fileA], contexts: [] };
+  vi.mocked(apiFetch).mockImplementation(async (_path, init) =>
+    init?.method
+      ? Response.json({ draft: { revision: 5 } })
+      : Response.json({ draft: { text: before.text, contentBlocks: [fileA] }, revision: 4 }),
+  );
+  const { hook, state } = mount({ text: '', images: [], contexts: [] });
+  await waitFor(() => expect(state.draft).toEqual(before));
+  const after = { ...before, text: '刚编辑的文字\nsecond line' };
+  state.draft = after;
+  hook.rerender();
+  await flushed();
+
+  expect(await hook.result.current.persistForReload(after)).toBe(true);
+  expect(writes()).toEqual([
+    [
+      'PUT',
+      '/api/threads/t1/composer-draft',
+      JSON.stringify({ expectedRevision: 4, text: after.text, contentBlocks: [fileA] }),
+    ],
+  ]);
+});
+
+it('refuses reload if the visible draft could not be saved', async () => {
+  vi.mocked(apiFetch).mockImplementation(async (_path, init) =>
+    init?.method ? new Response(null, { status: 503 }) : Response.json({ draft: null, revision: 0 }),
+  );
+  const { hook, state } = mount({ text: '', images: [], contexts: [] });
+  await flushed();
+  state.draft = { ...state.draft, text: 'keep this in the composer' };
+  hook.rerender();
+  await flushed();
+
+  expect(await hook.result.current.persistForReload(state.draft)).toBe(false);
+  expect(writes()).toHaveLength(1);
+});

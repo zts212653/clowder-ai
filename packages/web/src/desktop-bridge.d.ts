@@ -45,7 +45,10 @@ interface DesktopUpdateSettings {
   autoCheck: boolean;
 }
 
+type DesktopInterfaceReloadStatus = 'ready' | 'attachment' | 'draft' | 'busy';
+
 interface DesktopBridge {
+  onPrepareInterfaceReload?: (prepare: () => Promise<DesktopInterfaceReloadStatus>) => () => void;
   onStatus(callback: (message: string) => void): () => void;
   onUpdatePrompt(callback: (prompt: DesktopUpdatePromptPayload) => void): () => void;
   onUpdateProgress(callback: (progress: DesktopUpdateProgressPayload | null) => void): () => void;

@@ -194,3 +194,27 @@ describe('desktop preload update bridge', () => {
     assert.throws(() => bridge.setUpdateAutoCheck('false'), /invalid/i);
   });
 });
+
+test('answers a native reload probe only through a port in the top-level app window', async () => {
+  const origin = 'http://localhost:5342';
+  const rendererWindow = { location: { origin }, localStorage: { getItem: () => 'v2' } };
+  rendererWindow.top = rendererWindow;
+  const options = { argv: ['app.exe', `--cat-cafe-app-origin=${origin}`], rendererWindow };
+  const { bridge, ipcRenderer, sent } = loadBridge(options);
+  const channel = 'desktop-interface-reload:prepare';
+  const unsubscribe = bridge.onPrepareInterfaceReload(async () => 'attachment');
+  const messages = [];
+  const port = { postMessage: (data) => messages.push(data), close: () => messages.push('closed') };
+  await ipcRenderer.listeners(channel)[0]({ ports: [port] });
+
+  assert.deepEqual(messages, ['attachment', 'closed']);
+  assert.deepEqual(sent, []);
+  unsubscribe();
+  assert.equal(ipcRenderer.listenerCount(channel), 0);
+
+  rendererWindow.top = {};
+  assert.equal(loadBridge(options).bridge.onPrepareInterfaceReload, undefined);
+  rendererWindow.top = rendererWindow;
+  rendererWindow.location.origin = 'https://example.com';
+  assert.equal(loadBridge(options).bridge.onPrepareInterfaceReload, undefined);
+});

@@ -61,6 +61,7 @@
     "files": [
       "app-identity.js",
       "desktop-update-menu.js",
+      "interface-reload.js",
       "lifecycle-diagnostics.js",
       "app-lifecycle.js",
       "desktop-update-runtime.js",

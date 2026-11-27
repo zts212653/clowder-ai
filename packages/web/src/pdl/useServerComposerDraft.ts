@@ -155,6 +155,24 @@ export function useServerComposerDraft(input: {
     return () => window.removeEventListener('pagehide', leave);
   }, []);
   return {
+    async persistForReload(expected: ComposerDraft) {
+      const signature = JSON.stringify(expected);
+      await Promise.all(writing.values());
+      const saved = known.current.get(threadId);
+      if (latest.current.threadId !== threadId || JSON.stringify(latest.current.draft) !== signature) return false;
+      // An untouched, empty composer has nothing local to lose while the opening read is pending.
+      if (!enabled || (!saved && isEmpty(expected))) return isEmpty(expected);
+      if (!saved || shown.current !== threadId) return false;
+      if (saved.signature !== signature) {
+        pending.current = null;
+        await saveDraft(threadId, expected, known.current, show);
+      }
+      return (
+        latest.current.threadId === threadId &&
+        JSON.stringify(latest.current.draft) === signature &&
+        known.current.get(threadId)?.signature === signature
+      );
+    },
     /** A send the server took: that conversation's saved draft is gone too. */
     clear: (sent: string) =>
       void saveDraft(sent, { text: '', images: [], contexts: [] }, known.current, show).catch(() => undefined),

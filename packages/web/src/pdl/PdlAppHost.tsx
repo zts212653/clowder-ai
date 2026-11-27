@@ -69,6 +69,7 @@ import {
   getContextAttachmentDraft,
   getThreadDraft,
   hasPendingThreadDraft,
+  persistThreadDraftText,
   subscribeContextAttachmentDrafts,
   subscribeThreadDrafts,
   syncContextAttachmentDraftToStorage,
@@ -186,7 +187,7 @@ import type { ChatPort, ChatUiState, SidebarSnapshot } from './types';
 import { useConsoleCommandBindings } from './useConsoleCommandBindings';
 import { useBrakeBindings } from './useOpsBindings';
 import { useReplyBindings } from './useReplyBindings';
-import { type DraftFile, useServerComposerDraft } from './useServerComposerDraft';
+import { type ComposerDraft, type DraftFile, useServerComposerDraft } from './useServerComposerDraft';
 
 const confirmRouting: RoutingConfirmation = (request) => window.clowderChat.confirm('routingRedirect', request);
 
@@ -899,6 +900,55 @@ function ChatBinding({
   replyCurrent.current = replyOutput;
   const current = useRef(data);
   current.current = data;
+  const reloadActivity = useRef(false);
+  reloadActivity.current = preparingImages || Object.keys(sendingThreads).length > 0;
+  useEffect(() => {
+    const subscribe = window.desktopBridge?.onPrepareInterfaceReload;
+    if (!drafting || !subscribe) return;
+    let composing: EventTarget | null = null;
+    const start = (event: CompositionEvent) => {
+      composing = event.target;
+    };
+    const end = () => {
+      composing = null;
+    };
+    document.addEventListener('compositionstart', start, true);
+    document.addEventListener('compositionend', end, true);
+    const locallyHeldFile = () =>
+      [...threadImageDrafts].some(([id, files]) => files.some((file) => id === 'default' || !draftFile.has(file)));
+    const read = (): ComposerDraft => ({
+      text: ui.current.draft!['chat-input'],
+      images: current.current.images.flatMap((file) => draftFile.get(file) ?? []),
+      contexts: current.current.contexts,
+      ...(current.current.reply ? { replyTo: current.current.reply.id } : {}),
+    });
+    const unsubscribe = subscribe(async () => {
+      if (composing || reloadActivity.current) return 'busy';
+      if (locallyHeldFile()) return 'attachment';
+      const threadId = current.current.threadId;
+      const draft = read();
+      try {
+        if (!persistThreadDraftText(threadId, draft.text)) return 'draft';
+        if (threadId !== 'default' && !(await serverDraft.current?.persistForReload(draft))) return 'draft';
+      } catch {
+        return 'draft';
+      }
+      if (locallyHeldFile()) return 'attachment';
+      if (
+        composing ||
+        reloadActivity.current ||
+        current.current.threadId !== threadId ||
+        JSON.stringify(read()) !== JSON.stringify(draft)
+      )
+        return 'busy';
+      return 'ready';
+    });
+    return () => {
+      unsubscribe();
+      document.removeEventListener('compositionstart', start, true);
+      document.removeEventListener('compositionend', end, true);
+    };
+  }, [drafting]);
   // A send the server took clears the draft of the conversation it came from, wherever the owner is now.
   const clearSentDraft = (sent: string) => {
     if (sent === 'default') {

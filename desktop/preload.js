@@ -16,7 +16,9 @@ const appOrigin = process.argv
 // Preload runs before the web application: seed only a missing/invalid desktop
 // preference, so first launch paints v2 without overriding a later classic choice.
 // The splash page and other origins/subframes must not receive this preference.
-if (appOrigin && typeof window !== 'undefined' && window.top === window && window.location.origin === appOrigin) {
+const isAppWindow =
+  appOrigin && typeof window !== 'undefined' && window.top === window && window.location.origin === appOrigin;
+if (isAppWindow) {
   try {
     const key = 'cat-cafe:shell-presentation';
     const preference = window.localStorage.getItem(key);
@@ -33,6 +35,22 @@ if (appOrigin && typeof window !== 'undefined' && window.top === window && windo
 
 contextBridge.exposeInMainWorld('desktopBridge', {
   apiOrigin,
+  ...(isAppWindow
+    ? {
+        onPrepareInterfaceReload: (prepare) => {
+          const listener = async (event) => {
+            const [port] = event.ports;
+            try {
+              port.postMessage(await prepare());
+            } finally {
+              port.close();
+            }
+          };
+          ipcRenderer.on('desktop-interface-reload:prepare', listener);
+          return () => ipcRenderer.removeListener('desktop-interface-reload:prepare', listener);
+        },
+      }
+    : {}),
   onStatus: (callback) => {
     const listener = (_event, message) => callback(message);
     ipcRenderer.on('splash-status', listener);

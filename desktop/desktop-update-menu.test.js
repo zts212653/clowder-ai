@@ -176,3 +176,31 @@ test('native tray wiring selects packaged platform assets and preserves Windows 
     assert.equal(decodedPath, platform === 'darwin' ? expected : undefined);
   }
 });
+
+test('Windows tray offers an explicit interface reload next to Show', () => {
+  for (const platform of ['win32', 'darwin']) {
+    let entries;
+    let reloads = 0;
+    createDesktopTrayResult({
+      platform,
+      Menu: createMenu(),
+      Tray: class {
+        setToolTip() {}
+        setContextMenu(menu) {
+          entries = menu.template;
+        }
+        on() {}
+      },
+      getMainWindow: () => null,
+      onReloadInterface: () => {
+        reloads += 1;
+      },
+    });
+    const index = entries.findIndex((item) => item.label === '\u91cd\u65b0\u52a0\u8f7d\u754c\u9762');
+    assert.equal(index, platform === 'win32' ? 1 : -1);
+    if (index >= 0) {
+      entries[index].click();
+      assert.equal(reloads, 1);
+    }
+  }
+});

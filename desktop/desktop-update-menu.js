@@ -63,6 +63,7 @@ function createDesktopTrayResult({
   iconPath,
   getMainWindow,
   onManualUpdate,
+  onReloadInterface,
   onQuit,
   showAbout,
 }) {
@@ -77,6 +78,18 @@ function createDesktopTrayResult({
     tray.setContextMenu(
       Menu.buildFromTemplate([
         { label: 'Show Clowder AI', click: () => presentWindow(getMainWindow()) },
+        ...(platform === 'win32' && onReloadInterface
+          ? [
+              {
+                label: '重新加载界面',
+                click: () => {
+                  const window = getMainWindow();
+                  presentWindow(window);
+                  void onReloadInterface(window);
+                },
+              },
+            ]
+          : []),
         { type: 'separator' },
         { label: 'About', click: showAbout },
         { label: 'Check for Updates', click: onManualUpdate },

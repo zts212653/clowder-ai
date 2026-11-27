@@ -1,4 +1,15 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, net, session, shell, Notification } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  Menu,
+  dialog,
+  ipcMain,
+  MessageChannelMain,
+  net,
+  session,
+  shell,
+  Notification,
+} = require('electron');
 const path = require('node:path');
 const { resolveProjectRootFromDir } = require('./project-root');
 const { installationIdentity, isInstallationShutdownRequest } = require('./installation-lifecycle');
@@ -25,6 +36,7 @@ const { createShutdownController } = require('./shutdown-controller');
 const { DESKTOP_APP_ID } = require('./app-identity');
 const { createDesktopUpdateRuntime } = require('./desktop-update-runtime');
 const { ensureValidMacInstallLocation } = require('./mac-install-location');
+const { createInterfaceReloadHandler } = require('./interface-reload');
 const { createWindowRecoveryController } = require('./window-recovery');
 const { decideWindowClose } = require('./window-close-policy');
 const { createLifecycleLogger } = require('./lifecycle-diagnostics');
@@ -276,6 +288,7 @@ app.on('ready', async () => {
     electron: require('electron'),
     getMainWindow: getPresentableMainWindow,
     onManualUpdate: checkForUpdatesManually,
+    onReloadInterface: createInterfaceReloadHandler({ dialog, MessageChannelMain }),
     onQuit: () => requestQuit('tray'),
     showAbout,
   });
