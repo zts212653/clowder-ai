@@ -339,7 +339,10 @@ interface DrainRequestOptions {
   continuationAdmission?: AutomaticAdmission;
 }
 
-type ProcessingSlotReservation = PrestartRetirementReservation & { automaticAdmission?: AutomaticAdmission };
+type ProcessingSlotReservation = PrestartRetirementReservation & {
+  automaticAdmission?: AutomaticAdmission;
+  producerInFlight?: true;
+};
 
 export type PrestartRetirementOutcome = 'retired' | 'state_changed' | 'terminalization_failed';
 
@@ -2678,6 +2681,16 @@ export class QueueProcessor {
     return this.deps.queue.hasPendingForCat(threadId, catId, { userId });
   }
 
+  /** A retained reservation can outlive the execute promise while provider teardown is unconfirmed. */
+  hasActiveQueueProducer(threadId: string, userId: string, catId: string, invocationId: string): boolean {
+    const reservation = this.processingSlots.get(QueueProcessor.slotKey(threadId, catId));
+    return (
+      reservation?.producerInFlight === true &&
+      reservation.userId === userId &&
+      reservation.invocationId === invocationId
+    );
+  }
+
   /** Process-local producer ownership, optionally fenced to one parent invocation. */
   hasProcessingSlotReservation(threadId: string, catId: string, invocationId?: string): boolean {
     return invocationId === undefined
@@ -4118,7 +4131,8 @@ export class QueueProcessor {
       }
     }
 
-    void this.executeEntry(
+    reservation.producerInFlight = true;
+    const completion = this.executeEntry(
       entry,
       reservation,
       executionTargetCats,
@@ -4178,6 +4192,9 @@ export class QueueProcessor {
         this.signalDeliveryBatchDone(entry.threadId, 'failed');
       },
     );
+    void completion.finally(() => {
+      delete reservation.producerInFlight;
+    });
     return true;
   }
 
