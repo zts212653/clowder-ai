@@ -1,15 +1,5 @@
-const {
-  app,
-  BrowserWindow,
-  Menu,
-  dialog,
-  ipcMain,
-  MessageChannelMain,
-  net,
-  session,
-  shell,
-  Notification,
-} = require('electron');
+const electron = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, session, shell, Notification } = electron;
 const path = require('node:path');
 const { resolveProjectRootFromDir } = require('./project-root');
 const { installationIdentity, isInstallationShutdownRequest } = require('./installation-lifecycle');
@@ -285,10 +275,10 @@ app.on('ready', async () => {
   const showAbout = () => showAboutDialog({ app, dialog, onManualUpdate: checkForUpdatesManually });
   lifecycle('tray-create-requested');
   const trayResult = createNativeDesktopTrayResult({
-    electron: require('electron'),
+    electron,
     getMainWindow: getPresentableMainWindow,
     onManualUpdate: checkForUpdatesManually,
-    onReloadInterface: createInterfaceReloadHandler({ dialog, MessageChannelMain }),
+    onReloadInterface: createInterfaceReloadHandler({ dialog, MessageChannelMain: electron.MessageChannelMain }),
     onQuit: () => requestQuit('tray'),
     showAbout,
   });
