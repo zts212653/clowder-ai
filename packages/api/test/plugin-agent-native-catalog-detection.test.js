@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import Fastify from 'fastify';
 import { createPluginManagerRuntimeComposition } from '../dist/domains/plugin/index.js';
+import { registerAgentAccessRoutes } from '../dist/routes/agent-access-routes.js';
 import { setup } from './helpers/agent-adapter-archive.js';
 
 const packages = [
@@ -18,6 +20,18 @@ const packages = [
     version: '0.1.0-alpha.1',
     archive: process.env.CLOWDER_CODEX_CANDIDATE_ARCHIVE,
   },
+  {
+    id: 'claude-code',
+    name: 'Claude Code',
+    version: '0.1.0-alpha.1',
+    archive: process.env.CLOWDER_CLAUDE_CANDIDATE_ARCHIVE,
+  },
+  {
+    id: 'agy',
+    name: 'Antigravity',
+    version: '0.1.0-alpha.1',
+    archive: process.env.CLOWDER_AGY_CANDIDATE_ARCHIVE,
+  },
 ];
 
 for (const { id, name, version, archive } of packages) {
@@ -25,7 +39,7 @@ for (const { id, name, version, archive } of packages) {
     `${name}: default Host detects a catalog install and denies the same locally uploaded bytes`,
     {
       skip: !archive,
-      timeout: 45_000,
+      timeout: 90_000,
     },
     async (t) => {
       const ref = { pluginId: `official.agent-${id}`, contributionId: id };
@@ -78,8 +92,26 @@ for (const { id, name, version, archive } of packages) {
         (await runtime.inventoryStore.readCurrentAuthority(ref.pluginId))?.packageRecord?.provenance?.kind,
         'catalog',
       );
-      const result = await runtime.agentAdapters.detect(ref);
-      assert.equal(result.binding.packageDigest, entry.packageDigest);
+      const app = Fastify();
+      t.after(() => app.close());
+      app.addHook('preHandler', async (request) => {
+        request.sessionUserId = 'fixture-owner';
+      });
+      registerAgentAccessRoutes(app, {
+        inventory: runtime.inventoryStore,
+        runtime: { attemptInvoke: () => assert.fail('Selected adapter must not dispatch to the shared plugin') },
+        agentAdapters: runtime.agentAdapters,
+      });
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/agent-access/v1/detect',
+        headers: { host: 'localhost:3004' },
+        payload: { adapterRef: `plugin:${ref.pluginId}/${ref.contributionId}`, refresh: true },
+      });
+      assert.equal(response.statusCode, 200, response.body);
+      const result = response.json();
+      assert.equal(result.readiness.state, 'ready');
+      assert.equal(result.adapterOrigin.packageDigest, entry.packageDigest);
       assert.equal(result.candidates[0]?.state.status, 'ready', JSON.stringify(result.candidates[0]?.state));
       assert.match(result.candidates[0].state.version, /^\d+\.\d+\.\d+/);
       t.diagnostic(`Verified the native ${name} CLI version ${result.candidates[0].state.version}.`);

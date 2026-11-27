@@ -20,7 +20,7 @@ Architecture cell 为 identity-session 与插件运行时。Map delta 是把具�
 ### 两个仓的交付物
 
 - [Host PR #2030](https://github.com/zts212653/clowder-ai/pull/2030) 持有安装与执行通用接口、激活实例、调用权限、角色目录、会话与回执，并保留从旧入口切换和回退的机制。
-- [插件 PR #258](https://github.com/zts212653/clowder-ai-plugins/pull/258) 提供 Kimi、Codex exec、Claude Code print 模式候选的源码、规范声明、版本和独立归档。Host 通过公共契约调用归档。Codex App Server、Claude Code SDK 与工具、DSH 和 AGY 的独立接入仍待完善。
+- [插件 PR #258](https://github.com/zts212653/clowder-ai-plugins/pull/258) 提供 Kimi、Codex exec、Claude Code print 模式和 AGY stream-json 候选的源码、规范声明、版本和独立归档。Host 通过公共契约加载归档。Codex App Server、Claude Code SDK 与工具、AGY 产品调用和 DSH 独立接入仍待完善。
 - 两仓用确切 SHA、兼容范围和归档摘要组成待验收版本。开发候选用本地归档装进隔离 Host。目录上架和发布各自按仓库流程。
 - 当前 Worker 与 Host 属于同一 OS 进程。独立 Worker 管理包调用生命周期，不提供操作系统权限隔离。首批 native 执行端口只给经过 Host 核验的受信包和调用。第三方 ACP 声明沿现有路径。扩展到其他可执行插件须另证隔离与授权边界。
 
@@ -114,7 +114,7 @@ flowchart LR
 
 插件仓按 Node 24.18.0 和 npm 11.16.0 打包 `packages/agent-kimi`。Host 运行 `test/plugin-agent-kimi-local-archive.test.js` 时，`CLOWDER_KIMI_CANDIDATE_ARCHIVE` 指向该归档，`CLOWDER_KIMI_CANDIDATE_EXECUTABLE` 指向已经核定的本机 CLI。测试使用独立项目和原生 HOME，用真 CLI 查询版本。额度、原生续接回执与模型事件使用注入的进程或终端数据。安装、Worker 调用与停用使用实际 Host 管理器。
 
-隔离 HTTP 回归使用实际归档完成显式 adapterRef 检测和已选账号的额度读取。Host 标注检测结果的实例和摘要；无原生端口时 HTTP 503，并保留适配器报告的原因。默认 Host 组合仅向受信目录安装、完整标识匹配的 Kimi 和 Codex 归档授予版本探测。探测只运行 Host 解析的命令和固定的 `--version`，使用独立临时 HOME。目录用例以隔离目录快照安装实际摘要，通过默认组合读出真实版本，并验证同一份本地上传归档得不到该权限。线上目录上架与本地隔离目录测试分别验收。
+隔离 HTTP 回归使用实际归档完成显式 adapterRef 检测和已选账号的额度读取。Host 标注检测结果的实例和摘要；无原生端口时 HTTP 503，并保留适配器报告的原因。默认 Host 组合仅向受信目录安装、完整标识匹配的 Kimi、Codex、Claude Code 和 AGY 归档授予版本探测。探测只运行 Host 解析的命令和固定的 `--version`，使用独立临时 HOME。目录用例以隔离目录快照安装实际摘要，经产品检测 API 读出真实版本，并验证同一份本地上传归档得不到该权限。线上目录上架和不指定适配器的一键检测仍待验。
 
 Kimi 的额度路由使用 Host 数据目录中的版本化切换记录，项目请求继续按现有规则选择及校验账号。缺少记录或处于 legacy、validated 时走旧额度入口。active 使用完整插件引用与官方目录来源，并在结果中返回实际实例、摘要、生命周期代际和 active 状态。包停用、来源不符或状态文件无效时返回不可用。归档测试走现有额度 URL，使用隔离目录安装和 PTY 输出夹具。真实 Windows PTY 另以本地夹具验证回显与取消。
 
@@ -133,3 +133,7 @@ Kimi 的额度路由使用 Host 数据目录中的版本化切换记录，项目
 ### Claude Code print 模式候选
 
 原生 CLI 2.1.327 在隔离目录中使用回环 Anthropic Messages。适配器以 stdin 传提示，通过 Host 交付的身份文件设置 system，以原生 ID 续聊并投影文本、用量和终态。第二轮模型请求保留首轮消息及回复，身份仍位于 system。当前候选关闭工具和 MCP。SDK、交互承载、正常产品接线、模型目录、登录及额度仍待验收。
+
+### AGY stream-json 候选
+
+独立包移入既有 NDJSON 解析及终态规则。插件负责输入信封、会话 ID 资格和输出投影。真实 AGY 1.2.7 记录的续接回合回放成功，原生把权限拒绝标为 SUCCESS 时，插件仍输出失败和拒绝原因。还用合成数据验证跨会话帧拒绝和续接参数。受信目录安装后由 Host 检测到本机 CLI 1.5.15。Claude Code 和 AGY 同时安装到一个 Host 时，停用 Claude Code 不改变 AGY 的实例、摘要和代际。新版本真实授权账号的调用、热续聊、额度和桌面入口待验。

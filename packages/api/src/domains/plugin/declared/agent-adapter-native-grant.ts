@@ -23,6 +23,20 @@ const officialNativeClients = [
     packageName: '@clowder-ai/agent-codex',
     command: 'codex',
   },
+  {
+    pluginId: 'official.agent-claude-code',
+    contributionId: 'claude-code',
+    catalogId: 'agent-claude-code',
+    packageName: '@clowder-ai/agent-claude-code',
+    command: 'claude',
+  },
+  {
+    pluginId: 'official.agent-agy',
+    contributionId: 'agy',
+    catalogId: 'agent-agy',
+    packageName: '@clowder-ai/agent-agy',
+    command: 'agy',
+  },
 ];
 
 export const grantAgentAdapterNativeRuntime: AgentAdapterRuntimeGrant = (request) => {
