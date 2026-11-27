@@ -308,9 +308,13 @@ function workbenchModels() {
             mode: rendered ? 'render' : 'src',
             binary: file.binary,
             documentEditor,
-            documentFrame: fileParams && (html && rendered
-              ? '/workspace-html?' + fileParams
-              : documentEditor || pluginPreview ? '/workspace-document?' + fileParams : null),
+            documentFrame:
+              fileParams &&
+              (html && rendered
+                ? '/workspace-html?' + fileParams
+                : documentEditor || pluginPreview
+                  ? '/workspace-document?' + fileParams
+                  : null),
             hasBody: !file.binary,
             quote: !file.binary,
             media: mediaKind
@@ -337,7 +341,9 @@ function workbenchModels() {
                   : { t: 'workbench.file.openLocal' },
               openAction: info?.info?.noDefaultApplication ? 'open-with' : 'open',
               noDefaultApplication: !!info?.info?.noDefaultApplication,
-              revealLabel: { t: info?.info?.desktopPlatform === 'win32' ? 'workbench.file.revealWindows' : 'control.reveal' },
+              revealLabel: {
+                t: info?.info?.desktopPlatform === 'win32' ? 'workbench.file.revealWindows' : 'control.reveal',
+              },
               error: info?.actionError && {
                 t: 'workbench.file.' + (info.actionError === 'failed' ? 'actionFailed' : info.actionError),
               },
