@@ -23,6 +23,7 @@ import { ProfileMemoryLifecycleService } from '../src/domains/memory/profile/Pro
 import { ProfileMemoryLifecycleStore } from '../src/domains/memory/profile/ProfileMemoryLifecycleStore.js';
 import type { SqliteEvidenceStore } from '../src/domains/memory/SqliteEvidenceStore.js';
 import { applyMigrations } from '../src/domains/memory/schema.js';
+import { profileOwnerActionFixture } from './helpers/profile-owner-fixture.js';
 
 const owner = 'opening-profile-owner';
 let dataDir: string;
@@ -41,7 +42,7 @@ beforeEach(() => {
   store = new ProfileMemoryLifecycleStore({ db, repository });
   invalidations = [];
   lifecycle = new ProfileMemoryLifecycleService({
-    store,
+    store: profileOwnerActionFixture(store),
     coordinator: new OwnerMemoryActionCoordinator({
       store: new InMemoryOwnerMemoryActionReceiptStore(),
       lock: new SessionMutex(),

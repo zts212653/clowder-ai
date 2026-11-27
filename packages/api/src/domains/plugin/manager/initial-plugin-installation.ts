@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { PLUGIN_HOST_ENTRIES } from '../host-inventory/plugin-host-layout.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
+import { MEMORY_PACKAGE_NAME, MEMORY_PLUGIN_ID } from '../host-surface/memory/memory-plugin-host.js';
 import type { OfficialPluginPackageInstaller } from '../official-package-installer.js';
 import type { DormantPluginRuntimeComposition, PluginManagerRuntimeComposition } from '../runtime-composition.js';
 import { loadMachinePluginCatalog, OFFICIAL_PLUGIN_CATALOG_URL } from './machine-catalog-provider.js';
@@ -18,6 +19,7 @@ export interface InitialPluginInstallationOptions {
   readonly catalog: OfficialPluginCatalogProvider;
   readonly installer: Pick<OfficialPluginPackageInstaller, 'install' | 'installFromSnapshot'>;
   readonly loadSelection: () => Promise<unknown>;
+  readonly includeMemoryProvider?: boolean;
   readonly reconcile?: (pluginId: string, instanceId: string) => Promise<void>;
   readonly activate: (
     pluginId: string,
@@ -114,13 +116,13 @@ async function saveJournal(statePath: string, journal: Journal): Promise<void> {
 async function begin(options: InitialPluginInstallationOptions): Promise<InitialPluginPlan> {
   options.signal?.throwIfAborted();
   const existing = await loadJournal(options.statePath);
-  if (existing) return { journal: existing };
   // Includes uninstall tombstones and unreferenced packages without loading them.
-  if (await options.inventory.hasRecords()) {
+  if (existing || (await options.inventory.hasRecords())) {
     options.signal?.throwIfAborted();
-    const journal: Journal = { schemaVersion: 1, plugins: [] };
-    await saveJournal(options.statePath, journal);
-    return { journal };
+    const journal: Journal = existing ?? { schemaVersion: 1, plugins: [] };
+    const catalog = await appendMemoryDefault(options, journal);
+    if (!existing || catalog) await saveJournal(options.statePath, journal);
+    return { journal, catalogSnapshot: catalog };
   }
   const selection = parseInitialPluginSelection(await initialRead(options.loadSelection, options.signal));
   const catalog = await initialRead(() => options.catalog.snapshot(), options.signal);
@@ -138,9 +140,39 @@ async function begin(options: InitialPluginInstallationOptions): Promise<Initial
     };
   });
   const journal: Journal = { schemaVersion: 1, plugins };
+  await appendMemoryDefault(options, journal, catalog);
   options.signal?.throwIfAborted();
   await saveJournal(options.statePath, journal);
   return { journal, catalogSnapshot: catalog };
+}
+
+/** The first compatibility cut also reaches Hosts with older selection journals. */
+async function appendMemoryDefault(
+  options: InitialPluginInstallationOptions,
+  journal: Journal,
+  snapshot?: OfficialPluginCatalogSnapshot,
+): Promise<OfficialPluginCatalogSnapshot | undefined> {
+  if (!options.includeMemoryProvider || journal.plugins.some((p) => p.pluginId === MEMORY_PLUGIN_ID)) return undefined;
+  if ((await options.inventory.read.instances.list(MEMORY_PLUGIN_ID)).length) return undefined;
+  const catalog = snapshot ?? (await operationCatalogSnapshot(options, { journal }));
+  options.signal?.throwIfAborted();
+  if (catalog.status !== 'fresh') return undefined;
+  const release = catalog.entries.find(
+    (entry) =>
+      entry.pluginId === MEMORY_PLUGIN_ID &&
+      entry.catalogId === MEMORY_PLUGIN_ID &&
+      entry.packageName === MEMORY_PACKAGE_NAME,
+  );
+  if (!release) return undefined;
+  journal.plugins.push({
+    pluginId: MEMORY_PLUGIN_ID,
+    enabled: true,
+    catalogId: release.catalogId,
+    version: release.version,
+    packageDigest: release.packageDigest,
+    done: false,
+  });
+  return catalog;
 }
 async function prepareInstance(
   options: InitialPluginInstallationOptions,
@@ -277,6 +309,7 @@ export async function prepareHostInitialPlugins(options: {
     inventory: runtime.inventoryStore,
     catalog: options.catalog,
     installer: managerRuntime.officialInstaller,
+    includeMemoryProvider: true,
     loadSelection:
       options.loadSelection ??
       (() => loadMachinePluginCatalog(new URL('initial-plugins.json', OFFICIAL_PLUGIN_CATALOG_URL).href)),

@@ -335,6 +335,9 @@ function bindProject() {
     };
   });
 
+  // The official package places this entry; the Host owns the workbench and its session-scoped reads.
+  PAGES.memoryPlugin = PAGES.memory;
+
   VM.system = function () {
     const desktop = projectDesktop(),
       native = desktop.desktopSystem,

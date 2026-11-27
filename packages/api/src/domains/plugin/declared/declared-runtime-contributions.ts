@@ -44,6 +44,7 @@ export interface DeclaredScheduleTaskRunner {
 
 export interface DeclaredRuntimeContributionHost {
   readonly agentSessionProviders?: AgentSessionProviderLifecycle;
+  readonly memoryProvider?: import('../host-surface/memory/memory-plugin-host.js').MemoryPluginHost;
   readonly packages: VerifiedPluginPackageLocator;
   readonly limbRegistry?: LimbRegistry;
   readonly taskRunner?: DeclaredScheduleTaskRunner;
@@ -119,6 +120,7 @@ export class DeclaredRuntimeContributions {
     const cloudHostRegistry = this.host.cloudConversationHosts;
     let releaseAgentProvider: (() => Promise<void>) | undefined;
     try {
+      await this.host.memoryProvider?.admit(admission, actions);
       if (schedules.length > 0 && !this.host.taskRunner) {
         throw new ExternalPluginRuntimeError('UNSUPPORTED_TRANSPORT', 'Host task runner is unavailable');
       }
@@ -150,6 +152,7 @@ export class DeclaredRuntimeContributions {
         webhook,
       });
     } catch (error) {
+      this.host.memoryProvider?.deactivate(pluginInstanceId);
       await releaseAgentProvider?.();
       this.#remove({ limbNodeIds, scheduleTaskIds, cloudHostLeases });
       throw error;
@@ -157,6 +160,7 @@ export class DeclaredRuntimeContributions {
   }
 
   async deactivate(pluginInstanceId: string): Promise<void> {
+    this.host.memoryProvider?.deactivate(pluginInstanceId);
     const active = this.#active.get(pluginInstanceId);
     if (!active) return;
     this.#active.delete(pluginInstanceId);

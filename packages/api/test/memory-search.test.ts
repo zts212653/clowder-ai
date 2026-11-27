@@ -7,6 +7,7 @@ import Fastify from 'fastify';
 import type { CollectionManifest, EvidenceItem, IEvidenceStore } from '../src/domains/memory/interfaces.js';
 import { SqliteEvidenceStore } from '../src/domains/memory/SqliteEvidenceStore.js';
 import { memoryPageReadRoutes } from '../src/routes/memory-page-read.js';
+import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 
 let f: Awaited<ReturnType<typeof fixture>>;
 async function fixture() {
@@ -62,7 +63,7 @@ async function fixture() {
     getByAnchor: async (anchor) => items.get(anchor) ?? null,
   };
   const searchSources = {
-    tasteRepository: { canonicalRoot: () => root, approvalLockKey: () => 'unused' },
+    tasteBrowse: createTasteBrowseFixture({ canonicalRoot: () => root, approvalLockKey: () => 'unused' }),
     messageSearchService: {
       search: async (_input: unknown, principal: { userId: string }) => {
         calls.push({ owner: principal.userId });

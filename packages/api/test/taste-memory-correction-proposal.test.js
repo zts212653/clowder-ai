@@ -22,6 +22,7 @@ import { sessionAuthPlugin, sessionRoute } from '../dist/infrastructure/session-
 import { callbackProposeTasteRoutes } from '../dist/routes/callback-propose-taste-routes.js';
 import { tasteBrowseRoutes } from '../dist/routes/taste-browse.js';
 import { registerTasteProposalDecisionRoutes } from '../dist/routes/taste-proposal-decision-routes.js';
+import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 import { tasteSourceStore } from './helpers/taste-source-fixture.js';
 
 const ownerUserId = 'taste-correction-owner';
@@ -124,8 +125,7 @@ describe('F321 Taste source-bound correction proposal', () => {
     });
     await app.register(tasteBrowseRoutes, {
       ownerUserId,
-      tasteRepository: repository,
-      lifecycleStore,
+      browse: createTasteBrowseFixture(repository, lifecycleStore),
       lifecycleService: lifecycle,
       readObservatory: async () => ({ entries: [], constellations: [], coverage: { totalUnverified: 0 } }),
       proposalStore,

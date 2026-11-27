@@ -45,10 +45,8 @@ describe('POST /api/projects/setup', () => {
     const catalog = new LibraryCatalog();
     const stores = new Map();
     const stateManager = {
-      shouldBootstrap: () => true,
-      startBuilding: () => {},
+      claim: async () => true,
       markReady: () => {},
-      getState: () => ({}),
     };
     const service = new ExpeditionBootstrapService(stateManager, {
       rebuildIndex: (projectPath, ownerUserId) =>
@@ -85,10 +83,8 @@ describe('POST /api/projects/setup', () => {
     const { ExpeditionBootstrapService } = await import('../../dist/domains/memory/ExpeditionBootstrapService.js');
     const seenOwners = [];
     const stateManager = {
-      shouldBootstrap: () => true,
-      startBuilding: () => {},
+      claim: async () => true,
       markReady: () => {},
-      getState: () => ({}),
     };
     const service = new ExpeditionBootstrapService(stateManager, {
       rebuildIndex: async (_projectPath, ownerUserId) => {

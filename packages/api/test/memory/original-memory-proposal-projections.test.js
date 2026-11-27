@@ -167,6 +167,7 @@ describe('F321 original-memory proposal projections', () => {
       status: 'active',
       createdAt: '2026-10-06T00:00:00.000Z',
       updatedAt: '2026-10-06T00:00:00.000Z',
+      revision,
     };
     const calls = [];
     const app = ownerApp();

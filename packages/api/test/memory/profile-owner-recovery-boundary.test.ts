@@ -14,6 +14,7 @@ import type { OwnerMemoryActionReceiptRecord } from '../../src/domains/memory/ow
 import { ProfileMemoryLifecycleService } from '../../src/domains/memory/profile/ProfileMemoryLifecycleService.js';
 import { ProfileMemoryLifecycleStore } from '../../src/domains/memory/profile/ProfileMemoryLifecycleStore.js';
 import { applyMigrations } from '../../src/domains/memory/schema.js';
+import { profileOwnerActionFixture } from '../helpers/profile-owner-fixture.js';
 
 const revision = `sha256:${'a'.repeat(64)}`;
 const command = {
@@ -35,27 +36,20 @@ it('does not recover Profile hard-forget from canonical absence alone', async ()
       return saved;
     }
   }
-  let mutations = 0;
+  let invalidations = 0;
   const service = new ProfileMemoryLifecycleService({
     store: {
-      get: () => null,
-      replaceContent: () => {
-        mutations++;
-        return { outcome: 'not_available' } as const;
-      },
-      hardForget: () => {
-        mutations++;
-        return { outcome: 'not_available' } as const;
-      },
-      getOwnerActionEvidence: () => null,
-      finishHardForgetCleanup: () => undefined,
+      mutate: async () => ({ outcome: 'not_available' }),
+      recover: async () => null,
     },
     coordinator: new OwnerMemoryActionCoordinator({ store: new InterruptedReceiptStore(), lock: new SessionMutex() }),
-    invalidateDerived: async () => undefined,
+    invalidateDerived: async () => {
+      invalidations++;
+    },
   });
   await assert.rejects(service.executeOwnerAction('owner', 'corpus', command), /lost pending acknowledgement/);
   assert.deepEqual(await service.executeOwnerAction('owner', 'corpus', command), { error: 'not_available' });
-  assert.equal(mutations, 0);
+  assert.equal(invalidations, 0);
 });
 
 it('recovers only from exact per-request Profile mutation evidence', async () => {
@@ -80,7 +74,7 @@ it('recovers only from exact per-request Profile mutation evidence', async () =>
   assert.ok(current);
   let invalidations = 0;
   const service = new ProfileMemoryLifecycleService({
-    store,
+    store: profileOwnerActionFixture(store),
     coordinator: new OwnerMemoryActionCoordinator({ store: new LostCompletionStore(), lock: new SessionMutex() }),
     invalidateDerived: async () => {
       invalidations++;

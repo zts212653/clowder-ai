@@ -17,6 +17,7 @@ import { ProfileMemoryLifecycleStore } from '../dist/domains/memory/profile/Prof
 import { applyMigrations } from '../dist/domains/memory/schema.js';
 import { sessionAuthPlugin, sessionRoute } from '../dist/infrastructure/session-auth.js';
 import { profileMemoryOwnerRoutes } from '../dist/routes/profile-memory-owner.js';
+import { profileOwnerActionFixture, profileOwnerFixture } from './helpers/profile-owner-fixture.js';
 
 const ownerUserId = 'profile-owner';
 const origin = 'http://localhost:3003';
@@ -73,7 +74,7 @@ describe('F321 Profile owner lifecycle', () => {
     const store = new ProfileMemoryLifecycleStore({ db, repository });
     invalidations = [];
     const lifecycle = new ProfileMemoryLifecycleService({
-      store,
+      store: profileOwnerActionFixture(store),
       coordinator: new OwnerMemoryActionCoordinator({
         store: new InMemoryOwnerMemoryActionReceiptStore(),
         lock: new SessionMutex(),
@@ -87,7 +88,7 @@ describe('F321 Profile owner lifecycle', () => {
     await app.register(sessionRoute, { ownerUserId });
     await app.register(profileMemoryOwnerRoutes, {
       ownerUserId,
-      store,
+      store: profileOwnerFixture(db, store),
       lifecycle,
       proposalStore: { listByTarget: async () => [] },
       sourceReaders: {

@@ -1,6 +1,110 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { type RecallEventReader, readRecallPageEvent } from '../src/routes/memory-recall-events.js';
+import type { RecallTimelineReader } from '../src/routes/memory-recall-query.js';
+import type { RecallStatsReader } from '../src/routes/memory-recall-stats.js';
 import { recallFixture } from './memory-recall-fixture.js';
+
+test('recall stats passes only revalidated owner thread IDs to the plugin', async () => {
+  const queries: Parameters<RecallStatsReader>[0][] = [];
+  const stats = [{ source: 'pull', surface: 'search', presented: 4, inspected: 2, used: 1 }];
+  const f = await recallFixture(undefined, {
+    readRecallStats: async (input) => {
+      queries.push(input);
+      return stats;
+    },
+  });
+  try {
+    f.indexed.push('other', 'deleted', 'missing', 'system', 'own');
+    const url = '/api/memory/recall/stats?days=14';
+    assert.equal((await f.app.inject({ url, headers: { 'x-test-session': 'other-owner' } })).statusCode, 403);
+    assert.deepEqual(queries, []);
+    const res = await f.app.inject({ url, headers: { 'x-test-session': 'owner' } });
+    assert.equal(res.statusCode, 200, res.body);
+    const { from, to, rows } = res.json();
+    assert.deepEqual(rows, stats);
+    assert.equal(to - from, 14 * 86400000);
+    assert.deepEqual(queries, [{ from, to, threadIds: ['own', 'system'] }]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('recall pagination delegates only authorized threads and freezes the cursor window', async () => {
+  const queries: Parameters<RecallTimelineReader>[0][] = [];
+  const reads: Parameters<RecallEventReader>[0][] = [];
+  const f: Awaited<ReturnType<typeof recallFixture>> = await recallFixture(undefined, {
+    readRecallTimeline: async (input) => {
+      queries.push(input);
+      const ids = input.before ? ['older'] : ['newer', 'older'];
+      return ids.map((id, index) => ({
+        key: `recall:${id}`,
+        at: input.to - (id === 'newer' ? 1 : 2) - index,
+        thread_id: 'own',
+        invocation_id: `inv-${id}`,
+        cue_id: null,
+        recall_id: id,
+      }));
+    },
+    readRecallEvent: async (input) => {
+      reads.push(input);
+      return readRecallPageEvent(f.db, input.recallId, input.threadId) ?? null;
+    },
+  });
+  try {
+    f.indexed.push('other', 'deleted', 'system');
+    f.recall('newer');
+    f.recall('older', { timestamp: f.now - 2000 });
+    const firstResponse = await f.get('?limit=1');
+    assert.equal(firstResponse.statusCode, 200, firstResponse.body);
+    const first = firstResponse.json();
+    assert.equal(first.records[0].event.id, 'newer');
+    const next = (await f.get(`?limit=1&cursor=${encodeURIComponent(first.nextCursor)}`)).json();
+    assert.equal(next.records[0].event.id, 'older');
+    assert.deepEqual(
+      queries.map(({ threadIds, to, before }) => ({ threadIds, to, before })),
+      [
+        { threadIds: ['own', 'system'], to: first.to, before: undefined },
+        { threadIds: ['own', 'system'], to: first.to, before: { at: first.to - 1, key: 'recall:newer' } },
+      ],
+    );
+    assert.deepEqual(reads, [
+      { recallId: 'newer', threadId: 'own' },
+      { recallId: 'older', threadId: 'own' },
+    ]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('recall document titles use the provider and thread labels retain owner checks', async () => {
+  const anchors: string[] = [];
+  const f = await recallFixture((readers) => {
+    readers.readDocumentCandidate = async (anchor) => {
+      anchors.push(anchor);
+      return anchor === 'F042' ? { title: 'Public feature from plugin', kind: 'feature' } : null;
+    };
+  });
+  try {
+    const candidates = ['F042', 'thread-own', 'thread-other', 'private-collection'].map((anchor) => ({ anchor }));
+    f.recall('docs', { candidates: JSON.stringify(candidates) });
+    const response = await f.get();
+    assert.equal(response.statusCode, 200, response.body);
+    const results = response.json().records[0].event.results;
+    assert.deepEqual(
+      results.map(({ title, href }: { title: string; href: string | null }) => [title, href]),
+      [
+        ['Public feature from plugin', '/memory/search?q=F042'],
+        ['真实对话', '/thread/own'],
+        ['', null],
+        ['', null],
+      ],
+    );
+    assert.deepEqual(anchors, ['F042', 'private-collection']);
+  } finally {
+    await f.close();
+  }
+});
 
 test('selected window, source and cat use real ledger rows with both time bounds', async () => {
   const f = await recallFixture();

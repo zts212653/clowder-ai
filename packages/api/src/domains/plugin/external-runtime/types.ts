@@ -53,11 +53,17 @@ export interface VerifiedPluginPackageLocator {
     packageDigest: string,
     selectFile: (manifest: PluginManifest) => string,
   ): Promise<VerifiedPluginStaticFile>;
+  readInstalledConsoleFiles?(packageDigest: string): Promise<VerifiedPluginConsoleFiles>;
 }
 
 export interface VerifiedPluginStaticFile {
   readonly manifest: PluginManifest;
   readonly bytes: Buffer | undefined;
+}
+
+export interface VerifiedPluginConsoleFiles {
+  readonly manifest: PluginManifest;
+  readonly files: ReadonlyMap<string, Buffer>;
 }
 
 export interface ExternalPluginBootstrapEnvironment extends NodeJS.ProcessEnv {

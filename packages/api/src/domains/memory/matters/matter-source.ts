@@ -1,22 +1,20 @@
 import { createHash } from 'node:crypto';
 import type { MatterSourceCoordinate, MatterSourceInput, MessageFrom, QuoteContextAttachment } from '@cat-cafe/shared';
-import { resolveThreadAccess } from '../../cats/services/session/thread-access-policy.js';
+import {
+  canReadMemorySourceThread as canReadMatterThread,
+  type MemorySourceActor,
+  type MemorySourceReaders,
+  readMemorySourceMessage as readMatterMessage,
+} from '../../cats/services/session/memory/memory-source-access.js';
 import { messageFrom } from '../../cats/services/stores/message-from.js';
-import type { IMessageStore, StoredMessage } from '../../cats/services/stores/ports/MessageStore.js';
-import type { IThreadStore } from '../../cats/services/stores/ports/ThreadStore.js';
-import { canQuoteInPublicReply, isEligibleReplyParent, type Viewer } from '../../cats/services/stores/visibility.js';
+import type { StoredMessage } from '../../cats/services/stores/ports/MessageStore.js';
 
-export interface MatterActor {
-  userId: string;
-  viewer: Viewer;
-  publicReply?: boolean;
-  signal?: AbortSignal;
+export { canReadMatterThread, readMatterMessage };
+export type MatterSourceReaders = MemorySourceReaders;
+
+export interface MatterActor extends MemorySourceActor {
   /** Bound by authenticated callback state, never accepted in the model's payload. */
   invocation?: { threadId: string; triggerMessageId?: string };
-}
-export interface MatterSourceReaders {
-  messageStore: Pick<IMessageStore, 'getById'>;
-  threadStore: Pick<IThreadStore, 'get' | 'list'>;
 }
 export class MatterMemoryError extends Error {
   constructor(
@@ -27,49 +25,8 @@ export class MatterMemoryError extends Error {
   }
 }
 
-export async function canReadMatterThread(
-  readers: MatterSourceReaders,
-  actor: MatterActor,
-  threadId: string,
-): Promise<boolean> {
-  actor.signal?.throwIfAborted();
-  const thread = await readers.threadStore.get(threadId);
-  if (!thread || thread.deletedAt) return false;
-  const access = await resolveThreadAccess({
-    threadStore: readers.threadStore,
-    thread,
-    userId: actor.userId,
-    request: { resource: 'transcript', action: 'read' },
-  });
-  return access.status === 200;
-}
 export function matterDigest(value: unknown): string {
   return `sha256:${createHash('sha256').update(JSON.stringify(value)).digest('hex')}`;
-}
-
-/** Exact-source admission intentionally does not consult index.current or search. */
-export async function readMatterMessage(
-  readers: MatterSourceReaders,
-  actor: MatterActor,
-  coordinate: { threadId: string; messageId: string },
-): Promise<StoredMessage | null> {
-  actor.signal?.throwIfAborted();
-  if (!(await canReadMatterThread(readers, actor, coordinate.threadId))) return null;
-  const message = await readers.messageStore.getById(coordinate.messageId);
-  actor.signal?.throwIfAborted();
-  if (
-    !message ||
-    message.id !== coordinate.messageId ||
-    message.threadId !== coordinate.threadId ||
-    message.userId !== actor.userId ||
-    message.recall ||
-    message._tombstone ||
-    message.deletedAt
-  )
-    return null;
-  if (!isEligibleReplyParent(message, { threadId: coordinate.threadId, viewer: actor.viewer })) return null;
-  if (actor.publicReply && !canQuoteInPublicReply(message)) return null;
-  return message;
 }
 
 interface RawSegment {

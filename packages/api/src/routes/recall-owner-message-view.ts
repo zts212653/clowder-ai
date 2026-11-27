@@ -1,5 +1,6 @@
 import type { RecallScopeV1 } from '@cat-cafe/shared';
-import { eventMemoryRevision, type IEventMemoryStore } from '../domains/memory/EventMemoryStore.js';
+import { eventMemoryRevision } from '../domains/memory/EventMemoryStore.js';
+import type { EventMemoryPort } from '../domains/memory/event/event-memory-port.js';
 import type { PersonMemoryOwnerReadService } from '../domains/memory/people/PersonMemoryOwnerReadService.js';
 import type { TasteMemoryLifecycleStore } from '../domains/memory/taste/TasteMemoryLifecycleStore.js';
 import { TasteMemoryReader } from '../domains/memory/taste/TasteMemoryReader.js';
@@ -22,7 +23,7 @@ export interface RecallOwnerMessageSources {
     sourceReaders: TasteSourceReaders;
   };
   eventSources?: {
-    store: Pick<IEventMemoryStore, 'getEvent'>;
+    store: Pick<EventMemoryPort, 'getEvent'>;
     sourceReaders: EventMemorySourceReaders;
   };
 }
@@ -99,7 +100,7 @@ async function readEventView(
 ): Promise<RecallCandidateView> {
   if (!cue.source_anchor.startsWith('event-memory:')) return unavailable(cue);
   const { store, sourceReaders } = sources;
-  const event = store.getEvent(cue.source_anchor.slice('event-memory:'.length));
+  const event = await store.getEvent(cue.source_anchor.slice('event-memory:'.length), scope.ownerUserId);
   if (!event) return unavailable(cue, 'source_forgotten');
   if (event.ownerUserId !== scope.ownerUserId || event.threadId !== scope.threadId)
     return unavailable(cue, 'scope_revoked');

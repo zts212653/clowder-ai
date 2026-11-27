@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 import Fastify from 'fastify';
 import { tasteBrowseRoutes } from '../dist/routes/taste-browse.js';
+import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 
 let app;
 let root;
@@ -65,7 +66,7 @@ beforeEach(async () => {
   });
   await app.register(tasteBrowseRoutes, {
     ownerUserId: 'owner',
-    tasteRepository: { canonicalRoot: () => root, approvalLockKey: () => 'unused' },
+    browse: createTasteBrowseFixture({ canonicalRoot: () => root, approvalLockKey: () => 'unused' }),
     readObservatory: async () => {
       if (failStats) throw new Error('temporary read failure');
       return {

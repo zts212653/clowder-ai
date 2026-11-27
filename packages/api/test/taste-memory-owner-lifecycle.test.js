@@ -20,6 +20,7 @@ import { tasteMemoryId } from '../dist/domains/memory/taste/taste-memory-identit
 import { InMemoryTasteProposalStore } from '../dist/domains/taste/stores/InMemoryTasteProposalStore.js';
 import { sessionAuthPlugin, sessionRoute } from '../dist/infrastructure/session-auth.js';
 import { tasteBrowseRoutes } from '../dist/routes/taste-browse.js';
+import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 
 const ownerUserId = 'taste-owner';
 const origin = 'http://localhost:3003';
@@ -95,8 +96,7 @@ describe('F321 Taste owner lifecycle', () => {
     await app.register(sessionRoute, { ownerUserId });
     await app.register(tasteBrowseRoutes, {
       ownerUserId,
-      tasteRepository: repository,
-      lifecycleStore: store,
+      browse: createTasteBrowseFixture(repository, store),
       lifecycleService: lifecycle,
       readObservatory: async () => ({
         entries: [],

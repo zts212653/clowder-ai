@@ -114,6 +114,8 @@ function bindPluginSpaces() {
     diff.added.forEach(function (name) {
       if (name.indexOf('pluginDetail:') === 0) settleHold(readDetail(name.slice(13)));
       if (name.indexOf('pluginTools:') === 0) settleHold(chatAction('settingsPluginToolsRead', { id: name.slice(12) }));
+      if (name.indexOf('pluginDocumentation:') === 0)
+        settleHold(chatAction('settingsPluginDocumentationRead', { id: name.slice('pluginDocumentation:'.length) }));
     });
   });
   // A plugin that isn't installed shows only its list row; only an installed plugin has a detail to read.
@@ -454,6 +456,7 @@ function bindPluginSpaces() {
     const owner = placementData(),
       detail = owner.pluginDetails[plugin.pluginId];
     if (!detail) return null;
+    if (projectionNeeded) projectionNeeded.add('pluginDocumentation:' + plugin.pluginId);
     const active = plugin.intent === 'enabled' && (plugin.live === 'running' || plugin.live === 'degraded');
     const items = detail.contributions || detail.capabilities,
       kinds = {

@@ -15,6 +15,7 @@ describe('projects-bootstrap routes', () => {
   let db;
   let stateManager;
   let bootstrapCalls;
+  let memoryReady;
   let tmpDir;
 
   beforeEach(async () => {
@@ -28,6 +29,7 @@ describe('projects-bootstrap routes', () => {
     applyMigrations(db);
     stateManager = new IndexStateManager(db);
     bootstrapCalls = [];
+    memoryReady = true;
 
     const mockBootstrapService = {
       async bootstrap(projectPath, options) {
@@ -43,6 +45,7 @@ describe('projects-bootstrap routes', () => {
     await app.register(projectsBootstrapRoutes, {
       stateManager,
       bootstrapService: mockBootstrapService,
+      isMemoryReady: () => memoryReady,
       socketManager: mockSocketManager,
       getFingerprint: () => 'current-sha',
     });
@@ -116,6 +119,19 @@ describe('projects-bootstrap routes', () => {
   });
 
   describe('POST /api/projects/bootstrap', () => {
+    it('reports an unavailable memory provider before starting an index job', async () => {
+      memoryReady = false;
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/projects/bootstrap',
+        payload: { projectPath: join(tmpDir, 'new-proj') },
+        headers: { 'x-cat-cafe-user': 'test-user' },
+      });
+      assert.equal(res.statusCode, 503);
+      assert.deepEqual(res.json(), { error: 'memory_unavailable' });
+      assert.deepEqual(bootstrapCalls, []);
+    });
+
     it('returns 202 and starts bootstrap', async () => {
       const p = join(tmpDir, 'new-proj');
       const res = await app.inject({

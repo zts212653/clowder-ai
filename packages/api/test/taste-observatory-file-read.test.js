@@ -10,6 +10,7 @@ import Fastify from 'fastify';
 import { applyMigrations } from '../dist/domains/memory/schema.js';
 import { TasteObservatoryReader } from '../dist/domains/memory/taste/TasteObservatoryReader.js';
 import { tasteBrowseRoutes } from '../dist/routes/taste-browse.js';
+import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 
 const sourcePath = 'docs/taste/vignettes/file-read.md';
 const anchor = 'doc:taste/vignettes/file-read';
@@ -146,7 +147,7 @@ it('serves authenticated list/detail fanout with one child read and keeps source
   });
   await app.register(tasteBrowseRoutes, {
     ownerUserId: 'owner',
-    tasteRepository: { canonicalRoot: () => root, approvalLockKey: () => 'unused' },
+    browse: createTasteBrowseFixture({ canonicalRoot: () => root, approvalLockKey: () => 'unused' }),
     readObservatory: (owner, includePrivate) => statistics.read(owner, { includePrivate }),
     proposalStore: {
       get: async () => ({

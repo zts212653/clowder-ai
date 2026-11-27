@@ -98,6 +98,18 @@ export interface ModulePluginHostShape {
   readonly memberSessions?: PluginNeutralHost['memberSessions'];
   readonly collectiveArtifactOwner?: PluginNeutralHost['collectiveArtifactOwner'];
   readonly collectiveMaterialSource?: PluginNeutralHost['collectiveMaterialSource'];
+  readonly memoryDatabase?: { readonly canonicalPath: string; readonly storageFormat: 1 };
+  readonly memoryEmbedding?: ReturnType<
+    typeof import('../../host-surface/memory/memory-embedding-host.js').createMemoryEmbeddingHost
+  >;
+  readonly memoryData?: import('../../../../config/memory-data-locations.js').MemoryDataLocations;
+  readonly memoryThreadKv?: import('../../host-surface/memory/memory-thread-kv.js').MemoryThreadKvPort;
+  readonly memorySource?: ReturnType<
+    typeof import('../../host-surface/memory/memory-source-host.js').createMemorySourceHost
+  >;
+  readonly memoryIndexSources?: ReturnType<
+    typeof import('../../../cats/services/session/memory/memory-index-sources.js').createMemoryIndexSources
+  >;
   readonly threads: PluginThreadHost;
   readonly messaging: PluginMessagingHost;
   readonly streams: PluginStreams;
@@ -138,6 +150,16 @@ export interface ModulePluginRuntimeOptions {
   readonly materializer?: BuiltinPluginPackageMaterializer;
   readonly configuration: PluginRuntimeConfigurationPort;
   readonly storage?: PluginPrivateStoragePort;
+  readonly memoryHost?: (
+    packageRecord: ExecutablePluginPackageRecord,
+    pluginInstanceId: string,
+    assertActivation: () => void,
+  ) =>
+    | Pick<
+        ModulePluginHostShape,
+        'memoryDatabase' | 'memoryThreadKv' | 'memorySource' | 'memoryIndexSources' | 'memoryData' | 'memoryEmbedding'
+      >
+    | undefined;
   readonly taskStore?: ITaskStore;
   readonly taskOwnerUserId?: string;
   readonly taskThreadStore?: Pick<IThreadStore, 'get'> & Partial<Pick<IThreadStore, 'ensureOwnedThread'>>;
@@ -402,6 +424,7 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
       assertActivation();
       const host: ModulePluginHostShape = {
         ...neutral,
+        ...this.options.memoryHost?.(packageRecord, pluginInstanceId, assertActivation),
         pluginInstanceId,
         config: settingsHost.config,
         secrets: settingsHost.secrets,

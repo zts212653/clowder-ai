@@ -1,4 +1,5 @@
 import type { ExpansionFunnelMeta, ExpansionHintTargetRef } from '@cat-cafe/shared';
+import type { MemoryIndexStatusResult } from '@clowder-ai/plugin-memory-contract/maintenance';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
@@ -42,6 +43,7 @@ import {
   validateVectorGenerationTables,
   vectorGenerationTables,
 } from '../domains/memory/vector-generation-tables.js';
+import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory/memory-plugin-host.js';
 import { resolveDirectLocalAuthorizationUserId } from '../utils/request-identity.js';
 import { buildThreadCrossPostSuggestion, extractThreadIdFromEvidenceResult } from './cross-thread-affordance.js';
 import {
@@ -149,6 +151,7 @@ export interface EvidenceRoutesOptions {
   /** F256 Phase C: repo root for L0 convention graph adapter (reads compiler file) */
   repoRoot?: string;
   evidenceStore: IEvidenceStore;
+  readIndexStatus?: () => Promise<MemoryIndexStatusResult>;
   embeddingService?: Pick<IEmbeddingService, 'isReady'>;
   getEmbeddingService?: () => Pick<IEmbeddingService, 'isReady'> | undefined;
   getEmbeddingGenerationStatus?: () => { desired: string; effective?: string; building: boolean };
@@ -161,6 +164,93 @@ export interface EvidenceRoutesOptions {
    * (worktree / no-catalog scenarios remain functional).
    */
   catalog?: Pick<LibraryCatalog, 'list' | 'getRoutable'>;
+}
+
+// Embedders with a local-only store can still register this route without a plugin runtime.
+function readEmbeddedIndexStatus(evidenceStore: IEvidenceStore): MemoryIndexStatusResult | undefined {
+  const db = (evidenceStore as { getDb?: () => unknown }).getDb?.() as
+    | { prepare: (sql: string) => { get: () => Record<string, unknown> } }
+    | undefined;
+  if (!db) return undefined;
+
+  const bound = evidenceStore as { getVectorGenerationTables?: () => VectorGenerationTables };
+  const tables = validateVectorGenerationTables(bound.getVectorGenerationTables?.() ?? vectorGenerationTables());
+  let generationQuarantined = false;
+  try {
+    generationQuarantined =
+      db.prepare(`SELECT value FROM ${tables.metadata} WHERE key='vector_invalidation_quarantined'`).get()?.value ===
+      '1';
+  } catch {
+    /* A pre-vector database has no quarantine fact. */
+  }
+  const docCount = (db.prepare('SELECT count(*) AS c FROM evidence_docs').get() as { c: number }).c;
+  const threadCount = (
+    db.prepare("SELECT count(*) AS c FROM evidence_docs WHERE kind = 'thread'").get() as { c: number }
+  ).c;
+  const edgeCount = (db.prepare('SELECT count(*) AS c FROM edges').get() as { c: number }).c;
+  // Document freshness is not an indexing clock. Current IndexBuilder does not write a rebuild stamp.
+  const lastDocumentUpdated = (
+    db.prepare('SELECT max(updated_at) AS t FROM evidence_docs').get() as {
+      t: string | null;
+    }
+  ).t;
+  // Preserve the legacy field for existing consumers, including manually stamped databases.
+  let lastUpdated: string | null = null;
+  try {
+    const stampRow = db.prepare(`SELECT value FROM ${tables.metadata} WHERE key = 'last_rebuild_at'`).get() as
+      | { value: string }
+      | undefined;
+    lastUpdated = stampRow?.value ?? null;
+  } catch {
+    /* embedding_meta may not exist in very old schemas */
+  }
+  if (!lastUpdated) {
+    lastUpdated = lastDocumentUpdated;
+  }
+
+  // Passages count (may not exist in older schemas)
+  let passageCount = 0;
+  try {
+    passageCount = (db.prepare('SELECT count(*) AS c FROM evidence_passages').get() as { c: number }).c;
+  } catch {
+    /* table may not exist */
+  }
+
+  const passageVectors = readPersistedVectorCount(
+    db,
+    `SELECT count(*) AS c FROM ${tables.passages}`,
+    `SELECT count(*) AS c FROM ${tables.passages}_rowids`,
+  );
+
+  // Embedding model from embedding_meta (VectorStore.initMeta writes embedding_model_id)
+  let embeddingModel: string | null = null;
+  try {
+    const row = db.prepare(`SELECT value FROM ${tables.metadata} WHERE key = 'embedding_model_id'`).get() as
+      | { value: string }
+      | undefined;
+    embeddingModel = row?.value ?? null;
+  } catch {
+    /* table may not exist */
+  }
+
+  const vectorsCount = readPersistedVectorCount(
+    db,
+    `SELECT count(*) AS c FROM ${tables.documents}`,
+    `SELECT count(*) AS c FROM ${tables.documents}_rowids`,
+  ).count;
+  return {
+    docs_count: docCount,
+    threads_count: threadCount,
+    passages_count: passageCount,
+    edges_count: edgeCount,
+    vectors_count: vectorsCount,
+    passage_vectors_count: passageVectors.count,
+    passageVectorsReadable: passageVectors.virtualTableReadable,
+    generationQuarantined,
+    last_rebuild_at: lastUpdated,
+    last_document_updated_at: lastDocumentUpdated,
+    embedding_model: embeddingModel,
+  };
 }
 
 interface VectorCountDb {
@@ -592,7 +682,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
   // F188 Phase K (AC-K1/K3): adds `functionalStatus` + `configWarnings[]` to
   // surface configuration health without touching the existing `healthy` field
   // semantic (KD-14 — external healthcheck backward compat).
-  app.get('/api/evidence/status', async () => {
+  app.get('/api/evidence/status', async (_request, reply) => {
     // Helper: shape unhealthy responses with the Phase K schema extension so
     // the response type is stable across healthy / no_db / query_error paths
     // (砚砚 R3 P2-2). Frontend keeps red fatal banner priority when healthy=false.
@@ -605,84 +695,11 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
     });
 
     try {
-      const db = (opts.evidenceStore as { getDb?: () => unknown }).getDb?.() as
-        | { prepare: (sql: string) => { get: () => Record<string, unknown> } }
-        | undefined;
-      if (!db) return fatalShape('no_db');
-
-      const bound = opts.evidenceStore as { getVectorGenerationTables?: () => VectorGenerationTables };
-      const tables = validateVectorGenerationTables(bound.getVectorGenerationTables?.() ?? vectorGenerationTables());
-      let generationQuarantined = false;
-      try {
-        generationQuarantined =
-          db.prepare(`SELECT value FROM ${tables.metadata} WHERE key='vector_invalidation_quarantined'`).get()
-            ?.value === '1';
-      } catch {
-        /* A pre-vector database has no quarantine fact. */
-      }
-      const docCount = (db.prepare('SELECT count(*) AS c FROM evidence_docs').get() as { c: number }).c;
-      const threadCount = (
-        db.prepare("SELECT count(*) AS c FROM evidence_docs WHERE kind = 'thread'").get() as { c: number }
-      ).c;
-      const edgeCount = (db.prepare('SELECT count(*) AS c FROM edges').get() as { c: number }).c;
-      // Document freshness is not an indexing clock. Current IndexBuilder does not write a rebuild stamp.
-      const lastDocumentUpdated = (
-        db.prepare('SELECT max(updated_at) AS t FROM evidence_docs').get() as {
-          t: string | null;
-        }
-      ).t;
-      // Preserve the legacy field for existing consumers, including manually stamped databases.
-      let lastUpdated: string | null = null;
-      try {
-        const stampRow = db.prepare(`SELECT value FROM ${tables.metadata} WHERE key = 'last_rebuild_at'`).get() as
-          | { value: string }
-          | undefined;
-        lastUpdated = stampRow?.value ?? null;
-      } catch {
-        /* embedding_meta may not exist in very old schemas */
-      }
-      if (!lastUpdated) {
-        lastUpdated = lastDocumentUpdated;
-      }
-
-      // Passages count (may not exist in older schemas)
-      let passageCount = 0;
-      try {
-        passageCount = (db.prepare('SELECT count(*) AS c FROM evidence_passages').get() as { c: number }).c;
-      } catch {
-        /* table may not exist */
-      }
-
-      // F209: embedded passage-vector count + capability flag — lets the UI surface background
-      // embedding warm-up (passage_vectors < passages means semantic recall is still warming up;
-      // passage_fts is complete). `supported` distinguishes "warming up" from "vectors not available
-      // at all" (embed off / sqlite-vec missing), so the UI never shows a warm-up that never finishes.
+      const status = opts.readIndexStatus ? await opts.readIndexStatus() : readEmbeddedIndexStatus(opts.evidenceStore);
+      if (!status) return fatalShape('no_db');
+      const { generationQuarantined, passageVectorsReadable, ...counts } = status;
       const passageEmbeddingReady = (opts.getEmbeddingService?.() ?? opts.embeddingService)?.isReady() === true;
-      const passageVectors = readPersistedVectorCount(
-        db,
-        `SELECT count(*) AS c FROM ${tables.passages}`,
-        `SELECT count(*) AS c FROM ${tables.passages}_rowids`,
-      );
-      const passageVectorCount = passageVectors.count;
-      const passageVectorsSupported =
-        passageVectors.virtualTableReadable && passageEmbeddingReady && !generationQuarantined;
-
-      // Embedding model from embedding_meta (VectorStore.initMeta writes embedding_model_id)
-      let embeddingModel: string | null = null;
-      try {
-        const row = db.prepare(`SELECT value FROM ${tables.metadata} WHERE key = 'embedding_model_id'`).get() as
-          | { value: string }
-          | undefined;
-        embeddingModel = row?.value ?? null;
-      } catch {
-        /* table may not exist */
-      }
-
-      const vectorsCount = readPersistedVectorCount(
-        db,
-        `SELECT count(*) AS c FROM ${tables.documents}`,
-        `SELECT count(*) AS c FROM ${tables.documents}_rowids`,
-      ).count;
+      const passageVectorsSupported = passageVectorsReadable && passageEmbeddingReady && !generationQuarantined;
 
       // F188 Phase K (AC-K2): build signals → evaluate config warnings →
       // derive functionalStatus. Pure compute, no extra DB / fs cost beyond
@@ -696,15 +713,8 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
           }))
         : [];
       const configWarnings = evaluateConfigWarnings({
-        dbCounts: {
-          docs_count: docCount,
-          edges_count: edgeCount,
-          vectors_count: vectorsCount,
-          passage_vectors_count: passageVectorCount,
-          threads_count: threadCount,
-          passages_count: passageCount,
-        },
-        embeddingMeta: { embedding_model: embeddingModel },
+        dbCounts: counts,
+        embeddingMeta: { embedding_model: counts.embedding_model },
         embeddingService: { passage_vectors_supported: passageVectorsSupported },
         catalogSnapshot: { collections: catalogCollections },
       });
@@ -713,23 +723,18 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       return {
         backend: 'sqlite',
         healthy: true,
-        docs_count: docCount,
-        threads_count: threadCount,
-        passages_count: passageCount,
-        passage_vectors_count: passageVectorCount,
+        ...counts,
         passage_vectors_supported: passageVectorsSupported,
         passage_warmup_active: opts.indexBuilder?.isPassageWarmupActive() ?? false,
-        edges_count: edgeCount,
-        vectors_count: vectorsCount,
-        last_rebuild_at: lastUpdated,
-        last_document_updated_at: lastDocumentUpdated,
-        embedding_model: embeddingModel,
         ...(opts.getEmbeddingGenerationStatus ? { embedding_generation: opts.getEmbeddingGenerationStatus() } : {}),
         // F188 Phase K (AC-K1/K3): config health surface.
         functionalStatus,
         configWarnings,
       };
-    } catch {
+    } catch (error) {
+      if (error instanceof MemoryProviderCallError) {
+        return reply.code(503).send({ ...fatalShape('no_db'), error: 'memory_unavailable' });
+      }
       return fatalShape('query_error');
     }
   });

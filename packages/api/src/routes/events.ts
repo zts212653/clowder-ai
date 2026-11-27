@@ -17,16 +17,18 @@ import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { loadCompiledGovernanceL0Sync } from '../domains/cats/services/context/governance-l0.js';
 import { loadStagingBody } from '../domains/cats/services/context/StagingContent.js';
-import type { EventMemoryFilter, IEventMemoryStore } from '../domains/memory/EventMemoryStore.js';
+import type { EventMemoryFilter } from '../domains/memory/EventMemoryStore.js';
 import { eventMemoryRevision, type StoredEventMemoryLifecycle } from '../domains/memory/EventMemoryStore.js';
 import type { EventMemoryCorrectionProposalStore } from '../domains/memory/event/EventMemoryCorrectionProposalStore.js';
 import { EventMemoryLifecycleService } from '../domains/memory/event/EventMemoryLifecycleService.js';
 import { toEventMemoryCorrectionProposalView } from '../domains/memory/event/event-memory-correction-proposal-view.js';
+import type { EventMemoryPort } from '../domains/memory/event/event-memory-port.js';
 import type { BackfillMessageSource, BackfillThreadSource } from '../domains/memory/event-backfill.js';
 import { runCorpusBackfill } from '../domains/memory/event-backfill.js';
 import type { MagicWordMeaning } from '../domains/memory/magic-word-meanings.js';
 import { parseMagicWordMeanings } from '../domains/memory/magic-word-meanings.js';
 import type { OwnerMemoryActionCoordinator } from '../domains/memory/owner/OwnerMemoryActionCoordinator.js';
+import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory/memory-plugin-host.js';
 import { resolveSessionUserId } from '../utils/request-identity.js';
 import type { AgentKeyAuthRegistry, CallbackAuthRegistry } from './callback-auth-prehandler.js';
 import { registerCallbackAuthHook } from './callback-auth-prehandler.js';
@@ -87,7 +89,7 @@ const listSchema = z.object({
 
 export interface EventsRoutesOptions {
   readEvidenceDb?: import('better-sqlite3').Database;
-  eventMemoryStore: IEventMemoryStore;
+  eventMemoryStore: EventMemoryPort;
   lifecycleService?: EventMemoryLifecycleService;
   ownerActionCoordinator?: OwnerMemoryActionCoordinator;
   correctionProposalStore?: EventMemoryCorrectionProposalStore;
@@ -176,6 +178,13 @@ function fitEventListPage(
 }
 
 export const eventsRoutes: FastifyPluginAsync<EventsRoutesOptions> = async (app, opts) => {
+  app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof MemoryProviderCallError) {
+      void reply.code(503).send({ error: 'memory_unavailable', effect: error.effect });
+      return;
+    }
+    throw error;
+  });
   // F227 (砚砚 R2 P1): register callback auth in THIS plugin's scope so MCP
   // callbackPost (cat_cafe_teleport) X-Invocation-Id/X-Callback-Token headers
   // actually decorate request.callbackPrincipal. Fastify encapsulation means a
@@ -217,8 +226,8 @@ export const eventsRoutes: FastifyPluginAsync<EventsRoutesOptions> = async (app,
     // events; `ownerUserId` is appended LAST so a client-supplied value can't widen it.
     const limit = parsed.data.limit ?? 50;
     const offset = parsed.data.offset ?? 0;
-    const filter: EventMemoryFilter = { ...parsed.data, limit: limit + 1, offset, ownerUserId: owner };
-    const window = opts.eventMemoryStore.listEvents(filter);
+    const filter = { ...parsed.data, limit: limit + 1, offset, ownerUserId: owner } satisfies EventMemoryFilter;
+    const window = await opts.eventMemoryStore.listEvents(filter);
     const counts = opts.correctionProposalStore
       ? await opts.correctionProposalStore.countActionableForEvents(
           owner,
@@ -242,7 +251,7 @@ export const eventsRoutes: FastifyPluginAsync<EventsRoutesOptions> = async (app,
     if (!isAuthenticated(request)) return reply.status(401).send({ error: 'auth required' });
     const owner = ownerUserIdOf(request);
     if (!owner) return reply.status(403).send({ error: 'owner scope required' });
-    const event = opts.eventMemoryStore.getEvent(request.params.eventId);
+    const event = await opts.eventMemoryStore.getEvent(request.params.eventId, owner);
     if (!event || event.ownerUserId !== owner) return reply.status(404).send({ error: 'Event not found' });
     const correctionProposals = await listEventCorrections(opts.correctionProposalStore, owner, event.eventId);
     const snapshot = projectEventSnapshot(event);
@@ -285,7 +294,7 @@ export const eventsRoutes: FastifyPluginAsync<EventsRoutesOptions> = async (app,
       if (!owner) return reply.status(401).send({ error: 'Session required' });
       if (!request.query.revision) return reply.status(400).send({ error: 'Revision required' });
       if (!sourceReaders) return reply.status(503).send({ error: 'Source reader unavailable' });
-      const event = opts.eventMemoryStore.getEvent(request.params.eventId);
+      const event = await opts.eventMemoryStore.getEvent(request.params.eventId, owner);
       if (!event || event.ownerUserId !== owner) return reply.status(404).send({ error: 'Event not found' });
       if (eventMemoryRevision(event) !== request.query.revision) {
         return reply.status(409).send({ error: 'Revision changed' });
@@ -347,7 +356,7 @@ export const eventsRoutes: FastifyPluginAsync<EventsRoutesOptions> = async (app,
       }
       // F227 (cloud-review P1 / 砚砚): only teleport to one of the caller's OWN event
       // coordinates — a client cannot drive navigation to another user's event.
-      if (opts.eventMemoryStore.getByCoord(threadId, messageId, owner).length === 0) {
+      if ((await opts.eventMemoryStore.getByCoord(threadId, messageId, owner)).length === 0) {
         reply.status(404);
         return { error: 'no such event for this owner' };
       }

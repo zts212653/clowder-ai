@@ -11,6 +11,7 @@ import {
 } from '../../src/domains/memory/owner/OwnerMemoryActionCoordinator.js';
 import type { OwnerMemoryActionReceiptRecord } from '../../src/domains/memory/owner/OwnerMemoryActionReceiptStore.js';
 import { applyMigrations } from '../../src/domains/memory/schema.js';
+import { entityOwnerFixture } from '../helpers/entity-owner-fixture.js';
 
 const requestId = 'entity-forget:218f2d5e-9f45-7d8c-a829-88f6440a4f15';
 
@@ -29,20 +30,12 @@ it('does not recover a never-owned Entity from absence alone', async () => {
   let mutations = 0;
   const service = new EntityMemoryLifecycleService({
     store: {
-      get: () => null,
-      correct: () => {
+      get: async () => null,
+      mutate: async () => {
         mutations++;
         return { outcome: 'not_available' };
       },
-      retire: () => {
-        mutations++;
-        return { outcome: 'not_available' };
-      },
-      hardForget: () => {
-        mutations++;
-        return { outcome: 'not_available' };
-      },
-      getOwnerActionEvidence: () => null,
+      evidence: async () => null,
     },
     coordinator: new OwnerMemoryActionCoordinator({ store: new InterruptedReceiptStore(), lock: new SessionMutex() }),
     sourceAvailable: async () => false,
@@ -92,7 +85,7 @@ it('recovers Entity hard-forget from exact atomic action evidence', async () => 
   assert.ok(entity);
   const store = new EntityMemoryLifecycleStore(db);
   const service = new EntityMemoryLifecycleService({
-    store,
+    store: entityOwnerFixture(store, entitySourceRevision),
     coordinator: new OwnerMemoryActionCoordinator({ store: new LostCompletionStore(), lock: new SessionMutex() }),
     sourceAvailable: async () => true,
   });

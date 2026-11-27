@@ -31,6 +31,11 @@ it('reads package documentation with its detail and contribution tools only when
   expect(apiFetch).not.toHaveBeenCalled();
   await act(() => result.current.action('settingsPluginDetailRead', { id: 'fixture.plugin' }));
   expect(result.current.data.pluginDetails['fixture.plugin']).toEqual(plugin);
+  expect(result.current.data.pluginDocumentation['fixture.plugin']).toBeUndefined();
+  expect(vi.mocked(apiFetch).mock.calls.map(([path]) => path)).toEqual([
+    '/api/plugin-manager/plugins/_local/fixture.plugin',
+  ]);
+  await act(() => result.current.action('settingsPluginDocumentationRead', { id: plugin.pluginId }));
   expect(result.current.data.pluginDocumentation['fixture.plugin']).toEqual(documentation);
   expect(vi.mocked(apiFetch).mock.calls.map(([path]) => path)).toEqual([
     '/api/plugin-manager/plugins/_local/fixture.plugin',
@@ -63,6 +68,7 @@ it('reads inactive package details without requesting active-runtime contributio
   expect(apiFetch).not.toHaveBeenCalled();
   await act(() => result.current.action('settingsPluginDetailRead', { id: plugin.pluginId }));
   expect(result.current.data.pluginDetails[plugin.pluginId]).toEqual(plugin);
+  await act(() => result.current.action('settingsPluginDocumentationRead', { id: plugin.pluginId }));
   expect(result.current.data.pluginDocumentation[plugin.pluginId]).toEqual({ readmeMarkdown: '# Inactive package' });
   expect(vi.mocked(apiFetch).mock.calls.map(([path]) => path)).toEqual([
     '/api/plugin-manager/plugins/_local/fixture.inactive',

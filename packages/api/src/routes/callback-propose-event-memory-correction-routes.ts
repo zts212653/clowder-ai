@@ -9,12 +9,10 @@ import {
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import type { ApprovalIngress } from '../domains/approval-hub/ApprovalIngress.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
-import {
-  eventMemoryRevision,
-  type IEventMemoryStore,
-  type StoredEventMemoryLifecycle,
-} from '../domains/memory/EventMemoryStore.js';
+import { eventMemoryRevision, type StoredEventMemoryLifecycle } from '../domains/memory/EventMemoryStore.js';
 import type { EventMemoryCorrectionProposalStore } from '../domains/memory/event/EventMemoryCorrectionProposalStore.js';
+import type { EventMemoryPort } from '../domains/memory/event/event-memory-port.js';
+import { MemoryProviderCallError } from '../domains/plugin/host-surface/memory/memory-plugin-host.js';
 import { registerCallbackAuthHook, requireCallbackAuth } from './callback-auth-prehandler.js';
 import type { EventMemorySourceReaders } from './event-memory-source.js';
 import { readEventMemorySource } from './event-memory-source.js';
@@ -23,7 +21,7 @@ import { publishEventMemoryCorrectionProposal } from './wave2-proposal-publicati
 
 export interface ProposeEventMemoryCorrectionDeps {
   registry: InvocationRegistry;
-  eventMemoryStore: Pick<IEventMemoryStore, 'getEvent'>;
+  eventMemoryStore: Pick<EventMemoryPort, 'getEvent'>;
   proposalStore: EventMemoryCorrectionProposalStore;
   approvalIngress: ApprovalIngress;
   sourceReaders: EventMemorySourceReaders;
@@ -33,6 +31,13 @@ export const callbackProposeEventMemoryCorrectionRoutes: FastifyPluginAsync<Prop
   app,
   opts,
 ) => {
+  app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof MemoryProviderCallError) {
+      void reply.code(503).send({ error: 'memory_unavailable', effect: error.effect });
+      return;
+    }
+    throw error;
+  });
   registerCallbackAuthHook(app, opts.registry);
 
   app.post('/api/callbacks/propose-event-memory-correction', async (request, reply) => {
@@ -79,7 +84,7 @@ async function resolveProposalTarget(
   opts: ProposeEventMemoryCorrectionDeps,
   reply: FastifyReply,
 ): Promise<StoredEventMemoryLifecycle | null> {
-  const event = opts.eventMemoryStore.getEvent(input.eventId);
+  const event = await opts.eventMemoryStore.getEvent(input.eventId, ownerUserId);
   if (!event || event.ownerUserId !== ownerUserId || event.status !== 'active') {
     reply.status(404).send({ error: 'Event not found' });
     return null;

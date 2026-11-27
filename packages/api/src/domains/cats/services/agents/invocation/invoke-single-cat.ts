@@ -131,7 +131,6 @@ import type {
   EntityNudgePromptPresentation,
   EntityNudgeService,
 } from '../../../../memory/EntityNudgeService.js';
-import { matterOpeningDirectory } from '../../../../memory/matters/matter-opening-directory.js';
 import {
   AsrPersonMemoryOpportunityPromptService,
   type AsrPersonMemoryPresentationEnvelope,
@@ -1268,10 +1267,9 @@ export interface InvocationDeps {
   /** F287: invocation-bound Cue resolver; receives only server-owned typed seeds. */
   readonly memoryCuePromptService?: MemoryCueInvocationPromptResolver;
   readonly contextSourceAdmission?: Pick<ContextSourceAdmission, 'prepare'>;
-  readonly matterMemoryService?: Pick<
-    import('../../../../memory/matters/MatterMemoryService.js').MatterMemoryService,
-    'catalog'
-  >;
+  readonly matterOpeningPrompt?: (
+    caller: import('../../../../plugin/carrier/plugin-call-context.js').PluginCallContext,
+  ) => Promise<string>;
   /** F312: lane-owned standing predicate for an unconsumed canonical Profile revision. */
   readonly profileCueOpportunitySource?: import('../../../../memory/cue/sources/ProfileMemoryCueSource.js').ProfileMemoryCueSource;
   /** F312: lane-owned temporal/subject predicate for one unconsumed F227 Event revision. */
@@ -2058,9 +2056,15 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   const resolveInvocationMemoryCues = async (): Promise<void> => {
     invocationPromptAdditions.length = 0;
     if (isScopedMember) return;
-    if (deps.matterMemoryService && params.ownerAuthProvenance === 'strict') {
+    if (deps.matterOpeningPrompt && params.ownerAuthProvenance === 'strict') {
       invocationPromptAdditions.push(
-        await matterOpeningDirectory(deps.matterMemoryService, userId, catId, threadId, { invocationId }),
+        await deps.matterOpeningPrompt({
+          userId,
+          catId,
+          threadId,
+          invocationId,
+          assertCurrent: async () => signal.throwIfAborted(),
+        }),
       );
     }
     if (deps.runtimeInteractionPort && params.ownerAuthProvenance === 'strict') {

@@ -62,6 +62,48 @@ describe('F200 recall correlation integration', () => {
     assert.equal(consumed[0].method, 'Read');
   });
 
+  it('delegates the primary ledger write with the completed invocation scope', async () => {
+    const { triggerRecallCorrelation } = await import('../../dist/domains/memory/recall-correlation-hook.js');
+    const written = [];
+    const now = Date.now();
+    const events = [
+      {
+        threadId: 'untrusted-summary-thread',
+        catId: 'opus',
+        invocationId: 'inv-1',
+        toolName: 'search_evidence',
+        summary: { query: 'normal result', resultCount: 1, _toolUseId: 'search-1' },
+        timestamp: now,
+      },
+      {
+        threadId: 'other',
+        catId: 'opus',
+        invocationId: 'other-invocation',
+        toolName: 'search_evidence',
+        summary: { query: 'must not be recorded' },
+        timestamp: now,
+      },
+    ];
+    await triggerRecallCorrelation(undefined, events, 'inv-1', 'opus', {
+      userId: 'owner',
+      threadId: 'authorized-thread',
+      persist: async (scope, records, projections) => {
+        written.push({ scope, records, projections });
+      },
+    });
+    assert.equal(db.prepare('SELECT count(*) AS count FROM recall_events').get().count, 0);
+    assert.equal(written.length, 1);
+    assert.deepEqual(written[0].scope, { userId: 'owner', threadId: 'authorized-thread', invocationId: 'inv-1' });
+    assert.deepEqual(written[0].projections, {
+      trajectory: { filesRead: [], filesModified: [], duration: 0 },
+      traversals: [],
+    });
+    assert.deepEqual(
+      written[0].records.map(({ threadId, sourceEventId, query }) => ({ threadId, sourceEventId, query })),
+      [{ threadId: 'authorized-thread', sourceEventId: 'inv-1:opus:search-1', query: 'normal result' }],
+    );
+  });
+
   it('no memory tools → no RecallEvents', async () => {
     const { triggerRecallCorrelation } = await import(
       `../../dist/domains/memory/recall-correlation-hook.js?v2=${Date.now()}`

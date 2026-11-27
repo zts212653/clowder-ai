@@ -16,6 +16,7 @@ import { evidenceRoutes } from '../src/routes/evidence.js';
 import { libraryRoutes } from '../src/routes/library.js';
 import { memoryPageReadRoutes } from '../src/routes/memory-page-read.js';
 import { tasteBrowseRoutes } from '../src/routes/taste-browse.js';
+import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 
 const root = await mkdtemp(join(tmpdir(), 'f321-real-search-'));
 const evidence = new SqliteEvidenceStore(':memory:');
@@ -116,7 +117,7 @@ try {
     evidenceDb: evidence.getDb(),
     markerQueue: { list: async () => [] },
     searchSources: {
-      tasteRepository: { canonicalRoot: () => root, approvalLockKey: () => 'unused' },
+      tasteBrowse: createTasteBrowseFixture({ canonicalRoot: () => root, approvalLockKey: () => 'unused' }),
       messageSearchService: messages,
     },
   });
@@ -124,7 +125,7 @@ try {
   await app.register(libraryRoutes, { catalog, stores });
   await app.register(tasteBrowseRoutes, {
     ownerUserId: 'owner',
-    tasteRepository: { canonicalRoot: () => root, approvalLockKey: () => 'unused' },
+    browse: createTasteBrowseFixture({ canonicalRoot: () => root, approvalLockKey: () => 'unused' }),
     proposalStore: new InMemoryTasteProposalStore(),
     threadStore,
     messageStore,

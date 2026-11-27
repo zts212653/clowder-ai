@@ -950,7 +950,7 @@ export interface CallbackRoutesOptions {
   evidenceStore: IEvidenceStore;
   /** Optional shared publisher; caller authentication remains in callback routes. */
   messageSearchService?: import('../domains/memory/MessageSearchService.js').MessageSearchService;
-  matterMemoryService?: import('../domains/memory/matters/MatterMemoryService.js').MatterMemoryService;
+  matterRouteProvider?: import('./memory-matter-routes.js').MatterRouteProvider;
   messageSearchAnswerService?: import('../domains/memory/MessageSearchAnswerPublicationService.js').MessageSearchAnswerPublicationService;
   reflectionService: IReflectionService;
   /** F254 Phase B: Raw Redis client for freshness notice event log + state store */
@@ -6154,7 +6154,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     messageSearchAnswerService: opts.messageSearchAnswerService,
     evidenceStore: opts.evidenceStore,
     messageSearchService: opts.messageSearchService,
-    matterMemoryService: opts.matterMemoryService,
+    matterRouteProvider: opts.matterRouteProvider,
     messageStore: opts.messageStore,
     ...(opts.threadStore ? { threadStore: opts.threadStore } : {}),
     reflectionService: opts.reflectionService,

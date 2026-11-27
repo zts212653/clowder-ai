@@ -6,9 +6,9 @@ import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { MemoryStore } from '../dist/domains/cats/services/stores/ports/MemoryStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
 import { memoryRoutes } from '../dist/routes/memory.js';
+import { createThreadMemoryFixture } from './helpers/thread-memory-fixture.js';
 
 describe('Memory API Routes', () => {
   let app;
@@ -19,11 +19,11 @@ describe('Memory API Routes', () => {
 
   beforeEach(async () => {
     app = Fastify();
-    memoryStore = new MemoryStore();
+    memoryStore = createThreadMemoryFixture();
     threadStore = new ThreadStore();
     ownThreadId = threadStore.create('test-user', 'Own thread').id;
     otherThreadId = threadStore.create('other-user', 'Other thread').id;
-    await app.register(memoryRoutes, { memoryStore, threadStore });
+    await app.register(memoryRoutes, { memoryStore: () => memoryStore, threadStore });
     await app.ready();
   });
 

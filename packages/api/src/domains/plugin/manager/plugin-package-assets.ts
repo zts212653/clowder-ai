@@ -17,6 +17,8 @@ import {
   inventoryIdentity,
   objectIcon,
   pluginIconAsset,
+  readStaticPackageConsole,
+  readStaticPackageReadme,
   readVerifiedConsole,
   readVerifiedIcon,
   readVerifiedReadme,
@@ -161,6 +163,10 @@ export class PluginManagerPackageAssetService
       : undefined;
     if (!installed) return {};
     return this.cached(this.consoleCache, installed.packageDigest, async () => {
+      if (this.options.packages.readInstalledConsoleFiles) {
+        const files = await this.options.packages.readInstalledConsoleFiles(installed.packageDigest);
+        return readStaticPackageConsole(files, inventoryIdentity(installed));
+      }
       const located = await this.options.packages.resolveInstalledPackage(installed.packageDigest);
       try {
         return await readVerifiedConsole(located, inventoryIdentity(installed));
@@ -180,6 +186,20 @@ export class PluginManagerPackageAssetService
       : undefined;
     if (installed) {
       return this.cached(this.readmeCache, installed.packageDigest, async () => {
+        if (this.options.packages.readInstalledStaticFile) {
+          const file = await this.options.packages
+            .readInstalledStaticFile(installed.packageDigest, () => 'README.md')
+            .catch((error) => {
+              throw new PluginManagerPackageAssetError(
+                'INVALID_ASSET',
+                'installed plugin README could not be verified',
+                {
+                  cause: error,
+                },
+              );
+            });
+          return readStaticPackageReadme(file, inventoryIdentity(installed));
+        }
         const located = await this.options.packages.resolveInstalledPackage(installed.packageDigest).catch((error) => {
           throw new PluginManagerPackageAssetError('INVALID_ASSET', 'installed plugin package could not be verified', {
             cause: error,

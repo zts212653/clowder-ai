@@ -1,31 +1,16 @@
 import { isRecallResultStatus } from '@cat-cafe/shared';
+import type { MemoryRecallEvent, MemoryRecallEventRequest } from '@clowder-ai/plugin-memory-contract/recall';
 import type Database from 'better-sqlite3';
 import type { RecallCandidateView } from './recall-candidate-view.js';
 
-export interface RecallPageEventRow {
-  recall_id: string;
-  cat_id: string;
-  invocation_id: string;
-  source_event_id: string | null;
-  tool_name: string;
-  query: string;
-  mode: string | null;
-  scope: string | null;
-  candidates_json: string;
-  consumed_json: string;
-  result_count: number | null;
-  result_status: string | null;
-  timestamp: number;
-  source: 'pull' | 'push';
-  push_surface: string | null;
-  inspected: number;
-}
-export function readRecallPageEvent(db: Database.Database, id: string) {
+export type RecallPageEventRow = MemoryRecallEvent;
+export type RecallEventReader = (input: MemoryRecallEventRequest['input']) => Promise<MemoryRecallEvent | null>;
+export function readRecallPageEvent(db: Database.Database, id: string, threadId: string) {
   return db
     .prepare(`SELECT recall_id, cat_id, invocation_id, source_event_id, tool_name, query, mode, scope,
     candidates_json, consumed_json, result_count, result_status, timestamp, source, push_surface, inspected
-    FROM recall_events WHERE recall_id = ?`)
-    .get(id) as RecallPageEventRow | undefined;
+    FROM recall_events WHERE recall_id = ? AND thread_id = ?`)
+    .get(id, threadId) as RecallPageEventRow | undefined;
 }
 export function recallCandidates(row: RecallPageEventRow) {
   const raw: unknown = JSON.parse(row.candidates_json || '[]');

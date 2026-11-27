@@ -1,4 +1,4 @@
-import type { MemoryCueEpisodeStore } from '../domains/memory/cue/MemoryCueEpisodeStore.js';
+import type { CueInvocationReader } from '../domains/memory/cue/project-invocation-cues.js';
 import type { MemoryCueInvocationReadOptions } from './memory-cue-invocation-read.js';
 import { finalizeOwnerCueRead, type OwnerCueRead, readOwnerCueInvocation } from './memory-cue-read-projection.js';
 
@@ -23,7 +23,7 @@ export function parseCueInvocationBatch(raw: unknown): string[] | null {
 /** Preserve the old four-read concurrency bound while reducing HTTP fanout. */
 export async function readOwnerCueBatch(
   opts: MemoryCueInvocationReadOptions,
-  episodes: MemoryCueEpisodeStore,
+  readCues: CueInvocationReader,
   userId: string,
   threadId: string,
   ids: string[],
@@ -37,7 +37,7 @@ export async function readOwnerCueBatch(
       ...(await Promise.all(
         ids.slice(offset, offset + 4).map(async (invocationId) => {
           try {
-            const result = await readOwnerCueInvocation(opts, episodes, userId, threadId, invocationId, includeMatter);
+            const result = await readOwnerCueInvocation(opts, readCues, userId, threadId, invocationId, includeMatter);
             return { invocationId, ...result };
           } catch {
             return { invocationId, status: 503 as const, error: 'Cue source unavailable' };
@@ -56,7 +56,7 @@ export async function readOwnerCueBatch(
           try {
             const result = await readOwnerCueInvocation(
               opts,
-              episodes,
+              readCues,
               userId,
               threadId,
               row.invocationId,

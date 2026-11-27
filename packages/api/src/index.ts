@@ -249,7 +249,6 @@ import { TranscriptWriter } from './domains/cats/services/session/TranscriptWrit
 import { createBacklogStore } from './domains/cats/services/stores/factories/BacklogStoreFactory.js';
 import { createFrustrationIssueStore } from './domains/cats/services/stores/factories/FrustrationIssueStoreFactory.js';
 import { createLabelStore } from './domains/cats/services/stores/factories/LabelStoreFactory.js';
-import { createMemoryStore } from './domains/cats/services/stores/factories/MemoryStoreFactory.js';
 import { createMessageStore } from './domains/cats/services/stores/factories/MessageStoreFactory.js';
 import { createProfileUpdateProposalStore } from './domains/cats/services/stores/factories/ProfileUpdateProposalStoreFactory.js';
 import { createProposalStore } from './domains/cats/services/stores/factories/ProposalStoreFactory.js';
@@ -302,7 +301,6 @@ import { HumanDispositionLedger } from './domains/human-disposition/HumanDisposi
 import { createDeferredPersonMemoryDailyTaskSpec } from './domains/memory/DeferredPersonMemoryDailyTaskSpec.js';
 import { EntityRegistryStore } from './domains/memory/EntityRegistry.js';
 import { EntityMemoryLifecycleService } from './domains/memory/entity/EntityMemoryLifecycleService.js';
-import { EntityMemoryLifecycleStore } from './domains/memory/entity/EntityMemoryLifecycleStore.js';
 import { sharedProactiveCandidateNudgeReceiptStore } from './domains/memory/entity-nudge-state.js';
 import { createEventMemoryCorrectionProposalStore } from './domains/memory/event/createEventMemoryCorrectionProposalStore.js';
 import { EventMemoryLifecycleService } from './domains/memory/event/EventMemoryLifecycleService.js';
@@ -797,11 +795,22 @@ async function initializeApi(
   app.get('/api/health', healthHandler);
 
   // F152: Readiness check — verifies dependencies are reachable.
-  // evidenceStoreRef is set after memoryServices init; handler runs at request time.
-  let evidenceStoreRef: { health(): Promise<boolean> } | null = null;
+  const { MemoryPluginHost } = await import('./domains/plugin/host-surface/memory/memory-plugin-host.js');
+  const { createEntityMemoryProvider } = await import('./domains/plugin/host-surface/memory/entity-memory-provider.js');
+  const { createEventMemoryProvider } = await import('./domains/plugin/host-surface/memory/event-memory-provider.js');
+  const { createProfileMemoryProvider } = await import(
+    './domains/plugin/host-surface/memory/profile-memory-provider.js'
+  );
+  const memoryProvider = new MemoryPluginHost(app.log);
+  const entityMemory = createEntityMemoryProvider(memoryProvider);
+  const eventMemoryStore = createEventMemoryProvider(memoryProvider);
+  const profileMemory = createProfileMemoryProvider(memoryProvider);
+  // The scheduler readiness probe is set before the server listens.
+  let checkSchedulerDb: (() => boolean) | undefined;
   async function checkReadiness(): Promise<{
     status: 'ready' | 'degraded';
     checks: Record<string, { ok: boolean; ms: number; error?: string }>;
+    memory: { status: 'ready' | 'unavailable' };
   }> {
     const checks: Record<string, { ok: boolean; ms: number; error?: string }> = {};
     if (redisClient) {
@@ -815,10 +824,10 @@ async function initializeApi(
     } else {
       checks.redis = { ok: true, ms: 0 };
     }
-    if (evidenceStoreRef) {
+    if (checkSchedulerDb) {
       const t0 = Date.now();
       try {
-        const ok = await evidenceStoreRef.health();
+        const ok = checkSchedulerDb();
         checks.sqlite = { ok, ms: Date.now() - t0, ...(ok ? {} : { error: 'SELECT 1 failed' }) };
       } catch (err) {
         checks.sqlite = { ok: false, ms: Date.now() - t0, error: String(err) };
@@ -826,7 +835,11 @@ async function initializeApi(
     }
     checks.sessionHooks = { ok: sessionHookAuthenticationReady(), ms: 0 };
     const allOk = Object.values(checks).every((c) => c.ok);
-    return { status: allOk ? 'ready' : 'degraded', checks };
+    return {
+      status: allOk ? 'ready' : 'degraded',
+      checks,
+      memory: { status: memoryProvider.isReady() ? 'ready' : 'unavailable' },
+    };
   }
   const readyHandler = async (_request: unknown, reply: FastifyReply) => {
     const result = await checkReadiness();
@@ -1251,7 +1264,8 @@ async function initializeApi(
   // F221 Phase B: taste proposal store (InMemory now; Redis in Task 3)
   const tasteProposalStore = createTasteProposalStore(redis);
   const eventMemoryCorrectionProposalStore = createEventMemoryCorrectionProposalStore(redis);
-  const tasteRepository = new FileTasteRepository(findMonorepoRoot(process.cwd()));
+  const tasteProjectRoot = findMonorepoRoot(process.cwd());
+  const tasteRepository = new FileTasteRepository(tasteProjectRoot);
   const tasteApprovalCoordinator = {
     lock: new SessionMutex(),
     lockKey: () => tasteRepository.approvalLockKey(),
@@ -1433,7 +1447,6 @@ async function initializeApi(
   const backlogStore = createBacklogStore(redis);
   const workflowSopStore = createWorkflowSopStore(redis);
   const summaryStore = createSummaryStore(redis);
-  const memoryStore = createMemoryStore(redis);
   const taskProgressStore = createTaskProgressStore(redis);
   const draftStore = createDraftStore(redis);
   const readStateStore = createReadStateStore(redis);
@@ -1515,6 +1528,18 @@ async function initializeApi(
   const readDiagnostics = createSqliteReadDiagnostics({
     onSlowRead: (event) => app.log.warn({ module: 'sqlite-read', ...event }, 'Slow synchronous SQLite .all read'),
   });
+  const configuredEvidenceDbPath = process.env.EVIDENCE_DB ?? resolve(repoRoot, 'evidence.sqlite');
+  const evidenceDbPath = configuredEvidenceDbPath === ':memory:' ? ':memory:' : resolve(configuredEvidenceDbPath);
+  const { resolveMemoryDataLocations } = await import('./config/memory-data-locations.js');
+  const memoryData = resolveMemoryDataLocations({ sqlitePath: evidenceDbPath, dataDir: process.env.CAT_CAFE_DATA_DIR });
+  const { openHostSchedulerDatabase } = await import('./infrastructure/scheduler/host-scheduler-database.js');
+  const schedulerDb = await openHostSchedulerDatabase(evidenceDbPath);
+  checkSchedulerDb = () => schedulerDb.prepare('SELECT 1').pluck().get() === 1;
+  const detachSchedulerReadDiagnostics = readDiagnostics(schedulerDb);
+  app.addHook('onClose', async () => {
+    detachSchedulerReadDiagnostics();
+    schedulerDb.close();
+  });
   // Every store's degraded vector search, in this process or reported by a read worker.
   const { logVectorSearchDegradesTo } = await import('./domains/memory/vector-search-degrade-report.js');
   logVectorSearchDegradesTo(app.log);
@@ -1540,43 +1565,26 @@ async function initializeApi(
   app.log.info(
     `[api] F102: embed mode = ${resolvedEmbedMode} (EMBED_MODE=${process.env.EMBED_MODE ?? '(unset)'}, service.enabled=${embedSvcEnabled})`,
   );
+  const { createMemoryIndexSources } = await import('./domains/cats/services/session/memory/memory-index-sources.js');
+  const makeMemoryIndexSources = (assertActivation?: () => void) =>
+    createMemoryIndexSources({ messageStore, threadStore, ownerUserId: privateUserId, assertActivation });
+  const memoryIndexSources = makeMemoryIndexSources();
   const memoryServices = await createMemoryServices({
     type: 'sqlite',
     readDiagnostics,
-    sqlitePath: process.env.EVIDENCE_DB ?? resolve(repoRoot, 'evidence.sqlite'),
+    sqlitePath: evidenceDbPath,
     publishedProjectRoot: !process.env.DOCS_ROOT && existsSync(join(knowledgeRoot, '.git')) ? knowledgeRoot : undefined,
     docsRoot,
     markersDir,
-    dataDir: process.env.CAT_CAFE_DATA_DIR,
+    dataLocations: memoryData,
     transcriptDataDir, // reuse the same resolved path as Writer/Reader (line 282)
     embed: { embedMode: resolvedEmbedMode },
     privateUserId,
-    // Phase E-2: message passage indexing — provide a callback that reads thread messages
-    messageListFn: (threadId: string, limit?: number) =>
-      messageStore.getThreadEvidenceProjection(threadId, limit ?? 2000, privateUserId),
-    // Phase E-1: thread summary indexing — provide a callback that lists all threads
-    threadListFn: async () => {
-      const threads = await threadStore.list('default-user');
-      return threads
-        .filter((t) => !t.projectPath.startsWith('games/'))
-        .map((t) => ({
-          id: t.id,
-          title: t.title,
-          participants: t.participants as string[],
-          threadMemory: t.threadMemory ? { summary: t.threadMemory.summary } : null,
-          lastActiveAt: t.lastActiveAt,
-          featureIds: t.backlogItemId ? [t.backlogItemId] : undefined,
-        }));
-    },
-    excludeThreadIdsFn: async () => {
-      const allThreads = await threadStore.list('default-user');
-      const excluded = new Set<string>();
-      for (const t of allThreads) {
-        if (t.projectPath.startsWith('games/')) excluded.add(t.id);
-      }
-      return excluded;
-    },
+    messageListFn: memoryIndexSources.listMessages,
+    threadListFn: memoryIndexSources.listThreads,
+    excludeThreadIdsFn: async () => new Set(await memoryIndexSources.listExcludedThreadIds()),
   });
+  app.addHook('onClose', () => memoryServices.close());
   const { MessageSearchService } = await import('./domains/memory/MessageSearchService.js');
   const { MessageSearchAnswerPublicationStore } = await import(
     './domains/memory/MessageSearchAnswerPublicationStore.js'
@@ -1612,7 +1620,7 @@ async function initializeApi(
   });
   const profileMemorySourceReaders = { threadStore, messageStore };
   const profileMemoryLifecycleService = new ProfileMemoryLifecycleService({
-    store: profileMemoryLifecycleStore,
+    store: { ...profileMemory, lockKey: (owner, memoryId) => profileMemoryLifecycleStore.lockKey(owner, memoryId) },
     coordinator: ownerMemoryActionCoordinator,
     targetLock: profileUpdateLock,
     invalidateDerived: async ({ ownerUserId }) => {
@@ -1627,15 +1635,14 @@ async function initializeApi(
   });
   const eventMemorySourceReaders = { threadStore, messageStore };
   const eventMemoryLifecycleService = new EventMemoryLifecycleService({
-    store: memoryServices.eventMemoryStore,
+    store: eventMemoryStore,
     coordinator: ownerMemoryActionCoordinator,
     sourceAvailable: async (event) =>
       (await readEventMemorySource(event, event.ownerUserId, eventMemorySourceReaders)).status === 'ready',
   });
-  const entityMemoryLifecycleStore = new EntityMemoryLifecycleStore(memoryServices.store.getDb());
   const entityMemorySourceReaders = { threadStore, messageStore };
   const entityMemoryLifecycleService = new EntityMemoryLifecycleService({
-    store: entityMemoryLifecycleStore,
+    store: entityMemory,
     coordinator: ownerMemoryActionCoordinator,
     sourceAvailable: async (entity) =>
       (await readEntityMemorySource(entity, privateUserId, entityMemorySourceReaders)).status === 'ready',
@@ -1678,12 +1685,13 @@ async function initializeApi(
   );
   const memoryCueEpisodeStore = new MemoryCueEpisodeStore(memoryServices.store.getDb());
   const { MatterMemoryService } = await import('./domains/memory/matters/MatterMemoryService.js');
+  const { createMatterRouteProvider, readMatterOpeningPrompt } = await import('./routes/memory-matter-provider.js');
+  const matterRouteProvider = createMatterRouteProvider(memoryProvider);
   const matterMemoryService = new MatterMemoryService({
     db: memoryServices.store.getDb(),
     messageStore,
     threadStore,
     runWrite: (operation) => memoryServices.store.runExclusive(operation),
-    onChanged: (ownerUserId) => socketManager?.emitToUser(ownerUserId, 'memory_matter_changed', {}),
   });
   const { WorkPreparationOpportunityStore } = await import(
     './domains/memory/cue/preparation/WorkPreparationOpportunityStore.js'
@@ -1706,7 +1714,6 @@ async function initializeApi(
     },
   };
   // F152: Wire evidence store into /ready probe
-  evidenceStoreRef = memoryServices.evidenceStore;
   app.log.info('[api] F102: SQLite memory services initialized');
   startupMilestone('memory-services-ready');
 
@@ -1728,9 +1735,9 @@ async function initializeApi(
   }
 
   // F152 Phase B: Expedition Bootstrap — state manager + service
-  const { IndexStateManager } = await import('./domains/memory/IndexStateManager.js');
+  const { createProjectIndexProvider } = await import('./domains/plugin/host-surface/memory/project-index-provider.js');
   const { ExpeditionBootstrapService } = await import('./domains/memory/ExpeditionBootstrapService.js');
-  const indexStateManager = new IndexStateManager(memoryServices.store.getDb());
+  const indexStateManager = createProjectIndexProvider(memoryProvider);
   const { execFileSync } = await import('node:child_process');
   const getFingerprint = (projectPath: string) => {
     try {
@@ -1824,7 +1831,6 @@ async function initializeApi(
       memoryServices.embeddingLifecycle.catchUpAfterReady(),
     );
   }
-  app.addHook('onClose', async () => memoryServices.embeddingLifecycle.deactivate());
 
   // F-4: Global knowledge rebuild (Skills + MEMORY.md → global_knowledge.sqlite)
   if (memoryServices.globalIndexBuilder) {
@@ -1853,7 +1859,6 @@ async function initializeApi(
           app.log.warn({ err: error }, '[memory] published document vector catch-up pending');
         });
       });
-      app.addHook('onClose', async () => memoryServices.publishedDocuments!.stop());
     }
   }
 
@@ -1926,7 +1931,6 @@ async function initializeApi(
   const { createActorResolver } = await import('./infrastructure/scheduler/ActorResolver.js');
   const { getRoster } = await import('./config/cat-config-loader.js');
   const { loadDossierProfiles } = await import('@cat-cafe/shared/dossier');
-  const schedulerDb = memoryServices.store.getDb();
   const runLedger = new RunLedger(schedulerDb);
   const dossierProfiles = loadDossierProfiles(resolveActiveProjectRoot());
   const actorResolver = createActorResolver(getRoster, {
@@ -2869,7 +2873,7 @@ async function initializeApi(
     handles: memoryCueHandles,
     evidenceStore: memoryServices.evidenceStore,
     messageStore,
-    eventStore: memoryServices.eventMemoryStore,
+    eventStore: eventMemoryStore,
     entityRegistry: new EntityRegistryStore(memoryServices.store.getDb()),
     ...(personMemoryRecallService ? { personRecall: personMemoryRecallService } : {}),
     tasteRepository,
@@ -3052,6 +3056,7 @@ async function initializeApi(
     ...(agentPaneRegistry ? { agentPaneRegistry } : {}),
     packStore,
     evidenceStore: memoryServices.evidenceStore,
+    persistRecallEvents: memoryProvider.persistRecallEvents.bind(memoryProvider),
     ...(proactiveMemoryNudgeService ? { proactiveMemoryNudgeService } : {}),
     ...(humanDispositionFeedbackContextService ? { humanDispositionFeedbackContextService } : {}),
     ...(toolUsageCounter ? { toolUsageCounter } : {}),
@@ -3080,7 +3085,7 @@ async function initializeApi(
     ),
     contextSourceAdmission: memoryCueRuntime.contextSourceAdmission,
     memoryCuePromptService: memoryCueRuntime.promptService,
-    matterMemoryService,
+    matterOpeningPrompt: (caller) => readMatterOpeningPrompt(memoryProvider, caller),
     profileCueOpportunitySource: memoryCueRuntime.profileOpportunitySource,
     eventCueOpportunitySource: memoryCueRuntime.eventOpportunitySource,
     threadOverviewOpportunitySource: memoryCueRuntime.threadOverviewOpportunitySource,
@@ -3534,7 +3539,7 @@ async function initializeApi(
     holdBallCancelDeps: { dynamicTaskStore, taskRunner: taskRunnerV2, messageStore, socketManager },
     // F192 Phase G AC-G12 / F227 归一: magic word → Event Memory (single truth
     // source) + a lightweight episode ref for F192's a2 projection.
-    onMagicWordDetected: (
+    onMagicWordDetected: async (
       hits: Array<{ word: string }>,
       threadId: string,
       catId: string | null,
@@ -3560,19 +3565,13 @@ async function initializeApi(
         };
         let eventId: string;
         try {
-          const marked = memoryServices.eventMemoryStore.markEvent(record, ownerUserId);
+          const marked = await eventMemoryStore.markEvent(record, ownerUserId);
           if (marked.suppressed) continue;
           eventId = marked.event.eventId;
         } catch (err) {
-          // P1-3 (砚砚): dead-letter so the event is recoverable, not lost.
-          try {
-            memoryServices.eventMemoryStore.appendDeadLetter(record, ownerUserId, String(err));
-          } catch (dlErr) {
-            app.log.error({ dlErr, threadId, word: hit.word }, '[F227] dead-letter append ALSO failed');
-          }
           app.log.error(
-            { err, threadId, word: hit.word },
-            '[F227] Event Memory write failed — dead-lettered for replay',
+            { err, threadId, messageId, word: hit.word },
+            '[F227] Event Memory write could not be confirmed',
           );
           continue; // no orphan episode ref without a backing event
         }
@@ -3762,22 +3761,27 @@ async function initializeApi(
       lifecycle: tasteMemoryLifecycleStore,
       sourceReaders: { proposalStore: tasteProposalStore, threadStore, messageStore },
     },
-    eventSources: { store: memoryServices.eventMemoryStore, sourceReaders: eventMemorySourceReaders },
+    eventSources: { store: eventMemoryStore, sourceReaders: eventMemorySourceReaders },
   };
   await app.register(recallMetricsRoutes, {
     evidenceDb: memoryServices.store.getDb(),
+    readAnchors: memoryProvider.readRecallAnchors.bind(memoryProvider),
+    refreshAnchors: memoryProvider.refreshRecallAnchors.bind(memoryProvider),
     messageStore,
     threadStore,
     ...(personMemoryStore ? { personMemoryStore } : {}),
     cueSourceReader: memoryCueRuntime.sourceReader,
     profileMemoryStore: profileMemoryLifecycleStore,
     ...recallOwnerMessageSources,
+    readDocumentCandidate: (anchor, userId) => memoryProvider.readRecallCandidate(anchor, userId),
   });
   const { memoryCueInvocationReadRoutes } = await import('./routes/memory-cue-invocation-read.js');
   const { memoryMatterRoutes } = await import('./routes/memory-matter-routes.js');
-  await app.register(memoryMatterRoutes, { service: matterMemoryService });
+  await app.register(memoryMatterRoutes, { provider: matterRouteProvider });
+  const readInvocationCues = memoryProvider.readInvocationCues.bind(memoryProvider);
   await app.register(memoryCueInvocationReadRoutes, {
     matterMemoryService,
+    readInvocationCues,
     evidenceDb: memoryServices.store.getDb(),
     threadStore,
     invocationRecordStore,
@@ -3806,11 +3810,12 @@ async function initializeApi(
     tasteMemoryLifecycleStore,
   );
   const { tasteBrowseRoutes } = await import('./routes/taste-browse.js');
+  const { createTasteBrowseProvider } = await import('./domains/plugin/host-surface/memory/taste-browse-provider.js');
+  const tasteBrowse = createTasteBrowseProvider(memoryProvider);
   await app.register(tasteBrowseRoutes, {
     ownerUserId: privateUserId,
-    tasteRepository,
+    browse: tasteBrowse,
     proposalStore: tasteProposalStore,
-    lifecycleStore: tasteMemoryLifecycleStore,
     lifecycleService: tasteMemoryLifecycleService,
     threadStore,
     messageStore,
@@ -3829,15 +3834,14 @@ async function initializeApi(
   });
   await app.register(entityMemoryOwnerRoutes, {
     ownerUserId: privateUserId,
-    store: entityMemoryLifecycleStore,
+    store: entityMemory,
     lifecycle: entityMemoryLifecycleService,
     proposalStore: entityProposalStore,
     sourceReaders: entityMemorySourceReaders,
   });
   await app.register(profileMemoryOwnerRoutes, {
-    evidenceDb: memoryServices.store.getDb(),
     ownerUserId: privateUserId,
-    store: profileMemoryLifecycleStore,
+    store: profileMemory,
     lifecycle: profileMemoryLifecycleService,
     proposalStore: profileUpdateProposalStore,
     sourceReaders: profileMemorySourceReaders,
@@ -5215,7 +5219,7 @@ async function initializeApi(
         }
       : {}),
     memoryCueDeps,
-    matterMemoryService,
+    matterRouteProvider,
     skillConsumptionDeps: {
       receipts: skillConsumptionReceipts,
       ...(requestReviewUseReceipts ? { requestReviewReceipts: requestReviewUseReceipts } : {}),
@@ -5354,7 +5358,6 @@ async function initializeApi(
     presenceSource: sidebarPresenceSource,
     messageStore,
     taskStore,
-    memoryStore,
     sessionChainStore,
     transcriptWriter,
     artifactWorkLineage: artifactWorkLineageHolder,
@@ -5538,6 +5541,18 @@ async function initializeApi(
   const collectiveArtifactOwnerHolder: import('./domains/plugin/host-surface/collective-artifact-owner.js').CollectiveArtifactOwnerHolder =
     {};
   const pluginRuntime = cloudConversations.createRuntime({
+    memory: {
+      provider: memoryProvider,
+      evidenceDbPath,
+      data: { ...memoryData, tasteProjectRoot },
+      ephemeral: process.env.MEMORY_STORE === '1',
+      onMatterChanged: (ownerUserId) => socketManager?.emitToUser(ownerUserId, 'memory_matter_changed', {}),
+      indexSources: makeMemoryIndexSources,
+      getSearchEmbedding: () =>
+        memoryServices.embeddingLifecycle.getMode() === 'on'
+          ? memoryServices.embeddingLifecycle.getService()
+          : undefined,
+    },
     agentSessionProviders: (packages, configuration) =>
       declaredAgentSessionProviders({
         configuration,
@@ -6799,7 +6814,7 @@ async function initializeApi(
   let custodyOpportunityRuntime: InstanceType<typeof CustodyOpportunityRuntime> | null = null;
   try {
     custodyOpportunityRuntime = new CustodyOpportunityRuntime({
-      cohorts: new CustodyOpportunityCohortStore(memoryServices.store.getDb()),
+      cohorts: new CustodyOpportunityCohortStore(schedulerDb),
       messages: messageStore,
       tasks: taskStore,
       policyVersion: await custodyRecognitionPolicyVersion(repoRoot),
@@ -6940,7 +6955,7 @@ async function initializeApi(
   });
   await app.register(callbackProposeEventMemoryCorrectionRoutes, {
     registry,
-    eventMemoryStore: memoryServices.eventMemoryStore,
+    eventMemoryStore,
     proposalStore: eventMemoryCorrectionProposalStore,
     approvalIngress,
     sourceReaders: eventMemorySourceReaders,
@@ -7248,6 +7263,7 @@ async function initializeApi(
   await app.register(projectsBootstrapRoutes, {
     stateManager: indexStateManager,
     bootstrapService: expeditionBootstrapService,
+    isMemoryReady: () => memoryProvider.isReady(),
     socketManager: socketManager!,
     getFingerprint,
   });
@@ -7407,7 +7423,12 @@ async function initializeApi(
   await app.register((await import('./routes/skills-drift.js')).skillsDriftRoutes);
   await app.register((await import('./routes/mcp-drift.js')).mcpDriftRoutes);
   await app.register((await import('./routes/drift.js')).unifiedDriftRoutes);
-  await app.register(memoryRoutes, { memoryStore, threadStore });
+  const { createMemoryRouteProvider } = await import('./routes/memory-route-provider.js');
+  await app.register(memoryRoutes, {
+    memoryStore: createMemoryRouteProvider(memoryProvider),
+    threadStore,
+    deploymentOwnerUserId: privateUserId,
+  });
 
   const resolveLocalCodexReader = (catId: string) => {
     const catConfig = catRegistry.tryGet(catId)?.config;
@@ -7653,6 +7674,8 @@ async function initializeApi(
     publishedOwnerUserId: privateUserId,
     evidenceStore: memoryServices.evidenceStore,
     messageSearchService,
+    readIndexStatus: () =>
+      memoryProvider.readIndexStatus(memoryServices.store.getVectorGenerationTables().generationId, privateUserId),
     getEmbeddingService: () => memoryServices.embeddingLifecycle.getService(),
     getEmbeddingGenerationStatus: () => memoryServices.embeddingLifecycle.getGenerationStatus(),
     indexBuilder: memoryServices.indexBuilder,
@@ -7663,7 +7686,7 @@ async function initializeApi(
   });
   // F227: Event Memory query route (GET /api/memory/events)
   await app.register(eventsRoutes, {
-    eventMemoryStore: memoryServices.eventMemoryStore,
+    eventMemoryStore,
     readEvidenceDb: memoryServices.store.getDb(),
     lifecycleService: eventMemoryLifecycleService,
     correctionProposalStore: eventMemoryCorrectionProposalStore,
@@ -7758,10 +7781,12 @@ async function initializeApi(
       ownerUserId: privateUserId,
       catalog: memoryServices.catalog,
       stores: libraryStores,
-      searchSources: { tasteRepository, messageSearchService },
-      brakeSources: { eventMemoryStore: memoryServices.eventMemoryStore, threadStore, messageStore },
+      searchSources: { tasteBrowse, messageSearchService },
+      brakeSources: { eventMemoryStore, threadStore, messageStore },
       recallSources: {
         ...recallOwnerMessageSources,
+        readDocumentCandidate: (anchor) => memoryProvider.readRecallCandidate(anchor, privateUserId),
+        readInvocationCues,
         threadStore,
         messageStore,
         invocationRecordStore,
@@ -7772,6 +7797,9 @@ async function initializeApi(
       },
       evidenceDb: memoryServices.store.getDb(),
       markerQueue: memoryServices.markerQueue,
+      readRecallStats: (input) => memoryProvider.readRecallStats(input, privateUserId),
+      readRecallTimeline: (input) => memoryProvider.readRecallTimeline(input, privateUserId),
+      readRecallEvent: (input) => memoryProvider.readRecallEvent(input, privateUserId),
       repoRoot,
       docsRoot,
     });

@@ -13,7 +13,7 @@ import {
   validateArchiveMemberTypes,
   verifyArchiveDigest,
 } from './package-staging.js';
-import { ExternalPluginRuntimeError, type VerifiedPluginStaticFile } from './types.js';
+import { ExternalPluginRuntimeError, type VerifiedPluginConsoleFiles, type VerifiedPluginStaticFile } from './types.js';
 
 const exec = promisify(execFile);
 const STATIC_FILE_BYTES = 1024 * 1024;
@@ -46,28 +46,53 @@ async function archiveIdentity(archive: string): Promise<string> {
   return [value.dev, value.ino, value.mode, value.nlink, value.size, value.mtimeNs, value.ctimeNs].join(':');
 }
 
-/** SRI and the ordinary archive preflight still cover every byte/member. Only
- * manifest + selected static bytes enter memory; no executable tree is extracted,
- * sealed or cached, and this reader grants no package execution authority. */
-export async function readVerifiedPackageStaticFile(input: {
+interface StaticArchiveInput {
   readonly artifactRoot: string;
   readonly packagesRoot: string;
   readonly packageDigest: string;
-  readonly tarBin: string;
   readonly validateManifest?: PluginManifestValidator;
-  readonly selectFile: (manifest: PluginManifest) => string;
-}): Promise<VerifiedPluginStaticFile> {
+}
+
+function readStaticManifest(input: StaticArchiveInput, name: string, bytes: Buffer) {
+  const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  const value: unknown = name.endsWith('.json') ? JSON.parse(text) : parseYaml(text);
+  const validation = (input.validateManifest ?? validateHostPluginManifest)(value);
+  if (!validation.valid) invalid('static package manifest fails the published contract');
+  return { manifest: structuredClone(value) as typeof validation.manifest, validated: validation.manifest };
+}
+
+async function readSealedStaticArchive<T>(
+  input: StaticArchiveInput,
+  read: (archive: string, stage: string, signal: AbortSignal) => Promise<T>,
+): Promise<T> {
   await mkdir(input.packagesRoot, { recursive: true, mode: 0o700 });
   const stage = await mkdtemp(resolve(input.packagesRoot, '.static-assets-'));
   const archive = resolve(stage, 'package.tgz');
   const signal = AbortSignal.timeout(PLUGIN_ARCHIVE_BUDGET.deadlineMs);
-  const env = { PATH: process.env.PATH ?? '/usr/bin:/bin', LC_ALL: 'C' };
-  const options = { cwd: stage, env, signal, timeout: PLUGIN_ARCHIVE_BUDGET.deadlineMs, windowsHide: true };
   try {
     await sealArchive(resolve(input.artifactRoot, 'package.tgz'), archive, signal);
     await verifyArchiveDigest(archive, input.packageDigest);
-    await preflightPluginArchive(archive, signal);
     const identity = await archiveIdentity(archive);
+    const result = await read(archive, stage, signal);
+    await verifyArchiveDigest(archive, input.packageDigest);
+    if ((await archiveIdentity(archive)) !== identity) invalid('sealed static archive changed during read');
+    return result;
+  } finally {
+    await rm(stage, { recursive: true, force: true });
+  }
+}
+
+/** Read inert static bytes without extracting or granting authority to an executable tree. */
+export async function readVerifiedPackageStaticFile(
+  input: StaticArchiveInput & {
+    readonly tarBin: string;
+    readonly selectFile: (manifest: PluginManifest) => string;
+  },
+): Promise<VerifiedPluginStaticFile> {
+  return readSealedStaticArchive(input, async (archive, stage, signal) => {
+    await preflightPluginArchive(archive, signal);
+    const env = { PATH: process.env.PATH ?? '/usr/bin:/bin', LC_ALL: 'C' };
+    const options = { cwd: stage, env, signal, timeout: PLUGIN_ARCHIVE_BUDGET.deadlineMs, windowsHide: true };
     const listings = ['-tzf', '-tvzf'].map((flag) =>
       exec(input.tarBin, [flag, 'package.tgz'], {
         ...options,
@@ -90,16 +115,36 @@ export async function readVerifiedPackageStaticFile(input: {
       ).stdout;
     const manifestMember = memberName(members, 'plugin.yaml') ?? memberName(members, 'manifest.json');
     if (!manifestMember) invalid('package has no canonical manifest');
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(await extract(manifestMember));
-    const value: unknown = manifestMember.endsWith('.json') ? JSON.parse(text) : parseYaml(text);
-    const validation = (input.validateManifest ?? validateHostPluginManifest)(value);
-    if (!validation.valid) invalid('static package manifest fails the published contract');
-    const selected = memberName(members, input.selectFile(validation.manifest));
+    const { manifest, validated } = readStaticManifest(input, manifestMember, await extract(manifestMember));
+    const selected = memberName(members, input.selectFile(validated));
     const bytes = selected === undefined ? undefined : await extract(selected);
-    await verifyArchiveDigest(archive, input.packageDigest);
-    if ((await archiveIdentity(archive)) !== identity) invalid('sealed static archive changed during read');
-    return { manifest: structuredClone(value) as typeof validation.manifest, bytes };
-  } finally {
-    await rm(stage, { recursive: true, force: true });
-  }
+    return { manifest, bytes };
+  });
+}
+
+export async function readVerifiedPackageConsoleFiles(input: StaticArchiveInput): Promise<VerifiedPluginConsoleFiles> {
+  return readSealedStaticArchive(input, async (archive, _stage, signal) => {
+    const prefix = 'package/console/';
+    const members = await preflightPluginArchive(
+      archive,
+      signal,
+      (path) =>
+        path === 'package/plugin.yaml' ||
+        path === 'package/manifest.json' ||
+        (path.startsWith(prefix) &&
+          /^(pdl\.yaml|i18n\/[^/]+\.yaml|components\/[^/]+\.(js|css))$/u.test(path.slice(prefix.length))),
+    );
+    const manifestPath = members.has('package/plugin.yaml') ? 'package/plugin.yaml' : 'package/manifest.json';
+    const manifestBytes = members.get(manifestPath);
+    if (!manifestBytes) invalid('package has no canonical manifest');
+    const { manifest } = readStaticManifest(input, manifestPath, manifestBytes);
+    return {
+      manifest,
+      files: new Map(
+        [...members]
+          .filter(([path]) => path.startsWith(prefix))
+          .map(([path, bytes]) => [path.slice(prefix.length), bytes]),
+      ),
+    };
+  });
 }
