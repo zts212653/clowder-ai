@@ -33,9 +33,14 @@ export const assetMimes: Record<string, string> = {
 export interface ThemeRoots {
   builtin: string;
   custom: string;
+  builtinManifests: Map<string, { source: string; parsed: Promise<Theme> }>;
 }
 export function themeRoots(projectRoot: string, builtinRoot: string): ThemeRoots {
-  return { builtin: builtinRoot, custom: join(projectRoot, '.cat-cafe', 'console-themes') };
+  return {
+    builtin: builtinRoot,
+    custom: join(projectRoot, '.cat-cafe', 'console-themes'),
+    builtinManifests: new Map(),
+  };
 }
 /** The folder of package id: a built-in one wins (its id cannot be imported over). */
 export async function packageDir(roots: ThemeRoots, id: string): Promise<string> {
@@ -187,9 +192,40 @@ function identity(theme: Theme) {
   return { id, name, version, contractVersion };
 }
 
+/** Trusted worker entry point for the CPU-bound part of a theme read. */
+export function parseThemeManifest(source: string): Theme {
+  return parse(source);
+}
+
+async function readManifest(roots: ThemeRoots, dir: string, id: string, source: string): Promise<Theme> {
+  // Imported packages retain the existing accepted size range. The shared worker has a smaller heap.
+  if (dir !== join(roots.builtin, id)) return parse(source);
+
+  const cache = roots.builtinManifests;
+  const cached = cache.get(id);
+  if (cached?.source === source) return cached.parsed;
+
+  const parsed = import('../../utils/run-module-worker.js').then(({ runModuleWorker }) =>
+    runModuleWorker<Theme>({
+      moduleUrl: new URL(import.meta.url),
+      exportName: 'parseThemeManifest',
+      input: source,
+    }),
+  );
+  const entry = { source, parsed };
+  cache.set(id, entry);
+  void parsed.catch(() => {
+    if (cache.get(id) === entry) cache.delete(id);
+  });
+  return parsed;
+}
+
 export async function listPackages(roots: ThemeRoots) {
   const builtin = await packageIds(roots.builtin);
-  const read = (root: string, id: string) => readFile(join(root, id, 'theme.yaml'), 'utf8').then(parse);
+  const read = async (root: string, id: string) => {
+    const dir = join(root, id);
+    return readManifest(roots, dir, id, await readFile(join(dir, 'theme.yaml'), 'utf8'));
+  };
   return [
     ...(await Promise.all(builtin.map(async (id) => ({ ...identity(await read(roots.builtin, id)), builtin: true })))),
     ...(await Promise.all(
@@ -203,8 +239,9 @@ export async function listPackages(roots: ThemeRoots) {
 }
 
 export async function readPackage(roots: ThemeRoots, id: string) {
-  const files = await packageFiles(await packageDir(roots, id));
-  const theme: Theme = parse(files['theme.yaml'].toString('utf8'));
+  const dir = await packageDir(roots, id);
+  const files = await packageFiles(dir);
+  const theme = await readManifest(roots, dir, id, files['theme.yaml'].toString('utf8'));
   const uses = theme.uses ?? [];
   const sources = await installedComponents(roots, id, uses, files);
   const components: Record<string, { js: string[]; css: string[] }> = Object.create(null);

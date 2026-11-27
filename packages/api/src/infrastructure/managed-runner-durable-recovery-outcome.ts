@@ -8,7 +8,11 @@ import {
 } from '../domains/ball-custody/durable-managed-gate-recovery.js';
 import { hasDurableGateRecoveryReadyReceipt } from '../domains/ball-custody/durable-managed-gate-recovery-child-contract.js';
 import { durableGateRawOutcomeIsAmbiguous } from '../domains/ball-custody/durable-managed-gate-recovery-policy.js';
-import { readUnixProcessSnapshotSync, type UnixProcessIdentity } from '../utils/cli-process-ownership.js';
+import {
+  readUnixProcessSnapshotSync,
+  sameUnixProcess,
+  type UnixProcessIdentity,
+} from '../utils/cli-process-ownership.js';
 import {
   type DurableManagedGateAttemptProcess,
   type DurableManagedGateChildResult,
@@ -71,7 +75,7 @@ export async function selfRecoveryOutcome(
   }
   if (alphaObservation?.kind === 'live_preparation') {
     const process = readUnixProcessSnapshotSync({ pids: [alphaObservation.pid] })?.get(alphaObservation.pid);
-    const live = process?.startedAt === alphaObservation.startedAt && process.pid === alphaObservation.pid;
+    const live = process?.pid === alphaObservation.pid && sameUnixProcess(alphaObservation, process);
     const ready =
       frozenIdentity && hasDurableGateRecoveryReadyReceipt(context.job, attempt.attemptToken, frozenIdentity);
     const fence = context.readFence();

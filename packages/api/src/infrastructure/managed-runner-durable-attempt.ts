@@ -90,6 +90,27 @@ async function attemptMembers(attemptToken: string): Promise<UnixProcessIdentity
   });
 }
 
+/**
+ * Format-independent liveness for a recorded owner whose start-time comparison failed. The owner is the
+ * durable worker, which ManagedRunner starts with this job's id in its environment. Its PID being present
+ * with that marker shows it still runs the job whatever the command's shape or binary; a dead owner is
+ * absent and a reused PID lacks the marker, so a changed locale alone (#2025) never reads as "gone".
+ * Null is unknown.
+ */
+export async function durableGateOwnerStillRunsJob(
+  owner: Pick<UnixProcessIdentity, 'pid'>,
+  jobId: string,
+): Promise<boolean | null> {
+  const marker = `CAT_CAFE_MANAGED_JOB_ID=${jobId}`;
+  const snapshot = await readUnixProcessSnapshot({
+    pids: [owner.pid],
+    includeEnvironment: true,
+    environmentMarkers: [marker],
+  });
+  if (snapshot === null) return null;
+  return snapshot.get(owner.pid)?.commandAndEnvironment?.split(/\s+/u).includes(marker) ?? false;
+}
+
 function signalMembers(
   members: readonly UnixProcessIdentity[],
   signal: DurableManagedGateCleanupSignal['signal'],

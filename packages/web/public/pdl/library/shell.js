@@ -69,7 +69,7 @@ CT_DRAW.main = function () {
   const c = ctPages(), s = navStack(c), top = s[s.length - 1], fr = navNodeOf(top), focus = !!(fr && fr.focus);
   if (CT_DRAW.main.hidden()) return { key: 'main', html: '<div class="main-col scroll" data-okey="main" data-c="' + c + '"' + ctGridAttr('main') + '>' + projSlots(s.concat(navKeptLayers(c))).map(projTag).join('') + '</div>', col: 'minmax(0, 1fr)' };   /* 铺开的工作台盖住主区：主区的层整个按盖住的层留着，不画也不读 */
   if (focus) PROJ_FOCUS = true;   /* 声明了 focus 的插件界面框：遮罩在它下面 */
-  const html = '<div class="layer' + (focus ? ' occ' : '') + '" data-layer="' + top.id + '" data-lc="' + c + '">' + navWith(c, top, function () { const bk = navBackOf(c); return backIn(bk ? bk.role : 'page', bk, function () { return layerExit(c, top) + projFrame(top); }); }) + '</div>' + projSlots(s.slice(0, -1).concat(navKeptLayers(c))).map(projTag).join('');   /* 被盖住的层 + 切走的兄弟（别的页面、别的空间的页面）：隐藏着留在页面容器里 */
+  const html = '<div class="layer' + (focus ? ' occ' : '') + '" data-layer="' + top.id + '" data-lc="' + c + '">' + navWith(c, top, function () { const bk = navBackOf(c); return backIn(bk ? bk.role : 'page', bk, function () { return layerExit(c, top) + projFrame(c, top); }); }) + '</div>' + projSlots(s.slice(0, -1).concat(navKeptLayers(c))).map(projTag).join('');   /* 被盖住的层 + 切走的兄弟（别的页面、别的空间的页面）：隐藏着留在页面容器里 */
   if (space() !== panelSpace()) return { key: 'main', html: html, col: 'minmax(0, 1fr)', bare: true };
   return { key: 'main', html: '<div class="main-col scroll" data-okey="main" data-c="' + c + '"' + ctGridAttr('main') + '>' + html + '</div>', col: 'minmax(0, 1fr)' };
 };
