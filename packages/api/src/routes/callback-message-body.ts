@@ -1,7 +1,7 @@
 import { type MessageContent, type RichBlock, serializeContextAttachmentsPrompt } from '@cat-cafe/shared';
+import { messageContentRevision } from '../domains/cats/services/stores/message-content-projection.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { canViewMessage, type Viewer } from '../domains/cats/services/stores/visibility.js';
-import { messageContentRevision } from '../domains/memory/message-search-content.js';
 import { messageSourceParts } from '../domains/memory/message-source-parts.js';
 
 /** Only a single persisted original owns citation coordinates; merged Queue text does not. */

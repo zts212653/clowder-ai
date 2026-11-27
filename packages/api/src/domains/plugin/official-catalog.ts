@@ -6,6 +6,7 @@ import { BUNDLED_PACKAGE_ARCHIVES } from './bundled-package-index.js';
 import { CHATGPT_DOT_PLUGIN_MANIFEST } from './chatgpt-dot-manifest.js';
 
 import { PUBLISHED_COMPANION_V2 } from './desktop-window-runtime/published-companion-v2.js';
+import { MEMORY_PLUGIN_MANIFEST, supportsBundledMemory } from './memory-plugin-manifest.js';
 
 export interface OfficialPluginCatalogEntry {
   readonly catalogId: string;
@@ -75,7 +76,10 @@ export function bundledManifestDigest(manifest: PluginManifest): string {
   return `sha512-${createHash('sha512').update(JSON.stringify(manifest)).digest('base64')}`;
 }
 
-export const OFFICIAL_BUNDLED_MANIFESTS: readonly PluginManifest[] = [CHATGPT_DOT_PLUGIN_MANIFEST];
+export const OFFICIAL_BUNDLED_MANIFESTS: readonly PluginManifest[] = [
+  CHATGPT_DOT_PLUGIN_MANIFEST,
+  ...(supportsBundledMemory ? [MEMORY_PLUGIN_MANIFEST] : []),
+];
 export const OFFICIAL_PLUGIN_POLICIES = [
   {
     catalogId: 'chatgpt-dot',
@@ -90,6 +94,23 @@ export const OFFICIAL_PLUGIN_POLICIES = [
       packageDigest: BUNDLED_PACKAGE_ARCHIVES['chatgpt-dot'].packageDigest,
     },
   },
+  ...(supportsBundledMemory
+    ? [
+        {
+          catalogId: 'official.memory',
+          packageName: '@clowder-ai/memory-plugin',
+          pluginId: 'official.memory',
+          distribution: 'bundled',
+          bundledFormat: 'archive',
+          releaseTag: 'next',
+          bootstrapRelease: {
+            version: MEMORY_PLUGIN_MANIFEST.version,
+            archiveUrl: BUNDLED_PACKAGE_ARCHIVES['official.memory'].archiveUrl,
+            packageDigest: BUNDLED_PACKAGE_ARCHIVES['official.memory'].packageDigest,
+          },
+        } as const,
+      ]
+    : []),
   {
     catalogId: 'genoffice-docx',
     packageName: '@clowder-ai/genoffice-docx',

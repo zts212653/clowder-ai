@@ -53,7 +53,7 @@ export async function generateBundledPluginArtifacts(
 
   const records = [];
   for (const { catalogId, manifest, agentProvider, files = [], prebuilt } of definitions) {
-    assert.ok(/^[a-z][a-z0-9-]*$/.test(catalogId), 'invalid bundled catalog id');
+    assert.ok(/^[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)*$/.test(catalogId), 'invalid bundled catalog id');
     assert.ok(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version));
     const relativeRoot = `bundled-packages/${catalogId}/${manifest.version}/`;
     const manifestBytes = Buffer.from(formatManifest(`${JSON.stringify(manifest, null, 2)}\n`));

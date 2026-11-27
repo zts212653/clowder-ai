@@ -81,3 +81,91 @@ test('installer preserves identity before any payload delete', () => {
   assert.ok(prepare.indexOf('configure-desktop-instance.ps1') < prepare.indexOf('stop-installed-desktop.ps1'));
   assert.match(prepare, /Result := CustomMessage\('SetupIdentityFailed'\)/);
 });
+
+test(
+  'ordinary Windows setup keeps new state on the selected install drive and retains it on upgrade',
+  {
+    skip: process.platform !== 'win32',
+  },
+  () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'default-install-state-'));
+    const app = path.join(root, 'chosen location');
+    const program = path.join(app, 'desktop-dist', 'Clowder AI.exe');
+    const marker = path.join(app, 'desktop-data-root.json');
+    try {
+      configure(app);
+      const body = fs.readFileSync(marker, 'utf8');
+      const { dataRoot } = resolveDesktopRuntime({}, program);
+      assert.equal(path.dirname(dataRoot), fs.realpathSync.native(path.join(app, 'user-state')));
+      assert.match(path.basename(dataRoot), /^S-1-\d+(?:-\d+)+$/);
+      fs.mkdirSync(dataRoot);
+      const witness = path.join(dataRoot, 'test-conversation');
+      fs.writeFileSync(witness, 'retained');
+      fs.mkdirSync(path.dirname(program));
+      fs.writeFileSync(program, '');
+      configure(app, ['-ExistingInstallation']);
+      assert.equal(fs.readFileSync(marker, 'utf8'), body);
+      assert.equal(resolveDesktopRuntime({}, program).dataRoot, dataRoot);
+      assert.equal(fs.readFileSync(witness, 'utf8'), 'retained');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'ordinary Windows upgrade preserves the legacy profile without a data marker',
+  {
+    skip: process.platform !== 'win32',
+  },
+  () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'previous-install-state-'));
+    const program = path.join(root, 'desktop-dist', 'Clowder AI.exe');
+    try {
+      fs.mkdirSync(path.dirname(program));
+      fs.writeFileSync(program, '');
+      configure(root, ['-ExistingInstallation']);
+      assert.equal(fs.existsSync(path.join(root, 'desktop-data-root.json')), false);
+      assert.equal(fs.existsSync(path.join(root, 'user-state')), false);
+      assert.equal(resolveDesktopRuntime({}, program).dataRoot, undefined);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test('setup configures and preserves an external persistent data root', { skip: process.platform !== 'win32' }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'persistent-install-'));
+  const app = path.join(root, 'installed');
+  const data = path.join(root, 'data');
+  const other = path.join(root, 'other');
+  const marker = path.join(app, 'desktop-data-root.json');
+  fs.mkdirSync(data);
+  fs.mkdirSync(other);
+  try {
+    configure(app, ['-DataRoot', data]);
+    const body = fs.readFileSync(marker, 'utf8');
+    assert.equal(JSON.parse(body).dataRoot, fs.realpathSync.native(data));
+    configure(app);
+    configure(app, ['-DataRoot', data]);
+    assert.throws(() => configure(app, ['-DataRoot', other]), /conflicts/);
+    assert.throws(() => configure(app, ['-InstanceRoot', data]), /choose either/i);
+    assert.equal(fs.readFileSync(marker, 'utf8'), body);
+
+    const isolated = path.join(root, 'isolated');
+    fs.mkdirSync(isolated);
+    fs.writeFileSync(
+      path.join(isolated, 'desktop-instance.json'),
+      JSON.stringify({ ...saved, CAT_CAFE_DESKTOP_INSTANCE_ROOT: data }),
+    );
+    assert.throws(() => configure(isolated, ['-DataRoot', data]), /choose either/i);
+    assert.equal(fs.existsSync(path.join(isolated, 'desktop-data-root.json')), false);
+
+    const nested = path.join(root, 'nested-app');
+    fs.mkdirSync(nested);
+    assert.throws(() => configure(nested, ['-DataRoot', nested]), /outside the installation/i);
+    assert.throws(() => configure(nested, ['-DataRoot', path.join(root, 'missing')]), /existing directory/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

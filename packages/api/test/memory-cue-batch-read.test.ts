@@ -86,9 +86,10 @@ async function fixture(t: TestContext) {
           page: {
             matter: { matterId: 'one', title: 'Current matter title' },
             entries: [
-              { source: { threadId: 'source', messageId: 'm-one' } },
-              { source: { threadId: 'source', messageId: 'm-one' } },
-              { source: { threadId: 'source', messageId: 'm-two' } },
+              { source: { threadId: 'source', messageId: 'm-one' }, quote: 'Verified first message' },
+              { source: { threadId: 'source', messageId: 'm-one' }, quote: 'Verified first message' },
+              { source: { threadId: 'source', messageId: 'm-two' }, quote: 'Verified second message' },
+              { source: { threadId: 'source', messageId: 'hidden' } },
             ],
           },
         };

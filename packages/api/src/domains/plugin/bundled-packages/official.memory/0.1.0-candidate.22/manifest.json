@@ -1,0 +1,46 @@
+{
+  "pluginId": "official.memory",
+  "version": "0.1.0-candidate.22",
+  "contractVersion": "0.3.2-candidate.0",
+  "name": "Memory",
+  "description": {
+    "default": "保存和检索 Clowder 的线程记忆、证据检索与个人记忆，并在兼容的宿主上独立升级。",
+    "translations": {
+      "zh-CN": "保存和检索 Clowder 的线程记忆、证据检索与个人记忆，并在兼容的宿主上独立升级。",
+      "en": "Store and retrieve Clowder thread memory, evidence search and personal memory, with independent upgrades on a compatible Host."
+    }
+  },
+  "icon": {
+    "type": "svg",
+    "src": "assets/icon.svg"
+  },
+  "data": [
+    {
+      "name": "memory-thread-kv",
+      "dataClass": "user-authored",
+      "strategy": "retained"
+    },
+    {
+      "name": "memory-evidence-index",
+      "dataClass": "derived-user-visible",
+      "strategy": "retained"
+    },
+    {
+      "name": "memory-private-state",
+      "dataClass": "cache",
+      "strategy": "retained"
+    }
+  ],
+  "features": [
+    {
+      "id": "memory",
+      "name": "Memory",
+      "resources": []
+    }
+  ],
+  "runtime": {
+    "transport": "builtin",
+    "entrypoint": "dist/plugin-entrypoint.js",
+    "dataDirectory": "memory"
+  }
+}

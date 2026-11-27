@@ -168,7 +168,7 @@ export interface MessagesRoutesOptions {
     messageId: string,
     ownerUserId: string,
     messageExcerpt?: string,
-  ) => void;
+  ) => void | Promise<void>;
 }
 
 const log = createModuleLogger('routes/messages');
@@ -203,7 +203,7 @@ async function tryDetectMagicWords(
       // 砚砚 (non-blocking): pass a short excerpt of the triggering message so the
       // Event summary carries 原话 context, not just the magic word itself.
       const excerpt = content.length > 200 ? `${content.slice(0, 200)}…` : content;
-      onMagicWordDetected(hits, threadId, targetCats[0] ?? null, messageId, ownerUserId, excerpt);
+      await onMagicWordDetected(hits, threadId, targetCats[0] ?? null, messageId, ownerUserId, excerpt);
     }
   } catch {
     // Best-effort: the detection/dispatch wrapper must not fail message send. The

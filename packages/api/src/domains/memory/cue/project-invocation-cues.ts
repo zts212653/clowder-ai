@@ -1,5 +1,10 @@
 import type { MatterReadDetails, RecallResolverFamily } from '@cat-cafe/shared';
-import type { MemoryCueEvent, MemoryCueInvalidationReason } from './MemoryCueEpisodeStore.js';
+import type Database from 'better-sqlite3';
+import {
+  MemoryCueEpisodeStore,
+  type MemoryCueEvent,
+  type MemoryCueInvalidationReason,
+} from './MemoryCueEpisodeStore.js';
 
 /**
  * F321 Phase A (A1): per-cue read projection for one invocation.
@@ -122,4 +127,16 @@ export function projectInvocationCues(events: readonly MemoryCueEvent[]): Memory
 
   entries.sort((a, b) => a.presentedAt - b.presentedAt || a.cueId.localeCompare(b.cueId));
   return entries;
+}
+
+export type CueInvocationReader = (
+  owner: string,
+  threadId: string,
+  invocationId: string,
+) => Promise<MemoryCueInvocationCueEntry[]>;
+
+export function createInvocationCueReader(db: Database.Database): CueInvocationReader {
+  const episodes = new MemoryCueEpisodeStore(db);
+  return async (owner, threadId, invocationId) =>
+    projectInvocationCues(episodes.listByInvocation(owner, threadId, invocationId));
 }

@@ -16,6 +16,7 @@
 
 import type { EventConfidence, EventMemoryRecord, MessageFrom } from '@cat-cafe/shared';
 import type { IEventMemoryStore } from './EventMemoryStore.js';
+import type { EventMemoryPort } from './event/event-memory-port.js';
 import { detectGradedMagicWords } from './magic-word-confidence.js';
 
 /** The minimal slice of a StoredMessage the backfill reads. */
@@ -49,7 +50,7 @@ export interface BackfillMessage {
 }
 
 /** Only the store surface the backfill touches (keeps it test-stubbable). */
-type BackfillStore = Pick<IEventMemoryStore, 'markEvent' | 'appendDeadLetter'>;
+type BackfillStore = Pick<EventMemoryPort, 'markEvent'> & Partial<Pick<IEventMemoryStore, 'appendDeadLetter'>>;
 
 export interface BackfillResult {
   scanned: number;
@@ -96,11 +97,11 @@ export function buildBackfillEvent(
 }
 
 /** Process a batch of already-extracted messages into graded events (idempotent). */
-export function backfillMagicWordEvents(
+export async function backfillMagicWordEvents(
   messages: Iterable<BackfillMessage>,
   store: BackfillStore,
   ownerUserId: string,
-): BackfillResult {
+): Promise<BackfillResult> {
   const result: BackfillResult = { scanned: 0, marked: 0, skipped: 0, failed: 0 };
   for (const msg of messages) {
     result.scanned += 1;
@@ -112,11 +113,11 @@ export function backfillMagicWordEvents(
         // Idempotency is the store's job now (UNIQUE owner+coord+type): a re-run, a repeated
         // word in one message, or a race with a live write all resolve to inserted=false —
         // no getByCoord check-then-act (cloud-review P1). ownerUserId scopes the write.
-        const { inserted } = store.markEvent(record, ownerUserId);
+        const { inserted } = await store.markEvent(record, ownerUserId);
         if (inserted) result.marked += 1;
         else result.skipped += 1;
       } catch (err) {
-        store.appendDeadLetter(record, ownerUserId, String(err));
+        store.appendDeadLetter?.(record, ownerUserId, String(err));
         result.failed += 1;
       }
     }
@@ -175,7 +176,7 @@ export async function runCorpusBackfill(
     // brake (cloud-review P1). System / non-owner rows are skipped.
     const owned = messages.filter((m) => m.userId === opts.userId);
     if (owned.length === 0) continue;
-    const res = backfillMagicWordEvents(owned.map(extractBackfillMessage), store, opts.userId);
+    const res = await backfillMagicWordEvents(owned.map(extractBackfillMessage), store, opts.userId);
     total.scanned += res.scanned;
     total.marked += res.marked;
     total.skipped += res.skipped;

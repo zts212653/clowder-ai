@@ -4,7 +4,7 @@ import cookie from '@fastify/cookie';
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
 import { SessionMutex } from '../dist/domains/cats/services/agents/invocation/SessionMutex.js';
-import { EntityHardForgottenError, EntityRegistryStore } from '../dist/domains/memory/EntityRegistry.js';
+import { EntityHardForgottenError, EntityRegistryStore, entitySourceRevision } from '../dist/domains/memory/EntityRegistry.js';
 import { EntityMemoryLifecycleService } from '../dist/domains/memory/entity/EntityMemoryLifecycleService.js';
 import { EntityMemoryLifecycleStore } from '../dist/domains/memory/entity/EntityMemoryLifecycleStore.js';
 import {
@@ -14,6 +14,7 @@ import {
 import { applyMigrations } from '../dist/domains/memory/schema.js';
 import { sessionAuthPlugin, sessionRoute } from '../dist/infrastructure/session-auth.js';
 import { entityMemoryOwnerRoutes } from '../dist/routes/entity-memory-owner.js';
+import { entityOwnerFixture } from './helpers/entity-owner-fixture.js';
 
 const ownerUserId = 'entity-owner';
 const origin = 'http://localhost:3003';
@@ -62,8 +63,9 @@ describe('F321 Entity owner lifecycle', () => {
     registry = new EntityRegistryStore(db);
     registry.upsert([entity()], { source: 'system' });
     store = new EntityMemoryLifecycleStore(db);
+    const ownerStore = entityOwnerFixture(store, entitySourceRevision);
     const lifecycle = new EntityMemoryLifecycleService({
-      store,
+      store: ownerStore,
       coordinator: new OwnerMemoryActionCoordinator({
         store: new InMemoryOwnerMemoryActionReceiptStore(),
         lock: new SessionMutex(),
@@ -76,7 +78,7 @@ describe('F321 Entity owner lifecycle', () => {
     await app.register(sessionRoute, { ownerUserId });
     await app.register(entityMemoryOwnerRoutes, {
       ownerUserId,
-      store,
+      store: ownerStore,
       lifecycle,
       proposalStore: { listByTarget: async () => [] },
       sourceReaders: {

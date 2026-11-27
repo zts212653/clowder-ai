@@ -44,6 +44,14 @@ export async function bundledBuildFixture(t, description, fromSource = false, { 
   );
   await writeFile(join(root, 'package.json'), '{"type":"module"}\n');
   await copyBundledBuildDependencies(root, fromSource);
+  // Dot-only cases replace or remove their own source files. They don't select the memory release.
+  await writeFile(
+    join(
+      root,
+      fromSource ? 'src/domains/plugin/memory-plugin-manifest.ts' : 'dist/domains/plugin/memory-plugin-manifest.js',
+    ),
+    'export const BUNDLED_MEMORY_DEFINITIONS = [];\n',
+  );
   const producer = await readFile(
     join(
       api,

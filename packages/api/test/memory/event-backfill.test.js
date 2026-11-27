@@ -111,11 +111,11 @@ describe('F227 PR-2: backfillMagicWordEvents', () => {
     await store.initialize();
   });
 
-  it('marks a cocreator brake directed at a cat as a high event', () => {
+  it('marks a cocreator brake directed at a cat as a high event', async () => {
     const msgs = [
       extractBackfillMessage(storedMsg({ content: '这是脚手架吧 @opus 重写', catId: null, mentions: ['opus'] })),
     ];
-    const res = backfillMagicWordEvents(msgs, store, OWNER);
+    const res = await backfillMagicWordEvents(msgs, store, OWNER);
     assert.equal(res.marked, 1);
     const [e] = store.listEvents();
     assert.equal(e.type, '脚手架');
@@ -123,32 +123,32 @@ describe('F227 PR-2: backfillMagicWordEvents', () => {
     assert.equal(e.cat, 'opus');
   });
 
-  it('marks a cat-authored magic word as low (discussion)', () => {
+  it('marks a cat-authored magic word as low (discussion)', async () => {
     const msgs = [extractBackfillMessage(storedMsg({ content: '我刚写得有点脚手架', catId: 'opus' }))];
-    backfillMagicWordEvents(msgs, store, OWNER);
+    await backfillMagicWordEvents(msgs, store, OWNER);
     const [e] = store.listEvents();
     assert.equal(e.confidence, 'low');
     assert.equal(e.cognitiveTransition, null);
   });
 
-  it('does not mark messages with no magic word', () => {
+  it('does not mark messages with no magic word', async () => {
     const msgs = [extractBackfillMessage(storedMsg({ content: '今天写完了功能' }))];
-    const res = backfillMagicWordEvents(msgs, store, OWNER);
+    const res = await backfillMagicWordEvents(msgs, store, OWNER);
     assert.equal(res.marked, 0);
     assert.equal(store.listEvents().length, 0);
   });
 
-  it('is idempotent: re-running the same corpus does NOT duplicate events (store atomic dedup)', () => {
+  it('is idempotent: re-running the same corpus does NOT duplicate events (store atomic dedup)', async () => {
     const msgs = [extractBackfillMessage(storedMsg({ content: '脚手架 @opus', mentions: ['opus'] }))];
-    const r1 = backfillMagicWordEvents(msgs, store, OWNER);
-    const r2 = backfillMagicWordEvents(msgs, store, OWNER);
+    const r1 = await backfillMagicWordEvents(msgs, store, OWNER);
+    const r2 = await backfillMagicWordEvents(msgs, store, OWNER);
     assert.equal(r1.marked, 1);
     assert.equal(r2.marked, 0, 'second run must mark nothing');
     assert.equal(r2.skipped, 1);
     assert.equal(store.listEvents().length, 1, 'no duplicate event at the same coord');
   });
 
-  it('dead-letters a write failure instead of losing the event (最终不丢)', () => {
+  it('dead-letters a write failure instead of losing the event (最终不丢)', async () => {
     const dead = [];
     const failingStore = {
       markEvent() {
@@ -157,7 +157,7 @@ describe('F227 PR-2: backfillMagicWordEvents', () => {
       appendDeadLetter: (record, ownerUserId, err) => dead.push({ record, ownerUserId, err }),
     };
     const msgs = [extractBackfillMessage(storedMsg({ content: '脚手架 @opus', mentions: ['opus'] }))];
-    const res = backfillMagicWordEvents(msgs, failingStore, OWNER);
+    const res = await backfillMagicWordEvents(msgs, failingStore, OWNER);
     assert.equal(res.failed, 1);
     assert.equal(res.marked, 0);
     assert.equal(dead.length, 1);

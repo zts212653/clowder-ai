@@ -51,7 +51,7 @@ async function fixture() {
     },
     onFailure: (id, error) => errors.push([id, String(error)]),
   };
-  return { options, inventory, installed, activated, errors };
+  return { options, inventory, installed, activated, errors, entries };
 }
 
 test('first start installs the explicit selection at exact releases, activation waits until Host is listening', async () => {
@@ -131,6 +131,47 @@ test('uninstall history and completed first start prevent automatic reinstallati
   assert.deepEqual(other.installed, ['first']);
   assert.equal(other.activated.length, 0);
 });
+
+for (const legacyJournal of [false, true]) {
+  test(`memory compatibility cut visits an existing inventory once (journal=${legacyJournal})`, async () => {
+    const f = await fixture();
+    const release = f.entries[0];
+    if (legacyJournal) {
+      await (await prepareInitialPluginInstallation(f.options)).activate();
+    } else {
+      await f.options.installer.install(release.catalogId, {
+        version: release.version,
+        packageDigest: release.packageDigest,
+      });
+    }
+    f.options.includeMemoryProvider = true;
+
+    await (await prepareInitialPluginInstallation(f.options)).activate();
+    assert.ok(!f.installed.includes('official.memory'));
+
+    f.entries.push({
+      catalogId: 'official.memory',
+      pluginId: 'official.memory',
+      packageName: '@clowder-ai/memory-plugin',
+      version: release.version,
+      packageDigest: `sha512-${Buffer.alloc(64, 7).toString('base64')}`,
+    });
+    const prepared = await prepareInitialPluginInstallation(f.options);
+    assert.deepEqual(f.errors, []);
+    assert.ok(f.installed.includes('official.memory'));
+    assert.ok(!f.activated.some(([id]) => id === 'official.memory'));
+    await prepared.activate();
+    const [memory] = await f.inventory.read.instances.list('official.memory');
+    await f.inventory.transaction((tx) => tx.instances.put({ ...memory, lifecycleState: 'retired', retiredAt: 101 }));
+
+    await (await prepareInitialPluginInstallation(f.options)).activate();
+    assert.deepEqual(
+      f.activated.filter(([id]) => id === 'official.memory'),
+      [['official.memory', memory.pluginInstanceId]],
+    );
+    assert.equal(f.installed.filter((id) => id === 'official.memory').length, 1);
+  });
+}
 
 test('an owner change between admission and activation wins over the default', async () => {
   const f = await fixture();

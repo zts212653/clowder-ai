@@ -1,3 +1,4 @@
+import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 /** Real production routes, SQLite index and canonical message reads; no listeners or Redis. */
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -116,7 +117,7 @@ try {
     evidenceDb: evidence.getDb(),
     markerQueue: { list: async () => [] },
     searchSources: {
-      tasteRepository: { canonicalRoot: () => root, approvalLockKey: () => 'unused' },
+      tasteBrowse: createTasteBrowseFixture({ canonicalRoot: () => root, approvalLockKey: () => 'unused' }),
       messageSearchService: messages,
     },
   });
@@ -124,7 +125,7 @@ try {
   await app.register(libraryRoutes, { catalog, stores });
   await app.register(tasteBrowseRoutes, {
     ownerUserId: 'owner',
-    tasteRepository: { canonicalRoot: () => root, approvalLockKey: () => 'unused' },
+    browse: createTasteBrowseFixture({ canonicalRoot: () => root, approvalLockKey: () => 'unused' }),
     proposalStore: new InMemoryTasteProposalStore(),
     threadStore,
     messageStore,

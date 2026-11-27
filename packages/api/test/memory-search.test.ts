@@ -1,3 +1,4 @@
+import { createTasteBrowseFixture } from './helpers/taste-browse-fixture.js';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -62,7 +63,7 @@ async function fixture() {
     getByAnchor: async (anchor) => items.get(anchor) ?? null,
   };
   const searchSources = {
-    tasteRepository: { canonicalRoot: () => root, approvalLockKey: () => 'unused' },
+    tasteBrowse: createTasteBrowseFixture({ canonicalRoot: () => root, approvalLockKey: () => 'unused' }),
     messageSearchService: {
       search: async (_input: unknown, principal: { userId: string }) => {
         calls.push({ owner: principal.userId });

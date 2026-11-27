@@ -60,6 +60,7 @@ ${helperSources}
 [InstallDelete]
 ${installDelete}
 [Code]
+#include "${path.join(__dirname, 'installer/install-directory.iss')}"
 #include "${path.join(__dirname, 'installer/runtime-failure.iss')}"
 ${extractionOutput}
 #include "${path.join(__dirname, 'installer/install-preparation.iss')}"
@@ -87,6 +88,20 @@ async function runProbe(root, args = []) {
 
 const configureHelper = (body) => ({ name: 'configure-desktop-instance.ps1', body });
 const stopHelper = { name: 'stop-installed-desktop.ps1', body: 'exit 0\n' };
+
+test('native Setup provisions ordinary storage under the selected program directory', native, async () => {
+  await withTempRoot('setup-install-storage-', async (root) => {
+    const configureScript = fs.readFileSync(path.join(__dirname, 'scripts/configure-desktop-instance.ps1'), 'utf8');
+    await writeProbe(root, { createAppDir: true, helpers: [configureHelper(configureScript), stopHelper] });
+    const app = path.join(root, 'other install location');
+    const { installed, recorded } = await runProbe(root, [`/DIR=${app}`]);
+    assert.equal(installed.status, 0, recorded);
+    const marker = JSON.parse(fs.readFileSync(path.join(app, 'desktop-data-root.json'), 'utf8'));
+    assert.deepEqual(marker, { mode: 'install' });
+    assert.equal(fs.statSync(path.join(app, 'user-state')).isDirectory(), true);
+    assert.equal(fs.existsSync(path.join(root, 'program', 'user-state')), false);
+  });
+});
 
 test('native Setup records the actual identity-helper error before refusing installation', native, async () => {
   await withTempRoot('pr1519-prepare-log-', async (root) => {

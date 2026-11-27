@@ -29,6 +29,43 @@ function cue(
   };
 }
 
+test('recall uses the current worker cue projection only after the invocation is authorized', async () => {
+  const calls: string[][] = [];
+  const f = await recallFixture((readers) => {
+    readers.readInvocationCues = async (owner, thread, invocation) => {
+      calls.push([owner, thread, invocation]);
+      return [
+        {
+          cueId: 'visible',
+          resolverFamily: 'taste',
+          sourceAnchor: 'from-worker',
+          sourceRevision: 'next-revision',
+          consumerCatId: 'kimi',
+          status: 'drilled',
+          invalidationReason: null,
+          presentedAt: Date.now() - 3000,
+          lastEventAt: Date.now() - 1000,
+        },
+      ];
+    };
+  });
+  try {
+    f.invocation('parent');
+    f.invocation('foreign', 'other-owner');
+    f.episodes.append(cue(f.now, 'visible'));
+    f.episodes.append(cue(f.now, 'denied', 'taste', 'foreign'));
+    const res = await f.get('?source=push');
+    assert.equal(res.statusCode, 200, res.body);
+    const records = res.json().records;
+    assert.equal(records.length, 1);
+    assert.equal(records[0].event.cueStatus, 'drilled');
+    assert.equal(records[0].event.sourceRevision, 'next-revision');
+    assert.deepEqual(calls, [['owner', 'own', 'parent']]);
+  } finally {
+    await f.close();
+  }
+});
+
 test('all declared exact-delivery families preserve producer status and source owner scope without drilling seeds', async () => {
   const reads: Array<{ family: string; owner: string; invocationId: string; revision: string }> = [];
   const pushFamilies = RECALL_RESOLVER_FAMILIES.filter((family) => RECALL_RESOLVER_ADMISSION_V5[family] === 'catalog');

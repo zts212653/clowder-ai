@@ -3,7 +3,7 @@ import type { AutoDreamStore } from '../../auto-dream/AutoDreamStore.js';
 import type { IMessageStore } from '../../cats/services/stores/ports/MessageStore.js';
 import type { TasteRepository } from '../../taste/services/TasteRepository.js';
 import type { EntityRegistryStore } from '../EntityRegistry.js';
-import type { IEventMemoryStore } from '../EventMemoryStore.js';
+import type { EventMemoryPort } from '../event/event-memory-port.js';
 import type { IEvidenceStore } from '../interfaces.js';
 import type { MessageSearchService } from '../MessageSearchService.js';
 import type { MatterMemoryService } from '../matters/MatterMemoryService.js';
@@ -72,7 +72,7 @@ export function createMemoryCueRuntime(input: {
   handles: MemoryCueDrillHandleService;
   evidenceStore: Pick<IEvidenceStore, 'getByAnchor'>;
   messageStore: Pick<IMessageStore, 'getById'>;
-  eventStore: Pick<IEventMemoryStore, 'listEvents' | 'getEvent'>;
+  eventStore: Pick<EventMemoryPort, 'listEvents' | 'getEvent'>;
   entityRegistry: Pick<EntityRegistryStore, 'isCurrentVisibleRevision'>;
   personRecall?: PersonMemoryRecallService;
   tasteRepository: TasteRepository;

@@ -1,10 +1,9 @@
 import type { MemoryOwnerSourceCoordinate, MemoryOwnerSourceResponse } from '@cat-cafe/shared';
+import type { EntityProvenance } from '@clowder-ai/plugin-memory-contract/entity';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { resolveThreadMessageVisibility } from '../domains/cats/services/stores/visibility.js';
 import { canAccessThread } from '../domains/guides/guide-state-access.js';
-import type { StoredEntityRecord } from '../domains/memory/EntityRegistry.js';
-import type { EntityProvenance } from '../domains/memory/interfaces.js';
 
 export interface EntityMemorySourceReaders {
   threadStore: Pick<IThreadStore, 'get' | 'list'>;
@@ -12,7 +11,7 @@ export interface EntityMemorySourceReaders {
 }
 
 export async function readEntityMemorySource(
-  entity: StoredEntityRecord,
+  entity: { provenance: EntityProvenance[] },
   ownerUserId: string,
   readers: EntityMemorySourceReaders,
 ): Promise<MemoryOwnerSourceResponse> {

@@ -1,6 +1,8 @@
 param(
   [Parameter(Mandatory)] [string]$AppDir,
   [string]$InstanceRoot,
+  [string]$DataRoot,
+  [switch]$ExistingInstallation,
   [string]$FrontendPort,
   [string]$ApiPort,
   [string]$RedisPort
@@ -70,6 +72,17 @@ function Assert-DataBoundary([string]$root) {
     }
   }
 }
+function Resolve-DataRoot([string]$root) {
+  if ($root -notmatch '^(?:[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)') { throw 'Desktop data root must be absolute' }
+  if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw 'Desktop data root must be an existing directory' }
+  $canonical = Resolve-BoundaryPath $root
+  $app = Resolve-BoundaryPath $AppDir
+  if ($canonical.Equals($app, [StringComparison]::OrdinalIgnoreCase) -or
+      $canonical.StartsWith($app + '\', [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Desktop data root must be outside the installation'
+  }
+  return $canonical
+}
 function Assert-Identity($identity) {
   if ($identity -isnot [pscustomobject] -or -not $identity.CAT_CAFE_DESKTOP_INSTANCE_ROOT -or
       -not [IO.Path]::IsPathRooted($identity.CAT_CAFE_DESKTOP_INSTANCE_ROOT)) { throw 'Invalid instance root' }
@@ -87,6 +100,31 @@ $legacy = Join-Path $AppDir 'desktop-dist\desktop-instance.json'
 $saved = $null
 $body = $null
 $existing = if (Test-Path -LiteralPath $marker) { $marker } elseif (Test-Path -LiteralPath $legacy) { $legacy } else { $null }
+$dataMarker = Join-Path $AppDir 'desktop-data-root.json'
+$hasDataMarker = Test-Path -LiteralPath $dataMarker
+$installDataDirectory = Join-Path $AppDir 'user-state'
+if (($hasDataMarker -or $DataRoot) -and ($existing -or $InstanceRoot)) {
+  throw 'Choose either isolated instance or persistent data root'
+}
+if ($hasDataMarker) {
+  $savedData = [IO.File]::ReadAllText($dataMarker, [Text.Encoding]::UTF8) | ConvertFrom-Json
+  if ($savedData.mode -eq 'install') {
+    if ($DataRoot) { throw 'Explicit desktop data root conflicts with existing installation' }
+    if (-not (Test-Path -LiteralPath $installDataDirectory -PathType Container) -or
+        (Resolve-BoundaryPath $installDataDirectory) -ne (Join-Path (Resolve-BoundaryPath $AppDir) 'user-state')) {
+      throw 'The installation data directory is missing or redirected'
+    }
+  } else {
+    if ($savedData.dataRoot -isnot [string]) { throw 'Invalid desktop data root marker' }
+    $savedDataRoot = Resolve-DataRoot $savedData.dataRoot
+  }
+}
+if ($DataRoot) {
+  $requestedDataRoot = Resolve-DataRoot $DataRoot
+  if ($savedDataRoot -and $requestedDataRoot -ne $savedDataRoot) {
+    throw 'Explicit desktop data root conflicts with existing installation'
+  }
+}
 if ($existing) {
   $body = [IO.File]::ReadAllText($existing, [Text.Encoding]::UTF8)
   $saved = $body | ConvertFrom-Json
@@ -137,6 +175,28 @@ function Write-DefaultClientHomes([string]$root) {
 }
 
 Write-DefaultClientHomes $InstanceRoot
+if ($DataRoot -and -not $hasDataMarker) {
+  $marker = $dataMarker
+  $body = @{ dataRoot = $requestedDataRoot } | ConvertTo-Json -Compress
+} elseif (-not ($hasDataMarker -or $existing -or $InstanceRoot -or $ExistingInstallation) -and
+          -not (Test-Path -LiteralPath (Join-Path $AppDir 'desktop-dist\Clowder AI.exe') -PathType Leaf)) {
+  if (Test-Path -LiteralPath $installDataDirectory) { throw 'The installation data directory already exists without a marker' }
+  [IO.Directory]::CreateDirectory($AppDir) | Out-Null
+  # Setup runs elevated. Each account can create a private profile on first
+  # launch, including when another administrator authorized the installation.
+  $acl = [Security.AccessControl.DirectorySecurity]::new()
+  $acl.SetAccessRuleProtection($true, $false)
+  foreach ($sid in @('S-1-5-18', 'S-1-5-32-544', 'S-1-3-0')) {
+    $propagation = if ($sid -eq 'S-1-3-0') { 'InheritOnly' } else { 'None' }
+    $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+      [Security.Principal.SecurityIdentifier]::new($sid), 'FullControl', 'ContainerInherit,ObjectInherit', $propagation, 'Allow'))
+  }
+  $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+    [Security.Principal.SecurityIdentifier]::new('S-1-5-11'), 'ReadAndExecute,CreateDirectories', 'Allow'))
+  [IO.Directory]::CreateDirectory($installDataDirectory, $acl) | Out-Null
+  $marker = $dataMarker
+  $body = @{ mode = 'install' } | ConvertTo-Json -Compress
+}
 if (-not $body -or (Test-Path -LiteralPath $marker)) { exit 0 }
 # Keep this install-owned record outside the payload replacement boundary.
 # A failed extraction can be retried without losing the original instance.

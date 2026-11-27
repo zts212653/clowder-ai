@@ -1,6 +1,9 @@
 import type { CollectiveMaterialSourcePort } from '@cat-cafe/shared';
 import type { CollectiveArtifactOwnerPort } from '../../collaborative-content/collective-artifact/owner-port.js';
-import { currentPluginOwnerRequestContext } from '../carrier/plugin-owner-request-context.js';
+import {
+  currentPluginOwnerRequestContext,
+  withoutPluginOwnerRequestContext,
+} from '../carrier/plugin-owner-request-context.js';
 import { ExternalPluginRuntimeError } from '../external-runtime/types.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 import type { PluginInstanceRecord, PluginPackageRecord } from '../host-inventory/types.js';
@@ -9,6 +12,7 @@ import {
   type CollectiveMaterialSourceHolder,
   createCollectiveMaterialSourceProxy,
 } from './collective-material-source.js';
+import type { ConversationStorageSources } from './conversation-storage-sources.js';
 import { createPluginMembersHost, type PluginMembersHost, type PluginMembersServices } from './plugin-members-host.js';
 
 export interface PluginRuntimeInfo {
@@ -19,9 +23,18 @@ export interface PluginRuntimeInfo {
   readonly projectRoot: string;
   readonly logDirectory: string;
 }
+type ConversationStorageRead =
+  | { state: 'idle' | 'running' | 'error' }
+  | { state: 'ready'; sources: ConversationStorageSources };
+
 export interface PluginNeutralHost {
   readonly ownerChat?: import('./plugin-owner-chat.js').PluginOwnerChatHost;
   readonly runtimeInfo?: { get(): Promise<PluginRuntimeInfo> };
+  readonly conversationStorage?: {
+    startRead(): Promise<ConversationStorageSources>;
+    beginRead(): Promise<{ state: 'running' }>;
+    getRead(): Promise<ConversationStorageRead>;
+  };
   readonly memberSessions?: import('../member-sessions/host.js').PluginMemberSessionsHost;
   readonly collectiveMaterialSource?: CollectiveMaterialSourcePort;
   readonly collectiveArtifactOwner?: CollectiveArtifactOwnerPort;
@@ -30,6 +43,10 @@ export interface PluginNeutralHost {
 interface Deps {
   readonly ownerChat?: (assertCurrent: () => Promise<void>) => PluginNeutralHost['ownerChat'];
   readonly runtimeInfo?: () => PluginRuntimeInfo;
+  readonly conversationStorage?: (
+    signal: AbortSignal,
+  ) => Promise<import('./conversation-storage-sources.js').ConversationStorageSources>;
+  readonly conversationStorageOwnerUserId?: string;
   readonly memberSessions?: (assertCurrent: () => Promise<void>) => PluginNeutralHost['memberSessions'];
   readonly collectiveMaterialSource?: CollectiveMaterialSourceHolder;
   readonly collectiveArtifactOwner?: CollectiveArtifactOwnerHolder;
@@ -75,6 +92,7 @@ export async function createPluginNeutralHost(deps: Deps): Promise<PluginNeutral
     );
   }
   const collective = pkg.pluginId === 'official.collective-connector' && instance.pluginId === pkg.pluginId;
+  const conversationStorage = conversationStorageFor(pkg.pluginId, deps, current);
   return Object.freeze({
     ...(deps.ownerChat ? { ownerChat: deps.ownerChat(current) } : {}),
     ...(deps.runtimeInfo
@@ -92,6 +110,7 @@ export async function createPluginNeutralHost(deps: Deps): Promise<PluginNeutral
         }
       : {}),
     ...(deps.memberSessions ? { memberSessions: deps.memberSessions(current) } : {}),
+    ...(conversationStorage ? { conversationStorage } : {}),
     ...(collective && deps.collectiveMaterialSource
       ? {
           collectiveMaterialSource: createCollectiveMaterialSourceProxy({
@@ -113,5 +132,59 @@ export async function createPluginNeutralHost(deps: Deps): Promise<PluginNeutral
           }),
         }
       : {}),
+  });
+}
+
+function conversationStorageFor(pluginId: string, deps: Deps, assertCurrent: () => Promise<void>) {
+  const read = deps.conversationStorage;
+  const ownerUserId = deps.conversationStorageOwnerUserId;
+  if (pluginId !== 'official.storage-governance' || !read || !ownerUserId) return undefined;
+  let scan: ConversationStorageRead = { state: 'idle' };
+  async function authorizeScan(method: 'GET' | 'POST') {
+    const owner = currentPluginOwnerRequestContext(deps.pluginInstanceId);
+    if (
+      !owner ||
+      owner.userId !== ownerUserId ||
+      owner.requestIdentity?.method !== method ||
+      owner.requestIdentity.declaredPath !== 'scan'
+    )
+      refuse('Conversation storage requires an authenticated owner scan request');
+    await assertCurrent();
+    await owner.assertCurrent();
+    return owner;
+  }
+  return Object.freeze({
+    async startRead() {
+      const owner = await authorizeScan('POST');
+      const sources = await read(owner.signal);
+      await owner.assertCurrent();
+      await assertCurrent();
+      return sources;
+    },
+    async beginRead() {
+      await authorizeScan('POST');
+      if (scan.state !== 'running') {
+        scan = { state: 'running' };
+        const signal = deps.activationSignal ?? new AbortController().signal;
+        void withoutPluginOwnerRequestContext(async () => {
+          const sources = await read(signal);
+          signal.throwIfAborted();
+          await assertCurrent();
+          return sources;
+        }).then(
+          (sources) => {
+            scan = { state: 'ready', sources };
+          },
+          () => {
+            scan = { state: 'error' };
+          },
+        );
+      }
+      return { state: 'running' as const };
+    },
+    async getRead() {
+      await authorizeScan('GET');
+      return scan;
+    },
   });
 }

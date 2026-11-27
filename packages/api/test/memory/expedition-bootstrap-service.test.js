@@ -49,6 +49,31 @@ describe('ExpeditionBootstrapService', () => {
   }
 
   describe('bootstrap orchestration', () => {
+    it('keeps one Host rebuild while a replacement memory activation can claim stale state', async () => {
+      const started = Promise.withResolvers();
+      const finish = Promise.withResolvers();
+      let claims = 0;
+      const service = new ExpeditionBootstrapService({
+        claim: async () => { claims += 1; return true; },
+        markReady: async () => {},
+      }, {
+        getFingerprint: () => 'claim-fixture',
+        rebuildIndex: async () => {
+          started.resolve();
+          return finish.promise;
+        },
+      });
+      const first = service.bootstrap(tmpRoot, { ownerUserId: 'owner-a' });
+      await started.promise;
+      try {
+        assert.equal((await service.bootstrap(tmpRoot, { ownerUserId: 'owner-a' })).status, 'skipped');
+      } finally {
+        finish.resolve({ docsIndexed: 2, durationMs: 1 });
+      }
+      assert.equal((await first).status, 'ready');
+      assert.equal(claims, 1);
+    });
+
     it('completes full flow: scan → index → summary → ready', async () => {
       const svc = createService();
       const result = await svc.bootstrap(tmpRoot, { ownerUserId: 'owner-a' });

@@ -74,7 +74,7 @@ export async function matterCallbackFixture() {
     threadStore,
     runWrite: (operation) => evidenceStore.runExclusive(operation),
   });
-  await app.register(memoryMatterRoutes, { service: matterMemoryService });
+  await app.register(memoryMatterRoutes, { provider: () => matterMemoryService });
   await app.register(memoryCueInvocationReadRoutes, {
     evidenceDb: evidenceStore.getDb(),
     matterMemoryService,
@@ -91,7 +91,7 @@ export async function matterCallbackFixture() {
     evidenceStore,
     messageStore,
     threadStore,
-    matterMemoryService,
+    matterRouteProvider: () => matterMemoryService,
     markerQueue: {
       submit: async () => {
         throw new Error('This journey must not write a marker summary');
