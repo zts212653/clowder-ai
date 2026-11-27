@@ -358,12 +358,7 @@
     "untouchedSaveDispatchedRename": false,
     "languageSwitchPreservedFallback": true,
     "explicitRenameDispatched": true,
-    "combinations": [
-      "sys-1-zh",
-      "sys-1-en",
-      "pkg-v2-zh",
-      "pkg-v2-en"
-    ]
+    "combinations": ["sys-1-zh", "sys-1-en", "pkg-v2-zh", "pkg-v2-en"]
   },
   "screenshotState": "pointer outside header, header blurred, 1100ms after interaction"
 }
