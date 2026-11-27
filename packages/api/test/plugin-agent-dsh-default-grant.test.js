@@ -251,6 +251,7 @@ test(
     ]);
     const next = await invoke('DSH_DEFAULT_AFTER_CANCEL', 'after-cancel', { sessionId: nativeId });
     assert.equal(assertTurn(next, 'DSH_DEFAULT_REPLY_4'), nativeId);
+    assert.ok(!next.some((event) => event.type === 'text' && event.content.includes('DSH_CANCEL_PREFIX')));
     assert.equal(requests.length, 4);
     for (const body of requests) {
       assert.equal(body.model, 'selected-model');

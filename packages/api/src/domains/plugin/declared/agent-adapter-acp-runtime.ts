@@ -9,6 +9,7 @@ type NativeClient = Pick<
   | 'resumeSession'
   | 'promptStream'
   | 'hasPromptFinalResponse'
+  | 'isSafeForSingleFlightReuse'
   | 'cancelSession'
   | 'closeSession'
   | 'close'
@@ -22,7 +23,10 @@ export function createAgentAdapterAcpRuntime(
   ) => Promise<{ client: NativeClient; cwd: string }>,
   activation: AbortSignal,
 ): AcpRuntime {
-  const sessions = new Map<string, { client: NativeClient; nativeId: string }>();
+  const sessions = new Map<
+    string,
+    { client: NativeClient; nativeId: string; startup: Parameters<AcpRuntime['open']>[0]['startup'] }
+  >();
   const release = async (hostSessionId: string) => {
     const session = sessions.get(hostSessionId);
     if (!session) return;
@@ -38,44 +42,53 @@ export function createAgentAdapterAcpRuntime(
     sessions.clear();
     void Promise.allSettled(previous.map(({ client }) => client.close()));
   });
-  return {
-    async open(input, signal) {
-      const scope = AbortSignal.any([activation, signal]);
+  const open: AcpRuntime['open'] = async (input, signal) => {
+    const scope = AbortSignal.any([activation, signal]);
+    scope.throwIfAborted();
+    if (sessions.has(input.hostSessionId)) return { ok: false, code: 'failed' };
+    const { client, cwd } = await createClient(input, scope);
+    const close = addAbortListener(scope, () => {
+      void client.close().catch(() => {});
+    });
+    let opened = false;
+    try {
       scope.throwIfAborted();
-      if (sessions.has(input.hostSessionId)) return { ok: false, code: 'failed' };
-      const { client, cwd } = await createClient(input, scope);
-      const close = addAbortListener(scope, () => {
-        void client.close().catch(() => {});
-      });
-      let opened = false;
-      try {
-        scope.throwIfAborted();
-        const native = input.resumeNativeSessionId
-          ? await client.resumeSession(input.resumeNativeSessionId, cwd, [])
-          : await client.newSession(cwd, []);
-        scope.throwIfAborted();
-        if (!native.sessionId || (input.resumeNativeSessionId && native.sessionId !== input.resumeNativeSessionId))
-          return { ok: false, code: input.resumeNativeSessionId ? 'resume_unavailable' : 'failed' };
-        sessions.set(input.hostSessionId, { client, nativeId: native.sessionId });
-        opened = true;
-        return { ok: true, nativeSessionId: native.sessionId };
-      } catch (error) {
-        scope.throwIfAborted();
-        if (input.resumeNativeSessionId && error instanceof AcpProtocolError)
-          return { ok: false, code: 'resume_unavailable' };
-        throw error;
-      } finally {
-        close[Symbol.dispose]();
-        if (!opened) await client.close();
-      }
-    },
+      const native = input.resumeNativeSessionId
+        ? await client.resumeSession(input.resumeNativeSessionId, cwd, [])
+        : await client.newSession(cwd, []);
+      scope.throwIfAborted();
+      if (!native.sessionId || (input.resumeNativeSessionId && native.sessionId !== input.resumeNativeSessionId))
+        return { ok: false, code: input.resumeNativeSessionId ? 'resume_unavailable' : 'failed' };
+      sessions.set(input.hostSessionId, { client, nativeId: native.sessionId, startup: input.startup });
+      opened = true;
+      return { ok: true, nativeSessionId: native.sessionId };
+    } catch (error) {
+      scope.throwIfAborted();
+      if (input.resumeNativeSessionId && error instanceof AcpProtocolError)
+        return { ok: false, code: 'resume_unavailable' };
+      throw error;
+    } finally {
+      close[Symbol.dispose]();
+      if (!opened) await client.close();
+    }
+  };
+  return {
+    open,
     async prompt(input, signal) {
-      const session = sessions.get(input.hostSessionId);
-      if (!session) throw new Error('Native ACP session is unavailable');
-      const { client, nativeId } = session;
+      const { hostSessionId } = input;
       const scope = AbortSignal.any([activation, signal]);
       return (async function* () {
         scope.throwIfAborted();
+        let session = sessions.get(hostSessionId);
+        if (session && !session.client.isSafeForSingleFlightReuse) {
+          // ACP updates carry only the session ID. A cancelled prompt can still emit on this client.
+          const { startup, nativeId } = session;
+          await release(hostSessionId);
+          await open({ hostSessionId, startup, resumeNativeSessionId: nativeId }, scope);
+          session = sessions.get(hostSessionId);
+        }
+        if (!session) throw new Error('Native ACP session is unavailable');
+        const { client, nativeId } = session;
         const stream = client.promptStream(nativeId, input.prompt);
         const abort = addAbortListener(scope, () => client.cancelSession(nativeId, true));
         try {
