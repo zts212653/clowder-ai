@@ -1323,9 +1323,8 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       await threadStore.updateTitle(id, title);
       try {
         opts.indexBuilder?.markThreadDirty(id);
-        await opts.indexBuilder?.flushDirtyThreads?.();
       } catch (err) {
-        log.warn({ err, threadId: id }, 'failed to refresh thread evidence index after title update');
+        log.warn({ err, threadId: id }, 'failed to mark thread evidence dirty after title update');
       }
     }
     if (pinned !== undefined) await threadStore.updatePin(id, pinned);

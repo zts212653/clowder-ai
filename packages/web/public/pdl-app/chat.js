@@ -544,6 +544,9 @@ function chatUpdate(port) {
   S.thread = chatPort.threadId;
   S.navW = chatPort.navResize.width();
   if (changed) {
+    // The old composer may never receive compositionend after a conversation switch.
+    const composer = document.getElementById('chat-input');
+    if (composer && COMPOSING_FIELDS.has(composer)) composer.remove();
     S.ws.recallFor = null;
     S.ws.recallPages = 0;
     navStale();
@@ -831,32 +834,51 @@ window.clowderChat = {
     INPUTS.cafeCompose = function (e) {
       const ta = e.target,
         before = CS.draft[ta.id] || '',
-        previousPop = CS.pop;
+        previousPop = CS.pop,
+        composing = e.isComposing === true;
       CS.draft[ta.id] = ta.value;
-      return Promise.resolve(chatPort.action('compose', { v: ta.value, pos: String(ta.selectionStart) })).then(
-        function () {
-          if (CS.pop && CS.pop.typed) {
-            const pop = CS.pop,
-              same = previousPop && previousPop.typed && previousPop.kind === pop.kind;
-            spotOpen('caret', ta.parentElement, caretRect(ta), function (spot) {
-              popAnchor('chat.pop', spot);
-              CS.pop = Object.assign(pop, {
-                typed: true,
-                input: ta.id,
-                i: same ? Math.min(previousPop.i, 30) : 0,
-                up: true,
-                span: 5,
-              });
-              const count = cafeTypedItems().length;
-              if (CS.pop.i >= count) CS.pop.i = 0;
-              render(true);
+      return Promise.resolve(
+        chatPort.action('compose', {
+          v: ta.value,
+          pos: String(ta.selectionStart),
+          composing: composing ? '1' : '0',
+        }),
+      ).then(function () {
+        if (CS.pop && CS.pop.typed) {
+          const pop = CS.pop,
+            same = previousPop && previousPop.typed && previousPop.kind === pop.kind;
+          spotOpen('caret', ta.parentElement, caretRect(ta), function (spot) {
+            popAnchor('chat.pop', spot);
+            CS.pop = Object.assign(pop, {
+              typed: true,
+              input: ta.id,
+              i: same ? Math.min(previousPop.i, 30) : 0,
+              up: true,
+              span: 5,
             });
-          } else if ((previousPop && previousPop.typed) || !before.trim() !== !ta.value.trim()) {
+            const count = cafeTypedItems().length;
+            if (CS.pop.i >= count) CS.pop.i = 0;
             render(true);
-          }
-        },
-      );
+          });
+        } else if ((previousPop && previousPop.typed) || !before.trim() !== !ta.value.trim()) {
+          render(true);
+        }
+      });
     };
+    /* Some IMEs end composition without a following input event. Hand the final text to the host
+       without scheduling another render; the input that normally follows still owns the redraw. */
+    document.addEventListener('compositionend', function (e) {
+      const ta = e.target;
+      if (!ta || !ta.dataset || ta.dataset.input !== 'cafeCompose') return;
+      CS.draft[ta.id] = ta.value;
+      void Promise.resolve(
+        chatPort.action('compose', {
+          v: ta.value,
+          pos: String(ta.selectionStart),
+          composing: '0',
+        }),
+      ).catch(function () {});
+    });
     KEY_FNS.push(function (e) {
       if (!CS.pop || !CS.pop.typed || e.target.id !== CS.pop.input || e.isComposing) return false;
       const items = cafeTypedItems();

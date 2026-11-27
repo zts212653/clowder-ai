@@ -177,10 +177,10 @@ it('pulls recall once on entry and uses message increments without re-reading wh
   await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(4));
 });
 
-it('posts read receipts on entry and new bubbles, then invalidates the sidebar after each acknowledgement', async () => {
+function readReceiptHarness() {
   const source = readFileSync('src/pdl/PdlAppHost.tsx', 'utf8');
   const effect = source.split('  const messageCount = history.messages.length;')[1].split('\n  const patchThread =')[0];
-  const readReceipt = new Function(
+  return new Function(
     'useEffect',
     'history',
     'exportMids',
@@ -191,36 +191,64 @@ it('posts read receipts on entry and new bubbles, then invalidates the sidebar a
     'threadId',
     'notifyHandledMentionRead',
     'invalidateSidebarProjection',
+    'useSidebarProjectionStore',
     transpileModule('const messageCount = history.messages.length;' + effect, {
       compilerOptions: { target: ScriptTarget.ES2022 },
     }).outputText,
   );
+}
+
+it('skips a full sidebar read for no-op acknowledgements and refreshes on advance', async () => {
+  const readReceipt = readReceiptHarness();
   const notify = vi.fn(),
     invalidate = vi.fn(async () => true);
-  vi.mocked(apiFetch).mockImplementation(async () => Response.json({ caughtUp: true, messageId: 'latest' }));
+  let advanced = false;
+  vi.mocked(apiFetch).mockImplementation(async () =>
+    Response.json({ caughtUp: true, advanced, handledMention: false, messageId: 'latest' }),
+  );
   let messages: ReturnType<typeof fixtureData>['messages'] = [],
     needed: number | false = false;
   const hook = renderHook(() =>
-    readReceipt(useEffect, { messages }, undefined, true, true, () => needed, request, 'thread', notify, invalidate),
+    readReceipt(useEffect, { messages }, undefined, true, true, () => needed, request, 'thread', notify, invalidate, {
+      getState: () => ({ rows: [] }),
+    }),
   );
   expect(apiFetch).not.toHaveBeenCalled();
   needed = 1;
   await act(hook.rerender);
-  await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(notify).toHaveBeenCalledTimes(1));
+  expect(invalidate).not.toHaveBeenCalled();
+
+  advanced = true;
   messages = fixtureData().messages;
   await act(hook.rerender);
-  await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2));
-  messages = messages.map((message) => ({ ...message }));
-  await act(hook.rerender);
-  expect(apiFetch).toHaveBeenCalledTimes(2);
-  messages = [...messages, { ...messages[1], id: 'new-reply' }];
-  await act(hook.rerender);
-  await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(3));
-  for (const [path, init] of vi.mocked(apiFetch).mock.calls) {
-    expect(path).toBe('/api/threads/thread/read/latest');
-    expect(init?.method).toBe('POST');
-  }
-  expect(notify).toHaveBeenCalledTimes(3);
+  await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1));
+  expect(notify).toHaveBeenCalledTimes(2);
+});
+
+it('keeps the canonical read when an acknowledgement is not caught up', async () => {
+  const readReceipt = readReceiptHarness();
+  const notify = vi.fn(),
+    invalidate = vi.fn(async () => true);
+  vi.mocked(apiFetch).mockImplementation(async () => Response.json({ caughtUp: false, messageId: 'latest' }));
+  let needed: number | false = 1;
+  renderHook(() =>
+    readReceipt(
+      useEffect,
+      { messages: fixtureData().messages },
+      undefined,
+      true,
+      true,
+      () => needed,
+      request,
+      'thread',
+      notify,
+      invalidate,
+      { getState: () => ({ rows: [] }) },
+    ),
+  );
+  await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1));
+  needed = false;
 });
 
 it('keeps the sidebar source through conversation changes and re-pulls it only on an explicit invalidation', async () => {
