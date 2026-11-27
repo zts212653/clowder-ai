@@ -25,23 +25,29 @@ function reloadRenderer(contents, timeoutMs, retryUrl) {
     const finish = (loaded) => {
       clearTimeout(timer);
       contents.removeListener('did-finish-load', loadedPage);
+      contents.removeListener('did-navigate', committedPage);
       contents.removeListener('did-fail-load', failedPage);
       contents.removeListener('render-process-gone', lostPage);
       contents.removeListener('destroyed', lostPage);
       resolve(loaded);
     };
-    const loadedPage = () => finish(true);
+    let errorResponse = false;
+    const loadedPage = () => finish(!errorResponse);
     const lostPage = () => finish(false);
+    const committedPage = (_event, _url, statusCode) => {
+      errorResponse = statusCode >= 400;
+    };
     const failedPage = (_event, code, _description, _url, isMainFrame) => {
       if (isMainFrame && code !== -3) lostPage();
     };
     const timer = setTimeout(lostPage, timeoutMs);
     contents.once('did-finish-load', loadedPage);
+    contents.on('did-navigate', committedPage);
     contents.on('did-fail-load', failedPage);
     contents.once('render-process-gone', lostPage);
     contents.once('destroyed', lostPage);
     try {
-      if (retryUrl) void contents.loadURL(retryUrl).catch(lostPage);
+      if (retryUrl && contents.getURL() !== retryUrl) void contents.loadURL(retryUrl).catch(lostPage);
       else contents.reloadIgnoringCache();
     } catch {
       lostPage();

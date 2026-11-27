@@ -3,7 +3,7 @@ const { EventEmitter } = require('node:events');
 const { test } = require('node:test');
 const { createInterfaceReloadHandler } = require('./interface-reload');
 
-function fixture({ status = 'ready', responses = [], failFirst = false } = {}) {
+function fixture({ status = 'ready', responses = [], failFirst = false, statusCode = 200 } = {}) {
   const calls = [];
   const contents = new EventEmitter();
   const url = 'http://localhost:5613/thread/one#appearance';
@@ -19,11 +19,19 @@ function fixture({ status = 'ready', responses = [], failFirst = false } = {}) {
     calls.push(channel);
     if (status !== null) queueMicrotask(() => port.emit('message', { data: status }));
   };
+  let reloads = 0;
   contents.reloadIgnoringCache = () => {
+    reloads += 1;
     calls.push('reload');
-    queueMicrotask(() =>
-      failFirst ? contents.emit('did-fail-load', {}, -102, 'refused', url, true) : contents.emit('did-finish-load'),
-    );
+    queueMicrotask(() => {
+      if (failFirst) {
+        contents.getURL = () => 'about:blank';
+        contents.emit('did-fail-load', {}, -102, 'refused', url, true);
+      } else {
+        contents.emit('did-navigate', {}, url, reloads === 1 ? statusCode : 200);
+        contents.emit('did-finish-load');
+      }
+    });
   };
   contents.loadURL = async (target) => {
     calls.push(target);
@@ -83,4 +91,11 @@ test('gives native feedback when the main window is unavailable', async () => {
   await run(null);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].type, 'info');
+});
+
+test('a loaded HTTP error still offers a retry instead of treating the error page as success', async () => {
+  const { run, window, calls } = fixture({ statusCode: 503, responses: [1] });
+  await run(window);
+  assert.equal(calls[2].type, 'error');
+  assert.equal(calls[3], 'reload');
 });
