@@ -28,6 +28,7 @@ import { resolveCatCafeDataRoot } from './cli-process-ownership.js';
 import {
   controllerQueryScript,
   HELPER_READY,
+  HELPER_TIMEOUT,
   JOB_NAME_PREFIX,
   jobOwnerScript,
   jobQueryScript,
@@ -211,7 +212,10 @@ export async function adoptWindowsApiJob(
     stderr = (stderr + chunk.toString()).slice(-2_000);
   });
   const outcome = await new Promise<string>((resolve) => {
-    const timer = setTimeout(() => resolve('JOB_FAILED_TIMEOUT'), HELPER_TIMEOUT_MS);
+    const timer = setTimeout(() => {
+      const lastStage = [...stdout.matchAll(/^JOB_STAGE ([a-z_]+)\r?$/gm)].at(-1)?.[1] ?? 'startup';
+      resolve(`${HELPER_TIMEOUT}:stage=${lastStage}`);
+    }, HELPER_TIMEOUT_MS);
     const finish = (value: string): void => {
       clearTimeout(timer);
       resolve(value);
