@@ -833,93 +833,6 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     return new Map(rows.map((row) => [row.anchor, row]));
   }
 
-  /**
-   * Native FTS5 body/passage fallback for default summary search (SIM-Q4):
-   * Collects bounded candidates from both lexical-only evidence_doc_body_fts (1 row per doc,
-   * external collections, supports cross-paragraph multi-term FTS5 queries) and passage_fts
-   * (main store evidence_passages, excluding md-* rows already superseded by an authoritative
-   * evidence_doc_bodies row), then merges and ranks across both lanes by temporal status
-   * penalty + BM25 rank before applying LIMIT so a demoted body hit can never hide an active
-   * passage correction at small limits. Joins parent evidence_docs BEFORE GROUP BY / LIMIT so
-   * parent filters (status, kind, scope, world/scene, activation, d.updated_at) and per-doc
-   * deduplication never suffer candidate pool starvation or passage created_at mismatch.
-   */
-  private searchSummaryFallbackDocs(
-    ftsQueries: string[],
-    limit: number,
-    options: SearchOptions | undefined,
-    filters: SearchFilterContext,
-  ): EvidenceItem[] {
-    if (!this.db || ftsQueries.length === 0) return [];
-    for (const ftsQuery of ftsQueries) {
-      const candidates = new Map<string, { item: EvidenceItem; rank: number }>();
-      let hasDocBodiesTable = true;
-
-      try {
-        const bodyParams: unknown[] = [ftsQuery];
-        let bodySql = `
-          SELECT d.*, f.rank AS _fallback_rank
-          FROM evidence_doc_body_fts f
-          JOIN evidence_doc_bodies b ON b.rowid = f.rowid
-          JOIN evidence_docs d ON d.anchor = b.doc_anchor
-          WHERE evidence_doc_body_fts MATCH ?`;
-        bodySql = this.appendEvidenceDocFilters(bodySql, bodyParams, options, filters, 'd.');
-        bodySql += ` ORDER BY ${temporalPenaltySql('d')}, f.rank LIMIT ?`;
-        bodyParams.push(limit);
-        const bodyRows = this.db.prepare(bodySql).all(...bodyParams) as Array<RowShape & { _fallback_rank: number }>;
-        for (const row of bodyRows) {
-          if (candidates.has(row.anchor)) continue;
-          candidates.set(row.anchor, { item: rowToItem(row), rank: row._fallback_rank });
-        }
-      } catch (err) {
-        if (/no such table:\s*evidence_doc_bod/i.test(err instanceof Error ? err.message : String(err))) {
-          hasDocBodiesTable = false;
-        }
-      }
-
-      try {
-        const params: unknown[] = [ftsQuery];
-        let inner = `
-          SELECT d.anchor AS anchor, MIN(f.rank) AS best_rank
-          FROM passage_fts f
-          JOIN evidence_passages p ON p.rowid = f.rowid
-          JOIN evidence_docs d ON d.anchor = p.doc_anchor
-          WHERE passage_fts MATCH ?`;
-        if (hasDocBodiesTable) {
-          inner += `
-            AND NOT (
-              p.passage_id LIKE 'md-%'
-              AND EXISTS (SELECT 1 FROM evidence_doc_bodies b WHERE b.doc_anchor = d.anchor)
-            )`;
-        }
-        inner = this.appendEvidenceDocFilters(inner, params, options, filters, 'd.');
-        inner += ` GROUP BY d.anchor ORDER BY ${temporalPenaltySql('d')}, best_rank LIMIT ?`;
-        params.push(limit);
-        const sql = `
-          WITH matched AS (${inner})
-          SELECT d.*, m.best_rank AS _fallback_rank
-          FROM matched m
-          JOIN evidence_docs d ON d.anchor = m.anchor
-          ORDER BY ${temporalPenaltySql('d')}, m.best_rank`;
-        const rows = this.db.prepare(sql).all(...params) as Array<RowShape & { _fallback_rank: number }>;
-        for (const row of rows) {
-          if (candidates.has(row.anchor)) continue;
-          candidates.set(row.anchor, { item: rowToItem(row), rank: row._fallback_rank });
-        }
-      } catch {
-        // invalid FTS syntax at this relaxation level — try next
-      }
-
-      if (candidates.size > 0) {
-        return [...candidates.values()]
-          .sort((a, b) => Number(hasTemporalPenalty(a.item)) - Number(hasTemporalPenalty(b.item)) || a.rank - b.rank)
-          .slice(0, limit)
-          .map((entry) => entry.item);
-      }
-    }
-    return [];
-  }
-
   async searchWithMeta(query: string, options?: SearchOptions): Promise<EvidenceSearchExecution> {
     this.ensureOpen();
     if (this.usesIsolatedProcesses()) {
@@ -1037,11 +950,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     // ── FTS5 full-text search ────────────────────────────────────────
     // HW-6: Progressive relaxation — try AND-all first, then relax to OR
     const ftsQueries = buildProgressiveFtsQueries(trimmed);
-    const explicitDemotedStatus = Boolean(options?.status && TEMPORAL_DEMOTION_STATUSES.has(options.status));
-    let stage1MatchedStrictFts = false;
 
-    for (let ftsIndex = 0; ftsIndex < ftsQueries.length; ftsIndex++) {
-      const ftsQuery = ftsQueries[ftsIndex]!;
+    for (const ftsQuery of ftsQueries) {
       try {
         let sql = `
 					SELECT d.*, bm25(evidence_fts, 5.0, 1.0, 2.0) AS rank
@@ -1110,12 +1020,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
 
         const rows = this.db?.prepare(sql).all(...params) as RowShape[];
         for (const row of rows) {
-          const item = rowToItem(row);
-          if (ftsIndex === 0 && (explicitDemotedStatus || !hasTemporalPenalty(item))) {
-            stage1MatchedStrictFts = true;
-          }
           if (!seenAnchors.has(row.anchor)) {
-            results.push(item);
+            results.push(rowToItem(row));
             seenAnchors.add(row.anchor);
           }
         }
@@ -1234,58 +1140,6 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         items: this.enrichWithDrillDown(rawResult.items, undefined, options, trimmed),
         meta: rawResult.meta,
       };
-    }
-
-    // Two-stage fast-path protection (SIM-Q4):
-    // - If Stage-1 already found a strong qualifying hit (exact anchor, strict AND-all FTS,
-    //   single-term active hit, or all-terms metadata coverage), skip passage_fts completely
-    //   (zero passage SQL, zero ranking perturbation).
-    // - If Stage-1 missed or returned only superseded/stale drafts, run progressive native FTS5
-    //   on passage_fts joined/filtered/deduped by parent evidence_docs (respecting d.updated_at).
-    // - If Stage-1 only had a weak single-term OR hit on a multi-term query, run only the strict
-    //   AND-all passage FTS query and prepend stronger all-terms body hits ahead of weak hits.
-    const isQualifyingStage1 = (item: EvidenceItem) => explicitDemotedStatus || !hasTemporalPenalty(item);
-    const qualifyingStage1Hits = results.filter(isQualifyingStage1);
-    const stage1Strong =
-      qualifyingStage1Hits.length > 0 &&
-      (Boolean(exactRow && isQualifyingStage1(rowToItem(exactRow))) ||
-        stage1MatchedStrictFts ||
-        lexicalBackfillWords.length <= 1 ||
-        qualifyingStage1Hits.some((item) => {
-          const haystack = `${item.title} ${item.summary ?? ''} ${(item.keywords ?? []).join(' ')}`.toLowerCase();
-          return lexicalBackfillWords.every((word) => haystack.includes(word));
-        }));
-    const passageFallbackScopeAllowed =
-      !options?.scope || ['all', 'threads', 'docs', 'memory', 'sessions'].includes(options.scope);
-    if (!stage1Strong && passageFallbackScopeAllowed && ftsQueries.length > 0) {
-      const weakActiveFallback = qualifyingStage1Hits.length > 0;
-      const fallbackQueries = weakActiveFallback ? ftsQueries.slice(0, 1) : ftsQueries;
-      const fallbackDocs = this.searchSummaryFallbackDocs(fallbackQueries, bm25Pool, options, filters);
-      if (fallbackDocs.length > 0) {
-        if (weakActiveFallback) {
-          // Promote all strict AND-all passage hits (including docs already seen via partial
-          // Stage-1 match) in fallback rank order while keeping anchors strictly unique.
-          const promotedAnchors = new Set<string>();
-          const promoted: EvidenceItem[] = [];
-          const existingByAnchor = new Map(results.map((item) => [item.anchor, item]));
-          for (const doc of fallbackDocs) {
-            if (promotedAnchors.has(doc.anchor)) continue;
-            promotedAnchors.add(doc.anchor);
-            promoted.push(existingByAnchor.get(doc.anchor) ?? doc);
-            seenAnchors.add(doc.anchor);
-          }
-          const remaining = results.filter((item) => !promotedAnchors.has(item.anchor));
-          results.length = 0;
-          results.push(...promoted, ...remaining);
-        } else {
-          for (const item of fallbackDocs) {
-            if (!seenAnchors.has(item.anchor)) {
-              seenAnchors.add(item.anchor);
-              results.push(item);
-            }
-          }
-        }
-      }
     }
 
     // ── F163: Post-retrieval authority boost (fail-open: Task 11) ──

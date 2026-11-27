@@ -3,13 +3,11 @@ import { extractFrontmatter, extractSupersedes } from './CatCafeScanner.js';
 import type { CollectionManifest } from './collection-types.js';
 import { embedIndexedItems } from './embed-utils.js';
 import type { EvidenceItem, IEmbeddingService, RepoScanner, ScannedEvidence } from './interfaces.js';
-import { MARKDOWN_DOC_PASSAGE_PREFIX, stripYamlFrontmatter } from './MarkdownPassageIndexer.js';
-import { passageVectorKey } from './PassageVectorStore.js';
+import { stripYamlFrontmatter } from './MarkdownPassageIndexer.js';
 import type { SecretFinding } from './SecretScanner.js';
 import { SecretScanner } from './SecretScanner.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import type { VectorStore } from './VectorStore.js';
-import { createVectorInvalidator } from './vector-invalidation.js';
 
 export interface CollectionRebuildResult {
   indexed: number;
@@ -21,6 +19,30 @@ export interface CollectionRebuildResult {
 export interface CollectionEmbedDeps {
   getEmbeddingService: () => IEmbeddingService | undefined;
   vectorStore: VectorStore;
+}
+
+export interface CollectionIndexBuilderOptions {
+  /**
+   * Opt-in lexical full-body storage (`evidence_doc_bodies` + `evidence_doc_body_fts`).
+   * Defaults to `false` so non-external callers (e.g. `domain:user-profile` and direct
+   * builder callers) never persist full document bodies implicitly.
+   */
+  storeDocumentBodies?: boolean;
+}
+
+export class CollectionSecretRejectionError extends Error {
+  readonly code = 'COLLECTION_SECRET_REJECTED';
+
+  constructor(
+    readonly collectionId: string,
+    readonly rejectedAnchors: string[],
+    readonly secretFindings: SecretFinding[],
+  ) {
+    super(
+      `Collection ${collectionId} incremental update rejected ${rejectedAnchors.length} document(s) by SecretScanner (${secretFindings.length} finding(s))`,
+    );
+    this.name = 'CollectionSecretRejectionError';
+  }
 }
 
 function createLiveEmbeddingCapability(getEmbeddingService: () => IEmbeddingService | undefined): IEmbeddingService {
@@ -45,6 +67,8 @@ function createLiveEmbeddingCapability(getEmbeddingService: () => IEmbeddingServ
 }
 
 export class CollectionIndexBuilder {
+  private readonly storeDocumentBodies: boolean;
+
   constructor(
     private readonly store: SqliteEvidenceStore,
     private readonly manifest: CollectionManifest,
@@ -52,8 +76,10 @@ export class CollectionIndexBuilder {
     private readonly embedDeps?:
       | CollectionEmbedDeps
       | (() => CollectionEmbedDeps | undefined | Promise<CollectionEmbedDeps | undefined>),
+    options?: CollectionIndexBuilderOptions,
   ) {
     this.store.setSourceRoot(this.manifest.root, this.manifest.id);
+    this.storeDocumentBodies = options?.storeDocumentBodies === true;
   }
 
   async rebuild(options?: { force?: boolean }): Promise<CollectionRebuildResult> {
@@ -115,19 +141,24 @@ export class CollectionIndexBuilder {
     }
     if (scannedEntries.length === 0) return;
 
-    // Mirror rebuild()'s fail-closed SecretScanner gate before persisting metadata or body passages.
-    const { findings } = SecretScanner.scanBatch(
-      scannedEntries.map((r) => ({ path: r.item.sourcePath ?? r.item.anchor, content: r.rawContent })),
-    );
-    if (findings.length > 0) {
-      await this.purgeCollection();
-      throw new Error(
-        `Collection ${this.manifest.id} incremental update blocked by SecretScanner (${findings.length} finding(s))`,
-      );
-    }
-
+    // Per-document SecretScanner enforcement: rejected documents must not persist metadata,
+    // bodies, FTS entries, or stale derived indexes, while sibling clean documents in the
+    // collection remain intact and usable. Surface rejection via CollectionSecretRejectionError.
     const now = new Date().toISOString();
+    const rejectedAnchors: string[] = [];
+    const rejectedFindings: SecretFinding[] = [];
     for (const scanned of scannedEntries) {
+      const { findings } = SecretScanner.scanBatch([
+        { path: scanned.item.sourcePath ?? scanned.item.anchor, content: scanned.rawContent },
+      ]);
+      if (findings.length > 0) {
+        rejectedAnchors.push(scanned.item.anchor);
+        rejectedFindings.push(...findings);
+        await this.store.deleteByAnchor(scanned.item.anchor);
+        await this.deleteFrontmatterSupersedesEdges(scanned.item.anchor);
+        continue;
+      }
+
       const hash = createHash('sha256').update(scanned.rawContent).digest('hex');
       const item: EvidenceItem = {
         ...scanned.item,
@@ -135,8 +166,16 @@ export class CollectionIndexBuilder {
         updatedAt: now,
         authority: this.manifest.reviewPolicy.authorityCeiling,
       };
-      await this.publishDocumentWithBody(item, this.extractLexicalBody(scanned));
+      if (this.storeDocumentBodies) {
+        await this.publishDocumentWithBody(item, this.extractLexicalBody(scanned));
+      } else {
+        await this.store.upsert([item]);
+      }
       await this.refreshFrontmatterSupersedesEdges(item.anchor, scanned.rawContent);
+    }
+
+    if (rejectedAnchors.length > 0) {
+      throw new CollectionSecretRejectionError(this.manifest.id, rejectedAnchors, rejectedFindings);
     }
   }
 
@@ -155,20 +194,11 @@ export class CollectionIndexBuilder {
     return row !== undefined;
   }
 
-  private hasLegacyMarkdownPassages(anchor: string): boolean {
-    if (anchor.startsWith('thread-')) return false;
-    const row = this.store
-      .getDb()
-      .prepare('SELECT 1 FROM evidence_passages WHERE doc_anchor = ? AND passage_id LIKE ? LIMIT 1')
-      .get(anchor, `${MARKDOWN_DOC_PASSAGE_PREFIX}%`);
-    return row !== undefined;
-  }
-
   private async publishDocumentWithBody(item: EvidenceItem, bodyContent: string): Promise<void> {
     // Persist metadata with an incomplete sourceHash stamp first; commit the final sourceHash
-    // only inside the same atomic SQLite transaction that replaces the lexical body row and
-    // retires any legacy md-* passage projection for this document anchor.
-    // Any failure leaves source_hash NULL so the next rebuild retries and recovers cleanly.
+    // only inside the same atomic SQLite transaction that replaces the lexical body row.
+    // Any failure rolls back the body write and leaves source_hash NULL so the next rebuild
+    // retries and recovers cleanly.
     // Keeping external bodies in evidence_doc_bodies (rather than vector-tracked evidence_passages)
     // preserves G0/G1 passage_vectors cohort readiness with zero extra embedding batches.
     await this.store.upsert([{ ...item, sourceHash: undefined }]);
@@ -188,21 +218,6 @@ export class CollectionIndexBuilder {
         } else {
           db.prepare('DELETE FROM evidence_doc_bodies WHERE doc_anchor = ?').run(item.anchor);
         }
-        if (!item.anchor.startsWith('thread-')) {
-          const legacyPassages = db
-            .prepare('SELECT passage_id AS passageId FROM evidence_passages WHERE doc_anchor = ? AND passage_id LIKE ?')
-            .all(item.anchor, `${MARKDOWN_DOC_PASSAGE_PREFIX}%`) as Array<{ passageId: string }>;
-          if (legacyPassages.length > 0) {
-            const invalidatePassage = createVectorInvalidator(db, 'passage_vectors');
-            for (const passage of legacyPassages) {
-              invalidatePassage(passageVectorKey(item.anchor, passage.passageId));
-            }
-            db.prepare('DELETE FROM evidence_passages WHERE doc_anchor = ? AND passage_id LIKE ?').run(
-              item.anchor,
-              `${MARKDOWN_DOC_PASSAGE_PREFIX}%`,
-            );
-          }
-        }
         db.prepare('UPDATE evidence_docs SET source_hash = ? WHERE anchor = ?').run(
           item.sourceHash ?? null,
           item.anchor,
@@ -221,18 +236,16 @@ export class CollectionIndexBuilder {
     for (const result of results) {
       const hash = createHash('sha256').update(result.rawContent).digest('hex');
       const anchor = result.item.anchor;
-      const bodyContent = this.extractLexicalBody(result);
+      const bodyContent = this.storeDocumentBodies ? this.extractLexicalBody(result) : '';
       currentAnchors.add(anchor);
 
       if (!force) {
         const existing = await this.store.getByAnchor(anchor);
-        const bodyReady = bodyContent.length === 0 || this.hasDocumentBody(anchor);
-        const legacyMdClean = !this.hasLegacyMarkdownPassages(anchor);
+        const bodyReady = !this.storeDocumentBodies || bodyContent.length === 0 || this.hasDocumentBody(anchor);
         if (
           existing?.sourceHash === hash &&
           existing.authority === this.manifest.reviewPolicy.authorityCeiling &&
-          bodyReady &&
-          legacyMdClean
+          bodyReady
         ) {
           skipped++;
           continue;
@@ -245,7 +258,11 @@ export class CollectionIndexBuilder {
         updatedAt: now,
         authority: this.manifest.reviewPolicy.authorityCeiling,
       };
-      await this.publishDocumentWithBody(item, bodyContent);
+      if (this.storeDocumentBodies) {
+        await this.publishDocumentWithBody(item, bodyContent);
+      } else {
+        await this.store.upsert([item]);
+      }
       indexedItems.push(item);
       indexed++;
     }

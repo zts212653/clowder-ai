@@ -5,6 +5,7 @@ import { CollectionIndexBuilder, type CollectionRebuildResult } from './Collecti
 import type { CollectionManifest } from './collection-types.js';
 import { prepareCollectionVectorBinding } from './collection-vector-binding.js';
 import {
+  BUILTIN_COLLECTION_IDS,
   getExternalCollection,
   resolveCollectionStorePath,
   saveExternalCollection,
@@ -108,12 +109,18 @@ export async function ensureProjectCollection(
     const currentStore = store;
     const scanner = resolveCollectionScanner(manifest);
     const resolveEmbedMode = () => (getEmbedMode ? getEmbedMode() : 'shadow');
-    const builder = new CollectionIndexBuilder(store, manifest, scanner, async () => {
-      if (!getEmbeddingService?.()?.isReady() || !resolveEmbedMode()) return;
-      vectorAttempted = true;
-      prepared = await prepareCollectionVectorBinding(currentStore, () => getEmbeddingService?.(), resolveEmbedMode);
-      return prepared?.deps;
-    });
+    const builder = new CollectionIndexBuilder(
+      store,
+      manifest,
+      scanner,
+      async () => {
+        if (!getEmbeddingService?.()?.isReady() || !resolveEmbedMode()) return;
+        vectorAttempted = true;
+        prepared = await prepareCollectionVectorBinding(currentStore, () => getEmbeddingService?.(), resolveEmbedMode);
+        return prepared?.deps;
+      },
+      { storeDocumentBodies: !BUILTIN_COLLECTION_IDS.has(manifest.id) },
+    );
     result = await builder.rebuild();
     const published = !result.blocked && prepared?.publish();
     setStatus(result.blocked ? 'blocked' : vectorAttempted && !published ? 'stale' : 'active');

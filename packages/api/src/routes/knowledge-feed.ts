@@ -9,6 +9,7 @@ import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import { CollectionIndexBuilder } from '../domains/memory/CollectionIndexBuilder.js';
 import { COLLECTION_SENSITIVITY_ORDER } from '../domains/memory/collection-types.js';
+import { isExternalCollectionForBodyStorage } from '../domains/memory/external-collections.js';
 import type {
   IEvidenceStore,
   IMarkerQueue,
@@ -28,6 +29,7 @@ interface KnowledgeFeedDeps {
   materializationService?: IMaterializationService;
   catalog?: LibraryCatalog;
   collectionStores?: Map<string, IEvidenceStore>;
+  dataDir?: string;
 }
 
 export async function knowledgeFeedRoutes(app: FastifyInstance, deps: KnowledgeFeedDeps) {
@@ -160,7 +162,13 @@ export async function knowledgeFeedRoutes(app: FastifyInstance, deps: KnowledgeF
               const targetStore = deps.collectionStores?.get(targetCollectionId);
               if (targetStore) {
                 const scanner = resolveCollectionScanner(manifest);
-                opts.indexBuilder = new CollectionIndexBuilder(targetStore as SqliteEvidenceStore, manifest, scanner);
+                opts.indexBuilder = new CollectionIndexBuilder(
+                  targetStore as SqliteEvidenceStore,
+                  manifest,
+                  scanner,
+                  undefined,
+                  { storeDocumentBodies: isExternalCollectionForBodyStorage(manifest, deps.dataDir) },
+                );
               } else {
                 opts.indexBuilder = null;
               }

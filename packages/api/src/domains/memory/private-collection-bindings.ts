@@ -4,7 +4,11 @@ import { dirname, join } from 'node:path';
 import { profileUserRelativePath } from '@cat-cafe/shared/profile-contract';
 import { CollectionIndexBuilder } from './CollectionIndexBuilder.js';
 import type { CollectionManifest } from './collection-types.js';
-import { resolveCollectionStorePath, updateExternalCollection } from './external-collections.js';
+import {
+  BUILTIN_COLLECTION_IDS,
+  resolveCollectionStorePath,
+  updateExternalCollection,
+} from './external-collections.js';
 import type { IEvidenceStore } from './interfaces.js';
 import type { LibraryCatalog } from './LibraryCatalog.js';
 import { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
@@ -111,7 +115,9 @@ async function registerOneExternalCollection(
       const db = store.getDb();
       const hadVectors = hasVectorGeneration(db);
       const docsBefore = (db.prepare('SELECT count(*) AS n FROM evidence_docs').get() as { n: number }).n;
-      const builder = new CollectionIndexBuilder(store, manifest, resolveCollectionScanner(manifest));
+      const builder = new CollectionIndexBuilder(store, manifest, resolveCollectionScanner(manifest), undefined, {
+        storeDocumentBodies: !BUILTIN_COLLECTION_IDS.has(manifest.id),
+      });
       const result = await builder.rebuild();
       const docsAfter = (db.prepare('SELECT count(*) AS n FROM evidence_docs').get() as { n: number }).n;
       const lexicalChanged = result.indexed > 0 || docsAfter !== docsBefore;

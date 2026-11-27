@@ -103,20 +103,33 @@ export class MaterializationService implements IMaterializationService {
 
     // Trigger reindex: use override if provided, null = skip, undefined = default
     let reindexed = false;
+    let reindexError: string | undefined;
     const effectiveBuilder = options?.indexBuilder === undefined ? this.indexBuilder : options.indexBuilder;
     if (effectiveBuilder) {
       try {
         await effectiveBuilder.incrementalUpdate([outputPath]);
         reindexed = true;
-      } catch {
-        // Reindex failed — continue gracefully
+      } catch (err) {
+        reindexError = err instanceof Error ? err.message : String(err);
+        console.warn('[memory] materialize incrementalUpdate failed', {
+          markerId,
+          outputPath,
+          error: reindexError,
+        });
       }
     }
 
     // Transition marker to materialized
     await this.markerQueue.transition(markerId, 'materialized');
 
-    return { markerId, outputPath, anchor, committed, reindexed };
+    return {
+      markerId,
+      outputPath,
+      anchor,
+      committed,
+      reindexed,
+      ...(reindexError ? { reindexError } : {}),
+    };
   }
 
   /** Git-commit a materialized file (opt-in). Returns false if not in a repo or the commit fails. */

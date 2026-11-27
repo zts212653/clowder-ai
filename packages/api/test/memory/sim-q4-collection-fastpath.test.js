@@ -1,24 +1,54 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import { profileUserRelativePath } from '@cat-cafe/shared/profile-contract';
+import Database from 'better-sqlite3';
 
-describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
+describe('SIM-Q4 narrowed slice — summary fidelity & external-only document body storage', () => {
   let CollectionIndexBuilder;
+  let CollectionSecretRejectionError;
   let FlatScanner;
-  let StructuredScanner;
+  let LibraryCatalog;
+  let MarkerQueue;
+  let MaterializationService;
   let SqliteEvidenceStore;
+  let BUILTIN_COLLECTION_IDS;
+  let isExternalCollectionForBodyStorage;
+  let registerPrivateAndExternalCollections;
+  let refreshCanonicalProfileIndex;
+  let saveExternalCollection;
+  let CURRENT_SCHEMA_VERSION;
   let store;
   let dbPath;
+  let tempDirs;
+
+  const makeTempDir = (prefix) => {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    tempDirs.push(dir);
+    return dir;
+  };
 
   beforeEach(async () => {
-    ({ CollectionIndexBuilder } = await import('../../dist/domains/memory/CollectionIndexBuilder.js'));
+    tempDirs = [];
+    ({ CollectionIndexBuilder, CollectionSecretRejectionError } = await import(
+      '../../dist/domains/memory/CollectionIndexBuilder.js'
+    ));
     ({ FlatScanner } = await import('../../dist/domains/memory/FlatScanner.js'));
-    ({ StructuredScanner } = await import('../../dist/domains/memory/StructuredScanner.js'));
+    ({ LibraryCatalog } = await import('../../dist/domains/memory/LibraryCatalog.js'));
+    ({ MarkerQueue } = await import('../../dist/domains/memory/MarkerQueue.js'));
+    ({ MaterializationService } = await import('../../dist/domains/memory/MaterializationService.js'));
     ({ SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js'));
-    dbPath = join(mkdtempSync(join(tmpdir(), 'sim-q4-')), 'test.sqlite');
+    ({ BUILTIN_COLLECTION_IDS, isExternalCollectionForBodyStorage, saveExternalCollection } = await import(
+      '../../dist/domains/memory/external-collections.js'
+    ));
+    ({ registerPrivateAndExternalCollections, refreshCanonicalProfileIndex } = await import(
+      '../../dist/domains/memory/private-collection-bindings.js'
+    ));
+    ({ CURRENT_SCHEMA_VERSION } = await import('../../dist/domains/memory/schema.js'));
+    dbPath = join(makeTempDir('sim-q4-'), 'test.sqlite');
     store = new SqliteEvidenceStore(dbPath);
     await store.initialize();
   });
@@ -27,19 +57,21 @@ describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
     try {
       store?.close();
     } catch {}
-    try {
-      unlinkSync(dbPath);
-    } catch {}
+    for (const dir of tempDirs) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {}
+    }
   });
 
   const makeManifest = (root, overrides = {}) => ({
     id: 'research:sim-q4',
-    kind: 'domain',
+    kind: 'research',
     name: 'sim-q4',
     displayName: 'SIM Q4 Test',
     root,
     sensitivity: 'internal',
-    scannerLevel: 1,
+    scannerLevel: 0,
     indexPolicy: { autoRebuild: false },
     reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: false },
     createdAt: '2026-11-26',
@@ -47,8 +79,19 @@ describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
     ...overrides,
   });
 
-  it('Knife 1: FlatScanner skips horizontal rules and pure wikilink nav bars without skipping prose containing wikilinks', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'sim-q4-k1-'));
+  const queryBodyFtsAnchors = (db, matchExpr) =>
+    db
+      .prepare(
+        `SELECT b.doc_anchor AS anchor
+         FROM evidence_doc_body_fts f
+         JOIN evidence_doc_bodies b ON b.rowid = f.rowid
+         WHERE evidence_doc_body_fts MATCH ?`,
+      )
+      .all(matchExpr)
+      .map((row) => row.anchor);
+
+  it('Summary fidelity: FlatScanner skips --- separators and pure wikilink nav bars while preserving inline-link prose and collection excludes', () => {
+    const dir = makeTempDir('sim-q4-summary-');
     writeFileSync(
       join(dir, 'hr-doc.md'),
       [
@@ -75,12 +118,12 @@ describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
       ['# Prose Link', '', 'See [[architecture]] for the real design summary.'].join('\n'),
     );
     mkdirSync(join(dir, '.tools'), { recursive: true });
-    writeFileSync(join(dir, '.tools', 'noise.md'), '# Remotion Noise\n\nNoise content.');
+    writeFileSync(join(dir, '.tools', 'noise.md'), '# Tool Noise\n\nNoise content.');
 
-    const scanner = new FlatScanner('research:sim-q4', ['**/.tools/**']);
-    const results = scanner.discover(dir);
+    const scannerWithExclude = new FlatScanner('research:sim-q4', ['**/.tools/**']);
+    const results = scannerWithExclude.discover(dir);
 
-    assert.equal(results.length, 2, 'collection exclude should skip .tools noise');
+    assert.equal(results.length, 2, 'collection exclude config should skip .tools noise');
     const hrDoc = results.find((r) => r.item.sourcePath === 'hr-doc.md');
     const proseDoc = results.find((r) => r.item.sourcePath === 'prose-link.md');
 
@@ -99,611 +142,575 @@ describe('SIM-Q4 restrained collection fast-path & passage lifecycle', () => {
       [],
       'FlatScanner keeps vector-tracked passages empty so external bodies stay lexical-only',
     );
-    assert.ok(
-      hrDoc?.rawContent.includes('Second section body text.'),
-      'FlatScanner preserves full rawContent for body FTS',
-    );
+
+    // .tools exclusion stays in collection exclude config rather than hardcoded in FlatScanner.
+    const scannerWithoutExclude = new FlatScanner('research:sim-q4');
+    const unfiltered = scannerWithoutExclude.discover(dir);
+    assert.equal(unfiltered.length, 3, 'FlatScanner must not hardcode .tools exclusion globally');
   });
 
-  it('Knife 2a: default summary search rescues out-of-distribution body-only correction over superseded draft', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'sim-q4-k2-ood-'));
-    writeFileSync(
-      join(dir, 'old-draft.md'),
-      [
-        '---',
-        'title: Old Draft',
-        'status: superseded',
-        'superseded_by: doc/active-correction',
-        '---',
-        '# Old Draft',
-        '',
-        'This deprecated proposal uses legacy_m1a_protocol.',
-      ].join('\n'),
-    );
-    writeFileSync(
-      join(dir, 'active-correction.md'),
-      [
-        '---',
-        'title: Current Verification Ledger',
-        'status: active',
-        '---',
-        '# Current Verification Ledger',
-        '',
-        'Canonical operational decisions for the repository.',
-        '',
-        '## Upstream Alignment',
-        '',
-        'Section 2 notes that legacy_m1a_protocol was withdrawn and replaced by three-sentence guidance.',
-      ].join('\n'),
-    );
+  it('Scope boundary: CollectionIndexBuilder defaults storeDocumentBodies=false so generic & profile callers never persist full bodies', async () => {
+    const dir = makeTempDir('sim-q4-default-off-');
+    const file = join(dir, 'note.md');
+    writeFileSync(file, '# Private Note\n\nShort summary.\n\n## Hidden Body\n\nbody_only_generic_token_991.\n');
 
     const manifest = makeManifest(dir);
-    const builder = new CollectionIndexBuilder(store, manifest, new StructuredScanner(manifest.id));
-    await builder.rebuild();
+    const scanner = new FlatScanner(manifest.id);
+    const builder = new CollectionIndexBuilder(store, manifest, scanner);
 
-    const bodyCount = store.getDb().prepare('SELECT count(*) AS n FROM evidence_doc_bodies').get().n;
-    const passageCount = store.getDb().prepare('SELECT count(*) AS n FROM evidence_passages').get().n;
-    assert.equal(bodyCount, 2, `expected 1 lexical body row per doc, got ${bodyCount}`);
-    assert.equal(
-      passageCount,
-      0,
-      'external collection lexical bodies must not populate vector-tracked evidence_passages',
-    );
+    const rebuilt = await builder.rebuild();
+    assert.equal(rebuilt.blocked, false);
+    assert.equal(rebuilt.indexed, 1);
 
-    const results = await store.search('legacy_m1a_protocol', { limit: 5 });
-    assert.ok(results.length >= 2, `expected both active and superseded docs, got ${results.map((r) => r.anchor)}`);
-    assert.equal(
-      results[0].anchor,
-      'research:sim-q4:doc/active-correction',
-      'active body correction must outrank superseded draft on default search',
-    );
-
-    // Cross-paragraph multi-term query: terms in different paragraphs still match in 1-row-per-doc body FTS
-    const crossPara = await store.search('Canonical three-sentence', { limit: 5 });
-    assert.deepEqual(
-      crossPara.map((r) => r.anchor),
-      ['research:sim-q4:doc/active-correction'],
-    );
-
-    // Negative guard: explicit historical archaeology still finds the superseded draft
-    const archivedOnly = await store.search('legacy_m1a_protocol', { status: 'superseded', limit: 5 });
-    assert.deepEqual(
-      archivedOnly.map((r) => r.anchor),
-      ['research:sim-q4:doc/old-draft'],
-    );
-  });
-
-  it('Knife 2b (P2-4): in-process paired SQL spy proves fast-path touches 0 body/passage SQL while body-only fallback touches evidence_doc_body_fts', async () => {
-    const memStore = new SqliteEvidenceStore(':memory:');
-    await memStore.initialize();
-    try {
-      assert.equal(memStore.usesIsolatedProcesses(), false, 'must observe SQL inside the same process');
-      const dir = mkdtempSync(join(tmpdir(), 'sim-q4-k2-fast-'));
-      writeFileSync(
-        join(dir, 'canonical-plan.md'),
-        [
-          '---',
-          'title: Canonical Backlog Plan',
-          'status: active',
-          '---',
-          '# Canonical Backlog Plan',
-          '',
-          'Authoritative master plan for alpha_fastpath_token.',
-        ].join('\n'),
-      );
-      writeFileSync(
-        join(dir, 'tangential-notes.md'),
-        [
-          '---',
-          'title: Unrelated Meeting Notes',
-          'status: active',
-          '---',
-          '# Unrelated Meeting Notes',
-          '',
-          'Weekly logistics.',
-          '',
-          '## Side Remark',
-          '',
-          'Mentioned alpha_fastpath_token alpha_fastpath_token and deep_only_positive_control in passing.',
-        ].join('\n'),
-      );
-
-      const manifest = makeManifest(dir);
-      const builder = new CollectionIndexBuilder(memStore, manifest, new StructuredScanner(manifest.id));
-      await builder.rebuild();
-
-      let deepSqlCountTotal = 0;
-      const db = memStore.getDb();
-      const origPrepare = db.prepare.bind(db);
-      db.prepare = (sql, ...rest) => {
-        if (
-          typeof sql === 'string' &&
-          /evidence_doc_body_fts|evidence_doc_bodies|passage_fts|evidence_passages/i.test(sql)
-        ) {
-          deepSqlCountTotal++;
-        }
-        return origPrepare(sql, ...rest);
-      };
-
-      // Positive control 1: strong Stage-1 metadata hit must execute 0 body/passage SQL queries
-      const fastResults = await memStore.search('alpha_fastpath_token', { limit: 5 });
-      const fastSqlCount = deepSqlCountTotal;
-      assert.equal(fastSqlCount, 0, 'Stage-2 body/passage SQL must NOT execute when Stage-1 has a strong active hit');
-      assert.deepEqual(
-        fastResults.map((r) => r.anchor),
-        ['research:sim-q4:doc/canonical-plan'],
-      );
-
-      // Positive control 2: body-only query MUST execute evidence_doc_body_fts SQL and find the target doc
-      const deepResults = await memStore.search('deep_only_positive_control', { limit: 5 });
-      const deepSqlCount = deepSqlCountTotal - fastSqlCount;
-      assert.ok(deepSqlCount > 0, `body-only fallback must query evidence_doc_body_fts (got ${deepSqlCount})`);
-      assert.deepEqual(
-        deepResults.map((r) => r.anchor),
-        ['research:sim-q4:doc/tangential-notes'],
-      );
-    } finally {
-      memStore.close();
-    }
-  });
-
-  it('P2-1: filtered Stage-2 fallback avoids pool starvation when >20 archived passages match the query', async () => {
-    const memStore = new SqliteEvidenceStore(':memory:');
-    await memStore.initialize();
-    try {
-      const q = 'starvation_guard_needle';
-      await memStore.upsert([
-        {
-          anchor: 'research:sim-q4:doc/distractor',
-          kind: 'research',
-          status: 'archived',
-          title: 'Archived Noise',
-          summary: 'Unrelated overview.',
-          updatedAt: '2026-11-26T03:00:00Z',
-        },
-        {
-          anchor: 'research:sim-q4:doc/target',
-          kind: 'research',
-          status: 'active',
-          title: 'Active Target',
-          summary: 'Unrelated overview.',
-          updatedAt: '2026-11-26T03:00:00Z',
-        },
-      ]);
-      const insert = memStore
-        .getDb()
-        .prepare(
-          'INSERT INTO evidence_passages (doc_anchor, passage_id, content, position, created_at) VALUES (?, ?, ?, ?, ?)',
-        );
-      for (let i = 0; i < 25; i++) {
-        insert.run('research:sim-q4:doc/distractor', `md-${i}`, q, i, '2026-11-26T03:00:00Z');
-      }
-      insert.run('research:sim-q4:doc/target', 'md-0', `${q} ${'padding '.repeat(80)}`, 0, '2026-11-26T03:00:00Z');
-
-      const activeOnly = await memStore.search(q, { status: 'active', limit: 1 });
-      assert.deepEqual(
-        activeOnly.map((r) => r.anchor),
-        ['research:sim-q4:doc/target'],
-        'archived distractor passages must not starve active doc in bounded pool',
-      );
-    } finally {
-      memStore.close();
-    }
-  });
-
-  it('P2-2: default summary fallback filters by parent updated_at rather than unchanged passage created_at', async () => {
-    const memStore = new SqliteEvidenceStore(':memory:');
-    await memStore.initialize();
-    try {
-      await memStore.upsert([
-        {
-          anchor: 'research:sim-q4:doc/updated-parent',
-          kind: 'research',
-          status: 'active',
-          title: 'Updated Parent',
-          summary: 'Summary changed today.',
-          updatedAt: '2026-11-26T03:00:00Z',
-        },
-      ]);
-      memStore
-        .getDb()
-        .prepare(
-          'INSERT INTO evidence_passages (doc_anchor, passage_id, content, position, created_at) VALUES (?, ?, ?, ?, ?)',
-        )
-        .run(
-          'research:sim-q4:doc/updated-parent',
-          'md-0',
-          'Body retains older_created_body_needle from earlier revision.',
-          0,
-          '2026-11-01T03:00:00Z',
-        );
-
-      const hits = await memStore.search('older_created_body_needle', { dateFrom: '2026-11-20', limit: 5 });
-      assert.deepEqual(
-        hits.map((r) => r.anchor),
-        ['research:sim-q4:doc/updated-parent'],
-        'parent updated_at within dateFrom must not be excluded by older passage created_at',
-      );
-    } finally {
-      memStore.close();
-    }
-  });
-
-  it('P2-3: weak single-term OR metadata hit does not suppress stronger all-terms body hit', async () => {
-    const memStore = new SqliteEvidenceStore(':memory:');
-    await memStore.initialize();
-    try {
-      await memStore.upsert([
-        {
-          anchor: 'research:sim-q4:doc/weak',
-          kind: 'research',
-          status: 'active',
-          title: 'Weak Doc',
-          summary: 'Incidental mention of weaktermalpha only.',
-          updatedAt: '2026-11-26T03:00:00Z',
-        },
-        {
-          anchor: 'research:sim-q4:doc/strong',
-          kind: 'research',
-          status: 'active',
-          title: 'Strong Body Doc',
-          summary: 'Unrelated overview.',
-          updatedAt: '2026-11-26T03:00:00Z',
-        },
-      ]);
-      memStore
-        .getDb()
-        .prepare(
-          'INSERT INTO evidence_passages (doc_anchor, passage_id, content, position, created_at) VALUES (?, ?, ?, ?, ?)',
-        )
-        .run(
-          'research:sim-q4:doc/strong',
-          'md-0',
-          'Full correction covering both weaktermalpha and weaktermbeta together.',
-          0,
-          '2026-11-26T03:00:00Z',
-        );
-
-      const results = await memStore.search('weaktermalpha weaktermbeta', { limit: 5 });
-      assert.equal(
-        results[0]?.anchor,
-        'research:sim-q4:doc/strong',
-        'all-terms body match must outrank single-term OR metadata hit',
-      );
-    } finally {
-      memStore.close();
-    }
-  });
-
-  it('P2-3b: already-seen partial Stage-1 candidate is promoted without duplicates when its body matches all terms', async () => {
-    const memStore = new SqliteEvidenceStore(':memory:');
-    await memStore.initialize();
-    try {
-      await memStore.upsert([
-        {
-          anchor: 'research:sim-q4:doc/weak-first',
-          kind: 'research',
-          status: 'active',
-          title: 'Heading mentions seenalpha',
-          summary: 'Unrelated overview without second token.',
-          updatedAt: '2026-11-26T03:00:00Z',
-        },
-        {
-          anchor: 'research:sim-q4:doc/correct',
-          kind: 'research',
-          status: 'active',
-          title: 'Unrelated title',
-          summary: 'Summary only mentions seenbeta.',
-          updatedAt: '2026-11-26T03:00:00Z',
-        },
-      ]);
-      memStore
-        .getDb()
-        .prepare(
-          'INSERT INTO evidence_passages (doc_anchor, passage_id, content, position, created_at) VALUES (?, ?, ?, ?, ?)',
-        )
-        .run(
-          'research:sim-q4:doc/correct',
-          'md-0',
-          'Authoritative body section covers seenalpha and seenbeta together.',
-          0,
-          '2026-11-26T03:00:00Z',
-        );
-
-      const topOne = await memStore.search('seenalpha seenbeta', { limit: 1 });
-      assert.deepEqual(
-        topOne.map((r) => r.anchor),
-        ['research:sim-q4:doc/correct'],
-        'limit=1 must promote already-seen Stage-1 candidate whose body matches all terms',
-      );
-
-      const topFive = await memStore.search('seenalpha seenbeta', { limit: 5 });
-      const anchors = topFive.map((r) => r.anchor);
-      assert.equal(anchors[0], 'research:sim-q4:doc/correct');
-      assert.equal(new Set(anchors).size, anchors.length, 'promoted results must contain unique anchors only');
-      assert.deepEqual(anchors, ['research:sim-q4:doc/correct', 'research:sim-q4:doc/weak-first']);
-    } finally {
-      memStore.close();
-    }
-  });
-
-  it('P1-1: failed body replacement leaves source_hash incomplete so next rebuild retries and recovers', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'sim-q4-p1-retry-'));
-    const file = join(dir, 'policy.md');
-    const makeDoc = (word) => `# Policy\n\nStable overview.\n\n## Rule\n\n${word}\n`;
-    writeFileSync(file, makeDoc('atomic_old_claim'));
-
-    const manifest = makeManifest(dir);
-    const builder = new CollectionIndexBuilder(store, manifest, new StructuredScanner(manifest.id));
-    await builder.rebuild();
-
-    const updatedText = makeDoc('atomic_new_claim');
-    writeFileSync(file, updatedText);
-    store
-      .getDb()
-      .exec(
-        "CREATE TRIGGER fail_new_body BEFORE UPDATE ON evidence_doc_bodies WHEN new.content LIKE '%atomic_new_claim%' BEGIN SELECT RAISE(ABORT, 'injected body failure'); END",
-      );
-
-    await assert.rejects(() => builder.rebuild(), /injected body failure/);
-    store.getDb().exec('DROP TRIGGER fail_new_body');
-
-    const incompleteDoc = await store.getByAnchor('research:sim-q4:doc/policy');
-    assert.notEqual(
-      incompleteDoc?.sourceHash,
-      createHash('sha256').update(updatedText).digest('hex'),
-      'source_hash must not claim completion when body replacement failed',
-    );
-
-    const retry = await builder.rebuild();
-    assert.equal(retry.indexed, 1, 'next rebuild must retry and re-index incomplete document');
-    assert.equal(retry.skipped, 0);
-    assert.deepEqual(await store.search('atomic_old_claim', { limit: 5 }), []);
-    const recovered = await store.search('atomic_new_claim', { limit: 5 });
-    assert.deepEqual(
-      recovered.map((r) => r.anchor),
-      ['research:sim-q4:doc/policy'],
-    );
-  });
-
-  it('P1-2: incrementalUpdate enforces SecretScanner fail-closed gate before persisting lexical bodies', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'sim-q4-p1-secret-'));
-    const file = join(dir, 'policy.md');
-    writeFileSync(file, '# Policy\n\nStable overview.\n\n## Rule\n\nSafe body text.\n');
-
-    const manifest = makeManifest(dir);
-    const builder = new CollectionIndexBuilder(store, manifest, new StructuredScanner(manifest.id));
-    await builder.rebuild();
-
-    // Synthetic PEM header marker only (not a real key), placed in body below summary
-    writeFileSync(
-      file,
-      '# Policy\n\nStable overview.\n\n## Rule\n\n-----BEGIN PRIVATE KEY-----\nsynthetic_incremental_secret_marker\n',
-    );
-
-    await assert.rejects(() => builder.incrementalUpdate([file]), /blocked by SecretScanner/);
-
-    const leakedBodies = store
-      .getDb()
-      .prepare(
-        "SELECT count(*) AS n FROM evidence_doc_bodies WHERE content LIKE '%synthetic_incremental_secret_marker%'",
-      )
-      .get().n;
-    assert.equal(leakedBodies, 0, 'blocked incrementalUpdate must not persist secret bodies');
-    assert.deepEqual(await store.search('synthetic_incremental_secret_marker', { limit: 5 }), []);
-    assert.equal(
-      await store.getByAnchor('research:sim-q4:doc/policy'),
-      null,
-      'fail-closed secret gate must purge collection entries consistently with rebuild()',
-    );
-  });
-
-  it('External collection body lifecycle: edit via incrementalUpdate and delete via rebuild invalidate doc and body indexes', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'sim-q4-lifecycle-'));
-    const file = join(dir, 'living-policy.md');
-    writeFileSync(
-      file,
-      [
-        '---',
-        'title: Living Policy',
-        'status: active',
-        '---',
-        '# Living Policy',
-        '',
-        'Current working policy.',
-        '',
-        '## Budget Rule',
-        '',
-        'Old rule: legacy_budget_claim_71pct applies to every run.',
-      ].join('\n'),
-    );
-
-    const manifest = makeManifest(dir);
-    const builder = new CollectionIndexBuilder(store, manifest, new StructuredScanner(manifest.id));
-    await builder.rebuild();
-
-    const before = await store.search('legacy_budget_claim_71pct', { limit: 5 });
-    assert.equal(before.length, 1);
-    assert.equal(before[0].anchor, 'research:sim-q4:doc/living-policy');
-
-    writeFileSync(
-      file,
-      [
-        '---',
-        'title: Living Policy',
-        'status: active',
-        '---',
-        '# Living Policy',
-        '',
-        'Current working policy.',
-        '',
-        '## Budget Rule',
-        '',
-        'Corrected rule: verified_budget_claim_v2 replaces the retracted estimate.',
-      ].join('\n'),
-    );
-    await builder.incrementalUpdate([file]);
-
-    assert.deepEqual(
-      await store.search('legacy_budget_claim_71pct', { limit: 5 }),
-      [],
-      'corrected old body text must not survive incrementalUpdate',
-    );
-    const freshAfterEdit = await store.search('verified_budget_claim_v2', { limit: 5 });
-    assert.deepEqual(
-      freshAfterEdit.map((r) => r.anchor),
-      ['research:sim-q4:doc/living-policy'],
-    );
-
-    unlinkSync(file);
-    await builder.rebuild();
-
-    assert.deepEqual(await store.search('verified_budget_claim_v2', { limit: 5 }), []);
-    assert.deepEqual(await store.search('verified_budget_claim_v2', { depth: 'raw', limit: 5 }), []);
-    const remainingBodies = store
-      .getDb()
-      .prepare('SELECT count(*) AS n FROM evidence_doc_bodies WHERE doc_anchor = ?')
-      .get('research:sim-q4:doc/living-policy').n;
-    assert.equal(remainingBodies, 0, 'removed external document must leave 0 orphan bodies');
-  });
-
-  it('V85 P2-1: cross-lane merge prioritizes active passage correction over superseded body hit at limit=1 with unique anchors', async () => {
-    const memStore = new SqliteEvidenceStore(':memory:');
-    await memStore.initialize();
-    try {
-      const stamp = '2026-11-26T08:00:00Z';
-      await memStore.upsert([
-        {
-          anchor: 'research:sim-q4:doc/old-body',
-          kind: 'research',
-          status: 'superseded',
-          title: 'Old Body Draft',
-          summary: 'Neutral overview.',
-          updatedAt: stamp,
-        },
-        {
-          anchor: 'research:sim-q4:doc/current-passage',
-          kind: 'research',
-          status: 'active',
-          title: 'Current Passage Correction',
-          summary: 'Neutral overview.',
-          updatedAt: stamp,
-        },
-      ]);
-      const db = memStore.getDb();
-      db.prepare('INSERT INTO evidence_doc_bodies (doc_anchor, content, updated_at) VALUES (?, ?, ?)').run(
-        'research:sim-q4:doc/old-body',
-        'cross_lane_priority_token appears in superseded external body.',
-        stamp,
-      );
-      db.prepare(
-        'INSERT INTO evidence_passages (doc_anchor, passage_id, content, position, created_at) VALUES (?, ?, ?, ?, ?)',
-      ).run(
-        'research:sim-q4:doc/current-passage',
-        'md-0',
-        'cross_lane_priority_token appears in active main-store passage.',
-        0,
-        stamp,
-      );
-
-      const topOne = await memStore.search('cross_lane_priority_token', { limit: 1 });
-      assert.deepEqual(
-        topOne.map((r) => r.anchor),
-        ['research:sim-q4:doc/current-passage'],
-        'limit=1 must not let a superseded body hit hide an active passage correction',
-      );
-
-      const topFive = await memStore.search('cross_lane_priority_token', { limit: 5 });
-      const anchors = topFive.map((r) => r.anchor);
-      assert.equal(anchors[0], 'research:sim-q4:doc/current-passage');
-      assert.equal(new Set(anchors).size, anchors.length, 'cross-lane merged results must have unique anchors');
-      assert.deepEqual(anchors, ['research:sim-q4:doc/current-passage', 'research:sim-q4:doc/old-body']);
-    } finally {
-      memStore.close();
-    }
-  });
-
-  it('V85 P2-2: authoritative body retires legacy md-* passages and vectors on update or unchanged rebuild while preserving thread passages', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'sim-q4-v85-legacy-md-'));
-    const file = join(dir, 'policy.md');
-    const stamp = '2026-11-26T08:00:00Z';
-    const anchor = 'research:sim-q4:doc/policy';
-    const manifest = makeManifest(dir);
-    const builder = new CollectionIndexBuilder(store, manifest, new StructuredScanner(manifest.id));
-    const { openVectorGeneration } = await import('../../dist/domains/memory/open-vector-generation.js');
-    const { passageVectorKey } = await import('../../dist/domains/memory/PassageVectorStore.js');
-
-    writeFileSync(file, '# Policy\n\nNeutral summary.\n\n## Details\n\nretracted_legacy_v1\n');
-    await builder.rebuild();
-
-    // Seed an unrelated thread message passage that must NEVER be touched
-    await store.upsert([
-      {
-        anchor: 'thread-keep',
-        kind: 'thread',
-        status: 'active',
-        title: 'Unrelated Thread',
-        summary: 'Thread summary.',
-        updatedAt: stamp,
-      },
-    ]);
     const db = store.getDb();
-    db.prepare(
-      'INSERT INTO evidence_passages (doc_anchor, passage_id, content, speaker, position, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run('thread-keep', 'msg-1', 'thread_message_must_survive', 'user', 0, stamp);
-
-    // Simulate a lingering pre-V85 md-0 passage + passage vector on the external doc
-    const backend = openVectorGeneration(
-      db,
-      { modelId: 'fixture', modelRev: '1', dim: 4, generationId: 'g0' },
-      { create: true },
-    );
-    db.prepare(
-      'INSERT INTO evidence_passages (doc_anchor, passage_id, content, position, created_at) VALUES (?, ?, ?, ?, ?)',
-    ).run(anchor, 'md-0', 'retracted_legacy_v1 lingering_pre_v85_only', 0, stamp);
-    backend.passageVectorStore.upsert(passageVectorKey(anchor, 'md-0'), new Float32Array([1, 0, 0, 0]));
-
-    // Read-side authority fence: even BEFORE rebuild, default summary search excludes md-* superseded by evidence_doc_bodies
-    assert.deepEqual(
-      await store.search('lingering_pre_v85_only', { limit: 5 }),
-      [],
-      'read-side fence must ignore legacy md-* terms absent from authoritative evidence_doc_bodies',
+    assert.equal(
+      db.prepare('SELECT count(*) AS n FROM evidence_doc_bodies').get().n,
+      0,
+      'default CollectionIndexBuilder.rebuild must not write evidence_doc_bodies',
     );
 
-    // Ordinary rebuild with unchanged file hash must NOT skip while legacy md-* still exists
-    const cleanupRebuild = await builder.rebuild();
-    assert.equal(cleanupRebuild.indexed, 1, 'ordinary rebuild must retire lingering md-* even when hash matches');
+    writeFileSync(file, '# Private Note\n\nUpdated summary.\n\n## Hidden Body\n\nbody_only_generic_token_992.\n');
+    await builder.incrementalUpdate([file]);
+    assert.equal(
+      db.prepare('SELECT count(*) AS n FROM evidence_doc_bodies').get().n,
+      0,
+      'default CollectionIndexBuilder.incrementalUpdate must not write evidence_doc_bodies',
+    );
+  });
+
+  it('Scope boundary: domain:user-profile stays excluded from evidence_doc_bodies while external collections opt in cleanly', async () => {
+    const dataDir = makeTempDir('sim-q4-data-');
+    const userId = 'user-profile-scope-test';
+    const profileDir = join(dataDir, ...profileUserRelativePath(userId).split('/'));
+    mkdirSync(profileDir, { recursive: true });
+    writeFileSync(
+      join(profileDir, 'profile.md'),
+      '# User Profile\n\nSummary line.\n\n## Private Details\n\nprofile_full_body_secret_sentinel.\n',
+    );
+
+    const extRoot = makeTempDir('sim-q4-ext-');
+    writeFileSync(
+      join(extRoot, 'guide.md'),
+      '# External Guide\n\nExternal summary.\n\n## Deep Section\n\nexternal_body_sentinel_774.\n',
+    );
+    const extManifest = makeManifest(extRoot, {
+      id: 'research:ext-body-only',
+      name: 'ext-body-only',
+      indexPolicy: { autoRebuild: true },
+    });
+    saveExternalCollection(dataDir, extManifest);
+
+    assert.equal(isExternalCollectionForBodyStorage({ id: 'domain:user-profile' }, dataDir), false);
+    assert.equal(isExternalCollectionForBodyStorage({ id: 'project:cat-cafe' }, dataDir), false);
+    assert.equal(isExternalCollectionForBodyStorage({ id: 'global:methods' }, dataDir), false);
+    assert.equal(isExternalCollectionForBodyStorage({ id: 'domain:personal-memory' }, dataDir), false);
+    assert.equal(isExternalCollectionForBodyStorage({ id: 'research:not-persisted' }, dataDir), false);
+    assert.equal(isExternalCollectionForBodyStorage(extManifest, undefined), false);
+    assert.equal(isExternalCollectionForBodyStorage(extManifest, dataDir), true);
+    assert.ok(BUILTIN_COLLECTION_IDS.has('domain:user-profile'));
+
+    const catalog = new LibraryCatalog();
+    const stores = new Map();
+    await registerPrivateAndExternalCollections({
+      catalog,
+      stores,
+      externalManifests: [extManifest],
+      dataDir,
+      privateUserId: userId,
+      now: '2026-11-26T00:00:00Z',
+    });
+
+    try {
+      const profileStore = stores.get('domain:user-profile');
+      assert.ok(profileStore, 'canonical profile collection should register');
+      assert.equal(
+        profileStore.getDb().prepare('SELECT count(*) AS n FROM evidence_doc_bodies').get().n,
+        0,
+        'registerCanonicalProfile must not write full bodies into evidence_doc_bodies',
+      );
+
+      writeFileSync(
+        join(profileDir, 'profile.md'),
+        '# User Profile\n\nRefreshed summary.\n\n## Private Details\n\nprofile_refreshed_body_sentinel.\n',
+      );
+      const refreshed = await refreshCanonicalProfileIndex(stores, catalog, { dataDir, userId });
+      assert.equal(refreshed.status, 'refreshed');
+      assert.equal(
+        profileStore.getDb().prepare('SELECT count(*) AS n FROM evidence_doc_bodies').get().n,
+        0,
+        'refreshCanonicalProfileIndex must not write full bodies into evidence_doc_bodies',
+      );
+
+      const extStore = stores.get(extManifest.id);
+      assert.ok(extStore, 'external collection should register');
+      const extDb = extStore.getDb();
+      assert.deepEqual(
+        queryBodyFtsAnchors(extDb, 'external_body_sentinel_774'),
+        [`${extManifest.id}:doc/guide`],
+        'external collection startup autoRebuild must populate evidence_doc_bodies and FTS5',
+      );
+      assert.equal(
+        extDb.prepare('SELECT count(*) AS n FROM evidence_passages').get().n,
+        0,
+        'external body storage must stay decoupled from vector-tracked evidence_passages',
+      );
+    } finally {
+      for (const s of stores.values()) {
+        try {
+          s.close();
+        } catch {}
+      }
+    }
+  });
+
+  it('Storage lifecycle: full rebuild, incremental update, empty-body clear, delete/purge, and default summary search isolation', async () => {
+    const dir = makeTempDir('sim-q4-lifecycle-');
+    const fileA = join(dir, 'alpha.md');
+    const fileB = join(dir, 'beta.md');
+    const contentA = [
+      '---',
+      'title: Alpha Doc',
+      '---',
+      '# Alpha Doc',
+      '',
+      'Alpha summary only.',
+      '',
+      '## Body',
+      '',
+      'alpha_body_token_v1 unique_phrase_one.',
+    ].join('\n');
+    writeFileSync(fileA, contentA);
+    writeFileSync(fileB, '# Beta Doc\n\nBeta summary.\n\n## Body\n\nbeta_body_token_v1.\n');
+
+    const manifest = makeManifest(dir);
+    const scanner = new FlatScanner(manifest.id);
+    const builder = new CollectionIndexBuilder(store, manifest, scanner, undefined, {
+      storeDocumentBodies: true,
+    });
+
+    const first = await builder.rebuild();
+    assert.equal(first.blocked, false);
+    assert.equal(first.indexed, 2);
+    assert.equal(first.skipped, 0);
+
+    const db = store.getDb();
+    const anchorA = `${manifest.id}:doc/alpha`;
+    const anchorB = `${manifest.id}:doc/beta`;
+    const bodyRowA = db.prepare('SELECT content FROM evidence_doc_bodies WHERE doc_anchor = ?').get(anchorA);
+    assert.ok(bodyRowA?.content.includes('alpha_body_token_v1'));
+    assert.ok(!bodyRowA?.content.includes('title: Alpha Doc'), 'YAML frontmatter should be stripped from stored body');
+    assert.deepEqual(queryBodyFtsAnchors(db, 'alpha_body_token_v1'), [anchorA]);
+    assert.deepEqual(queryBodyFtsAnchors(db, 'beta_body_token_v1'), [anchorB]);
+
+    const docA = await store.getByAnchor(anchorA);
+    assert.equal(docA?.sourceHash, createHash('sha256').update(contentA).digest('hex'));
+
+    // Default summary search must NOT silently fall back into evidence_doc_bodies in this narrow slice.
+    const defaultSummarySearch = await store.search('alpha_body_token_v1');
+    assert.equal(
+      defaultSummarySearch.length,
+      0,
+      'narrow storage slice must not add default summary search body fallback or reranking',
+    );
+
+    // Second non-force rebuild skips unchanged docs when body and source_hash are consistent.
+    const second = await builder.rebuild();
+    assert.equal(second.indexed, 0);
+    assert.equal(second.skipped, 2);
+
+    // Incremental update replaces stored body + FTS5 cleanly.
+    const updatedContentA = '# Alpha Doc\n\nAlpha summary only.\n\n## Body\n\nalpha_body_token_v2.\n';
+    writeFileSync(fileA, updatedContentA);
+    await builder.incrementalUpdate([fileA]);
+    assert.deepEqual(queryBodyFtsAnchors(db, 'alpha_body_token_v1'), []);
+    assert.deepEqual(queryBodyFtsAnchors(db, 'alpha_body_token_v2'), [anchorA]);
+    assert.equal(
+      (await store.getByAnchor(anchorA))?.sourceHash,
+      createHash('sha256').update(updatedContentA).digest('hex'),
+    );
+
+    // Clearing body content to frontmatter-only deletes the stale evidence_doc_bodies row + FTS entry.
+    writeFileSync(fileA, '---\ntitle: Alpha Doc\n---\n');
+    await builder.incrementalUpdate([fileA]);
+    assert.equal(db.prepare('SELECT content FROM evidence_doc_bodies WHERE doc_anchor = ?').get(anchorA), undefined);
+    assert.deepEqual(queryBodyFtsAnchors(db, 'alpha_body_token_v2'), []);
+
+    // Deleting a file on disk + rebuild removes both evidence_docs and evidence_doc_bodies/FTS.
+    unlinkSync(fileB);
+    await builder.rebuild();
+    assert.equal(await store.getByAnchor(anchorB), null);
+    assert.equal(db.prepare('SELECT content FROM evidence_doc_bodies WHERE doc_anchor = ?').get(anchorB), undefined);
+    assert.deepEqual(queryBodyFtsAnchors(db, 'beta_body_token_v1'), []);
+
+    // Direct store deletion APIs (deleteByAnchor, removeBySourcePrefix, removeByPack) also clean bodies.
+    writeFileSync(fileA, '# Alpha Doc\n\nSummary.\n\n## Body\n\nalpha_cleanup_token.\n');
+    await builder.rebuild();
+    assert.deepEqual(queryBodyFtsAnchors(db, 'alpha_cleanup_token'), [anchorA]);
+    store.removeBySourcePrefix('alpha');
+    assert.equal(db.prepare('SELECT count(*) AS n FROM evidence_doc_bodies WHERE doc_anchor = ?').get(anchorA).n, 0);
+    assert.deepEqual(queryBodyFtsAnchors(db, 'alpha_cleanup_token'), []);
+
+    await builder.rebuild();
+    db.prepare('UPDATE evidence_docs SET pack_id = ? WHERE anchor = ?').run('pack-cleanup-1', anchorA);
+    await store.deleteByPackId('pack-cleanup-1');
+    assert.equal(db.prepare('SELECT count(*) AS n FROM evidence_doc_bodies WHERE doc_anchor = ?').get(anchorA).n, 0);
+    assert.deepEqual(queryBodyFtsAnchors(db, 'alpha_cleanup_token'), []);
+  });
+
+  it('Atomicity: transaction failure during body publish leaves source_hash NULL and next non-force rebuild retries cleanly', async () => {
+    const dir = makeTempDir('sim-q4-tx-retry-');
+    const file = join(dir, 'retry-doc.md');
+    const content = '# Retry Doc\n\nRetry summary.\n\n## Body\n\ntx_retry_body_token_505.\n';
+    writeFileSync(file, content);
+
+    const manifest = makeManifest(dir);
+    const scanner = new FlatScanner(manifest.id);
+    const builder = new CollectionIndexBuilder(store, manifest, scanner, undefined, {
+      storeDocumentBodies: true,
+    });
+    const anchor = `${manifest.id}:doc/retry-doc`;
+    const db = store.getDb();
+
+    // Inject a one-shot trigger failure inside the body transaction to simulate mid-publish failure.
+    db.exec(`
+      CREATE TRIGGER fail_body_once BEFORE INSERT ON evidence_doc_bodies
+      BEGIN
+        SELECT RAISE(ABORT, 'simulated_body_tx_failure');
+      END;
+    `);
+
+    await assert.rejects(() => builder.rebuild(), /simulated_body_tx_failure/);
+
+    assert.equal(
+      db.prepare('SELECT source_hash FROM evidence_docs WHERE anchor = ?').get(anchor)?.source_hash,
+      null,
+      'failed body transaction must leave source_hash NULL so rebuild will retry',
+    );
+    assert.equal(
+      db.prepare('SELECT count(*) AS n FROM evidence_doc_bodies WHERE doc_anchor = ?').get(anchor).n,
+      0,
+      'rolled-back body transaction must not leave partial body rows',
+    );
+
+    db.exec('DROP TRIGGER fail_body_once;');
+
+    const recovered = await builder.rebuild({ force: false });
+    assert.equal(recovered.blocked, false);
+    assert.equal(recovered.indexed, 1, 'non-force rebuild must retry NULL source_hash doc');
+    assert.equal(recovered.skipped, 0);
+    assert.equal(
+      (await store.getByAnchor(anchor))?.sourceHash,
+      createHash('sha256').update(content).digest('hex'),
+      'successful retry must commit final source_hash atomically with body',
+    );
+    assert.deepEqual(queryBodyFtsAnchors(db, 'tx_retry_body_token_505'), [anchor]);
+  });
+
+  it('Per-document SecretScanner rejection: incrementalUpdate isolates offending doc, preserves sibling docs, throws observable error, and recovers after remediation', async () => {
+    const dir = makeTempDir('sim-q4-secret-per-doc-');
+    const siblingFile = join(dir, 'sibling.md');
+    const batchCleanFile = join(dir, 'batch-clean.md');
+    const offendingFile = join(dir, 'offending.md');
+
+    writeFileSync(siblingFile, '# Sibling\n\nExisting safe doc.\n\n## Body\n\nsibling_safe_body_token.\n');
+    writeFileSync(
+      offendingFile,
+      [
+        '---',
+        'supersedes: [doc/sibling]',
+        '---',
+        '# Offending',
+        '',
+        'Initially clean version.',
+        '',
+        '## Body',
+        '',
+        'offending_clean_body_token.',
+      ].join('\n'),
+    );
+
+    const manifest = makeManifest(dir);
+    const scanner = new FlatScanner(manifest.id);
+    const builder = new CollectionIndexBuilder(store, manifest, scanner, undefined, {
+      storeDocumentBodies: true,
+    });
+
+    const initial = await builder.rebuild();
+    assert.equal(initial.indexed, 2);
+
+    const db = store.getDb();
+    const siblingAnchor = `${manifest.id}:doc/sibling`;
+    const batchCleanAnchor = `${manifest.id}:doc/batch-clean`;
+    const offendingAnchor = `${manifest.id}:doc/offending`;
+    assert.deepEqual(queryBodyFtsAnchors(db, 'offending_clean_body_token'), [offendingAnchor]);
+
+    // Introduce a secret into offendingFile while also updating a clean file in the same batch.
+    writeFileSync(batchCleanFile, '# Batch Clean\n\nClean sibling in same batch.\n\n## Body\n\nbatch_clean_token.\n');
+    writeFileSync(
+      offendingFile,
+      [
+        '---',
+        'supersedes: [doc/sibling]',
+        '---',
+        '# Offending',
+        '',
+        'Leaked credential update.',
+        '',
+        ['token = gh', 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij'].join(''),
+      ].join('\n'),
+    );
+
+    let caught;
+    try {
+      await builder.incrementalUpdate([batchCleanFile, offendingFile]);
+    } catch (err) {
+      caught = err;
+    }
+
+    assert.ok(caught instanceof CollectionSecretRejectionError, 'must throw observable CollectionSecretRejectionError');
+    assert.equal(caught.code, 'COLLECTION_SECRET_REJECTED');
+    assert.deepEqual(caught.rejectedAnchors, [offendingAnchor]);
+    assert.ok(caught.secretFindings.length >= 1);
+
+    // Offending doc must have NO doc row, NO body row, NO FTS entry, and NO stale supersedes edge.
+    assert.equal(await store.getByAnchor(offendingAnchor), null);
+    assert.equal(
+      db.prepare('SELECT count(*) AS n FROM evidence_doc_bodies WHERE doc_anchor = ?').get(offendingAnchor).n,
+      0,
+    );
+    assert.deepEqual(queryBodyFtsAnchors(db, 'offending_clean_body_token'), []);
     assert.equal(
       db
-        .prepare("SELECT count(*) AS n FROM evidence_passages WHERE doc_anchor = ? AND passage_id LIKE 'md-%'")
-        .get(anchor).n,
+        .prepare("SELECT count(*) AS n FROM edges WHERE from_anchor = ? AND relation = 'supersedes'")
+        .get(offendingAnchor).n,
       0,
+      'rejected doc must not retain stale supersedes edges',
     );
-    assert.equal(backend.passageVectorStore.count(), 0, 'derived legacy md-* passage vector must be invalidated');
-    assert.deepEqual(await store.search('lingering_pre_v85_only', { depth: 'raw', limit: 5 }), []);
 
-    // Second rebuild skips cleanly once legacy md-* is retired
-    const secondRebuild = await builder.rebuild();
-    assert.deepEqual([secondRebuild.indexed, secondRebuild.skipped], [0, 1]);
+    // Both pre-existing sibling and clean doc in the same batch must remain intact and usable.
+    assert.ok(await store.getByAnchor(siblingAnchor), 'pre-existing sibling doc must NOT be purged');
+    assert.deepEqual(queryBodyFtsAnchors(db, 'sibling_safe_body_token'), [siblingAnchor]);
+    assert.ok(await store.getByAnchor(batchCleanAnchor), 'clean doc in same batch must still be indexed');
+    assert.deepEqual(queryBodyFtsAnchors(db, 'batch_clean_token'), [batchCleanAnchor]);
 
-    // Update file to v2 with another pre-existing md-0 seeded: refresh must retire old md-0 so v1 never revives
-    db.prepare(
-      'INSERT INTO evidence_passages (doc_anchor, passage_id, content, position, created_at) VALUES (?, ?, ?, ?, ?)',
-    ).run(anchor, 'md-0', 'retracted_legacy_v1', 0, stamp);
-    writeFileSync(file, '# Policy\n\nNeutral summary.\n\n## Details\n\nverified_policy_v2\n');
+    // Recoverability: removing the secret lets incrementalUpdate re-index cleanly.
+    const fixedContent = '# Offending\n\nRemediated summary.\n\n## Body\n\noffending_recovered_body_token.\n';
+    writeFileSync(offendingFile, fixedContent);
+    await builder.incrementalUpdate([offendingFile]);
+    assert.equal(
+      (await store.getByAnchor(offendingAnchor))?.sourceHash,
+      createHash('sha256').update(fixedContent).digest('hex'),
+    );
+    assert.deepEqual(queryBodyFtsAnchors(db, 'offending_recovered_body_token'), [offendingAnchor]);
+  });
+
+  it('MaterializationService observability: secret rejection surfaces reindexError without purging collection', async () => {
+    const rootDir = makeTempDir('sim-q4-mat-');
+    const queue = new MarkerQueue(makeTempDir('sim-q4-markers-'));
+    writeFileSync(join(rootDir, 'existing.md'), '# Existing\n\nKeep me intact.\n\n## Body\n\nkeep_me_intact_881.\n');
+
+    const manifest = makeManifest(rootDir);
+    const scanner = new FlatScanner(manifest.id);
+    const builder = new CollectionIndexBuilder(store, manifest, scanner, undefined, {
+      storeDocumentBodies: true,
+    });
     await builder.rebuild();
 
-    assert.deepEqual(
-      (await store.search('verified_policy_v2', { limit: 5 })).map((r) => r.anchor),
-      [anchor],
-    );
-    assert.deepEqual(await store.search('retracted_legacy_v1', { limit: 5 }), []);
-    assert.deepEqual(await store.search('retracted_legacy_v1', { depth: 'raw', limit: 5 }), []);
+    const marker = await queue.submit({
+      content: ['Leaked lesson ', 'gh', 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij'].join(''),
+      source: 'neo:test',
+      status: 'captured',
+      targetKind: 'lesson',
+      targetCollectionId: manifest.id,
+    });
+    await queue.transition(marker.id, 'approved');
 
-    // Unrelated thread message passage must remain intact
-    const survivingThread = db
-      .prepare("SELECT count(*) AS n FROM evidence_passages WHERE doc_anchor = 'thread-keep' AND passage_id = 'msg-1'")
-      .get().n;
-    assert.equal(survivingThread, 1, 'thread message passages must never be deleted');
+    const svc = new MaterializationService(queue, rootDir);
+    const result = await svc.materialize(marker.id, {
+      targetRoot: rootDir,
+      indexBuilder: builder,
+    });
+
+    assert.equal(result.reindexed, false, 'secret-rejected materialization must not report reindexed=true');
+    assert.match(
+      result.reindexError ?? '',
+      /SecretScanner/,
+      'MaterializationService must surface SecretScanner rejection via reindexError instead of swallowing it',
+    );
+    assert.ok(
+      await store.getByAnchor(`${manifest.id}:doc/existing`),
+      'existing sibling doc in collection must remain intact after rejected materialization',
+    );
+    assert.deepEqual(queryBodyFtsAnchors(store.getDb(), 'keep_me_intact_881'), [`${manifest.id}:doc/existing`]);
+  });
+
+  it('Migration upgrade & idempotent reopen: upgrades pre-body V84 DB and preserves data across repeated opens', async () => {
+    const upgradeDbPath = join(makeTempDir('sim-q4-mig-'), 'legacy-v84.sqlite');
+    const seedStore = new SqliteEvidenceStore(upgradeDbPath);
+    await seedStore.initialize();
+    await seedStore.upsert([
+      {
+        anchor: 'research:legacy:doc/preexisting',
+        kind: 'research',
+        status: 'active',
+        title: 'Preexisting V84 Doc',
+        summary: 'Must survive upgrade intact.',
+        sourcePath: 'preexisting.md',
+        updatedAt: '2026-11-26T00:00:00Z',
+        authority: 'validated',
+      },
+    ]);
+    // Simulate a pre-upgrade V84 database by dropping the new body table/FTS/triggers and reverting schema_version.
+    const raw = seedStore.getDb();
+    raw.exec(`
+      DROP TRIGGER IF EXISTS evidence_doc_bodies_ai;
+      DROP TRIGGER IF EXISTS evidence_doc_bodies_ad;
+      DROP TRIGGER IF EXISTS evidence_doc_bodies_au;
+      DROP TABLE IF EXISTS evidence_doc_body_fts;
+      DROP TABLE IF EXISTS evidence_doc_bodies;
+      DELETE FROM schema_version WHERE version >= 85;
+    `);
+    seedStore.close();
+
+    // Verify raw SQLite DB is strictly at V84 without evidence_doc_bodies before reopening.
+    const inspectBefore = new Database(upgradeDbPath, { readonly: true });
+    assert.equal(inspectBefore.prepare('SELECT MAX(version) AS v FROM schema_version').get().v, 84);
+    assert.equal(
+      inspectBefore.prepare("SELECT name FROM sqlite_master WHERE name = 'evidence_doc_bodies'").get(),
+      undefined,
+    );
+    inspectBefore.close();
+
+    // First open upgrades V84 -> CURRENT_SCHEMA_VERSION cleanly.
+    const upgraded = new SqliteEvidenceStore(upgradeDbPath);
+    await upgraded.initialize();
+    assert.ok(await upgraded.getByAnchor('research:legacy:doc/preexisting'), 'pre-existing doc must survive upgrade');
+    assert.equal(
+      upgraded.getDb().prepare('SELECT MAX(version) AS v FROM schema_version').get().v,
+      CURRENT_SCHEMA_VERSION,
+    );
+    upgraded
+      .getDb()
+      .prepare('INSERT INTO evidence_doc_bodies (doc_anchor, content, updated_at) VALUES (?, ?, ?)')
+      .run('research:legacy:doc/preexisting', 'upgraded_body_persistence_token', '2026-11-26T00:00:00Z');
+    assert.deepEqual(queryBodyFtsAnchors(upgraded.getDb(), 'upgraded_body_persistence_token'), [
+      'research:legacy:doc/preexisting',
+    ]);
+    upgraded.close();
+
+    // Second open is strictly idempotent: no duplicate schema_version rows and body/FTS stay intact.
+    const reopened = new SqliteEvidenceStore(upgradeDbPath);
+    await reopened.initialize();
+    const versionRows = reopened
+      .getDb()
+      .prepare('SELECT count(*) AS n FROM schema_version WHERE version = ?')
+      .get(CURRENT_SCHEMA_VERSION).n;
+    assert.equal(versionRows, 1, 'reopening upgraded DB must not duplicate schema_version entries');
+    assert.deepEqual(queryBodyFtsAnchors(reopened.getDb(), 'upgraded_body_persistence_token'), [
+      'research:legacy:doc/preexisting',
+    ]);
+    reopened.close();
+  });
+
+  it('#2085 compatibility: first external body/summary rewrite isolates stale vectors once, then zero-change reboot stays active', async () => {
+    const dataDir = makeTempDir('sim-q4-2085-compat-');
+    const extRoot = makeTempDir('sim-q4-2085-root-');
+    const docFile = join(extRoot, 'note.md');
+    writeFileSync(
+      docFile,
+      [
+        '# Compat Note',
+        '',
+        '---',
+        '',
+        '[[_MOC]]',
+        '',
+        'Real summary paragraph.',
+        '',
+        'Deep compat_body_token_2085.',
+      ].join('\n'),
+    );
+
+    const extManifest = makeManifest(extRoot, {
+      id: 'research:compat-2085',
+      name: 'compat-2085',
+      status: 'active',
+      indexPolicy: { autoRebuild: true },
+    });
+    saveExternalCollection(dataDir, extManifest);
+
+    // Pre-seed collection store with a broken `---` summary + physical doc_vectors (pre-rewrite state).
+    const storePath = join(dataDir, 'library', 'research-compat-2085', 'evidence.sqlite');
+    mkdirSync(join(dataDir, 'library', 'research-compat-2085'), { recursive: true });
+    const seed = new SqliteEvidenceStore(storePath, undefined, {
+      sourceRoot: extRoot,
+      sourceRef: extManifest.id,
+    });
+    await seed.initialize();
+    await seed.upsert([
+      {
+        anchor: `${extManifest.id}:doc/note`,
+        kind: 'research',
+        status: 'active',
+        title: 'Compat Note',
+        summary: '---',
+        sourcePath: 'note.md',
+        sourceHash: 'pre-rewrite-old-hash',
+        updatedAt: '2026-11-26T00:00:00Z',
+        authority: 'validated',
+      },
+    ]);
+    // Seed real G0 vector tables so hasVectorGeneration(db) and vector invalidation run end-to-end.
+    const { openVectorGeneration } = await import('../../dist/domains/memory/open-vector-generation.js');
+    openVectorGeneration(
+      seed.getDb(),
+      { id: 'test-model', dim: 4, version: '1', generationId: 'g0' },
+      { create: true },
+    );
+    seed.close();
+
+    // First boot: summary fidelity + body backfill rewrites the doc -> lexicalChanged=true -> status becomes 'stale'.
+    const catalog1 = new LibraryCatalog();
+    const stores1 = new Map();
+    await registerPrivateAndExternalCollections({
+      catalog: catalog1,
+      stores: stores1,
+      externalManifests: [extManifest],
+      dataDir,
+      now: '2026-11-26T00:00:00Z',
+    });
+    try {
+      assert.equal(
+        catalog1.get(extManifest.id)?.status,
+        'stale',
+        'first body/summary rewrite on vector-bearing collection must isolate vectors as stale',
+      );
+      const s1 = stores1.get(extManifest.id);
+      assert.equal((await s1.getByAnchor(`${extManifest.id}:doc/note`))?.summary, 'Real summary paragraph.');
+      assert.deepEqual(queryBodyFtsAnchors(s1.getDb(), 'compat_body_token_2085'), [`${extManifest.id}:doc/note`]);
+      assert.equal(s1.getDb().prepare('SELECT count(*) AS n FROM evidence_passages').get().n, 0);
+    } finally {
+      for (const s of stores1.values()) s.close();
+    }
+
+    // Second boot (after vectors are marked active again with no file changes): skips unchanged doc & stays active.
+    const catalog2 = new LibraryCatalog();
+    const stores2 = new Map();
+    await registerPrivateAndExternalCollections({
+      catalog: catalog2,
+      stores: stores2,
+      externalManifests: [{ ...extManifest, status: 'active' }],
+      dataDir,
+      now: '2026-11-26T00:00:00Z',
+    });
+    try {
+      assert.equal(
+        catalog2.get(extManifest.id)?.status,
+        'active',
+        'unchanged reboot with body already populated must skip rewrite and stay active',
+      );
+    } finally {
+      for (const s of stores2.values()) s.close();
+    }
   });
 });
