@@ -5,7 +5,7 @@ import { useShellLanguage } from '@/components/shell/shell-language';
 import styles from './artwork-actions.module.css';
 import { artworkActionsCopy } from './artwork-actions.shell-copy';
 import { artworkApplicationName, artworkFileDate, fileByteLengthLabel } from './artwork-file-labels';
-import { type ContentFileInfo, fileDownloadUrl } from './file-action-client';
+import { type ContentFileInfo, fileDownloadUrl, type LocalFileAction } from './file-action-client';
 import { contentApiBase } from './file-source';
 import { ReviewToolbarIcon } from './ReviewToolbarIcon';
 /** Keep keyboard focus on visible actions when narrow-only actions are disclosed. */
@@ -65,7 +65,7 @@ export function FileActionMenu({
   close: () => void;
   copyLocation: () => void;
   copyPixels: () => void;
-  fileAction: (action: 'reveal' | 'open') => void;
+  fileAction: (action: LocalFileAction) => void;
   toggleSize?: () => void;
   download: () => void;
   workMode?: { run: () => void; busy: boolean } | null;
@@ -122,16 +122,27 @@ export function FileActionMenu({
             {info.canReveal !== false && (
               <button role="menuitem" type="button" onClick={() => fileAction('reveal')}>
                 <ReviewToolbarIcon name="folder" />
-                {t.reveal}
+                {info.desktopPlatform === 'win32' ? t.revealWindows : t.reveal}
               </button>
             )}
-            {info.canOpen !== false && (
+            {info.canOpen !== false && !info.noDefaultApplication && (
               <button role="menuitem" type="button" onClick={() => fileAction('open')}>
                 <ReviewToolbarIcon name="external" />
                 {t.open}
                 <small>
-                  {artworkApplicationName(info.defaultApplication, info.defaultApplicationBundleId, t.preview)}
+                  {artworkApplicationName(
+                    info.defaultApplication,
+                    info.defaultApplicationBundleId,
+                    info.canOpenWith ? '' : t.preview,
+                  )}
                 </small>
+              </button>
+            )}
+            {info.noDefaultApplication && <p role="status">{t.noDefaultApplication}</p>}
+            {info.canOpenWith && (
+              <button role="menuitem" type="button" onClick={() => fileAction('open-with')}>
+                <ReviewToolbarIcon name="external" />
+                {t.openWith}
               </button>
             )}
           </>

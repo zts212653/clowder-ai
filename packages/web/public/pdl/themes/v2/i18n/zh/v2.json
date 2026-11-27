@@ -2832,6 +2832,13 @@
     "file": {
       "openProject": "打开项目文件",
       "openLocal": "用默认应用打开",
+      "openWith": "选择打开方式…",
+      "openLocalWithName": "用默认应用打开 · {0}",
+      "revealWindows": "在资源管理器中显示",
+      "missing": "文件不存在。",
+      "denied": "没有权限读取文件。",
+      "actionFailed": "系统暂时无法完成文件操作。",
+      "noDefaultApplication": "Windows 没有为此文件设置默认应用。",
       "noPreview": "这种文件不能在这里预览",
       "collabEdit": "协作编辑"
     },

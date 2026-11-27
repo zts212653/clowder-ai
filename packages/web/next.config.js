@@ -89,13 +89,13 @@ const nextConfig = {
           { key: 'Content-Security-Policy', value: buildContentSecurityPolicy("'none'") },
         ],
       },
-      {
-        source: '/workspace-document',
+      ...['/workspace-document', '/workspace-html'].map((source) => ({
+        source,
         headers: [
           { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
           { key: 'Content-Security-Policy', value: buildContentSecurityPolicy("'self'") },
         ],
-      },
+      })),
     ];
   },
   webpack: (config) => {

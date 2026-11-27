@@ -3,8 +3,10 @@ import { stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename } from 'node:path';
 import { promisify } from 'node:util';
+import { canLaunchLocalFile } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { LocalMediaFileUnavailable } from '../domains/video-studio/content-owner/published-media-file-exports.js';
+import { windowsFileActions } from '../domains/workspace/windows-file-actions.js';
 import { isDirectLoopbackRequest, isTrustedLocalApiRequest } from '../utils/loopback-request.js';
 
 const exec = promisify(execFile);
@@ -18,6 +20,8 @@ export type AuthorizedMediaFile = {
   createdAt?: string;
 };
 type Dependencies = {
+  platform?: NodeJS.Platform;
+  windows?: typeof windowsFileActions;
   allowDirectoryReveal?: boolean;
   authorize: (request: FastifyRequest) => Promise<AuthorizedMediaFile | { local: false } | null>;
   onError: (reply: FastifyReply, error: unknown) => unknown;
@@ -59,6 +63,9 @@ export function isLocalHumanFileActionRequest(request: FastifyRequest) {
 
 /** A file action is always re-authorized by the same media owner, never by a caller-supplied path. */
 export function registerMediaFileActions(app: FastifyInstance, mediaPath: string, deps: Dependencies) {
+  const platform = deps.platform ?? process.platform;
+  const windows = platform === 'win32' ? (deps.windows ?? windowsFileActions) : undefined;
+  const desktopActions = platform === 'darwin' || !!windows;
   app.get(`${mediaPath}/file-info`, async (request, reply) => {
     reply.header('Cache-Control', 'private, no-store');
     if (!isLocalHumanFileActionRequest(request)) return { local: false };
@@ -69,10 +76,14 @@ export function registerMediaFileActions(app: FastifyInstance, mediaPath: string
       const info = await stat(file.path);
       if (!info.isFile() && !(deps.allowDirectoryReveal && info.isDirectory()))
         return reply.code(404).send({ error: 'not_found' });
-      const desktopActions = process.platform === 'darwin';
-      const canOpen = desktopActions && info.isFile() && file.canOpen !== false;
+      const canOpen =
+        desktopActions && info.isFile() && file.canOpen !== false && (!windows || canLaunchLocalFile(file.path));
       const canReveal = desktopActions && file.canReveal !== false;
-      const application = canOpen ? await defaultApp(file.mime) : {};
+      const application: { name?: string; bundleId?: string; noDefault?: boolean } = canOpen
+        ? windows
+          ? await windows.application(file.path)
+          : await defaultApp(file.mime)
+        : {};
       const home = homedir();
       return {
         ...file,
@@ -84,6 +95,9 @@ export function registerMediaFileActions(app: FastifyInstance, mediaPath: string
         modifiedAt: info.mtime.toISOString(),
         defaultApplication: application.name ?? null,
         defaultApplicationBundleId: application.bundleId,
+        ...(windows
+          ? { desktopPlatform: 'win32', canOpenWith: canOpen, noDefaultApplication: application.noDefault === true }
+          : {}),
       };
     } catch (error) {
       if (error instanceof LocalMediaFileUnavailable)
@@ -91,7 +105,7 @@ export function registerMediaFileActions(app: FastifyInstance, mediaPath: string
       return deps.onError(reply, error);
     }
   });
-  for (const action of ['reveal', 'open'] as const) {
+  for (const action of ['reveal', 'open', 'open-with'] as const) {
     app.post(`${mediaPath}/${action}`, async (request, reply) => {
       reply.header('Cache-Control', 'private, no-store');
       if (!isLocalHumanFileActionRequest(request)) return reply.code(403).send({ error: 'local_human_required' });
@@ -103,13 +117,21 @@ export function registerMediaFileActions(app: FastifyInstance, mediaPath: string
         if ('local' in file) return reply.code(403).send({ error: 'local_file_unavailable' });
         const info = await stat(file.path);
         if (
-          (action === 'open' && (file.canOpen === false || !info.isFile())) ||
+          (action !== 'reveal' &&
+            (file.canOpen === false || !info.isFile() || (windows && !canLaunchLocalFile(file.path)))) ||
           (action === 'reveal' && file.canReveal === false)
         )
           return reply.code(403).send({ error: 'file_action_not_permitted' });
         if (!info.isFile() && !(deps.allowDirectoryReveal && action === 'reveal' && info.isDirectory()))
           return reply.code(404).send({ error: 'not_found' });
-        if (process.platform !== 'darwin') return reply.code(422).send({ error: 'desktop_action_unavailable' });
+        if (windows) {
+          const error = await windows.run(action, file.path);
+          if (error)
+            return reply.code(error === 'not_found' ? 404 : error === 'access_denied' ? 403 : 422).send({ error });
+          return { ok: true };
+        }
+        if (platform !== 'darwin' || action === 'open-with')
+          return reply.code(422).send({ error: 'desktop_action_unavailable' });
         if (action === 'reveal') {
           await exec('open', ['-R', file.path], { timeout: 5000 });
         } else {

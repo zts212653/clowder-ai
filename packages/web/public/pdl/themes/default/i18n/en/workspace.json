@@ -35,6 +35,14 @@
  "workbench": {
   "file": {
    "outsideWorkspace": "This file's folder is not registered as a workspace",
+   "openWith": "Choose an application…",
+   "openLocalWithName": "Open with default application · {0}",
+   "revealWindows": "Show in File Explorer",
+   "missing": "The file does not exist.",
+   "denied": "You do not have permission to read this file.",
+   "actionFailed": "The system could not complete this file action.",
+   "noDefaultApplication": "Windows has no default application for this file.",
+   "openLocal": "Open with default application",
    "needsConnection": "Connect the file's folder first to open it",
    "unreadable": "This file cannot be opened right now",
    "collabEdit": "Collaborative edit"

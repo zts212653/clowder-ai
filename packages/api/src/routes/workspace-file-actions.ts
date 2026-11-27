@@ -17,9 +17,15 @@ export function registerWorkspaceFileActions(app: FastifyInstance, user: (reques
         .parse(request.query);
       return resolveLocalFile(await getWorktreeRoot(worktreeId), path);
     },
-    onError: (reply, error) =>
-      reply
-        .code(error instanceof z.ZodError ? 400 : error instanceof WorkspaceSecurityError ? 403 : 404)
-        .send({ error: 'file_action_unavailable' }),
+    onError: (reply, error) => {
+      if (error instanceof z.ZodError) return reply.code(400).send({ error: 'invalid_file_source' });
+      if (error instanceof WorkspaceSecurityError && error.code !== 'NOT_FOUND')
+        return reply.code(403).send({ error: 'access_denied' });
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (code === 'EACCES' || code === 'EPERM') return reply.code(403).send({ error: 'access_denied' });
+      if (code === 'NOT_FOUND' || code === 'ENOENT' || code === 'ENOTDIR')
+        return reply.code(404).send({ error: 'not_found' });
+      return reply.code(500).send({ error: 'file_action_failed' });
+    },
   });
 }

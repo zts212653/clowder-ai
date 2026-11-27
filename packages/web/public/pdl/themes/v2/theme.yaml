@@ -24816,7 +24816,12 @@ pdl:
       bare: true
     file.body:
       vm: filePage
-      error: t:frame.loadError
+      error:
+        of: $.readError
+        map:
+          missing: t:workbench.file.missing
+          denied: t:workbench.file.denied
+          _: t:frame.loadError
       blocks:
         - type: component
           use: v2Box
@@ -24939,7 +24944,7 @@ pdl:
                         type: component
                         use: v2Copy
                         props:
-                          value: $.path
+                          value: $.copyPath
                           label: t:composerPop.copyPath
                           mono: true
                           tail: true
@@ -24965,7 +24970,7 @@ pdl:
                         args:
                           path: ws.fileMode
                       when:
-                        - $.markdown
+                        - $.textPreview
                         - "!$.editing"
                     - type: component
                       use: v2Grow
@@ -25013,10 +25018,11 @@ pdl:
                     - type: component
                       use: v2Action
                       props:
-                        label: t:workbench.file.openLocal
+                        label: $.actions.openLabel
+                        disabled: $.actions.busy
                         act: fileAction
                         args:
-                          op: open
+                          op: $.actions.openAction
                           worktreeId: $.worktreeId
                           path: $.filePath
                       when: $.actions.canOpen
@@ -25038,13 +25044,20 @@ pdl:
                               map:
                                 "true": t:workbench.file.outsideWorkspace
                                 _: ""
-                          - label: t:control.reveal
+                          - label: $.actions.revealLabel
                             act: fileAction
                             args:
                               op: reveal
                               worktreeId: $.worktreeId
                               path: $.filePath
                             when: $.actions.canReveal
+              - type: notice
+                tone: warn
+                text: $.actions.error
+                when: $.actions.error
+              - type: notice
+                text: t:workbench.file.noDefaultApplication
+                when: $.actions.noDefaultApplication
               - type: component
                 use: v2Pre
                 props:
@@ -25061,6 +25074,7 @@ pdl:
                 when:
                   - "!$.editing"
                   - "!$.binary"
+                  - "!$.htmlPreview"
                   - of: $.markdown
                     map:
                       "true":

@@ -240,3 +240,29 @@ it('shows a persistent metadata error and retries directly in the classic file t
   await act(async () => copy.click());
   expect(transport.copy).toHaveBeenCalledWith(windowsPath);
 });
+
+it('uses the file owner to choose an app after a default association disappears, without launching automatically', async () => {
+  transport.fetch.mockResolvedValueOnce(
+    Response.json({
+      local: true,
+      path: windowsPath,
+      canOpen: true,
+      canOpenWith: true,
+      canReveal: true,
+      defaultApplication: 'Editor',
+    }),
+  );
+  transport.fetch.mockResolvedValueOnce(Response.json({ error: 'default_application_unavailable' }, { status: 422 }));
+  transport.fetch.mockResolvedValueOnce(Response.json({ ok: true }));
+  await act(async () => root.render(<FileActions source={source} filename="report.md" appearance="classic" />));
+  const button = (text: string) =>
+    [...host.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent?.includes(text));
+  expect(transport.fetch).toHaveBeenCalledTimes(1);
+  await act(async () => button('Open with default application')!.click());
+  expect(transport.fetch).toHaveBeenCalledTimes(2);
+  expect(host.textContent).toContain('Windows has no default application for this file');
+  await act(async () => button('Choose an application')!.click());
+  expect(transport.fetch.mock.calls[2][0]).toBe(
+    '/api/workspace/file/actions/open-with?worktreeId=tree&path=docs%2Freport.md',
+  );
+});

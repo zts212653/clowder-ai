@@ -172,7 +172,7 @@ export function useWorkbenchBindings(
   const [fileTarget, setFileTarget] = useState<{ worktreeId: string; path: string } | null>(null);
   const [fileAttempt, reloadFile] = useState(0);
   // The file asked for could not be read: the file view says so in place (its data carries load 'error').
-  const [openFailed, setOpenFailed] = useState(false);
+  const [openFailed, setOpenFailed] = useState<'' | 'missing' | 'denied' | 'failed'>('');
   const openRequest = useRef(0);
   const fileEdits = useRef<Record<string, { content: string; original: string; baseSha256: string }>>({});
   const [, publishDrafts] = useState(0);
@@ -200,7 +200,7 @@ export function useWorkbenchBindings(
       ticket = ++openRequest.current,
       { worktreeId, path } = fileTarget;
     setOpened((current) => (current?.worktreeId === worktreeId && current.file.path === path ? current : null));
-    setOpenFailed(false);
+    setOpenFailed('');
     void request<FileData>(`/api/workspace/file?${new URLSearchParams({ worktreeId, path })}`, {
       signal: abort.signal,
     }).then(
@@ -210,10 +210,10 @@ export function useWorkbenchBindings(
         editing.setEditMode(!!fileEdits.current[JSON.stringify([worktreeId, file.path])]);
         editing.setSaveError(null);
       },
-      () => {
+      (error: Error & { status?: number }) => {
         if (abort.signal.aborted || ticket !== openRequest.current) return;
         setOpened(null);
-        setOpenFailed(true);
+        setOpenFailed(error.status === 404 ? 'missing' : error.status === 403 ? 'denied' : 'failed');
       },
     );
     return () => abort.abort();
@@ -234,7 +234,14 @@ export function useWorkbenchBindings(
     await write(path, { ...body, worktreeId: owner.worktreeId, editSessionToken: owner.token }, method);
     await workspace.fetchTree();
   };
-  const [fileInfo, setFileInfo] = useState<{ scope: string; load: string; info?: ContentFileInfo }>({
+  const fileActionPending = useRef(false);
+  const [fileInfo, setFileInfo] = useState<{
+    scope: string;
+    load: string;
+    info?: ContentFileInfo;
+    actionError?: 'missing' | 'denied' | 'failed';
+    busy?: boolean;
+  }>({
     scope: '',
     load: 'loading',
   });
@@ -592,12 +599,29 @@ export function useWorkbenchBindings(
         useChatStore.getState().setWorkspaceWorktreeId(args.v);
         return true;
       }
-      case 'fileAction':
-        await runContentFileAction(
-          { kind: 'workspace', worktreeId: args.worktreeId, path: args.path },
-          args.op as 'open' | 'reveal',
-        );
+      case 'fileAction': {
+        const op = args.op;
+        if ((op !== 'open' && op !== 'reveal' && op !== 'open-with') || fileActionPending.current) return false;
+        const scope = JSON.stringify([args.worktreeId, args.path]);
+        fileActionPending.current = true;
+        setFileInfo((file) => (file.scope === scope ? { ...file, busy: true, actionError: undefined } : file));
+        try {
+          await runContentFileAction({ kind: 'workspace', worktreeId: args.worktreeId, path: args.path }, op);
+        } catch (error) {
+          const code = error instanceof Error ? error.message : '';
+          setFileInfo((file) => {
+            if (file.scope !== scope) return file;
+            if (code === 'default_application_unavailable' && file.info?.canOpenWith)
+              return { ...file, info: { ...file.info, noDefaultApplication: true } };
+            const actionError = code === 'not_found' ? 'missing' : code === 'access_denied' ? 'denied' : 'failed';
+            return { ...file, actionError };
+          });
+        } finally {
+          fileActionPending.current = false;
+          setFileInfo((file) => (file.scope === scope ? { ...file, busy: false } : file));
+        }
         return true;
+      }
       case 'fileCreate':
         await changeFile(args.kind === 'dir' ? '/api/workspace/dir/create' : '/api/workspace/file/create', {
           path: args.path,

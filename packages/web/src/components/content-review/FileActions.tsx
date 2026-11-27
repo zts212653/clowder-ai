@@ -1,9 +1,10 @@
 'use client';
+import { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useWorkspaceSurfaceVisibility } from '@/components/workbench/WorkspaceSurfaceVisibility';
 import styles from './artwork-actions.module.css';
 import { FileActionMenu } from './FileActionMenu';
-import { downloadContentFile, runContentFileAction } from './file-action-client';
+import { downloadContentFile, type LocalFileAction, runContentFileAction } from './file-action-client';
 import type { FileActionsProps } from './file-actions-contract';
 import { ReviewToolbarIcon } from './ReviewToolbarIcon';
 import { useFileActionController } from './useFileActionController';
@@ -50,6 +51,17 @@ export function FileActions(props: FileActionsProps) {
     openMenu,
     closeMenu,
   } = useFileActionController({ ...props, visible });
+  const pending = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const fileAction = (action: LocalFileAction) => {
+    if (pending.current) return;
+    pending.current = true;
+    setBusy(true);
+    void perform(() => runContentFileAction(source, action)).finally(() => {
+      pending.current = false;
+      setBusy(false);
+    });
+  };
   if (!visible || !link) return null;
   if (appearance === 'copy')
     return (
@@ -93,12 +105,24 @@ export function FileActions(props: FileActionsProps) {
           {info?.local && info.canReveal !== false && (
             <button
               type="button"
-              onClick={() => void perform(() => runContentFileAction(source, 'reveal'))}
-              title={t.reveal}
+              onClick={() => fileAction('reveal')}
+              title={info.desktopPlatform === 'win32' ? t.revealWindows : t.reveal}
             >
-              {t.reveal}
+              {info.desktopPlatform === 'win32' ? t.revealWindows : t.reveal}
             </button>
           )}
+        </>
+      ) : null}
+      {appearance === 'classic' && info?.local && info.canOpenWith ? (
+        <>
+          {info.noDefaultApplication && notice !== 'noDefaultApplication' && <output>{t.noDefaultApplication}</output>}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => fileAction(info.noDefaultApplication ? 'open-with' : 'open')}
+          >
+            {info.noDefaultApplication ? t.openWith : [t.open, info.defaultApplication].filter(Boolean).join(' · ')}
+          </button>
         </>
       ) : null}
       {showDownload ? (
@@ -157,7 +181,7 @@ export function FileActions(props: FileActionsProps) {
           close={closeMenu}
           copyLocation={copyLocation}
           copyPixels={copyPixels}
-          fileAction={(action) => void perform(() => runContentFileAction(source, action))}
+          fileAction={fileAction}
           canCopyContent={canCopyContent}
           copyContent={copyContent}
           copyName={

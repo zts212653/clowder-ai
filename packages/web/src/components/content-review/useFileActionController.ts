@@ -14,7 +14,16 @@ import {
 import type { FileActionsProps } from './file-actions-contract';
 import { useFileMenuHover } from './useFileMenuHover';
 
-type FileNotice = 'failed' | 'copiedFrame' | 'copiedImage' | 'copiedPath' | 'copiedLink' | 'copiedContent';
+type FileNotice =
+  | 'noDefaultApplication'
+  | 'fileMissing'
+  | 'fileDenied'
+  | 'failed'
+  | 'copiedFrame'
+  | 'copiedImage'
+  | 'copiedPath'
+  | 'copiedLink'
+  | 'copiedContent';
 
 /** File operation state and lifetime; every entry renders these same operations. */
 export function useFileActionController({
@@ -96,8 +105,15 @@ export function useFileActionController({
     try {
       const result = await action();
       if (scope === generation.current && (message || result)) feedback(message ?? result!);
-    } catch {
-      if (scope === generation.current) feedback('failed');
+    } catch (error) {
+      if (scope !== generation.current) return;
+      if (error instanceof Error && error.message === 'default_application_unavailable') {
+        setInfo((file) => (file?.canOpenWith ? { ...file, noDefaultApplication: true } : file));
+        feedback('noDefaultApplication');
+      } else {
+        const code = error instanceof Error ? error.message : '';
+        feedback(code === 'not_found' ? 'fileMissing' : code === 'access_denied' ? 'fileDenied' : 'failed');
+      }
     }
   };
   const copyPixels = () =>

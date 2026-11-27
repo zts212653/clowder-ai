@@ -31,7 +31,7 @@ test('an unregistered absolute artifact offers its exact current directory witho
     process.env.CAT_CAFE_DATA_DIR = join(temp, 'state');
     process.env.CAT_CAFE_WORKSPACE_ROOT = host;
     delete process.env.WORKSPACE_LINKED_ROOTS;
-    const filePath = join(fileDirectory, 'notes.txt');
+    const filePath = join(fileDirectory, 'notes %20.txt');
     await writeFile(filePath, 'absolute native source without recorded project root');
     await app.register(workspaceRoutes, { auditLog: new EventAuditLog({ auditDir: join(temp, 'audit') }) });
     const response = await app.inject({
@@ -46,7 +46,7 @@ test('an unregistered absolute artifact offers its exact current directory witho
     assert.equal(response.statusCode, 200, `known absolute file remains unusable: ${response.body}`);
     assert.equal(response.json().kind, 'connection-required');
     assert.equal(response.json().root, await realpath(fileDirectory));
-    assert.equal(response.json().path, 'notes.txt');
+    assert.equal(response.json().path, 'notes %20.txt');
     assert.equal(response.json().admission, 'absolute-file-directory');
     const headers = { 'x-cat-cafe-user': 'operator' };
     const operation = {
@@ -69,6 +69,17 @@ test('an unregistered absolute artifact offers its exact current directory witho
     const landing = await open();
     assert.equal(landing.statusCode, 200, landing.body);
     assert.equal(landing.json().kind, 'file');
+    if (process.platform === 'win32') {
+      const markdownDrive = '/' + filePath.replaceAll('\\', '/');
+      const linked = await app.inject({
+        method: 'POST',
+        url: '/api/workspace/resolve-file-source',
+        headers,
+        payload: { path: markdownDrive },
+      });
+      assert.equal(linked.statusCode, 200, linked.body);
+      assert.deepEqual(linked.json(), landing.json(), 'normalization preserves a literal percent escape');
+    }
     await app.close();
     const restarted = join(temp, 'restarted');
     await mkdir(restarted);
