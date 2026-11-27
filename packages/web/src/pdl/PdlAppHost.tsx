@@ -227,10 +227,9 @@ async function downloadImages(urls: readonly string[], blocks: readonly MessageC
   );
 }
 
-/** Keep newly picked files visible as saved draft attachments finish loading. */
+/** Fill remaining slots without removing already saved draft attachments. */
 export function fitRestoredComposerAttachments(restored: File[], added: File[]) {
-  const keptAdded = added.slice(0, 5);
-  const files = [...restored.slice(0, 5 - keptAdded.length), ...keptAdded];
+  const files = [...restored, ...added].slice(0, 5);
   return { files, omitted: restored.length + added.length - files.length };
 }
 
@@ -636,7 +635,7 @@ function ChatBinding({
         useToastStore.getState().addToast({
           type: 'info',
           title: '输入框最多保留 5 个附件',
-          message: `已优先保留新选附件，本次有 ${fitted.omitted} 个附件未加入。`,
+          message: `已保存的草稿附件已保留，${fitted.omitted} 个新选附件因上限未加入。`,
           duration: 6000,
         });
       }
@@ -950,6 +949,7 @@ function ChatBinding({
       ui.current.homeTitle = '';
       ui.current.homePin = false;
     }
+    if (sent !== 'default') serverDraft.current?.clear(sent);
     if (current.current.threadId === sent) {
       setInput('');
       setImages([]);
@@ -958,7 +958,6 @@ function ChatBinding({
       return;
     }
     syncDraftToStorage(sent, '');
-    serverDraft.current!.clear(sent);
     threadImageDrafts.delete(sent);
     syncContextAttachmentDraftToStorage(sent, []);
     syncReplyDraftToStorage(sent, null);

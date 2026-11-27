@@ -466,14 +466,11 @@ it('marks the departing conversation using its own draft when switching A to B t
   }
 });
 
-it('keeps a file picked during slow restore when five saved attachments finish loading', () => {
+it('keeps all five saved attachments and explains why a new local file did not fit', () => {
   const restored = Array.from({ length: 5 }, (_, index) => new File(['old'], `restored-${index}.png`));
   const picked = new File(['new'], 'new-picked.png');
   const result = fitRestoredComposerAttachments(restored, [picked]);
-  expect(result.files.map((file) => file.name)).toEqual([
-    ...restored.slice(0, 4).map((file) => file.name),
-    picked.name,
-  ]);
-  expect(result.files.at(-1)).toBe(picked);
+  expect(result.files.map((file) => file.name)).toEqual(restored.map((file) => file.name));
   expect(result.omitted).toBe(1);
+  expect(fitRestoredComposerAttachments(restored.slice(0, 4), [picked]).files.at(-1)).toBe(picked);
 });

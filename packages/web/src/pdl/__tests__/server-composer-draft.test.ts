@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import type { ContextAttachment } from '@cat-cafe/shared';
+import { ScriptTarget, transpileModule } from 'typescript';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/utils/api-client';
 import { type ComposerDraft, useServerComposerDraft } from '../useServerComposerDraft';
@@ -744,4 +746,100 @@ it('keeps only new edits when another device cleared a draft during an interrupt
     contentBlocks: [{ type: 'context_attachment', attachment: quote }],
   });
   download.resolve();
+});
+
+it('cancels slow restoration when the current conversation sends, keeping the next draft clean', async () => {
+  const files = Promise.withResolvers<void>();
+  vi.mocked(apiFetch).mockImplementation(async (_path, init) => {
+    if (init?.method === 'DELETE') return Response.json({ draft: null, revision: 2 });
+    if (init?.method === 'PUT') return Response.json({ draft: { revision: 3 } });
+    return Response.json({ draft: { text: 'sent', contentBlocks: [fileA] }, revision: 1 });
+  });
+  const { hook, restore, state } = mount({ text: '', images: [], contexts: [] });
+  restore.mockImplementation((saved, current?: () => boolean) => {
+    state.draft = { ...saved, images: [] };
+    hook.rerender();
+    return files.promise.then(() => {
+      if (current?.()) {
+        state.draft = { ...state.draft, images: saved.images };
+        hook.rerender();
+      }
+    });
+  });
+  await waitFor(() => expect(state.draft.text).toBe('sent'));
+
+  const source = readFileSync('src/pdl/PdlAppHost.tsx', 'utf8');
+  const callback = source.split('  const clearSentDraft = ')[1]!.split('\n  const playback =')[0]!;
+  const invoke = new Function(
+    'current',
+    'serverDraft',
+    'setInput',
+    'setImages',
+    'setContexts',
+    'useChatStore',
+    transpileModule(`const clearSentDraft = ${callback}\nclearSentDraft('t1');`, {
+      compilerOptions: { target: ScriptTarget.ES2022 },
+    }).outputText,
+  );
+  invoke(
+    { current: { threadId: 't1' } },
+    hook.result,
+    (text: string) => {
+      state.draft = { ...state.draft, text };
+    },
+    (images: ComposerDraft['images']) => {
+      state.draft = { ...state.draft, images };
+    },
+    (contexts: ComposerDraft['contexts']) => {
+      state.draft = { ...state.draft, contexts };
+    },
+    { getState: () => ({ clearReplyTo: vi.fn() }) },
+  );
+  state.draft = { ...state.draft, text: 'next message' };
+  hook.rerender();
+  files.resolve();
+  await waitFor(() => expect(writes().some(([method]) => method === 'PUT')).toBe(true));
+  expect(state.draft).toEqual({ text: 'next message', images: [], contexts: [] });
+  expect(writes().map(([method]) => method)).toEqual(['DELETE', 'PUT']);
+  expect(JSON.parse(String(writes()[1][2]))).toEqual({ expectedRevision: 2, text: 'next message' });
+});
+
+it('keeps a failed departure write when the conversation reopens against the older saved draft', async () => {
+  const firstRestore = Promise.withResolvers<void>();
+  let attempts = 0;
+  vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+    if (!String(path).includes('/t1/')) return Response.json({ draft: null, revision: 0 });
+    if (init?.method === 'PUT') {
+      return ++attempts === 1
+        ? Response.json({ error: 'temporarily unavailable' }, { status: 503 })
+        : Response.json({ draft: { revision: 2 } });
+    }
+    return Response.json({ draft: { text: 'old words', contentBlocks: [fileA] }, revision: 1 });
+  });
+
+  const empty = { text: '', images: [], contexts: [] };
+  const { hook, restore, state } = mount(empty);
+  let restores = 0;
+  restore.mockImplementation((saved) => {
+    state.draft = ++restores === 1 ? { ...saved, images: [] } : saved;
+    hook.rerender();
+    return restores === 1 ? firstRestore.promise : undefined;
+  });
+  await waitFor(() => expect(state.draft.text).toBe('old words'));
+  state.draft = { ...state.draft, text: 'keep my new work' };
+  hook.rerender();
+  await flushed();
+
+  state.threadId = 't2';
+  state.draft = empty;
+  hook.rerender();
+  await waitFor(() => expect(attempts).toBe(1));
+  state.threadId = 't1';
+  state.draft = { ...empty, text: 'keep my new work' };
+  hook.rerender();
+  await waitFor(() => expect(state.draft.images).toEqual([fileA]));
+  expect(state.draft.text).toBe('keep my new work');
+  await waitFor(() => expect(attempts).toBe(2));
+  expect(writes().map(([, , body]) => JSON.parse(String(body)).text)).toEqual(['keep my new work', 'keep my new work']);
+  firstRestore.resolve();
 });
