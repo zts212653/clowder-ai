@@ -527,12 +527,12 @@ export function useWorkbenchBindings(
       case 'fileOpenPath': {
         // A full path outside the registered workspaces: the host resolves its folder as a file location and the file
         // opens there without changing the conversation's workspace. A folder that must be connected first is reported.
-        const result = await write<{ kind: string; worktreeId?: string; path?: string }>(
+        const result = await write<{ kind: string; root?: string; worktreeId?: string; path?: string }>(
           '/api/workspace/resolve-file-source',
           { path: args.p },
         );
-        if (result.kind !== 'file' || !result.worktreeId || !result.path)
-          return { code: result.kind === 'connection-required' ? 'connection_required' : result.kind };
+        if (result.kind === 'connection-required') return { code: 'connection_required', root: result.root };
+        if (result.kind !== 'file' || !result.worktreeId || !result.path) return { code: result.kind };
         setFileTarget({ worktreeId: result.worktreeId, path: result.path });
         return { w: result.worktreeId, p: result.path };
       }

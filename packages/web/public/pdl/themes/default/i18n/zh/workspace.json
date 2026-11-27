@@ -65,6 +65,7 @@
       "actionFailed": "系统暂时无法完成文件操作。",
       "noDefaultApplication": "Windows 没有为此文件设置默认应用。",
       "needsConnection": "需要先连接文件所在的目录才能打开",
+      "newProjectFolderSteps": "在「新对话」底部点文件夹图标，选择「浏览文件夹」，并选中下方目录。进入对话后，在「项目文件」里打开该文件。",
       "unreadable": "这个文件暂时打不开",
       "noPreview": "这种文件不能在这里预览",
       "openLocal": "用默认应用打开",

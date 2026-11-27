@@ -17629,10 +17629,60 @@ pdl:
                         sub: "@path"
                         selected: "@selected"
                 when:
-                  of: $.kind
-                  map:
-                    projPick: true
-                    _: false
+                  - of: $.kind
+                    map:
+                      projPick: true
+                      _: false
+                  - "!$.browse"
+              - type: search
+                form: cafePathGo
+                id: pp-path
+                placeholder: t:composerPop.pathPlaceholder
+                value: $.browse.root
+                input: cafePathComplete
+                when: $.browse
+              - type: opts
+                from: $.browse.completions
+                item:
+                  title: "@name"
+                  sub: "@path"
+                  act: cafePathPick
+                  args:
+                    path: "@path"
+                  stay: true
+                when: $.browse
+              - type: tree
+                id: ppTree
+                nodes: $.browse.nodes
+                item:
+                  cur: "@selected"
+                  slot: pick.folder
+                  actsCtx:
+                    path: "@path"
+                    src: "@source"
+                row: file.row
+                select:
+                  act: set
+                  args:
+                    path: cs.ppPick
+                    v: "@path"
+                    p: "@path"
+                stay: true
+                when: $.browse
+              - type: component
+                use: v2Action
+                props:
+                  label: t:composerPop.useFolder
+                  act: cafeUseFolder
+                  primary: true
+                  disabled: $.browse.noPick
+                  tip:
+                    of: $.browse.restriction
+                    map:
+                      runtime_read_only: t:composerPop.restriction.runtime_read_only
+                      configuration_unknown: t:composerPop.restriction.configuration_unknown
+                      _: ""
+                when: $.browse
               - type: component
                 use: v2StatusText
                 props:

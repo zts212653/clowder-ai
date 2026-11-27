@@ -44,6 +44,7 @@
    "noDefaultApplication": "Windows has no default application for this file.",
    "openLocal": "Open with default application",
    "needsConnection": "Connect the file's folder first to open it",
+   "newProjectFolderSteps": "In New conversation, open the folder picker at the bottom, choose Browse folders, and select the folder below. Once in the conversation, open the file from Project files.",
    "unreadable": "This file cannot be opened right now",
    "collabEdit": "Collaborative edit"
   },
