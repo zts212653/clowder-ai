@@ -1,6 +1,9 @@
 import { addAbortListener } from 'node:events';
 import type { AgentAdapterNativeRuntime } from '@clowder-ai/agent-contract';
+import { createModuleLogger } from '../../../infrastructure/logger.js';
 import { type AcpClient, AcpProtocolError } from '../../cats/services/agents/providers/acp/AcpClient.js';
+
+const log = createModuleLogger('plugin/agent-adapter-acp');
 
 type AcpRuntime = NonNullable<AgentAdapterNativeRuntime['acp']>;
 type NativeClient = Pick<
@@ -10,6 +13,8 @@ type NativeClient = Pick<
   | 'promptStream'
   | 'hasPromptFinalResponse'
   | 'isSafeForSingleFlightReuse'
+  | 'agentCapabilities'
+  | 'pid'
   | 'cancelSession'
   | 'closeSession'
   | 'close'
@@ -82,8 +87,15 @@ export function createAgentAdapterAcpRuntime(
         let session = sessions.get(hostSessionId);
         if (session && !session.client.isSafeForSingleFlightReuse) {
           // ACP updates carry only the session ID. A cancelled prompt can still emit on this client.
-          const { startup, nativeId } = session;
-          await release(hostSessionId);
+          const { client, startup, nativeId } = session;
+          if (client.agentCapabilities?.sessionCapabilities?.close) {
+            await client.closeSession(nativeId);
+            sessions.delete(hostSessionId);
+            // The native close was acknowledged. Its disconnected process can finish exiting independently.
+            void client.close().catch((err) => log.warn({ err, pid: client.pid }, 'ACP process exit not confirmed'));
+          } else {
+            await release(hostSessionId);
+          }
           await open({ hostSessionId, startup, resumeNativeSessionId: nativeId }, scope);
           session = sessions.get(hostSessionId);
         }
