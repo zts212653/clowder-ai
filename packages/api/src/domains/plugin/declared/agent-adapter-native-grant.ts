@@ -8,6 +8,7 @@ import { isCliPlainTextResult, spawnCli } from '../../../utils/cli-spawn.js';
 import type { AgentAdapterRuntimeGrant } from './agent-adapter-access.js';
 import { grantAgentAdapterClaudePrint } from './agent-adapter-claude-native-grant.js';
 import { grantAgentAdapterCodexExec } from './agent-adapter-codex-native-grant.js';
+import { grantAgentAdapterKimiPrint } from './agent-adapter-kimi-native-grant.js';
 import { matchesOfficialAgentCatalog, officialNativeClients } from './agent-adapter-official-clients.js';
 
 export const grantAgentAdapterNativeRuntime: AgentAdapterRuntimeGrant = (request) => {
@@ -23,6 +24,8 @@ export const grantAgentAdapterNativeRuntime: AgentAdapterRuntimeGrant = (request
     return grantAgentAdapterCodexExec(request);
   if (grant.command === 'claude' && ['openSession', 'startTurn', 'release'].includes(request.action))
     return grantAgentAdapterClaudePrint(request);
+  if (grant.command === 'kimi' && ['openSession', 'startTurn', 'release'].includes(request.action))
+    return grantAgentAdapterKimiPrint(request);
 
   if (request.action === 'quota' && request.account && grant.terminalCommand) {
     const { account } = request;
