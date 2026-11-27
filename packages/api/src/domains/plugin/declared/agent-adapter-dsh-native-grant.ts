@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { AgentAdapterNativeRuntime } from '@clowder-ai/agent-contract';
 import { resolveInvokeCapabilityRoot } from '../../../config/capabilities/invoke-capability-root.js';
 import { DSH_CHECK_GUARD, readDshCheckBinding } from '../../../routes/dsh-check-launch.js';
+import { DSH_DESKTOP_RUNTIME } from '../../../routes/dsh-desktop-runtime.js';
 import { dshDesktopL0Compatibility, resolveDshDesktopLaunch } from '../../../utils/dsh-desktop-launch.js';
 import { AcpClient } from '../../cats/services/agents/providers/acp/AcpClient.js';
 import { resolveAcpBootstrapCwd } from '../../cats/services/agents/providers/acp/acp-bootstrap-cwd.js';
@@ -32,8 +33,8 @@ async function createDesktopClient(
   const { config, environment, projectRoot } = launch.saved;
   const args = config.startupArgs;
   const desktop = resolveDshDesktopLaunch(config.command, []);
-  if (!desktop || !dshDesktopL0Compatibility(config.command, args)?.supported)
-    throw new Error('DSH Desktop version or launch is unsupported');
+  const compatibility = dshDesktopL0Compatibility(config.command, args);
+  if (!desktop || !compatibility?.supported) throw new Error('DSH Desktop version or launch is unsupported');
 
   const home = environment?.DSH_HOME;
   const patch = args[3];
@@ -77,12 +78,22 @@ async function createDesktopClient(
   const token = randomUUID();
   const guard = join(bootstrap, 'dsh-tools-' + token + '.mjs');
   const startupPath = join(bootstrap, 'dsh-identity-' + token + '.patch.json');
+  const credentials =
+    compatibility.desktopVersion === '0.2.3-alpha.2' ? join(bootstrap, 'dsh-credentials-' + token + '.mjs') : undefined;
+  // Alpha.2 exposes the same root context under Cordis's public symbol. Keep the saved bridge unchanged.
+  const credentialBody = credentials
+    ? DSH_DESKTOP_RUNTIME.replace(
+        "ctx.root.set('launchEnvironment', snapshot);",
+        "const { Context } = await import(pathToFileURL(join(config.nativeScope, 'cordis/lib/index.js')).href);\n  ctx[Context.root].set('launchEnvironment', snapshot);",
+      )
+    : undefined;
   const content = JSON.stringify([
-    ...binding.patch.map((row) =>
-      'id' in row && row.id === 'acp'
-        ? { ...row, inject: [...new Set([...(row.inject ?? []), 'clowderConnectionCheckReady'])] }
-        : row,
-    ),
+    ...binding.patch.map((row) => {
+      if (credentials && 'insert' in row) return { insert: [{ ...bridge, name: pathToFileURL(credentials).href }] };
+      if ('id' in row && row.id === 'acp')
+        return { ...row, inject: [...new Set([...(row.inject ?? []), 'clowderConnectionCheckReady'])] };
+      return row;
+    }),
     {
       insert: [
         { id: 'clowder-dsh-tool-guard', name: pathToFileURL(guard).href },
@@ -93,6 +104,7 @@ async function createDesktopClient(
   let client: AcpClient | undefined;
   try {
     await writeFile(guard, DSH_CHECK_GUARD, { flag: 'wx', mode: 0o600 });
+    if (credentials && credentialBody) await writeFile(credentials, credentialBody, { flag: 'wx', mode: 0o600 });
     await writeFile(startupPath, content, { flag: 'wx', mode: 0o600 });
     const env = Object.fromEntries(
       ['SystemRoot', 'WINDIR', 'ComSpec', 'PATH', 'PATHEXT', 'SystemDrive', 'OS', 'ProgramFiles']
@@ -122,7 +134,11 @@ async function createDesktopClient(
         if (boot() !== bootstrap) throw new Error('DSH ACP bootstrap directory changed');
       },
     });
-    if ((await readFile(startupPath, 'utf8')) !== content || (await readFile(guard, 'utf8')) !== DSH_CHECK_GUARD)
+    if (
+      (await readFile(startupPath, 'utf8')) !== content ||
+      (await readFile(guard, 'utf8')) !== DSH_CHECK_GUARD ||
+      (credentials && (await readFile(credentials, 'utf8')) !== credentialBody)
+    )
       throw new Error('DSH ACP startup content changed');
     signal.throwIfAborted();
     await client.initialize();
@@ -132,7 +148,7 @@ async function createDesktopClient(
     await client?.close().catch(() => {});
     throw error;
   } finally {
-    await Promise.allSettled([unlink(startupPath), unlink(guard)]);
+    await Promise.allSettled([unlink(startupPath), unlink(guard), ...(credentials ? [unlink(credentials)] : [])]);
   }
 }
 
