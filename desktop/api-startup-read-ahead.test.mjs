@@ -112,43 +112,33 @@ test('a junction cannot redirect a program hint into an external HOME', () =>
     }
   }));
 
-test('two readers and a time budget bound speculative I/O, with no new reads after expiry', { timeout: 10_000 }, (t) =>
+test('two readers and a time budget bound speculative I/O, with no new reads after expiry', () =>
   fixture(async (f) => {
     f.record.files = Array.from({ length: 8 }, (_, i) => ({ relative: `node_modules/witness/dep${i}.js`, bytes: 1 }));
     for (const file of f.record.files) await fs.writeFile(path.join(f.root, file.relative), '1');
     await fs.writeFile(f.manifest, JSON.stringify(f.record));
-    t.mock.timers.enable({ apis: ['setTimeout'] });
-    const readersStarted = Promise.withResolvers();
-    const releaseReaders = Promise.withResolvers();
-    const readersFinished = Promise.withResolvers();
-    let active = 0;
-    let attempts = 0;
+    let active = 0,
+      peak = 0,
+      calls = 0;
     const io = {
       ...fs,
-      realpath: (file) => {
-        if (path.basename(file).startsWith('dep')) attempts++;
-        return fs.realpath(file);
-      },
       readFile: async (file, options) => {
-        if (!path.basename(file).startsWith('dep')) return fs.readFile(file, options);
+        if (!String(file).includes('/dep') && !String(file).includes('\\dep')) return fs.readFile(file, options);
+        calls++;
         active++;
-        if (active === 2) readersStarted.resolve();
-        await releaseReaders.promise;
-        if (--active === 0) readersFinished.resolve();
-        return Buffer.from('1');
+        peak = Math.max(peak, active);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 90));
+          return await fs.readFile(file, options);
+        } finally {
+          active--;
+        }
       },
     };
-    const pending = readAheadApi(f.entry, { io, budgetMs: 40 });
-    try {
-      const started = await Promise.race([readersStarted.promise.then(() => true), pending.then(() => false)]);
-      assert.equal(started, true, 'two reads should start before the budget expires');
-      t.mock.timers.tick(40);
-      assert.equal((await pending).status, 'budget');
-    } finally {
-      releaseReaders.resolve();
-    }
-    await readersFinished.promise;
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(attempts, 2);
-  }),
-);
+    const result = await readAheadApi(f.entry, { io, budgetMs: 40 });
+    assert.equal(result.status, 'budget');
+    assert.equal(peak, 2);
+    const callsAtExpiry = calls;
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    assert.equal(calls, callsAtExpiry);
+  }));
