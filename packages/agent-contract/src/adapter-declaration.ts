@@ -39,16 +39,20 @@ function capability<T extends z.ZodType>(data: T) {
   ]);
 }
 
+const notReported = { status: 'unknown', reason: 'not_reported' } as const;
+
 const descriptionSchema = z.strictObject({
   protocolVersion: z.literal(1),
   label: z.string().trim().min(1).max(120),
   capabilities: z.strictObject({
     resume: capability(z.strictObject({ mode: z.literal('native') })),
     tools: capability(z.strictObject({ approval: z.enum(['host', 'client', 'none']) })),
-    login: capability(z.strictObject({ mode: z.enum(['native', 'browser', 'device-code']) })),
-    input: capability(z.strictObject({ duringTurn: z.literal(true) })),
-    inspectInput: capability(z.strictObject({ deliveryReceipt: z.literal(true) })),
-    compact: capability(z.strictObject({ mode: z.literal('native'), observesResult: z.boolean() })),
+    login: capability(z.strictObject({ mode: z.enum(['native', 'browser', 'device-code']) })).default(notReported),
+    input: capability(z.strictObject({ duringTurn: z.literal(true) })).default(notReported),
+    inspectInput: capability(z.strictObject({ deliveryReceipt: z.literal(true) })).default(notReported),
+    compact: capability(z.strictObject({ mode: z.literal('native'), observesResult: z.boolean() })).default(
+      notReported,
+    ),
     modelCatalog: capability(z.strictObject({ source: z.literal('client') })),
     quota: capability(
       z.strictObject({
@@ -67,4 +71,28 @@ export type AgentAdapterDescription = z.infer<typeof descriptionSchema>;
 
 export function parseAgentAdapterDescription(input: unknown) {
   return descriptionSchema.safeParse(input);
+}
+
+const detectionSchema = z.strictObject({
+  candidates: z
+    .array(
+      z.strictObject({
+        id: z.string().trim().min(1).max(128),
+        label: z.string().trim().min(1).max(120),
+        state: z.discriminatedUnion('status', [
+          z.strictObject({ status: z.literal('ready'), version: z.string().min(1).max(120).optional() }),
+          z.strictObject({ status: z.literal('not-installed') }),
+          z.strictObject({ status: z.literal('login-required') }),
+          z.strictObject({ status: z.literal('unavailable'), reason: z.string().trim().min(1).max(256) }),
+        ]),
+      }),
+    )
+    .max(100)
+    .refine((candidates) => new Set(candidates.map((candidate) => candidate.id)).size === candidates.length),
+});
+
+export type AgentAdapterDetection = z.infer<typeof detectionSchema>;
+
+export function parseAgentAdapterDetection(input: unknown) {
+  return detectionSchema.safeParse(input);
 }

@@ -68,7 +68,12 @@ import {
 import { readPackageAgentAdapterDeclaration } from '../../read-package-capabilities.js';
 import type { BundledPluginRuntime } from './bundled-runtime-carrier.js';
 import { snapshotModuleAuthority } from './module-authority-snapshot.js';
-import { createModuleHostInvocation, exposesModuleAction, projectOwnerHttpContext } from './module-host-invocation.js';
+import {
+  createModuleHostInvocation,
+  exposesModuleAction,
+  type ModuleActionControl,
+  projectOwnerHttpContext,
+} from './module-host-invocation.js';
 import {
   assertModuleSettingsDeclaration,
   createModuleSettingsHost,
@@ -777,13 +782,18 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
     });
   };
 
-  invoke(pluginInstanceId: string, method: string, params: unknown): Promise<unknown> {
-    return this.attemptInvoke(pluginInstanceId, method, params).then(settlePluginInvocation);
+  invoke(pluginInstanceId: string, method: string, params: unknown, control?: ModuleActionControl): Promise<unknown> {
+    return this.attemptInvoke(pluginInstanceId, method, params, control).then(settlePluginInvocation);
   }
 
   /** Invoke, also saying whether the module's action was entered when it fails (F202 W2-3 h3b). */
-  attemptInvoke(pluginInstanceId: string, method: string, params: unknown): Promise<PluginInvocationOutcome> {
-    return createModuleHostInvocation({ runtime: this }).attempt(pluginInstanceId, method, params);
+  attemptInvoke(
+    pluginInstanceId: string,
+    method: string,
+    params: unknown,
+    control?: ModuleActionControl,
+  ): Promise<PluginInvocationOutcome> {
+    return createModuleHostInvocation({ runtime: this }).attempt(pluginInstanceId, method, params, control);
   }
 
   exposesAction(pluginInstanceId: string, method: string): boolean {

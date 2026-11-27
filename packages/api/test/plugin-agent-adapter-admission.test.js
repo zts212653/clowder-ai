@@ -54,6 +54,7 @@ async function setup(t) {
     actionNames = operations,
     description = describe(version),
     hangingDescribe = false,
+    detection = { candidates: [] },
     extraDeclarations = {},
   }) {
     const manifest = {
@@ -66,11 +67,27 @@ async function setup(t) {
     };
     assert.deepEqual(validateManifest(manifest).errors ?? [], []);
     const entrypoint = [
+      'let observedAbort = false;',
       'export default { create: () => ({ start: () => ({',
       'actions: Object.fromEntries(' +
         JSON.stringify(actionNames) +
-        ".map(name => [name, () => name === 'describe' ? " +
-        (hangingDescribe ? 'new Promise(() => {})' : JSON.stringify(description)) +
+        ".map(name => [name, (input, control) => name === 'describe' ? " +
+        (hangingDescribe
+          ? `new Promise((_, reject) => {
+              if (Object.keys(input).length !== 0 || !control?.signal) {
+                reject(new Error('Missing separate adapter call context'));
+                return;
+              }
+              control.signal.addEventListener('abort', () => {
+                observedAbort = true;
+                reject(control.signal.reason);
+              }, { once: true });
+            })`
+          : JSON.stringify(description)) +
+        " : name === 'detect' ? " +
+        "(observedAbort ? { candidates: [{id: 'aborted', label: 'Aborted', state: {status: 'unavailable', reason: 'metadata_cancelled'}}] } : " +
+        JSON.stringify(detection) +
+        ') ' +
         ' : ({name})])),',
       'stop() {}',
       '}) }) };',
@@ -212,7 +229,7 @@ test('the Host rejects malformed or undeclared capability data from a real insta
   }
 });
 
-test('description stops waiting on an unresponsive installed module and other packages remain usable', async (t) => {
+test('description sends cooperative abort to an installed Worker and other packages remain usable', async (t) => {
   const { manager, runtime, install } = await setup(t);
   for (const [id, hangingDescribe] of [
     ['slow', true],
@@ -230,6 +247,16 @@ test('description stops waiting on an unresponsive installed module and other pa
     }),
     { name: 'TimeoutError' },
   );
+  const slowRef = { pluginId: 'local.slow-adapter', contributionId: 'slow' };
+  let cancellationObserved;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if ((await runtime.agentAdapters.detect(slowRef)).candidates[0]?.id === 'aborted') {
+      cancellationObserved = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.ok(cancellationObserved, 'Worker did not observe the describe AbortSignal');
   assert.deepEqual(
     await runtime.agentAdapters.describe({
       pluginId: 'local.ready-adapter',
@@ -239,7 +266,7 @@ test('description stops waiting on an unresponsive installed module and other pa
   );
 });
 
-test('legacy Agent Access and ACP declarations install without the new adapter declaration', async (t) => {
+test('legacy Agent Access and ACP declarations activate without the new adapter declaration', async (t) => {
   const { manager, runtime, install } = await setup(t);
   for (const [pluginId, extraDeclarations] of [
     [
@@ -270,7 +297,47 @@ test('legacy Agent Access and ACP declarations install without the new adapter d
     ],
   ]) {
     await install({ pluginId, extraDeclarations });
-    assert.equal((await manager.get(pluginId)).plugin.artifact, 'installed');
+    const { plugin } = await manager.get(pluginId);
+    assert.equal(plugin.artifact, 'installed');
+    await manager.setEnabled(pluginId, { enabled: true, expectedRevision: plugin.lifecycleRevision });
+    assert.equal((await manager.get(pluginId)).plugin.live, 'running');
   }
   assert.deepEqual(await runtime.agentAdapters.list(), []);
+});
+
+test('active adapter detection returns Host attribution and refuses a package-supplied startup command', async (t) => {
+  const { manager, runtime, install } = await setup(t);
+  const pluginId = 'local.detection-adapter';
+  const contributionId = 'detection';
+  const ref = { pluginId, contributionId };
+  const candidate = { id: 'configured', label: 'Fixture client', state: { status: 'ready', version: '1.0' } };
+  await install({ pluginId, declaration: declaration(contributionId), detection: { candidates: [candidate] } });
+  const { plugin } = await manager.get(pluginId);
+  await manager.setEnabled(pluginId, { enabled: true, expectedRevision: plugin.lifecycleRevision });
+  const [binding] = await runtime.agentAdapters.list();
+  assert.deepEqual(await runtime.agentAdapters.detect(ref, { refresh: true }), {
+    candidates: [candidate],
+    binding,
+  });
+  await install({
+    pluginId,
+    version: '1.1.0',
+    declaration: declaration(contributionId),
+    detection: { candidates: [{ ...candidate, command: 'arbitrary-process' }] },
+  });
+  await assert.rejects(runtime.agentAdapters.detect(ref), { code: 'PROTOCOL_VIOLATION' });
+});
+
+test('existing v1 description without the new capability fields remains readable', async (t) => {
+  const { manager, runtime, install } = await setup(t);
+  const pluginId = 'local.v1-adapter';
+  const v1 = describe('1.0.0');
+  const operationsOmitted = ['login', 'input', 'inspectInput', 'compact'];
+  for (const op of operationsOmitted) delete v1.capabilities[op];
+  await install({ pluginId, declaration: declaration('old'), description: v1 });
+  const { plugin } = await manager.get(pluginId);
+  await manager.setEnabled(pluginId, { enabled: true, expectedRevision: plugin.lifecycleRevision });
+  const result = await runtime.agentAdapters.describe({ pluginId, contributionId: 'old' });
+  for (const op of operationsOmitted)
+    assert.deepEqual(result.capabilities[op], { status: 'unknown', reason: 'not_reported' });
 });

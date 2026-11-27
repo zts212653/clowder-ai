@@ -47,8 +47,17 @@ export interface ModuleHostInvocationDeps {
   };
 }
 
+export interface ModuleActionControl {
+  readonly signal: AbortSignal;
+}
+
 export interface ModuleHostInvocation extends Pick<HostPluginInvocationPort, 'invoke'> {
-  attempt(targetId: string, method: string, params: unknown): Promise<PluginInvocationOutcome>;
+  attempt(
+    targetId: string,
+    method: string,
+    params: unknown,
+    control?: ModuleActionControl,
+  ): Promise<PluginInvocationOutcome>;
 }
 
 /**
@@ -103,7 +112,12 @@ export function projectOwnerHttpContext(instanceId: string) {
 }
 
 export function createModuleHostInvocation(deps: ModuleHostInvocationDeps): ModuleHostInvocation {
-  const attempt = async (targetId: string, method: string, params: unknown): Promise<PluginInvocationOutcome> => {
+  const attempt = async (
+    targetId: string,
+    method: string,
+    params: unknown,
+    control?: ModuleActionControl,
+  ): Promise<PluginInvocationOutcome> => {
     const actions = deps.runtime.actions(targetId);
     if (!actions) {
       return invocationNotStarted(
@@ -118,7 +132,8 @@ export function createModuleHostInvocation(deps: ModuleHostInvocationDeps): Modu
     }
     // The boundary: from here the package's own code runs.
     const caller = currentPluginCallContext(targetId);
-    const publicContext = projectNativeContext(caller);
+    const nativeContext = projectNativeContext(caller);
+    const publicContext = control ? Object.freeze({ ...nativeContext, signal: control.signal }) : nativeContext;
     const ownerHttpContext = projectOwnerHttpContext(targetId);
     return attemptPluginAction(() =>
       consumeOwnerOperationInvocation(
