@@ -894,6 +894,10 @@ it('keeps an explicitly recovered local draft across reload after the first read
   const first = mount(empty);
   await flushed();
   expect(first.hook.result.current.holdRecoveredDraft(chosen)).toBe(true);
+  const revised = { ...chosen, text: 'revised recovered words while offline' };
+  first.state.draft = revised;
+  first.hook.rerender();
+  await flushed();
   expect(writes()).toHaveLength(0);
   await cleanup();
 
@@ -901,11 +905,11 @@ it('keeps an explicitly recovered local draft across reload after the first read
     init?.method === 'PUT' ? Response.json({ draft: { revision: 1 } }) : Response.json({ draft: null, revision: 0 }),
   );
   const again = mount(empty);
-  await waitFor(() => expect(again.state.draft).toEqual(chosen));
+  await waitFor(() => expect(again.state.draft).toEqual(revised));
   await waitFor(() => expect(writes()).toHaveLength(1));
   expect(JSON.parse(String(writes()[0][2]))).toEqual({
     expectedRevision: 0,
-    text: chosen.text,
+    text: revised.text,
     replyTo: 'm1',
     contentBlocks: [{ type: 'context_attachment', attachment: quote }],
   });

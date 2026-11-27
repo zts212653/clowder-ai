@@ -57,7 +57,7 @@ const isEmpty = (draft: ComposerDraft) =>
   !draft.text.trim() && !draft.images.length && !draft.contexts.length && !draft.replyTo;
 const emptyDraft: ComposerDraft = { text: '', images: [], contexts: [] };
 const emptySignature = JSON.stringify(emptyDraft);
-type Edit = { draft: ComposerDraft; base?: ComposerDraft };
+type Edit = { draft: ComposerDraft; base?: ComposerDraft; beforeRead?: true };
 type KnownDraft = { revision: number; signature: string; afterSend?: true };
 type Scope = {
   session: ApiSessionIdentity;
@@ -92,7 +92,7 @@ function readEdit(scope: Scope, threadId: string): Edit | undefined {
     if (!raw) return undefined;
     const edit = JSON.parse(raw) as Partial<Edit> | null;
     if (edit && isStoredDraft(edit.draft) && (edit.base === undefined || isStoredDraft(edit.base))) {
-      return { draft: edit.draft, base: edit.base };
+      return { draft: edit.draft, base: edit.base, beforeRead: edit.beforeRead === true ? true : undefined };
     }
   } catch {
     // Browser storage can be unavailable. The edit remains usable in this page.
@@ -164,7 +164,11 @@ export function useServerComposerDraft(input: {
     () => ({ session, known: new Map(), edits: new Map(), pending: null, sends: new Set() }),
     [session],
   );
-  const opening = useRef<{ threadId: string; images?: { visible: DraftFile[]; complete: DraftFile[] } }>();
+  const opening = useRef<{
+    threadId: string;
+    recoverySignature: string;
+    images?: { visible: DraftFile[]; complete: DraftFile[] };
+  }>();
   // An opening starts unshown. A slow restore can queue edits using the saved attachment descriptors,
   // and only flushes them if the owner leaves before all attachments are available.
   const shown = useRef<string | null>(null);
@@ -190,11 +194,13 @@ export function useServerComposerDraft(input: {
   const holdWrites = input.holdWrites === true;
   useEffect(() => {
     if (!enabled || !session.ownerUserId) return;
-    const owner: NonNullable<typeof opening.current> = { threadId };
+    const opened = JSON.stringify(latest.current.draft);
+    const owner: NonNullable<typeof opening.current> = { threadId, recoverySignature: opened };
     opening.current = owner;
     const isCurrent = () => currentSession(scope) && opening.current === owner && latest.current.threadId === threadId;
     shown.current = null;
-    const opened = JSON.stringify(latest.current.draft);
+    const recovery = readEdit(scope, threadId);
+    if (recovery?.beforeRead) scope.edits.set(threadId, recovery);
     const openedRevision = latest.current.revision ?? 0;
     // Reopening can race the write flushed on the previous departure.
     const readDraft = () => readSaved(scope, threadId);
@@ -237,9 +243,24 @@ export function useServerComposerDraft(input: {
   }, [threadId, enabled, scope, session.ownerUserId]);
   useEffect(() => {
     const server = scope.known.get(threadId);
-    const restoreImages = opening.current?.images;
+    const view = opening.current;
+    const restoreImages = view?.images;
     // Keep any previous committed edit queued while the native IME owns its candidate text.
-    if (!enabled || !server || holdWrites || (!restoreImages && shown.current !== threadId)) return;
+    if (!enabled || holdWrites) return;
+    if (!server) {
+      const recovery = scope.edits.get(threadId);
+      if (
+        recovery?.beforeRead &&
+        view?.threadId === threadId &&
+        view.recoverySignature !== signature &&
+        currentSession(scope)
+      ) {
+        view.recoverySignature = signature;
+        rememberEdit(scope, threadId, { ...recovery, draft: JSON.parse(signature) as ComposerDraft });
+      }
+      return;
+    }
+    if (!restoreImages && shown.current !== threadId) return;
     let draft = JSON.parse(signature) as ComposerDraft;
     if (server.afterSend) {
       if (isEmpty(draft)) return;
@@ -270,7 +291,7 @@ export function useServerComposerDraft(input: {
       if (!isEmpty(latest.current.draft) || scope.sends.has(threadId) || readEdit(scope, threadId)) return false;
       const known = scope.known.get(threadId);
       if (known && known.signature !== emptySignature) return false;
-      rememberEdit(scope, threadId, { draft, base: emptyDraft });
+      rememberEdit(scope, threadId, { draft, base: emptyDraft, beforeRead: known ? undefined : true });
       return true;
     },
     /** Accepted sends consume an exact revision captured by the message route, even before the browser's first read. */
