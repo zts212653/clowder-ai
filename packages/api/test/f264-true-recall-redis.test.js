@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
+import Fastify from 'fastify';
+import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
+import { RedisQueueLedgerStore } from '../dist/domains/cats/services/agents/invocation/queue-ledger/RedisQueueLedgerStore.js';
+import { createRecallMessageHandler } from '../dist/routes/composer-draft-recall-handler.js';
 import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import {
   assertRedisIsolationOrThrow,
@@ -57,6 +61,72 @@ describe('F264 Gap F true recall contract (Redis store)', { skip: redisIsolation
       }),
     );
   }
+
+  it('keeps another input appendable after a draft conflict restores its sibling', async (t) => {
+    const threadId = 'thread-queue-recall-version';
+    const userId = 'owner-redis';
+    const queue = new InvocationQueue(new RedisQueueLedgerStore(redis));
+    const from = { kind: 'user', userId };
+    const addInput = (content) =>
+      queue.send(
+        store,
+        { threadId, userId, from, content, mentions: [], timestamp: Date.now(), deliveryStatus: 'queued' },
+        {
+          threadId,
+          userId,
+          from,
+          content,
+          targetCats: ['codex'],
+          kind: 'conversation_input',
+          ownerAuthProvenance: 'strict',
+          intent: 'execute',
+        },
+      );
+    const first = await addInput('recall this input');
+    const second = await addInput('append this input');
+    const entryId = second.entries[0].id;
+    const revision = queue.snapshotRevision(threadId, userId);
+    const rows = queue.list(threadId, userId);
+
+    const draft = await store.putOwnerComposerDraft(userId, threadId, {
+      expectedRevision: 0,
+      text: 'a newer draft',
+      updatedAt: Date.now(),
+    });
+    assert.equal(draft.kind, 'updated');
+    const app = Fastify();
+    t.after(async () => {
+      await app.close();
+      await cleanupPrefixedRedisKeys(redis, ['queue:{thread-queue-recall-version}:*']);
+    });
+    app.post(
+      '/api/messages/:id/recall',
+      createRecallMessageHandler(
+        {
+          invocationQueue: queue,
+          messageStore: store,
+          threadStore: { get: async () => ({ title: 'Fixture' }) },
+          socketManager: {},
+          indexBuilder: {
+            suppressMessagePassage: async () => ({ leaseId: 'recall-test' }),
+            releaseMessagePassageSuppression: async () => true,
+          },
+        },
+        () => userId,
+      ),
+    );
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/messages/' + first.message.id + '/recall',
+      payload: { threadId, expectedDraftRevision: 0, merge: 'replace' },
+    });
+    assert.equal(response.statusCode, 409);
+    assert.equal(response.json().code, 'DRAFT_REVISION_MISMATCH');
+    assert.equal((await store.getOwnerComposerDraft(userId, threadId)).text, 'a newer draft');
+    assert.deepEqual(queue.list(threadId, userId), rows);
+    assert.ok(await queue.claimExactAppend(threadId, userId, entryId, revision, ['codex']));
+    assert.equal(await queue.claimExactAppend(threadId, userId, rows[0].id, revision, ['codex']), null);
+  });
 
   it('rejects foreign owner and thread without mutating either Redis hash', async () => {
     const message = await appendQueued();

@@ -210,14 +210,21 @@ export class InvocationOwnerReaper {
       return;
     }
 
-    // Queue owns settlement from child success through the parent completion handoff.
+    // An in-flight Queue execution owns preparation before the first child and settlement after child success.
     const parentStatus = probe.record?.status;
-    if (
+    const preparing = probe.verdict === 'absent' && parentStatus === 'running';
+    const settlingSuccessfulChild =
       probe.verdict === 'terminal' &&
       (parentStatus === 'running' || parentStatus === 'succeeded') &&
-      probe.children.some((child) => child.status === 'succeeded') &&
-      [...candidate.targetCats].some((catId) =>
-        this.options.hasActiveQueueProducer?.(candidate.threadId, candidate.userId, catId, candidate.executionId),
+      probe.children.some((child) => child.status === 'succeeded');
+    if (
+      (preparing || settlingSuccessfulChild) &&
+      [...candidate.targetCats].some(
+        (catId) =>
+          this.options.hasActiveQueueProducer?.(candidate.threadId, candidate.userId, catId, candidate.executionId) &&
+          (!preparing ||
+            this.options.invocationTracker.classifyExecutionId(candidate.threadId, catId, candidate.executionId) ===
+              'matching'),
       )
     ) {
       await this.recordActiveCandidate(candidate, probe, now, result);

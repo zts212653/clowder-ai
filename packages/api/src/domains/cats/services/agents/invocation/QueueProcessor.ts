@@ -4132,6 +4132,19 @@ export class QueueProcessor {
     }
 
     reservation.producerInFlight = true;
+    if (isPublicQueueEntry(entry)) {
+      const { queue, socketManager, log } = this.deps;
+      const userId = queueEntryOwnerId(entry);
+      void emitQueueUpdated(
+        socketManager,
+        userId,
+        entry.threadId,
+        queue.list(entry.threadId, userId),
+        'preparing',
+      ).catch((err) =>
+        log.warn({ err, threadId: entry.threadId }, '[QueueProcessor] claimed Queue projection emit failed'),
+      );
+    }
     const completion = this.executeEntry(
       entry,
       reservation,
@@ -6384,6 +6397,16 @@ export class QueueProcessor {
           onLifecycleInvocationStarted: async (
             input: Parameters<NonNullable<RouteOptions['onLifecycleInvocationStarted']>>[0],
           ) => {
+            // A pre-provider await may outlive the parent owner. Refuse admission
+            // before publishing History or touching a claim that recovery may own.
+            const owner = invocationTracker.classifyExecutionId?.(
+              input.threadId,
+              input.catId,
+              input.parentInvocationId,
+            );
+            if (owner !== undefined && owner !== 'matching') {
+              throw new Error('Lifecycle ActiveRun owner mismatch: ' + input.invocationId);
+            }
             const responseAdmissionStartedAt = performance.now();
             let interruptLifecycleResponse: ((reason: string) => Promise<void>) | undefined;
             let lifecycleResponseInterrupted = false;

@@ -908,7 +908,8 @@ export function useSocket(
           ? {
               ...entry,
               messagePreview: entry.messagePreview ?? previous.messagePreview,
-              lifecycleActions: entry.lifecycleActions ?? previous.lifecycleActions,
+              lifecycleActions:
+                entry.status === 'queued' ? (entry.lifecycleActions ?? previous.lifecycleActions) : undefined,
             }
           : entry;
       });

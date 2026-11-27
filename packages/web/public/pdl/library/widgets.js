@@ -47,7 +47,8 @@ PDL_COMPONENTS.queue = function (p, sc, root) {
   const fold = more ? foldTg(open, 'fold', ' data-f="queue"', open ? '' : tc('fold.moreHtml', '<span class="num">' + more + '</span>'), null, 'up') : '';   /* 和折叠块共用开关，队列向上展开。 */
   /* 一条排队消息就是一行 lrow（小行）：正文 · 投给谁（头像叠放）· 悬停操作；行与行之间是分组的发丝线 */
   const rows = q.map(function (x) {
-    return { key: x.key, orderable: !!order && !!x.orderable, layout: 'record', hook: 'qitem', title: '<span data-tip="' + h(x.text) + '">' + h(x.text) + '</span>', cols: [{ w: 'ctl', v: p.targets && x.delivery ? '<span class="qto">' + x.delivery.map(function (target) { return pvParts(p.targets, target, root); }).join('') + '</span>' : x.to.length ? '<span class="qto">' + x.to.map(function (id) { return whoAva(id, { size: 'sm', tip: tc('queue.to', who(id, 'text', { handle: true })) }); }).join('') + '</span>' : '' }],
+    const text = x.processing ? tc('queue.preparing') + ' · ' + x.text : x.text;
+    return { key: x.key, orderable: !!order && !!x.orderable, layout: 'record', hook: 'qitem', title: '<span data-tip="' + h(x.text) + '">' + h(text) + '</span>', cols: [{ w: 'ctl', v: p.targets && x.delivery ? '<span class="qto">' + x.delivery.map(function (target) { return pvParts(p.targets, target, root); }).join('') + '</span>' : x.to.length ? '<span class="qto">' + x.to.map(function (id) { return whoAva(id, { size: 'sm', tip: tc('queue.to', who(id, 'text', { handle: true })) }); }).join('') + '</span>' : '' }],
       actsHtml: (p.actions || []).filter(function (a) { return pvOk(a.when, x, root); }).map(function (a) {
         if (a.type === 'more') return lrAct({ icon: 'more', label: pv(a.label, x, root), act: 'menu', data: argAttrs({ menu: menuLive(pvMenu(a.items, x, root)), k: x.key }) });
         return lrAct({ icon: a.icon, label: pv(a.label, x, root), act: a.act, data: pvArgs(a.args, x, root) });

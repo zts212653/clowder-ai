@@ -1398,6 +1398,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
                     };
                   });
                 })(),
+                processing: q.status === 'processing',
                 queued: q.status === 'queued',
                 recallable: q.status === 'queued' && (!q.from || q.from.kind === 'user'),
                 orderable: q.status === 'queued',

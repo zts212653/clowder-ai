@@ -11,6 +11,7 @@
   }
  },
  "queue": {
+   "preparing": "Preparing to send",
   "targets": {
    "title": "Change recipients"
   }

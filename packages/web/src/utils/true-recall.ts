@@ -6,7 +6,13 @@ export class TrueRecallRequestError extends Error {
   readonly code?: string;
 
   constructor(status: number, body: Record<string, unknown>) {
-    super(typeof body.error === 'string' ? body.error : '撤回并重新编辑失败，请重试');
+    super(
+      body.code === 'DRAFT_REVISION_MISMATCH'
+        ? '草稿已变化，消息仍在队列中。确认草稿后可重试撤回。'
+        : typeof body.error === 'string'
+          ? body.error
+          : '撤回并重新编辑失败，请重试',
+    );
     this.name = 'TrueRecallRequestError';
     this.status = status;
     this.code = typeof body.code === 'string' ? body.code : undefined;

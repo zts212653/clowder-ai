@@ -121,6 +121,7 @@
   "autoNamed": "自动：{0}"
  },
  "queue": {
+   "preparing": "准备发送",
   "notifications": {
    "queuedMessageDeleted": "已删除这条排队消息"
   },
