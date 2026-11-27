@@ -139,14 +139,29 @@ export function createModuleHostInvocation(deps: ModuleHostInvocationDeps): Modu
     const nativeContext = projectNativeContext(caller);
     const nativeRuntime = control?.nativeRuntime;
     const run = nativeRuntime?.run?.bind(nativeRuntime);
+    const acp = nativeRuntime?.acp;
     // A native stream is consumed over several Worker pulls. Keep its transferred readable
     // until the consumer closes it or the activation ends, independently of any one pull.
-    const port = run
+    const port = nativeRuntime
       ? {
           ...nativeRuntime,
-          run: async (...args: Parameters<typeof run>) => new RetainedRemoteValue(Readable.from(await run(...args))),
+          ...(run
+            ? {
+                run: async (...args: Parameters<typeof run>) =>
+                  new RetainedRemoteValue(Readable.from(await run(...args))),
+              }
+            : {}),
+          ...(acp
+            ? {
+                acp: {
+                  ...acp,
+                  prompt: async (...args: Parameters<typeof acp.prompt>) =>
+                    new RetainedRemoteValue(Readable.from(await acp.prompt(...args))),
+                },
+              }
+            : {}),
         }
-      : nativeRuntime;
+      : undefined;
     const publicContext = control
       ? Object.freeze({ ...nativeContext, signal: control.signal, ...(port ? { nativeRuntime: port } : {}) })
       : nativeContext;

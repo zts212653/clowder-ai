@@ -24,6 +24,7 @@ import {
 
 const metadataTimeoutMs = 5_000;
 const quotaTimeoutMs = 16_000;
+const nativeLifecycleTimeoutMs = 60_000;
 type AdapterAction = 'describe' | 'detect' | Parameters<AgentAdapterSessionInvocation>[0] | 'quota';
 type AgentAdapterAccountScope = {
   readonly projectRoot: string;
@@ -38,6 +39,7 @@ export type AgentAdapterRuntimeGrant = (request: {
   readonly contributionId: string;
   readonly packageDigest: string;
   readonly pluginInstanceId: string;
+  readonly activationSignal: AbortSignal;
   readonly packageProvenance?: PluginPackageProvenance;
   readonly action: AdapterAction;
   readonly catId?: string;
@@ -99,6 +101,7 @@ export function createAgentAdapterAccess(
       ...ref,
       packageDigest: active.instance.packageDigest,
       pluginInstanceId: active.instance.pluginInstanceId,
+      activationSignal: active.lifetime,
       ...(provenance === undefined ? {} : { packageProvenance: provenance }),
       action,
       ...(options?.catId === undefined ? {} : { catId: options.catId }),
@@ -116,7 +119,11 @@ export function createAgentAdapterAccess(
     });
     const timer = setTimeout(
       () => deadline.abort(new DOMException('Agent adapter call timed out', 'TimeoutError')),
-      action === 'quota' ? quotaTimeoutMs : metadataTimeoutMs,
+      action === 'openSession' || action === 'release'
+        ? nativeLifecycleTimeoutMs
+        : action === 'quota'
+          ? quotaTimeoutMs
+          : metadataTimeoutMs,
     );
     timer.unref();
     const response = await Promise.race([

@@ -20,7 +20,7 @@ Architecture cell 为 identity-session 与插件运行时。Map delta 是把具�
 ### 两个仓的交付物
 
 - [Host PR #2030](https://github.com/zts212653/clowder-ai/pull/2030) 持有安装与执行通用接口、激活实例、调用权限、角色目录、会话与回执，并保留从旧入口切换和回退的机制。
-- [插件 PR #258](https://github.com/zts212653/clowder-ai-plugins/pull/258) 提供 Kimi、Codex exec、Claude Code print 模式和 AGY stream-json 候选的源码、规范声明、版本和独立归档。Host 通过公共契约加载归档。Codex App Server、Claude Code SDK 与工具、AGY 产品调用和 DSH 独立接入仍待完善。
+- [插件 PR #258](https://github.com/zts212653/clowder-ai-plugins/pull/258) 提供 Kimi、Codex exec、Claude Code print、AGY stream-json 和 DSH Desktop ACP 五个独立候选的源码、规范声明、版本和归档。Host 通过公共契约加载归档。Codex App Server、Claude Code SDK 与工具、AGY 真实账号调用、DSH 默认启动授权和全面产品切换仍待完善。
 - 两仓用确切 SHA、兼容范围和归档摘要组成待验收版本。开发候选用本地归档装进隔离 Host。目录上架和发布各自按仓库流程。
 - 当前 Worker 与 Host 属于同一 OS 进程。独立 Worker 管理包调用生命周期，不提供操作系统权限隔离。首批 native 执行端口只给经过 Host 核验的受信包和调用。第三方 ACP 声明沿现有路径。扩展到其他可执行插件须另证隔离与授权边界。
 
@@ -134,6 +134,16 @@ Kimi 的额度路由使用 Host 数据目录中的版本化切换记录，项目
 
 原生 CLI 2.1.327 在隔离目录中使用回环 Anthropic Messages。适配器以 stdin 传提示，通过 Host 交付的身份文件设置 system，以原生 ID 续聊并投影文本、用量和终态。第二轮模型请求保留首轮消息及回复，身份仍位于 system。当前候选关闭工具和 MCP。SDK、交互承载、正常产品接线、模型目录、登录及额度仍待验收。
 
+宪宪独立批准插件提交 `e3bafd21d314d68f5060bd4e3d79edff492283fb` 的 Claude Code print 增量，复跑真实 CLI 与归档用例 2/2。Windows 原生回归使用实际 `claude.exe`。审查记录 `0001795773718034-000537-16aa45e8`。
+
 ### AGY stream-json 候选
 
 独立包移入既有 NDJSON 解析及终态规则。插件负责输入信封、会话 ID 资格和输出投影。真实 AGY 1.2.7 记录的续接回合回放成功，原生把权限拒绝标为 SUCCESS 时，插件仍输出失败和拒绝原因。还用合成数据验证跨会话帧拒绝和续接参数。受信目录安装后由 Host 检测到本机 CLI 1.5.15。Claude Code 和 AGY 同时安装到一个 Host 时，停用 Claude Code 不改变 AGY 的实例、摘要和代际。新版本真实授权账号的调用、热续聊、额度和桌面入口待验。
+
+### DSH Desktop ACP 候选
+
+DSH 独立归档提供原生 system 身份补丁及会话事件投影。Host 复用通用 ACP 进程与会话方法，将跨 Worker 的回合流绑定到活动归档。候选只接受匹配的 native session ID，显式标记额度不支持。
+
+回归入口 `packages/api/test/plugin-agent-dsh-native-archive.test.js` 通过真实 Manager 安装归档。设定 `CLOWDER_DSH_CANDIDATE_ARCHIVE` 与 `CLOWDER_DSH_TEST_DESKTOP_ROOT`，用隔离 Desktop 和回环模型验证首次发送、同进程续聊、重启后同 ID 的历史及 system 身份更新。正常释放先等 `session/close`，再按隔离授权关闭 stdin，并在重启和删除测试目录之前分别确认进程退出。默认账户、登录、工具审批、受信目录的启动授权、旧版载体和产品桌面路径仍需验收。这条回归使用隔离启动授权。
+
+Windows 的隔离子进程回归仍有退出超时。一次复跑中两次 `session/close` 都得到确认，严格 `session/resume` 和身份更新成功，但第二个 Native 进程在释放时限内未退出，整条用例判失败。准入、会话桥和通用 ACP 的定向回归 58/58，五个独立候选的包内回归 16/16。

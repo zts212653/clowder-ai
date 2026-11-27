@@ -90,6 +90,8 @@ export interface AcpClientConfig {
   args: string[];
   /** Working directory for the ACP process */
   cwd: string;
+  /** Time for the admitted process to close its ACP transport on stdin EOF. */
+  stdinShutdownGraceMs?: number;
   /** Factory-owned Windows verification, bound to the root in the pool signature. */
   verifyBootstrapCwd?: (command: string, args: string[], env: NodeJS.ProcessEnv) => void;
   /** Extra env vars to pass to the process */
@@ -1083,7 +1085,10 @@ export class AcpClient {
     this.rl?.close();
     this.rejectAllPending(new Error('ACP client closed'));
     if (this.child?.pid !== undefined && !this.exited)
-      await this.child.shutdown(ACP_CHILD_SHUTDOWN_GRACE_MS, this.initResult?.agentInfo?.name === PI_BRIDGE_NAME);
+      await this.child.shutdown(
+        this.config.stdinShutdownGraceMs ?? ACP_CHILD_SHUTDOWN_GRACE_MS,
+        this.config.stdinShutdownGraceMs !== undefined || this.initResult?.agentInfo?.name === PI_BRIDGE_NAME,
+      );
   }
 
   get pid(): number | undefined {
