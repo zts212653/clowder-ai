@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { isAbsolute, join } from 'node:path';
 import { resolveByAccountRef, validateRuntimeProviderBinding } from '../../../../config/account-resolver.js';
 import { claudeExecutionAccountSnapshot } from '../../../../config/claude-token-account.js';
-import { resolveCliCommand } from '../../../../utils/cli-resolve.js';
 import { resolveCatCafeDataRoot } from '../../../../utils/cli-process-ownership.js';
+import { resolveCliCommand } from '../../../../utils/cli-resolve.js';
 import type { AgentAdapterRuntimeGrant } from '../agent-adapter-access.js';
 import { createAgentAdapterNativeProcess } from './agent-adapter-native-process.js';
 

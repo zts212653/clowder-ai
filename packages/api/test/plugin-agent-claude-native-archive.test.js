@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { once } from 'node:events';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { resolveByAccountRef } from '../dist/config/account-resolver.js';
@@ -11,8 +11,8 @@ import { claudeExecutionAccountSnapshot } from '../dist/config/claude-token-acco
 import { writeCredential } from '../dist/config/credentials.js';
 import { SessionImplementationRegistry } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
 import { RegisteredSessionAgentService } from '../dist/domains/cats/services/agents/session-contract/registered-session-agent-service.js';
-import { createPluginManagerRuntimeComposition } from '../dist/domains/plugin/index.js';
 import { grantAgentAdapterNativeRuntime } from '../dist/domains/plugin/declared/agent-adapter-native/agent-adapter-native-grant.js';
+import { createPluginManagerRuntimeComposition } from '../dist/domains/plugin/index.js';
 import { setup } from './helpers/agent-adapter-archive.js';
 
 const archive = process.env.CLOWDER_CLAUDE_CANDIDATE_ARCHIVE;

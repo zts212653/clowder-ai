@@ -18,5 +18,7 @@ export function codexExecutionAccountSnapshot(
 
 /** Host-local currentness check for the selected gateway and its credential. */
 export function codexGatewayCredentialVersion(baseUrl: string, apiKey: string): string {
-  return createHash('sha256').update(JSON.stringify([baseUrl, apiKey])).digest('hex');
+  return createHash('sha256')
+    .update(JSON.stringify([baseUrl, apiKey]))
+    .digest('hex');
 }

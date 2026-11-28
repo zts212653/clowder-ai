@@ -4272,7 +4272,12 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
         ? { executionAccountProjectRoot: frozenExecutionBinding.projectRoot }
         : {}),
       ...(codexAccountLaunch?.authMode === 'api_key' && resolvedAccount?.baseUrl && resolvedAccount.apiKey
-        ? { codexGatewayCredentialVersion: codexGatewayCredentialVersion(resolvedAccount.baseUrl, resolvedAccount.apiKey) }
+        ? {
+            codexGatewayCredentialVersion: codexGatewayCredentialVersion(
+              resolvedAccount.baseUrl,
+              resolvedAccount.apiKey,
+            ),
+          }
         : {}),
       auditContext: {
         invocationId,

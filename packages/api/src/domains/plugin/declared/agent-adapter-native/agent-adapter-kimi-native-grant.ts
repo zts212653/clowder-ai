@@ -4,8 +4,8 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { normalizeKimiEvent } from '@clowder-ai/agent-access/runtime/kimi-event-parser';
 import { buildKimiLaunchArguments } from '@clowder-ai/agent-access/runtime/kimi-launch-arguments';
 import { resolveByAccountRef, validateRuntimeProviderBinding } from '../../../../config/account-resolver.js';
-import { resolveCliCommand } from '../../../../utils/cli-resolve.js';
 import { resolveCatCafeDataRoot } from '../../../../utils/cli-process-ownership.js';
+import { resolveCliCommand } from '../../../../utils/cli-resolve.js';
 import { providerProfileAccountSnapshot } from '../../../cats/services/agents/invocation/execution-account-binding.js';
 import { buildApiKeyEnv } from '../../../cats/services/agents/providers/kimi-config.js';
 import {

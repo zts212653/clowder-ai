@@ -47,5 +47,7 @@ export function matchesOfficialAgentCatalog(
   client: (typeof officialNativeClients)[number],
   source: PluginPackageProvenance | undefined,
 ) {
-  return source?.kind === 'catalog' && source.catalogId === client.catalogId && source.packageName === client.packageName;
+  return (
+    source?.kind === 'catalog' && source.catalogId === client.catalogId && source.packageName === client.packageName
+  );
 }

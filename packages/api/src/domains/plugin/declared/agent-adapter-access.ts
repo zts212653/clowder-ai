@@ -54,7 +54,10 @@ export type AgentAdapterRuntimeGrant = (request: {
 
 export function createAgentAdapterAccess(
   inventory: Pick<PluginInventoryStore, 'readCurrentAuthority' | 'snapshot'>,
-  runtime: Pick<ModulePluginRuntime, 'agentAdapter' | 'agentAdapterPackageRoot' | 'invoke' | 'operationActivationSignal'>,
+  runtime: Pick<
+    ModulePluginRuntime,
+    'agentAdapter' | 'agentAdapterPackageRoot' | 'invoke' | 'operationActivationSignal'
+  >,
   grantNativeRuntime?: AgentAdapterRuntimeGrant,
 ) {
   const resolve = (instance: PluginInstanceRecord | undefined) => {

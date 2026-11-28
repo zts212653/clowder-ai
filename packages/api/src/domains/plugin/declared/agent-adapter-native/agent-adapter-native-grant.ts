@@ -6,11 +6,11 @@ import { captureTerminalInteraction } from '../../../../utils/capture-terminal-i
 import { resolveCliCommand } from '../../../../utils/cli-resolve.js';
 import { isCliPlainTextResult, spawnCli } from '../../../../utils/cli-spawn.js';
 import type { AgentAdapterRuntimeGrant } from '../agent-adapter-access.js';
+import { matchesOfficialAgentCatalog, officialNativeClients } from '../agent-adapter-official-clients.js';
 import { grantAgentAdapterClaudePrint } from './agent-adapter-claude-native-grant.js';
 import { grantAgentAdapterCodexExec } from './agent-adapter-codex-native-grant.js';
 import { grantAgentAdapterDshDesktop } from './agent-adapter-dsh-native-grant.js';
 import { grantAgentAdapterKimiPrint } from './agent-adapter-kimi-native-grant.js';
-import { matchesOfficialAgentCatalog, officialNativeClients } from '../agent-adapter-official-clients.js';
 
 export const grantAgentAdapterNativeRuntime: AgentAdapterRuntimeGrant = (request) => {
   const grant = officialNativeClients.find(
