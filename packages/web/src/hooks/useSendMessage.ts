@@ -39,8 +39,21 @@ export type RoutingConfirmation = (
   request: ReturnType<typeof routingConfirmationRequiredSchema.parse>,
 ) => Promise<boolean>;
 
+/**
+ * The send notice carries the attempt it belongs to. A retry under the same
+ * attempt key (`idempotencyKey`) must be able to take back the notice its own
+ * earlier try left, even after that try's request had already reached the
+ * server; a different attempt's notice is a separate failure and stays.
+ */
+function sendErrorNoticeId(attemptId: string): string {
+  return `err-send-${attemptId}`;
+}
+
 export function useSendMessage(activeThreadId?: string, confirm?: RoutingConfirmation) {
   const addMessageToThread = useChatStore((state) => state.addMessageToThread);
+  const patchThreadMessage = useChatStore((state) => state.patchThreadMessage);
+  const removeThreadMessage = useChatStore((state) => state.removeThreadMessage);
+  const clearThreadMessageDeletion = useChatStore((state) => state.clearThreadMessageDeletion);
   const { processCommand } = useChatCommands();
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle');
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -61,17 +74,41 @@ export function useSendMessage(activeThreadId?: string, confirm?: RoutingConfirm
   }, []);
 
   const publishError = useCallback(
-    (threadId: string, content: string) => {
+    (threadId: string, attemptId: string, content: string) => {
+      const id = sendErrorNoticeId(attemptId);
       const message: ChatMessageData = {
-        id: `err-${Date.now()}`,
+        id,
         type: 'system',
         variant: 'error',
         content,
         timestamp: Date.now(),
       };
+      // The notice belongs to the attempt that failed: a second failure of the
+      // same attempt rewrites it in place instead of stacking another bubble
+      // (`addMessageToThread` ignores an id it already holds).
+      patchThreadMessage(threadId, id, { content: message.content, timestamp: message.timestamp });
       addMessageToThread(threadId, message);
     },
-    [addMessageToThread],
+    [addMessageToThread, patchThreadMessage],
+  );
+
+  /**
+   * The same attempt was taken after all (a late commit, a retry under the same
+   * key), so its failure notice no longer describes this conversation. Other
+   * attempts' notices stay: their failures are still real.
+   */
+  const settleSendError = useCallback(
+    (threadId: string, attemptId: string) => {
+      const id = sendErrorNoticeId(attemptId);
+      const store = useChatStore.getState();
+      if (!store.getThreadState(threadId).messages.some((row) => row.id === id)) return;
+      removeThreadMessage(threadId, id);
+      // Removing records a tombstone so a late server row cannot resurrect the
+      // id. A client-only notice is never published by the server, and the same
+      // attempt may legitimately fail again later, so the tombstone goes too.
+      clearThreadMessageDeletion(threadId, id);
+    },
+    [clearThreadMessageDeletion, removeThreadMessage],
   );
 
   const handleSend = useCallback(
@@ -177,6 +214,10 @@ export function useSendMessage(activeThreadId?: string, confirm?: RoutingConfirm
         // A successful send must remain visible even if its Queue socket event was
         // missed. Reuse the same fenced server snapshot as reconnect, not a local bubble.
         if (admission.status === 'queued') void reconcileThreadWithServer(threadId, () => false, 'SendAdmission');
+        // Admission proves the server holds this attempt, including a late commit
+        // whose client had already timed out. Any notice from an earlier try of
+        // this same attempt is now out of date.
+        settleSendError(threadId, clientMessageId);
         setUploadStatus('idle');
         setUploadError(null);
         window.dispatchEvent(new CustomEvent('guide:confirm', { detail: { target: 'chat.input' } }));
@@ -193,11 +234,11 @@ export function useSendMessage(activeThreadId?: string, confirm?: RoutingConfirm
         } else {
           setUploadStatus('idle');
         }
-        publishError(threadId, `Failed to send message: ${errorMessage}`);
+        publishError(threadId, clientMessageId, `Failed to send message: ${errorMessage}`);
         return false;
       }
     },
-    [activeThreadId, confirm, createClientId, processCommand, publishError],
+    [activeThreadId, confirm, createClientId, processCommand, publishError, settleSendError],
   );
 
   return { handleSend, uploadStatus, uploadError };
