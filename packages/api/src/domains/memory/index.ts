@@ -2,12 +2,18 @@
 
 // F152 Phase A: Scanners
 export { CatCafeScanner } from './CatCafeScanner.js';
-export type { CollectionRebuildResult } from './CollectionIndexBuilder.js';
+export type { CollectionIndexBuilderOptions, CollectionRebuildResult } from './CollectionIndexBuilder.js';
 // F186 Phase B: Collection scanners
-export { CollectionIndexBuilder } from './CollectionIndexBuilder.js';
+export { CollectionIndexBuilder, CollectionSecretRejectionError } from './CollectionIndexBuilder.js';
 // Phase C: embedding + vector
 export { EmbeddingService } from './EmbeddingService.js';
-export { loadExternalCollections, resolveCollectionStorePath, saveExternalCollection } from './external-collections.js';
+export {
+  BUILTIN_COLLECTION_IDS,
+  isExternalCollectionForBodyStorage,
+  loadExternalCollections,
+  resolveCollectionStorePath,
+  saveExternalCollection,
+} from './external-collections.js';
 export { FlatScanner } from './FlatScanner.js';
 export type { MemoryConfig, MemoryServices } from './factory.js';
 // Factory

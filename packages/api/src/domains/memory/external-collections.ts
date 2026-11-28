@@ -5,6 +5,32 @@ import { validateManifestInput } from './collection-types.js';
 
 const COLLECTIONS_FILE = 'library/collections.json';
 
+/** Built-in collections that must never opt into external full-body storage. */
+export const BUILTIN_COLLECTION_IDS = new Set<string>([
+  'project:cat-cafe',
+  'global:methods',
+  'domain:personal-memory',
+  'domain:user-profile',
+]);
+
+/**
+ * True only for persisted external collections registered in `library/collections.json`.
+ * Built-in collections (including `domain:user-profile`) and callers without `dataDir`
+ * fail closed to `false`.
+ */
+export function isExternalCollectionForBodyStorage(
+  manifest: Pick<CollectionManifest, 'id'>,
+  dataDir?: string,
+): boolean {
+  if (BUILTIN_COLLECTION_IDS.has(manifest.id)) return false;
+  if (!dataDir) return false;
+  try {
+    return getExternalCollection(dataDir, manifest.id) !== undefined;
+  } catch {
+    return false;
+  }
+}
+
 /** Read one saved record before deciding whether a collection is new or can be restored. */
 export function getExternalCollection(dataDir: string, collectionId: string): CollectionManifest | undefined {
   const filePath = join(dataDir, COLLECTIONS_FILE);

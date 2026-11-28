@@ -95,7 +95,14 @@ END`,
 
 // Versions 53-57 were deployed by reverted F323 migrations and remain in live
 // schema_version ledgers. They must never be reused even though main returned to V52.
-export const CURRENT_SCHEMA_VERSION = 84;
+//
+// DRAFT PLACEHOLDER (DO NOT MERGE UNTIL V85–V87 LAND ON `next`):
+// Maintainer confirmed V85–V87 are reserved by pending upstream sync migrations
+// (zts212653/clowder-ai#2066#issuecomment-7207405997). Because applyMigrations() skips
+// lower versions once a higher version has run, this stays at placeholder 85 only for
+// Draft review on current `next` (V84) and MUST be renumbered to the actual next free
+// slot (expected V88) after V85–V87 land on `next` before un-drafting/merging.
+export const CURRENT_SCHEMA_VERSION = 85;
 
 function memoryCueLedgerHasConsumerBinding(db: Database.Database): boolean {
   return (db.prepare('PRAGMA table_info(memory_cue_events)').all() as Array<{ name: string }>).some(
@@ -215,6 +222,36 @@ END`,
   `CREATE TRIGGER IF NOT EXISTS evidence_passages_au AFTER UPDATE ON evidence_passages BEGIN
   INSERT INTO passage_fts(passage_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
   INSERT INTO passage_fts(rowid, content) VALUES (new.rowid, new.content);
+END`,
+];
+
+// Draft placeholder migration (to be renumbered after V85–V87 land on `next`, expected V88):
+// Lexical-only full document body storage + FTS5 index (1 row per external collection doc).
+// Decouples external collection body storage from vector-tracked evidence_passages so
+// external rebuilds never perturb G0/G1 passage_vectors readiness.
+// Note: unicode61 FTS5 provides storage indexing only and does not claim CJK tokenization
+// or Chinese natural-language recall is solved.
+export const SCHEMA_V85_TABLE = `
+CREATE TABLE IF NOT EXISTS evidence_doc_bodies (
+  doc_anchor TEXT PRIMARY KEY,
+  content TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`;
+
+export const SCHEMA_V85_FTS =
+  'CREATE VIRTUAL TABLE IF NOT EXISTS evidence_doc_body_fts USING fts5(content, content=evidence_doc_bodies, content_rowid=rowid, tokenize="unicode61 tokenchars \'_-\'")';
+
+export const DOC_BODY_FTS_TRIGGER_STATEMENTS = [
+  `CREATE TRIGGER IF NOT EXISTS evidence_doc_bodies_ai AFTER INSERT ON evidence_doc_bodies BEGIN
+  INSERT INTO evidence_doc_body_fts(rowid, content) VALUES (new.rowid, new.content);
+END`,
+  `CREATE TRIGGER IF NOT EXISTS evidence_doc_bodies_ad AFTER DELETE ON evidence_doc_bodies BEGIN
+  INSERT INTO evidence_doc_body_fts(evidence_doc_body_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+END`,
+  `CREATE TRIGGER IF NOT EXISTS evidence_doc_bodies_au AFTER UPDATE ON evidence_doc_bodies BEGIN
+  INSERT INTO evidence_doc_body_fts(evidence_doc_body_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+  INSERT INTO evidence_doc_body_fts(rowid, content) VALUES (new.rowid, new.content);
 END`,
 ];
 
@@ -1903,6 +1940,16 @@ export function applyMigrations(db: Database.Database): void {
     db.transaction(() => {
       addMatterSummaries(db);
       db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(84, new Date().toISOString());
+    })();
+  }
+  if (currentVersion < 85) {
+    db.transaction(() => {
+      db.exec(SCHEMA_V85_TABLE);
+      db.exec(SCHEMA_V85_FTS);
+      for (const trigger of DOC_BODY_FTS_TRIGGER_STATEMENTS) {
+        db.exec(trigger);
+      }
+      db.prepare('INSERT INTO schema_version(version,applied_at) VALUES (?,?)').run(85, new Date().toISOString());
     })();
   }
 }

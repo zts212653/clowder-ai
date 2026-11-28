@@ -7744,6 +7744,7 @@ async function initializeApi(
     materializationService: memoryServices.materializationService,
     catalog: memoryServices.catalog,
     collectionStores: memoryServices.collectionStores,
+    dataDir: memoryServices.dataDir,
   });
 
   // F186: Library catalog API (Phase D: includes external collections + dataDir for register endpoint)

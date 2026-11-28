@@ -152,7 +152,7 @@ describe('F332 canonical matters: privacy, lossless sources and immutable read e
       ALTER TABLE memory_matters DROP COLUMN access_guards_json;
       ALTER TABLE memory_matter_entries DROP COLUMN summary;
       ALTER TABLE memory_matter_entries DROP COLUMN summary_author_json;
-      DELETE FROM schema_version WHERE version = 84;`);
+      DELETE FROM schema_version WHERE version >= 84;`);
     await evidence.close();
     await reopen();
     const old = await service.read(sol, legacy.matter.matterId);

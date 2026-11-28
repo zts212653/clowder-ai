@@ -16,6 +16,7 @@ import type {
 import { COLLECTION_SENSITIVITY_ORDER, validateManifestInput } from '../domains/memory/collection-types.js';
 import { prepareCollectionVectorBinding } from '../domains/memory/collection-vector-binding.js';
 import {
+  isExternalCollectionForBodyStorage,
   resolveCollectionStorePath,
   saveExternalCollection,
   updateExternalCollection,
@@ -342,7 +343,9 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
     if (store instanceof SqliteEvidenceStore) store.setEmbedDeps(undefined);
     setCollectionStatusBestEffort(opts.catalog, manifest.id, 'indexing');
     try {
-      const builder = new CollectionIndexBuilder(store as SqliteEvidenceStore, manifest, scanner, prepareVectors);
+      const builder = new CollectionIndexBuilder(store as SqliteEvidenceStore, manifest, scanner, prepareVectors, {
+        storeDocumentBodies: isExternalCollectionForBodyStorage(manifest, opts.dataDir),
+      });
       const result = await builder.rebuild({ force });
       const published = !result.blocked && prepared?.publish();
       const finalStatus = result.blocked ? 'blocked' : vectorAttempted && !published ? 'stale' : 'active';
@@ -526,7 +529,9 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
         try {
           const manifest = opts.catalog.get(collectionId)!;
           const scanner = resolveCollectionScanner(manifest);
-          const builder = new CollectionIndexBuilder(store as SqliteEvidenceStore, manifest, scanner);
+          const builder = new CollectionIndexBuilder(store as SqliteEvidenceStore, manifest, scanner, undefined, {
+            storeDocumentBodies: isExternalCollectionForBodyStorage(manifest, opts.dataDir),
+          });
           await builder.rebuild({ force: true });
           reindexTriggered = true;
         } catch {

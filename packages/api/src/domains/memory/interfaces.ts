@@ -350,6 +350,7 @@ export interface MaterializeResult {
   anchor: string;
   committed: boolean;
   reindexed: boolean;
+  reindexError?: string;
 }
 
 export interface CollectionGroup {

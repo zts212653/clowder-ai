@@ -6,7 +6,11 @@ import type Database from 'better-sqlite3';
 import { CollectionIndexBuilder } from './CollectionIndexBuilder.js';
 import type { CollectionManifest } from './collection-types.js';
 import { readEmbeddingDeployment } from './embedding-generation-config.js';
-import { resolveCollectionStorePath, updateExternalCollection } from './external-collections.js';
+import {
+  BUILTIN_COLLECTION_IDS,
+  resolveCollectionStorePath,
+  updateExternalCollection,
+} from './external-collections.js';
 import type { IEvidenceStore } from './interfaces.js';
 import type { LibraryCatalog } from './LibraryCatalog.js';
 import { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
@@ -260,7 +264,9 @@ async function registerOneExternalCollection(
         const startMs = Date.now();
         const hadPhysicalVectors = hasVectorGeneration(db);
         const docsBefore = (db.prepare('SELECT count(*) AS n FROM evidence_docs').get() as { n: number }).n;
-        const builder = new CollectionIndexBuilder(store, manifest, resolveCollectionScanner(manifest));
+        const builder = new CollectionIndexBuilder(store, manifest, resolveCollectionScanner(manifest), undefined, {
+          storeDocumentBodies: !BUILTIN_COLLECTION_IDS.has(manifest.id),
+        });
         const result = await builder.rebuild();
         const docsAfter = (db.prepare('SELECT count(*) AS n FROM evidence_docs').get() as { n: number }).n;
         const lexicalChanged = result.indexed > 0 || docsAfter !== docsBefore;
@@ -274,11 +280,19 @@ async function registerOneExternalCollection(
           vectorStateAfter === 'stale' ||
           (hadPhysicalVectors && (lexicalChanged || (vectorStateAfter === 'none' && manifest.status === 'stale')));
         finalStatus = result.blocked ? 'blocked' : vectorsStale ? 'stale' : 'active';
+        if (result.secretFindings.length > 0 && !result.blocked) {
+          console.warn('[memory] external collection startup autoRebuild rejected secret-bearing documents', {
+            id: manifest.id,
+            rejectedAnchors: result.rejectedAnchors ?? [],
+            secretFindings: result.secretFindings.length,
+          });
+        }
         console.info('[memory] external collection startup autoRebuild', {
           id: manifest.id,
           indexed: result.indexed,
           skipped: result.skipped,
           blocked: result.blocked,
+          ...(result.secretFindings.length > 0 ? { secretFindings: result.secretFindings.length } : {}),
           status: finalStatus,
           durationMs: Date.now() - startMs,
         });

@@ -2156,6 +2156,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           );
           db.prepare('DELETE FROM evidence_passages WHERE doc_anchor = ?').run(anchor);
         }
+        db.prepare('DELETE FROM evidence_doc_bodies WHERE doc_anchor = ?').run(anchor);
         invalidateDocument(anchor);
         db.prepare('DELETE FROM evidence_docs WHERE anchor = ?').run(anchor);
       })();
@@ -2175,6 +2176,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         }>;
         for (const { anchor } of rows) {
           removeDocument(anchor);
+          db.prepare('DELETE FROM evidence_doc_bodies WHERE doc_anchor = ?').run(anchor);
           const passages = db
             .prepare('SELECT passage_id AS id FROM evidence_passages WHERE doc_anchor=?')
             .all(anchor) as Array<{ id: string }>;
@@ -2216,6 +2218,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           db.prepare(
             `DELETE FROM evidence_passages WHERE doc_anchor IN (${ph}) AND doc_anchor NOT LIKE 'thread-%'`,
           ).run(...batch);
+          db.prepare(`DELETE FROM evidence_doc_bodies WHERE doc_anchor IN (${ph})`).run(...batch);
           for (const anchor of batch) invalidateDocument(anchor);
         }
       }
