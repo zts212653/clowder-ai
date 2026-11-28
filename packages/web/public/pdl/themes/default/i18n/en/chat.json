@@ -1,4 +1,11 @@
 {
+  "pendingDecisions": {
+    "count": "{0} decisions waiting",
+    "known": "{0} known decisions to check",
+    "go": "Review decisions",
+    "stale": "Older pending decision",
+    "item": "Pending decision"
+  },
   "threadSettings": {
     "reveal": {
       "title": "Reveal private messages"

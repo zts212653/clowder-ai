@@ -142,6 +142,8 @@ it('keeps failed reads display-only until a new read confirms retained rows', as
   await app.load();
   app.set({ fail: true });
   await app.load();
+  expect(app.read("inboxPendingCount('source')")).toBe(1);
+  expect(app.read("inboxPendingLabel('source')")).toBe('pendingDecisions.known');
   expect(app.vm()).toMatchObject({
     displayOnly: true,
     main: { at: [{ text: 'Retained body', ctx: { canWrite: false } }] },
@@ -149,6 +151,7 @@ it('keeps failed reads display-only until a new read confirms retained rows', as
   await expect(app.read("A.cafeIbDone({id:'proposal-mid',res:'accept'})")).rejects.toThrow('inboxRefresh.retained');
   app.set({ fail: false, revision: 3 });
   await app.load();
+  expect(app.read("inboxPendingLabel('source')")).toBe('pendingDecisions.count');
   expect(app.vm().main.at[0].ctx).toMatchObject({ canWrite: true, expectedRevision: 3 });
   expect(app.post).not.toHaveBeenCalled();
 });
@@ -159,7 +162,8 @@ it('withdraws identity authority immediately and rejects an older in-flight read
   const old = app.load();
   const stale = app.page();
   app.events.get('session:changed')!();
-  expect(app.vm().main.at[0].ctx.canWrite).toBe(false);
+  expect(app.vm().displayOnly).toBe(true);
+  expect(app.read("inboxPendingItems('source')")).toEqual([]);
   app.set({ defer: false, revision: 4 });
   await app.load();
   app.finish(stale);
@@ -170,7 +174,10 @@ it('withdraws identity authority immediately and rejects an older in-flight read
 it('does not grant write authority to a read from the previous session owner', async () => {
   const app = inbox();
   await app.load();
+  expect(app.read("inboxPendingItems('source')")).toMatchObject([{ mid: 'proposal-mid' }]);
   app.events.get('session:changed')!({ ownerUserId: 'next-owner' });
+  expect(app.read("inboxPendingCount('source')")).toBe(0);
+  expect(app.read("inboxDecisionNotices('source')")).toEqual([]);
   await app.load();
   expect(app.vm().displayOnly).toBe(true);
   await expect(app.read("A.cafeIbDone({kind:'mention',t:'source',mid:'mention',revision:1})")).rejects.toThrow(

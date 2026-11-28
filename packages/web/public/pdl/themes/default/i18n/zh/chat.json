@@ -1,4 +1,11 @@
 {
+  "pendingDecisions": {
+    "count": "{0} 项等你决定",
+    "known": "已知 {0} 项待核对",
+    "go": "去决定",
+    "stale": "较早的待决项",
+    "item": "待决事项"
+  },
   "works": {
     "groupBy": "分组",
     "searchPlaceholder": "搜索作品",

@@ -3,6 +3,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { readCorrectionMemory, readPublishedCorrection } from '@/components/memory/page/read-correction-approval';
 import { readDomainApprovalSource } from '@/components/rich/read-domain-approval-source';
 import { readEvalRepairPending, readEvalRepairResult } from '@/components/rich/read-eval-repair';
+import { approvalRow, storeItem } from '@/components/shell/mailbox/__tests__/mailbox-fixtures';
 import { readApprovalProducerBody } from '@/lib/approval-producer-read';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { apiFetch } from '@/utils/api-client';
@@ -350,14 +351,20 @@ it('reads Taste from its own producer and refuses to submit after that owner cha
     },
   };
   const target = messageCards(data.messages, data.threadId, 'memory')[0].target;
-  vi.mocked(readDomainApprovalSource).mockResolvedValue({
+  const item = storeItem({ proposalId: 'taste-1', sourceFeatureId: 'F221', detail: { scene: 'real scene' } });
+  const source = {
     ownerUserId: 'owner',
-    item: { proposalId: 'taste-1' },
-  } as Awaited<ReturnType<typeof readDomainApprovalSource>>);
-  const proposal = { id: 'taste-1', userId: 'owner', threadId: data.threadId, status: 'pending', scene: 'real scene' };
-  vi.mocked(readApprovalProducerBody).mockResolvedValue({ proposal });
+    item,
+    row: approvalRow(item),
+  };
+  vi.mocked(readDomainApprovalSource).mockResolvedValue(source);
+  // The public producer GET deliberately returns only its id and status.
+  vi.mocked(readApprovalProducerBody).mockResolvedValue({ proposalId: 'taste-1', status: 'pending' });
   const read = await readMemoryMessage(target, new AbortController().signal);
-  vi.mocked(readApprovalProducerBody).mockResolvedValue({ proposal: { ...proposal, scene: 'changed by owner' } });
+  vi.mocked(readDomainApprovalSource).mockResolvedValue({
+    ...source,
+    item: { ...source.item, detail: { scene: 'changed by owner' } },
+  });
   await expect(decideMemoryMessage({ target, read, current: true, refresh: vi.fn() }, 'reject')).rejects.toThrow(
     '已变化',
   );
@@ -391,9 +398,7 @@ it('keeps every original quote and submits the displayed taste decision digest',
     ownerUserId: 'owner',
     row: {} as UnifiedAttentionItemV1,
   });
-  vi.mocked(readApprovalProducerBody).mockResolvedValue({
-    proposal: { id: target.id, userId: 'owner', threadId: target.threadId, status: 'pending' },
-  });
+  vi.mocked(readApprovalProducerBody).mockResolvedValue({ proposalId: target.id, status: 'pending' });
   useApprovalHubStore.setState({ items: [item], count: 1, error: null, decisionAttempts: {}, deciding: {} });
   const read = await readMemoryMessage(target, new AbortController().signal);
   expect(memoryMessageView({ target, read, current: true, refresh: vi.fn() })).toMatchObject({

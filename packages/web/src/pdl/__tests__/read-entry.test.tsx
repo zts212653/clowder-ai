@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { ScriptTarget, transpileModule } from 'typescript';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useApprovalStatus } from '@/components/rich/use-approval-status';
+import { approvalRow, okRead, storeItem } from '@/components/shell/mailbox/__tests__/mailbox-fixtures';
 import { readApprovalProducerBody } from '@/lib/approval-producer-read';
 import { approvalResultRead } from '@/lib/approval-result-read';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
@@ -13,8 +14,10 @@ import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { request } from '../owner-api';
 import { ProposalRecordBinding } from '../PdlAppHost';
 import {
+  decideProposal,
   type ProposalBinding,
   type ProposalTarget,
+  proposalTarget,
   proposalView,
   readProposal,
   recheckProposal,
@@ -32,6 +35,89 @@ beforeEach(() => {
   observeApiSessionOwner('owner');
 });
 afterEach(cleanup);
+
+it('hosts a profile card through the real id/status read and canonical publication, then confirms its result', async () => {
+  const block = {
+    kind: 'card' as const,
+    v: 1 as const,
+    id: 'profile-update-profile',
+    title: 'Profile change',
+    bodyMarkdown: 'Owner proposal\n```diff\n-before\n+after\n```',
+    fields: [{ label: 'Target', value: 'primer.md' }],
+    meta: { approval: { producerId: 'F231', canonicalProposalId: 'profile' } },
+  };
+  const target = proposalTarget(block, 'thread', 'message')!;
+  const item = storeItem({
+    proposalId: target.id,
+    sourceFeatureId: 'F231',
+    ownerUserId: 'owner',
+    requesterCatId: 'codex',
+    inlineApprovable: false,
+    expiresAt: 1,
+    detail: { rationale: 'Owner proposal', targetPath: 'primer.md' },
+    navigation: {
+      state: 'anchored',
+      originRef: { kind: 'message', threadId: 'thread', messageId: 'origin' },
+      approvalCardRef: { threadId: 'thread', messageId: 'message' },
+    },
+  });
+  const row = {
+    ...approvalRow(item),
+    originalApprovalCard: { cardRef: { threadId: 'thread', messageId: 'message', blockId: block.id }, block },
+  };
+  let status = 'pending';
+  vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+    if (path === '/api/session') return Response.json({ userId: 'owner' });
+    if (path === '/api/profile-updates/profile/approve' && init?.method === 'POST') {
+      status = 'approved';
+      return Response.json({ proposalId: target.id, status });
+    }
+    if (path === '/api/profile-updates/profile') return Response.json({ proposalId: target.id, status });
+    if (String(path).includes('/approval-hub/pending'))
+      return Response.json({ items: status === 'pending' ? [item] : [], count: status === 'pending' ? 1 : 0 });
+    if (String(path).includes('/approval-hub/settled'))
+      return Response.json({
+        items:
+          status === 'approved' ? [{ ...item, resolution: 'accepted', materialization: { state: 'succeeded' } }] : [],
+      });
+    const read = okRead(status === 'pending' ? [row] : [], {
+      identity: { ownerUserId: 'owner' },
+      page: { offset: 0, limit: 20, scope: 'known_rows', hasMore: false },
+    });
+    return Response.json(read.kind === 'ok' ? read.read : null);
+  });
+  let binding!: ProposalBinding;
+  renderHook(
+    () => null,
+    () => (
+      <ProposalRecordBinding
+        target={target}
+        generation={1}
+        changed={(value) => {
+          binding = value;
+        }}
+      />
+    ),
+  );
+  await waitFor(() => expect(binding.current).toBe(true));
+  expect(proposalView(binding, false, false, {}, block)).toMatchObject({
+    canApprove: true,
+    rejectable: true,
+    first: block.bodyMarkdown,
+  });
+  expect(
+    approvalResultRead.snapshot({ owner: 'owner', producer: 'F231', proposalId: target.id }, 'native').value,
+  ).toEqual({ proposalId: target.id, status: 'pending' });
+  await expect(readProposal({ ...target, mid: 'copied-card' }, undefined, true)).rejects.toThrow('来源');
+  await act(() => decideProposal(binding, 'approve'));
+  await waitFor(() => expect(binding.record?.status).toBe('approved'));
+  expect(proposalView(binding, false, false, {}, block)).toMatchObject({
+    canApprove: false,
+    rejectable: false,
+    noticeState: 'approved',
+  });
+  expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+});
 
 it('keeps the shared native body intact and projects the proposal binding from that body', async () => {
   const target: ProposalTarget = {

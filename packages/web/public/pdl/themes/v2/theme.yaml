@@ -17007,6 +17007,7 @@ pdl:
               mid: "@mid"
               from: "@from"
               error: "@err"
+              wait: "@wait"
               act: msgJump
               label:
                 t: v2a.position
@@ -17021,6 +17022,9 @@ pdl:
           use: v2Composer
           props:
             home: $.home
+            notices:
+              - type: notices
+                items: $.decisionNotices
             runners:
               - type: component
                 use: v2Runners
@@ -17953,7 +17957,8 @@ pdl:
                     running: "@running"
                     error: "@failed"
                     pending: "@pending"
-                    pendingLabel: t:v2a.pending
+                    pendingLabel: "@pendingLabel"
+                    threadId: "@id"
                     at: "@at"
                     unread: "@unread"
                     unreadLabel:

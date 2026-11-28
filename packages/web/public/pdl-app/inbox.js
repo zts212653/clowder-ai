@@ -3,6 +3,8 @@
 const MODAL_INIT = {};
 const MODALS = {};
 let inboxPendingCounts = {};
+let inboxPendingByThread = {};
+let inboxPendingComplete = false;
 function inboxDecisionThreadId(r) {
   if (!r || r.userMention) return '';
   if (r.approval?.resolution && r.approval.resolution !== 'open') return '';
@@ -22,8 +24,30 @@ function inboxPendingCount(threadId) {
   if (projectionNeeded) projectionNeeded.add('inbox');
   return (threadId && inboxPendingCounts[threadId]) || 0;
 }
+function inboxPendingItems(threadId) {
+  if (projectionNeeded) projectionNeeded.add('inbox');
+  return inboxPendingByThread[threadId] || [];
+}
+function inboxPendingLabel(threadId) {
+  return tc(inboxPendingComplete ? 'pendingDecisions.count' : 'pendingDecisions.known', inboxPendingCount(threadId));
+}
+function inboxDecisionNotices(threadId) {
+  return inboxPendingCount(threadId)
+    ? [
+        {
+          id: 'pending-decisions',
+          tone: 'warn',
+          text: inboxPendingLabel(threadId) + ' · ' + tc('pendingDecisions.go'),
+          act: 'pendingDecisions',
+          args: { t: threadId },
+        },
+      ]
+    : [];
+}
 function bindInbox() {
   inboxPendingCounts = {};
+  inboxPendingByThread = {};
+  inboxPendingComplete = false;
   CS.ib = {
     view: 'main',
     time: 'week',
@@ -46,6 +70,7 @@ function bindInbox() {
     owner;
   function rebuildPendingCounts() {
     const next = {};
+    const byThread = {};
     const seen = new Set();
     allDecisions.forEach(function (r) {
       if (r && r.decisionRef) {
@@ -53,15 +78,38 @@ function bindInbox() {
         seen.add(r.decisionRef);
       }
       const tid = inboxDecisionThreadId(r);
-      if (tid) next[tid] = (next[tid] || 0) + 1;
+      if (tid) {
+        next[tid] = (next[tid] || 0) + 1;
+        const ref =
+          r.originalApprovalCard?.cardRef ||
+          r.runtimeInteraction?.cardRef ||
+          r.choiceRequest?.cardRef ||
+          r.approval?.navigation?.approvalCardRef;
+        (byThread[tid] || (byThread[tid] = [])).push({
+          summary: r.summary,
+          createdAt: r.approval?.createdAt,
+          expiresAt: r.approval?.expiresAt,
+          t: tid,
+          mid: ref?.messageId || '',
+        });
+      }
     });
     if (conciergeThread && Array.isArray(confirmations)) {
       confirmations.forEach(function (c) {
-        if (c && c.status === 'rendered') next[conciergeThread] = (next[conciergeThread] || 0) + 1;
+        if (c && c.status === 'rendered') {
+          next[conciergeThread] = (next[conciergeThread] || 0) + 1;
+          (byThread[conciergeThread] || (byThread[conciergeThread] = [])).push({
+            summary: c.action?.title || c.action?.summary || c.action?.originalText,
+            createdAt: c.createdAt,
+            t: conciergeThread,
+            mid: c.messageId || '',
+          });
+        }
       });
     }
-    const changed = !chatDataEqual(inboxPendingCounts, next);
+    const changed = !chatDataEqual(inboxPendingCounts, next) || !chatDataEqual(inboxPendingByThread, byThread);
     inboxPendingCounts = next;
+    inboxPendingByThread = byThread;
     return changed;
   }
   async function loadAllDecisionItems(ticket, currentPage, currentOffset, opt) {
@@ -88,7 +136,8 @@ function bindInbox() {
       items.push.apply(items, pageData.items);
       if (!pageData.page?.hasMore || !pageData.items.length) return items;
     }
-    return items;
+    // A bounded scan that still has more rows cannot claim a complete projection.
+    return null;
   }
   function requireCurrent() {
     if (!confirmed) throw new Error(tc('inboxRefresh.retained'));
@@ -96,6 +145,8 @@ function bindInbox() {
   async function load() {
     const ticket = ++sequence;
     confirmed = false;
+    if (inboxPendingComplete) navStale();
+    inboxPendingComplete = false;
     chatDataRender();
     const opt = { afterCurrentGet: true },
       // The two decision pages are checked together (same owner); the rest are read on their own and a failure there
@@ -143,20 +194,52 @@ function bindInbox() {
       const collected = await loadAllDecisionItems(ticket, read, currentOffset, opt);
       if (ticket !== sequence) return;
       if (Array.isArray(collected)) allDecisions = collected;
+      inboxPendingComplete = Array.isArray(collected) && read.status === 'available' && extra.status === 'fulfilled';
     }
-    if (rebuildPendingCounts()) navStale();
+    if (rebuildPendingCounts() || inboxPendingComplete) navStale();
     await chatDataRender();
   }
   api.on('session:changed', function (identity) {
     owner = identity && identity.ownerUserId;
     ++sequence;
     confirmed = false;
+    read = handled = null;
+    allDecisions = [];
+    confirmations = [];
+    conciergeThread = null;
+    lastHandling = null;
+    inboxPendingComplete = false;
+    rebuildPendingCounts();
+    navStale();
     chatDataRender();
     if (heldNeeded.has('inbox')) return load();
   });
   api.on('sources:needed', function (diff) {
     if (diff.added.indexOf('inbox') >= 0) settleHold(load());
   });
+  A.pendingDecisions = function (d, el) {
+    const items = inboxPendingItems(d.t || chatPort.threadId);
+    if (!items.length) return A.inboxToggle({}, el);
+    if (items.length === 1 && items[0].mid) return A.msgJump({ t: items[0].t, mid: items[0].mid });
+    return A.menu(
+      {
+        menu: menuLive(
+          items.map(function (item) {
+            const stale = typeof item.expiresAt === 'number' && item.expiresAt < Date.now();
+            return {
+              label:
+                (item.summary || tc('pendingDecisions.item')) +
+                (typeof item.createdAt === 'number' ? ' · ' + FORMATS.ago(item.createdAt) : '') +
+                (stale ? ' · ' + tc('pendingDecisions.stale') : ''),
+              act: item.mid ? 'msgJump' : 'inboxToggle',
+              data: item.mid ? { t: item.t, mid: item.mid } : {},
+            };
+          }),
+        ),
+      },
+      el,
+    );
+  };
   [
     'cat-cafe:entrusted-work-projection-invalidated',
     'cat-cafe:ignored-item-preferences-updated',

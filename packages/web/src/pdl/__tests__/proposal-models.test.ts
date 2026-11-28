@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { readOriginalApprovalSource } from '@/components/rich/read-domain-approval-source';
+import { approvalRow, storeItem } from '@/components/shell/mailbox/__tests__/mailbox-fixtures';
 import { approvalResultRead } from '@/lib/approval-result-read';
 import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import {
@@ -13,6 +15,7 @@ import {
 
 const transport = vi.hoisted(() => ({ read: vi.fn(), post: vi.fn() }));
 vi.mock('@/lib/approval-producer-read', () => ({ readApprovalProducerBody: transport.read }));
+vi.mock('@/components/rich/read-domain-approval-source', () => ({ readOriginalApprovalSource: vi.fn() }));
 vi.mock('@/utils/api-client', () => ({ apiFetch: transport.post }));
 const target = {
   feature: 'F128' as const,
@@ -45,25 +48,61 @@ beforeEach(() => {
 });
 
 describe('producer-specific proposal bindings', () => {
+  it.each([
+    { proposal: { proposalId: 'profile', status: 'pending' } },
+    { proposalId: 'other-profile', status: 'pending' },
+    { proposalId: 'profile', status: 'expired' },
+    { proposalId: 'profile', status: null },
+  ])('refuses an invalid public profile status response: %j', async (body) => {
+    const block = {
+      kind: 'card' as const,
+      v: 1 as const,
+      id: 'profile-update-profile',
+      title: 'Profile',
+      meta: { approval: { producerId: 'F231', canonicalProposalId: 'profile' } },
+    };
+    transport.read.mockResolvedValue(body);
+    await expect(readProposal(proposalTarget(block, 'thread', 'message')!)).rejects.toThrow('来源');
+    expect(transport.post).not.toHaveBeenCalled();
+  });
+  it('withdraws the profile binding if its authenticated session changes during the publication read', async () => {
+    const block = {
+      kind: 'card' as const,
+      v: 1 as const,
+      id: 'profile-update-profile',
+      title: 'Profile',
+      meta: { approval: { producerId: 'F231', canonicalProposalId: 'profile' } },
+    };
+    transport.read.mockResolvedValue({ proposalId: 'profile', status: 'pending' });
+    vi.mocked(readOriginalApprovalSource).mockImplementationOnce(async () => {
+      observeApiSessionOwner('different-owner');
+      return null;
+    });
+    await expect(readProposal(proposalTarget(block, 'thread', 'message')!)).rejects.toThrow('已变化');
+    expect(transport.post).not.toHaveBeenCalled();
+  });
   it('reads the native profile proposal and submits its decision to the original writer', async () => {
     const block = {
       v: 1 as const,
       kind: 'card' as const,
       id: 'profile-update-profile-1',
       title: 'Profile',
+      bodyMarkdown: 'Owner change\n\n```diff\n-before\n+after\n```',
+      fields: [{ label: '目标', value: 'primer.md' }],
       meta: { approval: { producerId: 'F231', canonicalProposalId: 'profile-1' } },
     };
     const profile = proposalTarget(block, 'thread-1', 'message-1')!;
-    transport.read.mockResolvedValue({
-      proposal: {
-        ...record(),
-        proposalId: 'profile-1',
-        targetLayer: 'relationship',
-        targetPath: 'primer.md',
-        beforeContent: 'before',
-        afterContent: 'after',
-        rationale: 'owner change',
-      },
+    transport.read.mockResolvedValue({ proposalId: 'profile-1', status: 'pending' });
+    const item = storeItem({
+      proposalId: 'profile-1',
+      sourceFeatureId: 'F231',
+      requesterCatId: 'codex',
+      detail: { rationale: 'owner change', targetPath: 'primer.md' },
+    });
+    vi.mocked(readOriginalApprovalSource).mockResolvedValue({
+      ownerUserId: 'owner-1',
+      item,
+      row: approvalRow(item),
     });
     const original = await readProposal(profile),
       refresh = vi.fn();
@@ -73,6 +112,7 @@ describe('producer-specific proposal bindings', () => {
       canRequestChange: true,
       asking: true,
     });
+    expect(proposalView(binding, false, true, {}, block)?.first).toBe(block.bodyMarkdown);
     const send = vi.fn(async () => true);
     await requestProposalRevision(binding, '请修正这段画像', send);
     expect(send).toHaveBeenCalledWith('codex', '请修正这段画像');

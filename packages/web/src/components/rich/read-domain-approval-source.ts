@@ -61,6 +61,16 @@ export async function readDomainApprovalSource(
 ): Promise<DomainApprovalSource | null> {
   const candidate = domainApprovalCandidate(block);
   if (!candidate) return null;
+  return readOriginalApprovalSource(block, coordinate, candidate, fresh);
+}
+
+/** The canonical publication and owner checks shared by original approval-card readers. */
+export async function readOriginalApprovalSource(
+  block: RichCardBlock,
+  coordinate: DomainCardCoordinate,
+  candidate: { feature: keyof typeof prefix | 'F231'; proposalId: string },
+  fresh = true,
+): Promise<DomainApprovalSource | null> {
   try {
     const userId = await readFreshApprovalResultOwner();
     if (!userId) return null;

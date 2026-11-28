@@ -731,11 +731,14 @@ window.clowderChat = {
     };
     VM.chatComposer = function () {
       const base = chatRead('chatComposer');
+      const decisions = inboxDecisionNotices(chatPort.threadId);
       if (chatPort.threadId !== 'default') {
         CS.homePin = null;
         CS.homeTitle = null;
       }
       return Object.assign({}, base, {
+        notices: (base.notices || []).concat(decisions),
+        decisionNotices: decisions,
         homePin: CS.homePin != null ? !!CS.homePin : !!base.homePin,
         input: Object.assign({}, base.input, {
           title: CS.homeTitle != null ? CS.homeTitle : (base.input && base.input.title) || '',
@@ -759,8 +762,13 @@ window.clowderChat = {
       return { items: chatList('chatStreamParts', chatMessageVM).items };
     };
     VM.chatTicks = function () {
+      const waiting = new Set(
+        inboxPendingItems(chatPort.threadId).map(function (item) {
+          return item.mid;
+        }),
+      );
       const list = chatList('chatTicksParts', function (tick) {
-        return tick;
+        return Object.assign({}, tick, { wait: waiting.has(tick.mid) });
       });
       return { older: list.parts.older, ticks: list.items };
     };
@@ -1176,10 +1184,58 @@ window.clowderChat = {
     A.streamLatest = function () {
       streamScrollTo(null);
     };
+    let olderWork = null;
+    let olderWaiters = [];
+    function releasePreviousOlder() {
+      if (olderWork && olderWork.threadId !== chatPort.threadId) {
+        olderWork = null;
+        finishOlder(false);
+      }
+    }
+    function finishOlder(loaded) {
+      const waiters = olderWaiters;
+      olderWaiters = [];
+      waiters.forEach(function (w) {
+        w.done(w.threadId === chatPort.threadId ? loaded : false);
+      });
+    }
     STREAM_OLDER.load = function (done) {
-      if (chatRead('chatPage').older !== 'idle') return false;
-      chatAction('older').then(done);
+      releasePreviousOlder();
+      const state = chatRead('chatPage').older;
+      if (state === 'done') return false;
+      olderWaiters.push({ threadId: chatPort.threadId, done: done });
+      if (state === 'loading' || olderWork) return true;
+      const work = { threadId: chatPort.threadId };
+      olderWork = work;
+      Promise.resolve(chatAction('older')).then(
+        async function (loaded) {
+          if (olderWork !== work) return;
+          await chatDataRender();
+          if (olderWork !== work) return;
+          olderWork = null;
+          finishOlder(loaded);
+        },
+        function () {
+          if (olderWork === work) {
+            olderWork = null;
+            finishOlder(false);
+          }
+        },
+      );
+      return true;
     };
+    onRender(function () {
+      releasePreviousOlder();
+      if (!olderWork && olderWaiters.length && chatRead('chatPage').older !== 'loading') {
+        const waiters = olderWaiters;
+        olderWaiters = [];
+        queueMicrotask(function () {
+          waiters.forEach(function (w) {
+            w.done(w.threadId === chatPort.threadId ? undefined : false);
+          });
+        });
+      }
+    });
     A.streamOlder = function () {
       return STREAM_OLDER.load(function () {});
     };
