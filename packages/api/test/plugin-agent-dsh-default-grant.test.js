@@ -226,7 +226,7 @@ test(
     const first = await invoke('DSH_DEFAULT_FIRST', 'first');
     const nativeId = assertTurn(first, 'DSH_DEFAULT_REPLY_1');
     assert.ok(nativeId);
-    await member.releaseAll('first_reopen');
+    await t.test('Release the first turn before resuming', () => member.releaseAll('first_reopen'));
     const resumed = await invoke('DSH_DEFAULT_RESUMED', 'resumed', { sessionId: nativeId });
     assert.equal(assertTurn(resumed, 'DSH_DEFAULT_REPLY_2'), nativeId);
     assert.match(JSON.stringify(requests[1].messages), /DSH_DEFAULT_FIRST/);
@@ -250,24 +250,22 @@ test(
       }),
     ]);
     const next = await invoke('DSH_DEFAULT_AFTER_CANCEL', 'after-cancel', { sessionId: nativeId });
-    assert.equal(assertTurn(next, 'DSH_DEFAULT_REPLY_4'), nativeId);
-    assert.ok(!next.some((event) => event.type === 'text' && event.content.includes('DSH_CANCEL_PREFIX')));
+    const afterCancelText = next.filter(({ type }) => type === 'text').map(({ content }) => content);
+    t.diagnostic(JSON.stringify({ nativeId, cancelledTurn: 'cancelled', nextTurn: 'after-cancel', afterCancelText }));
+    assert.equal(next.at(-1)?.errorCode, undefined, next.find(({ type }) => type === 'error')?.error);
+    assert.equal(next.at(-1)?.metadata?.sessionId, nativeId);
+    assert.equal(afterCancelText.join(''), 'DSH_DEFAULT_REPLY_4');
     assert.equal(requests.length, 4);
+    const afterCancelHistory = JSON.stringify(requests[3].messages);
+    assert.match(afterCancelHistory, /DSH_DEFAULT_FIRST/);
+    assert.match(afterCancelHistory, /DSH_DEFAULT_REPLY_1/);
+    assert.match(afterCancelHistory, /DSH_DEFAULT_RESUMED/);
+    assert.match(afterCancelHistory, /DSH_DEFAULT_REPLY_2/);
     for (const body of requests) {
       assert.equal(body.model, 'selected-model');
       assert.match(JSON.stringify(body.messages.filter(({ role }) => role === 'system')), /DSH_DEFAULT_ROLE/);
       assert.doesNotMatch(JSON.stringify(body.messages.filter(({ role }) => role === 'user')), /DSH_DEFAULT_ROLE/);
     }
-    await member.releaseAll('done');
-    const beforeUninstall = (await manager.get(ref.pluginId)).plugin;
-    await manager.uninstall(ref.pluginId, { expectedRevision: beforeUninstall.lifecycleRevision });
-    const retired = await runtime.inventoryStore.readAuthority(beforeUninstall.pluginInstanceId);
-    assert.equal(retired?.instance.lifecycleState, 'retired');
-    assert.equal(registry.has(ref), false);
-    assert.equal(getResolvedCats(root)[catId]?.agentProvider, 'plugin:official.agent-dsh/dsh');
-    const unavailable = await invoke('Must not run after uninstall', 'uninstalled', { sessionId: nativeId });
-    assert.equal(unavailable.at(-1)?.errorCode, 'session_implementation_unavailable');
-    assert.equal(requests.length, 4);
     t.diagnostic(
       JSON.stringify({
         desktopVersion,
@@ -275,8 +273,19 @@ test(
         modelRequests: requests.length,
         cancelled: true,
         resumedAfterCancel: true,
-        managerUninstall: 'retired',
       }),
     );
+    await member.releaseAll('done');
+    await t.test('Manager uninstall retires the DSH member implementation', async () => {
+      const beforeUninstall = (await manager.get(ref.pluginId)).plugin;
+      await manager.uninstall(ref.pluginId, { expectedRevision: beforeUninstall.lifecycleRevision });
+      const retired = await runtime.inventoryStore.readAuthority(beforeUninstall.pluginInstanceId);
+      assert.equal(retired?.instance.lifecycleState, 'retired');
+      assert.equal(registry.has(ref), false);
+      assert.equal(getResolvedCats(root)[catId]?.agentProvider, 'plugin:official.agent-dsh/dsh');
+      const unavailable = await invoke('Must not run after uninstall', 'uninstalled', { sessionId: nativeId });
+      assert.equal(unavailable.at(-1)?.errorCode, 'session_implementation_unavailable');
+      assert.equal(requests.length, 4);
+    });
   },
 );
