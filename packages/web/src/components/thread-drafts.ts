@@ -137,6 +137,12 @@ export function syncDraftToStorage(threadId: string, text: string | undefined): 
   for (const listener of threadDraftListeners) listener();
 }
 
+/** Flush the live text before leaving and verify storage, rather than its in-memory mirror. */
+export function persistThreadDraftText(threadId: string, text: string): boolean {
+  syncDraftToStorage(threadId, text);
+  return (hydrateTextDrafts().get(threadId) ?? '') === (text.trim() ? text : '');
+}
+
 /** #934: Save/clear reply context for a thread draft. */
 export function syncReplyDraftToStorage(threadId: string, reply: DraftReplyContext | null): void {
   if (JSON.stringify(threadReplyDrafts.get(threadId) ?? null) === JSON.stringify(reply)) return;

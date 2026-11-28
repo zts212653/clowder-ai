@@ -1,4 +1,5 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, net, session, shell, Notification } = require('electron');
+const electron = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, session, shell, Notification } = electron;
 const path = require('node:path');
 const { resolveProjectRootFromDir } = require('./project-root');
 const { installationIdentity, isInstallationShutdownRequest } = require('./installation-lifecycle');
@@ -25,6 +26,7 @@ const { createShutdownController } = require('./shutdown-controller');
 const { DESKTOP_APP_ID } = require('./app-identity');
 const { createDesktopUpdateRuntime } = require('./desktop-update-runtime');
 const { ensureValidMacInstallLocation } = require('./mac-install-location');
+const { createInterfaceReloadHandler } = require('./interface-reload');
 const { createWindowRecoveryController } = require('./window-recovery');
 const { decideWindowClose } = require('./window-close-policy');
 const { createLifecycleLogger } = require('./lifecycle-diagnostics');
@@ -273,9 +275,10 @@ app.on('ready', async () => {
   const showAbout = () => showAboutDialog({ app, dialog, onManualUpdate: checkForUpdatesManually });
   lifecycle('tray-create-requested');
   const trayResult = createNativeDesktopTrayResult({
-    electron: require('electron'),
+    electron,
     getMainWindow: getPresentableMainWindow,
     onManualUpdate: checkForUpdatesManually,
+    onReloadInterface: createInterfaceReloadHandler({ dialog, MessageChannelMain: electron.MessageChannelMain }),
     onQuit: () => requestQuit('tray'),
     showAbout,
   });

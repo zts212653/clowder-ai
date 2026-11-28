@@ -286,6 +286,33 @@ export function useServerComposerDraft(input: {
   }, [scope]);
 
   return {
+    async persistForReload(expected: ComposerDraft) {
+      if (!enabled) return isEmpty(expected);
+      const expectedSignature = JSON.stringify(expected);
+      const stillCurrent = () =>
+        currentSession(scope) &&
+        latest.current.threadId === threadId &&
+        !latest.current.holdWrites &&
+        !scope.sends.has(threadId) &&
+        JSON.stringify(latest.current.draft) === expectedSignature;
+      if (!stillCurrent()) return false;
+      const key = editKey(scope, threadId);
+      await writing.get(key);
+      if (!stillCurrent()) return false;
+      const known = scope.known.get(threadId);
+      if (!known) return isEmpty(expected) && !readEdit(scope, threadId);
+      if (shown.current !== threadId) return false;
+      if (known.afterSend && isEmpty(expected)) return true;
+      if (known.signature !== expectedSignature) {
+        const draft = known.afterSend
+          ? mergeDraft(emptyDraft, expected, JSON.parse(known.signature) as ComposerDraft)
+          : expected;
+        scope.pending = { threadId, draft };
+        flush(scope, show);
+        await writing.get(key);
+      }
+      return stillCurrent() && scope.known.get(threadId)?.signature === expectedSignature;
+    },
     holdRecoveredDraft: (draft: ComposerDraft): boolean => {
       if (!enabled || !scope.session.ownerUserId || !currentSession(scope) || latest.current.holdWrites) return false;
       if (!isEmpty(latest.current.draft) || scope.sends.has(threadId) || readEdit(scope, threadId)) return false;
