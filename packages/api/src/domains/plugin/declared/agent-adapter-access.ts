@@ -183,7 +183,7 @@ export function createAgentAdapterAccess(
     },
     async detect(
       ref: { pluginId: string; contributionId: string },
-      options?: { refresh?: boolean; signal?: AbortSignal },
+      options?: { refresh?: boolean; signal?: AbortSignal; catalog?: AdapterCatalogIdentity },
     ) {
       const { active, response } = await read(ref, 'detect', { refresh: options?.refresh ?? false }, options);
       const result = parseAgentAdapterDetection(response);

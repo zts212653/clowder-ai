@@ -3705,6 +3705,7 @@ async function initializeApi(
     agentRoleWrite: (...args) => agentRoleWrite(...args),
     nativeRuntimeDiscovery: (...args) => readLegacyNativeRuntimes(...args),
     agentAccessDetection: (...args) => readAgentAccessDetection(...args),
+    readDshAdapterDesktop: (...args) => readDshAdapterDesktop(...args),
     runDshConnection: (config, cwd, preferences) => agentAccessDshConnection(config, cwd, preferences),
     runtimeCatalog: {
       modelCatalogGeneration: () => agentAccessModelCatalogGeneration(),
@@ -6119,7 +6120,11 @@ async function initializeApi(
   );
   const agentRoleRead = createAgentRoleRead(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
   const agentRoleWrite = createAgentRoleWrite(pluginRuntime.inventoryStore, pluginRuntime.supervisor);
-  const { readLegacyNativeRuntimes, readDetection: readAgentAccessDetection } = registerAgentAccessRoutes(app, {
+  const {
+    readLegacyNativeRuntimes,
+    readDetection: readAgentAccessDetection,
+    readDshAdapterDesktop,
+  } = registerAgentAccessRoutes(app, {
     inventory: pluginRuntime.inventoryStore,
     runtime: pluginRuntime.supervisor,
     agentAdapters: pluginRuntime.agentAdapters,

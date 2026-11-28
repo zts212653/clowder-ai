@@ -23,8 +23,11 @@ import {
 } from '../domains/plugin/carrier/plugin-owner-request-context.js';
 import type { PluginRuntimeCarrierRouter } from '../domains/plugin/carrier/runtime-carrier.js';
 import type { createAgentAdapterAccess } from '../domains/plugin/declared/agent-adapter-access.js';
+import { findDshAdapterDesktop } from '../domains/plugin/declared/agent-adapter-native/agent-adapter-dsh-native-grant.js';
 import {
+  dshDesktopAdapterRef,
   matchesOfficialAgentCatalog,
+  officialDshClient,
   officialNativeClients,
 } from '../domains/plugin/declared/agent-adapter-official-clients.js';
 import type { InventoryAuthority, PluginInventoryStore } from '../domains/plugin/host-inventory/ports.js';
@@ -34,6 +37,7 @@ import { requestLifetime } from './plugin/plugin-webhook-forwarding-routes.js';
 import { pluginAccessError, requirePluginReadAccess } from './plugin-access-guards.js';
 
 const detectionRequestSchema = agentAccessDetectRequestSchema.extend({ adapterRef: z.string().max(200).optional() });
+type AdapterDetection = Awaited<ReturnType<ReturnType<typeof createAgentAdapterAccess>['detect']>>;
 
 export function registerAgentAccessRoutes(
   app: FastifyInstance,
@@ -101,20 +105,31 @@ export function registerAgentAccessRoutes(
         active.map(async ({ ref }) => {
           const target = parsePluginAgentRef(ref);
           const result = target
-            ? await adapters.detect(target, { refresh: input.refresh, signal: lifetime.signal }).catch(() => undefined)
+            ? await adapters
+                .detect(target, {
+                  refresh: input.refresh,
+                  signal: lifetime.signal,
+                  ...(ref === dshDesktopAdapterRef ? { catalog: officialDshClient } : {}),
+                })
+                .catch(() => undefined)
             : undefined;
-          return { ref, rows: result?.candidates ?? [] };
+          const desktop = ref === dshDesktopAdapterRef && result ? await projectDshDesktop(result) : undefined;
+          return { ref, rows: result?.candidates ?? [], desktop };
         }),
       );
       const candidates: AgentAccessDetection['candidates'] = [];
       const partialFailures = [...(legacy.partialFailures ?? [])];
-      probes.forEach(({ ref, rows }) => {
+      probes.forEach(({ ref, rows, desktop }) => {
         const candidate =
           rows.find(({ state }) => state.status === 'ready') ??
           rows.find(({ state }) => state.status === 'login-required') ??
           rows.find(({ state }) => state.status === 'not-installed');
-        if (!candidate) {
+        if (!candidate || (ref === dshDesktopAdapterRef && candidate.state.status === 'ready' && !desktop)) {
           partialFailures.push({ id: ref });
+          return;
+        }
+        if (desktop) {
+          candidates.push(desktop);
           return;
         }
         candidates.push({
@@ -136,6 +151,53 @@ export function registerAgentAccessRoutes(
         candidates: [...legacyCandidates.filter(({ id }) => !adapterIds.has(id)), ...candidates],
         ...(partialFailures.length ? { partialFailures } : {}),
       };
+    } finally {
+      lifetime.close();
+    }
+  }
+
+  async function projectDshDesktop(result: AdapterDetection) {
+    if (!result.candidates.some(({ id, state }) => id === officialDshClient.contributionId && state.status === 'ready'))
+      return;
+    const desktop = await findDshAdapterDesktop().catch(() => undefined);
+    if (!desktop?.command) return;
+    const authority = await inventory.readCurrentAuthority(officialDshClient.pluginId);
+    const { binding } = result;
+    if (
+      !matchesOfficialAgentCatalog(officialDshClient, authority?.packageRecord?.provenance) ||
+      authority?.instance.activationState !== 'enabled' ||
+      authority.instance.runtimeState !== 'healthy' ||
+      authority.instance.pluginInstanceId !== binding.pluginInstanceId ||
+      authority.instance.packageDigest !== binding.packageDigest ||
+      authority.instance.lifecycleRevision !== binding.lifecycleRevision
+    )
+      return;
+    return {
+      id: dshDesktopAdapterRef,
+      label: 'DSH Desktop (Agent Adapter)',
+      clientId: 'acp' as const,
+      installed: true,
+      command: desktop.command,
+      dshDesktop: true as const,
+      dshSetupSupported: true as const,
+      models: [],
+      acp: {
+        command: desktop.command,
+        startupArgs: desktop.startupArgs,
+        transport: 'stdio' as const,
+        agentProvider: dshDesktopAdapterRef,
+      },
+    };
+  }
+
+  async function readDshAdapterDesktop(request: FastifyRequest, reply: FastifyReply, ref: string) {
+    if (ref !== dshDesktopAdapterRef || !agentAdapters) return;
+    const lifetime = requestLifetime(request, reply);
+    try {
+      const result = await agentAdapters
+        .detect(officialDshClient, { catalog: officialDshClient, signal: lifetime.signal })
+        .catch(() => undefined);
+      return result ? await projectDshDesktop(result) : undefined;
     } finally {
       lifetime.close();
     }
@@ -220,7 +282,7 @@ export function registerAgentAccessRoutes(
     return { runtimes: detected.candidates, authenticationStatus: 'local_checked' };
   }
 
-  return { readLegacyNativeRuntimes, readDetection };
+  return { readLegacyNativeRuntimes, readDetection, readDshAdapterDesktop };
 }
 
 function currentAgentAccess(

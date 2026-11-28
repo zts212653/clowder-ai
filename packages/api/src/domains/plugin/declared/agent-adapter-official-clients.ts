@@ -1,5 +1,14 @@
 import type { PluginPackageProvenance } from '../host-inventory/types.js';
 
+export const officialDshClient = {
+  pluginId: 'official.agent-dsh',
+  contributionId: 'dsh',
+  catalogId: 'agent-dsh',
+  packageName: '@clowder-ai/agent-dsh',
+  command: 'dsh',
+} as const;
+export const dshDesktopAdapterRef = 'plugin:official.agent-dsh/dsh';
+
 export const officialNativeClients = [
   {
     pluginId: 'official.agent-kimi',
@@ -34,17 +43,11 @@ export const officialNativeClients = [
     packageName: '@clowder-ai/agent-agy',
     command: 'agy',
   },
-  {
-    pluginId: 'official.agent-dsh',
-    contributionId: 'dsh',
-    catalogId: 'agent-dsh',
-    packageName: '@clowder-ai/agent-dsh',
-    command: 'dsh',
-  },
+  { ...officialDshClient, legacyDiscoveryId: undefined, terminalCommand: undefined },
 ];
 
 export function matchesOfficialAgentCatalog(
-  client: (typeof officialNativeClients)[number],
+  client: Pick<(typeof officialNativeClients)[number], 'catalogId' | 'packageName'>,
   source: PluginPackageProvenance | undefined,
 ) {
   return (

@@ -28,7 +28,7 @@ export function needsDshPreparation(form: HubCatEditorFormState, baseline?: CatD
   return (
     usesDshDesktopSetup(form, Boolean(baseline), runtime ? [runtime] : undefined) &&
     (!baseline ||
-      (['acpCommand', 'acpStartupArgs', 'defaultModel'] as const).some(
+      (['acpAgentProvider', 'acpCommand', 'acpStartupArgs', 'defaultModel'] as const).some(
         (key) => form[key] !== initialState(baseline)[key],
       ))
   );
@@ -51,7 +51,13 @@ export async function prepareNativeMember(
         ? { runtimes, runtimeConfirmedRevision: runtimeRevision }
         : state,
     );
-    const sources = runtimes.filter((runtime) => runtime.installed && runtime.dshDesktop && runtime.acp);
+    const sources = runtimes.filter(
+      (runtime) =>
+        runtime.installed &&
+        runtime.dshDesktop &&
+        runtime.acp &&
+        (runtime.acp.agentProvider ?? null) === (form.acpAgentProvider ?? null),
+    );
     const source =
       sources.find((runtime) => runtime.acp?.command === form.acpCommand) ??
       (form.acpCommand === 'dsh' && sources.length === 1 ? sources[0] : undefined);

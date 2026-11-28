@@ -37,6 +37,21 @@ test('default detection grants only inspect for a matching catalog identity', ()
   }
 });
 
+test('trusted DSH detection grants only read-only inspection before a member exists', () => {
+  const request = {
+    pluginId: 'official.agent-dsh',
+    contributionId: 'dsh',
+    pluginInstanceId: 'pi_dsh',
+    packageDigest: 'verified-host-inventory-digest',
+    packageProvenance: { kind: 'catalog', catalogId: 'agent-dsh', packageName: '@clowder-ai/agent-dsh' },
+    activationSignal: new AbortController().signal,
+    action: 'detect',
+  };
+  assert.deepEqual(Object.keys(grantAgentAdapterNativeRuntime(request) ?? {}), ['inspect']);
+  assert.equal(grantAgentAdapterNativeRuntime({ ...request, action: 'openSession' }), undefined);
+  assert.equal(grantAgentAdapterNativeRuntime({ ...request, packageProvenance: { kind: 'local-archive' } }), undefined);
+});
+
 test('quota authorization requires the selected account generation and fixed terminal input', async (t) => {
   const request = {
     pluginId: 'official.agent-kimi',

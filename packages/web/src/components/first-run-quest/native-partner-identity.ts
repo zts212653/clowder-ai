@@ -62,6 +62,10 @@ export function nativePartnerIdentity(runtime: RuntimeChoice, templates: Templat
     form.roleDescription = identity.roleDescription;
     form.personality = identity.personality;
     form.teamStrengths = identity.teamStrengths;
+    if (runtime.dshDesktop && runtime.acp?.agentProvider) {
+      form.name = form.displayName = runtime.label;
+      form.nickname = runtime.label;
+    }
   }
   if (runtime.clientId === 'opencode') {
     form.roleDescription = '负责编码实现和工具协作，模型跟随 OpenCode 配置';

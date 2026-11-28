@@ -953,6 +953,7 @@ interface CatsRoutesOptions {
   resolveDshMemberConnectionClient?: ResolveDshMemberConnectionClient;
   nativeRuntimeDiscovery?: ReturnType<typeof registerAgentAccessRoutes>['readLegacyNativeRuntimes'];
   agentAccessDetection?: ReturnType<typeof registerAgentAccessRoutes>['readDetection'];
+  readDshAdapterDesktop?: ReturnType<typeof registerAgentAccessRoutes>['readDshAdapterDesktop'];
   resolveCarrierCapability?: (catId: CatId) => FreshnessCarrierCapability | undefined;
   runtimeCatalog?: RuntimeCatalogRouteOptions;
 }
@@ -973,6 +974,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
   registerDshSetupRoutes(app, {
     runConnection: opts.runDshConnection,
     readDetection: opts.agentAccessDetection,
+    readDshAdapterDesktop: opts.readDshAdapterDesktop,
     ...(opts.resolveDshMemberConnectionClient
       ? { isAvailable: async () => Boolean(await opts.resolveDshMemberConnectionClient?.()) }
       : {}),

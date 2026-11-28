@@ -185,7 +185,13 @@ export async function readMemberSettings() {
   );
   const runtimes = memberRuntimeTools(discovered.candidates, libraries.libraries).map((runtime) => ({
     ...runtime,
-    ...(runtime.dshDesktop ? { discoveredId: discovered.candidates.find((item) => item.dshDesktop)?.id } : {}),
+    ...(runtime.dshDesktop
+      ? {
+          discoveredId:
+            runtime.acp?.agentProvider ??
+            discovered.candidates.find((item) => item.dshDesktop && !item.acp?.agentProvider)?.id,
+        }
+      : {}),
     acpMaxDefault: defaultAcpPoolMaxProcesses(runtime.clientId),
     form: runtimeDefaults(runtime),
   }));

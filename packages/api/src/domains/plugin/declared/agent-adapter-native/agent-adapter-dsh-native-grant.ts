@@ -7,7 +7,11 @@ import type { AgentAdapterNativeRuntime } from '@clowder-ai/agent-contract';
 import { resolveInvokeCapabilityRoot } from '../../../../config/capabilities/invoke-capability-root.js';
 import { DSH_CHECK_GUARD, readDshCheckBinding } from '../../../../routes/dsh-check-launch.js';
 import { DSH_DESKTOP_RUNTIME } from '../../../../routes/dsh-desktop-runtime.js';
-import { dshDesktopL0Compatibility, resolveDshDesktopLaunch } from '../../../../utils/dsh-desktop-launch.js';
+import {
+  dshDesktopL0Compatibility,
+  findDshDesktopCommands,
+  resolveDshDesktopLaunch,
+} from '../../../../utils/dsh-desktop-launch.js';
 import { AcpClient } from '../../../cats/services/agents/providers/acp/AcpClient.js';
 import { resolveAcpBootstrapCwd } from '../../../cats/services/agents/providers/acp/acp-bootstrap-cwd.js';
 import type { AgentServiceOptions } from '../../../cats/services/types.js';
@@ -24,6 +28,18 @@ type SessionLaunch = {
   packageRoot: string;
 };
 const activations = new WeakMap<AbortSignal, { acp: Acp; launches: Map<string, SessionLaunch> }>();
+
+export async function findDshAdapterDesktop() {
+  const commands = await findDshDesktopCommands();
+  const [command] = commands;
+  if (!command) return { state: { status: 'not-installed' } as const };
+  if (commands.length > 1) return { state: { status: 'unavailable', reason: 'dsh_setup_desktop_ambiguous' } as const };
+  const startupArgs = ['--profile', 'acp'];
+  const compatibility = dshDesktopL0Compatibility(command, startupArgs);
+  if (!compatibility?.supported)
+    return { state: { status: 'unavailable', reason: 'dsh_desktop_version_unsupported' } as const };
+  return { command, startupArgs, state: { status: 'ready', version: compatibility.desktopVersion } as const };
+}
 
 async function createDesktopClient(
   launch: SessionLaunch,
@@ -154,6 +170,16 @@ async function createDesktopClient(
 
 /** Start only a saved Desktop member under the catalog adapter's activation. */
 export const grantAgentAdapterDshDesktop: AgentAdapterRuntimeGrant = (request) => {
+  if (request.action === 'detect') {
+    return {
+      async inspect(signal) {
+        signal.throwIfAborted();
+        const { state } = await findDshAdapterDesktop();
+        signal.throwIfAborted();
+        return state;
+      },
+    };
+  }
   const scope = request.hostSession;
   const catId = request.catId;
   const activation = request.activationSignal;

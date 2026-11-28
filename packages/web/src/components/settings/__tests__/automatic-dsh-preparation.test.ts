@@ -64,6 +64,36 @@ it('prepares the selected route into the final save form without testing the mod
     model: 'selected',
   });
 });
+it('prepares the selected independent DSH binding before the shared Desktop with the same command', async () => {
+  const ref = 'plugin:official.agent-dsh/dsh';
+  const adapter = { ...runtime, id: ref, acp: { ...runtime.acp, agentProvider: ref } };
+  const respond = vi.mocked(apiFetch).getMockImplementation()!;
+  vi.mocked(apiFetch).mockImplementation((url, ...args) =>
+    url.endsWith('/agent-access/v1/detect')
+      ? Promise.resolve(Response.json({ readiness: { state: 'ready' }, candidates: [runtime, adapter] }))
+      : respond(url, ...args),
+  );
+  const result = await prepareNativeMember(
+    {
+      ...initialState(),
+      clientId: 'acp',
+      carrier: 'acp',
+      configurationSource: 'native_tool',
+      acpCommand: runtime.acp.command,
+      acpStartupArgs: '--profile acp',
+      acpAgentProvider: ref,
+      defaultModel: '["custom","selected"]',
+    },
+    undefined,
+    { ...adapter, label: 'Independent DSH', clientId: 'acp', models: [] },
+  );
+  expect(result.acpAgentProvider).toBe(ref);
+  for (const [url, request] of vi.mocked(apiFetch).mock.calls) {
+    if (url.endsWith('/inspect') || url.endsWith('/prepare'))
+      expect(JSON.parse(String(request?.body)).runtimeId).toBe(ref);
+  }
+});
+
 it('does not inspect or prepare an unchanged existing binding', async () => {
   const cat = {
     id: 'old',

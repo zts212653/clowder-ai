@@ -39,10 +39,11 @@ export function memberRuntimeTools(
     ),
   ];
   const dshChoice = (item: RuntimeChoice) =>
-    !!item.dshDesktop ||
-    item.dshSetupSupported === true ||
-    (item.id.startsWith('acp:') && item.onboardingEligible === false) ||
-    isDshMember({ clientId: item.clientId, acp: item.acp }, runtimes);
+    !item.acp?.agentProvider &&
+    (!!item.dshDesktop ||
+      item.dshSetupSupported === true ||
+      (item.id.startsWith('acp:') && item.onboardingEligible === false) ||
+      isDshMember({ clientId: item.clientId, acp: item.acp }, runtimes));
   const dshBinding = (draft: ReturnType<typeof runtimeDefaults>) =>
     draft.carrier === 'acp' &&
     isDshMember(
@@ -63,7 +64,7 @@ export function memberRuntimeTools(
       : Object.values(runtimeDrafts ?? {})
           .reverse()
           .find(dshBinding);
-  const source = runtimes.find((item) => item.dshDesktop);
+  const source = runtimes.find((item) => item.dshDesktop && !item.acp?.agentProvider);
   const dsh: RuntimeChoice | undefined = binding
     ? {
         id: 'dsh',

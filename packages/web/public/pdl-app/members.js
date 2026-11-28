@@ -347,7 +347,7 @@ function bindMembers() {
       !form.acpAgentProvider &&
       form.acpCommand === 'dsh' &&
       form.acpStartupArgs === '--profile acp' &&
-      meta.runtimes.some((row) => row.dshDesktop && row.installed)
+      meta.runtimes.some((row) => row.dshDesktop && row.installed && !row.acp?.agentProvider)
     );
   }
   function isDshDraft(state, runtime = selectedRuntime(state.form)) {
@@ -383,7 +383,10 @@ function bindMembers() {
       (runtime?.dshDesktop
         ? runtime
         : meta.runtimes.find(
-            (row) => row.dshDesktop && (dshTemplate(f) || (saved && row.form.acpCommand === f.acpCommand)),
+            (row) =>
+              row.dshDesktop &&
+              !row.acp?.agentProvider &&
+              (dshTemplate(f) || (saved && row.form.acpCommand === f.acpCommand)),
           ));
     if (desktop && !desktop.installed) return null;
     if (!runtime && !f.acpAgentProvider && !desktop) return null;
@@ -690,7 +693,7 @@ function bindMembers() {
       cloud = !!(current && current.identityProtection && current.identityProtection.kind === 'builtin-cloud'),
       catalogState = runtimeCatalogState(),
       runtime = selectedRuntime(f),
-      desktop = meta.runtimes.find((row) => row.dshDesktop),
+      desktop = meta.runtimes.find((row) => row.dshDesktop && !row.acp?.agentProvider),
       isDsh = isDshDraft(state, runtime),
       savedLaunch = savedDshBinding(state) ? f : state.dshBinding,
       legacyDsh =
@@ -774,13 +777,20 @@ function bindMembers() {
       cloud: cloud,
       configurationSource: f.configurationSource,
       accountRef: f.accountRef,
-      clientName: isDsh ? (legacyDsh ? 'DeepSeek Harness' : dshClientName) : client && client.label,
+      clientName:
+        isDsh && f.acpAgentProvider
+          ? runtime.label
+          : isDsh
+            ? legacyDsh
+              ? 'DeepSeek Harness'
+              : dshClientName
+            : client && client.label,
       nativeLogin: runtime && runtime.readiness,
       d: d,
       pluginRuntimes: pluginRuntimes,
       hasPluginRuntimes: pluginRuntimes.length > 1,
       runtimeChoice: f.acpAgentProvider || '',
-      clientChoice: isDsh ? 'dsh' : f.clientId,
+      clientChoice: isDsh && !f.acpAgentProvider ? 'dsh' : f.clientId,
       dsh: !!isDsh,
       clients: meta.clients
         .map(function (c) {
@@ -911,10 +921,10 @@ function bindMembers() {
     if (!state) return;
     if (key === 'clientId') {
       const f = state.form;
-      const fromDsh = isDshDraft(state);
+      const fromDsh = !f.acpAgentProvider && isDshDraft(state);
       if (e.target.value === 'dsh') {
         if (fromDsh) return;
-        const runtime = meta.runtimes.find((row) => row.dshDesktop && row.installed);
+        const runtime = meta.runtimes.find((row) => row.dshDesktop && row.installed && !row.acp?.agentProvider);
         const binding = state.dshBinding || runtime?.form;
         if (binding) {
           Object.assign(f, pdlClone(binding));
@@ -1599,7 +1609,10 @@ function bindMembers() {
         return {
           id: p.id,
           name: p.form.displayName,
-          runtime: p.runtime.dshDesktop ? Object.assign({}, p.runtime, { label: dshClientName }) : p.runtime,
+          runtime:
+            p.runtime.dshDesktop && !p.runtime.acp?.agentProvider
+              ? Object.assign({}, p.runtime, { label: dshClientName })
+              : p.runtime,
           selected: p.selected,
           existingId: p.existingId,
           selectable: p.selectable && !p.existingId && !p.identityConflict,

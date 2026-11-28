@@ -51,6 +51,7 @@ interface DshSetupRouteOptions {
   runConnection?: RunDshConnection;
   isAvailable?: () => Promise<boolean>;
   readDetection?: ReturnType<typeof registerAgentAccessRoutes>['readDetection'];
+  readDshAdapterDesktop?: ReturnType<typeof registerAgentAccessRoutes>['readDshAdapterDesktop'];
 }
 export function registerDshSetupRoutes(app: FastifyInstance, options: DshSetupRouteOptions = {}) {
   async function runtimeFor(id: string, root: string, context: DshSetupRequest) {
@@ -68,15 +69,22 @@ export function registerDshSetupRoutes(app: FastifyInstance, options: DshSetupRo
         throw Error('dsh_setup_custom_startup');
       return resolveDshSetupLaunch(runtime.acp.command, runtime.acp.startupArgs, root);
     });
-  const resolveDesktop =
-    options.resolveDesktopLaunch ??
-    (async (id: string, context: DshSetupRequest): Promise<DshDesktopSource> => {
-      const cwd = resolveActiveProjectRoot();
-      const runtime = await runtimeFor(id, cwd, context);
-      if (!runtime?.installed || !('dshDesktop' in runtime) || !runtime.dshDesktop || !runtime.command)
-        throw Error('dsh_setup_custom_startup');
-      return { command: runtime.command, cwd, ...(await resolveDshDesktopHome(runtime.command)) };
-    });
+  const resolveDesktop = async (id: string, context: DshSetupRequest): Promise<DshDesktopSource> => {
+    const adapter = id.startsWith('plugin:');
+    if (!adapter && options.resolveDesktopLaunch) return options.resolveDesktopLaunch(id);
+    const cwd = resolveActiveProjectRoot();
+    const runtime = adapter
+      ? await options.readDshAdapterDesktop?.(context.request, context.reply, id)
+      : await runtimeFor(id, cwd, context);
+    if (!runtime?.installed || !('dshDesktop' in runtime) || !runtime.dshDesktop || !runtime.command)
+      throw Error('dsh_setup_custom_startup');
+    if (options.resolveDesktopLaunch) {
+      const source = await options.resolveDesktopLaunch(id);
+      if (source.command !== runtime.command) throw Error('dsh_setup_custom_startup');
+      return source;
+    }
+    return { command: runtime.command, cwd, ...(await resolveDshDesktopHome(runtime.command)) };
+  };
   const audit =
     options.audit ??
     ((target: string, owner: string) =>
