@@ -6703,7 +6703,13 @@ it.each(['sys:1', 'pkg:v2'])('selects DeepSeek Harness and checks the saved bind
     selectable: true,
     creationRequestKey: 'new-dsh',
     runtime: { id: 'dsh', dshDesktop: true, installed: true, label: 'DSH Desktop' },
-    form: { ...initialState(), clientId: 'acp', carrier: 'acp', acpCommand: command },
+    form: {
+      ...initialState(),
+      clientId: 'acp',
+      carrier: 'acp',
+      acpCommand: command,
+      configurationSource: 'native_tool',
+    },
   };
   meta.runtimes = [
     {
@@ -6819,9 +6825,11 @@ it.each(['sys:1', 'pkg:v2'])('selects DeepSeek Harness and checks the saved bind
       button.textContent?.includes('探测可用 Client'),
     );
     expect(detect).toBeDefined();
+    const beforeDetect = calls.mock.calls.length;
     detect?.click();
     await w.__settled();
     expect(calls.mock.calls.some(([name]) => name === 'nativeDetect')).toBe(true);
+    expect(calls.mock.calls.slice(beforeDetect).some(([name]) => name === 'memberRuntimeModels')).toBe(false);
     const create = w.document.querySelector('[data-act="nativeCreate"]') as HTMLButtonElement;
     expect(create).not.toBeNull();
     expect(create.disabled).toBe(false);

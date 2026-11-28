@@ -1626,6 +1626,7 @@ function bindMembers() {
           loginCommand:
             p.runtime.readiness && p.runtime.readiness.status !== 'configured' && p.runtime.readiness.loginCommand,
           get preferences() {
+            if (p.runtime.dshDesktop && !p.adjusting) return null;
             return memberPreferences(p.form, runtimeCatalogState(p.form, '', p.runtime), p.runtime.acpMaxDefault);
           },
           state: p.existingId
@@ -1722,7 +1723,7 @@ function bindMembers() {
         selected = partner;
         const preference = memberPreferences(
           partner.form,
-          runtimeCatalogState(partner.form, '', partner.runtime),
+          partner.runtime.dshDesktop ? null : runtimeCatalogState(partner.form, '', partner.runtime),
           partner.runtime.acpMaxDefault,
         );
         if ((partner.runtime.agyCarrier === 'native' && !partner.form.defaultModel.trim()) || preference.invalidEffort)
