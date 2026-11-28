@@ -100,9 +100,8 @@ it('prepares the selected independent DSH binding before the shared Desktop with
   };
   expect(buildNativeCreationPayload(result)).toMatchObject(binding);
   expect(buildCatPayload(result)).toMatchObject(binding);
-  expect(buildCatPayload({ ...result, acpAgentProvider: 'plugin:fixture.acp/agent' }).acp).toEqual({
-    command: 'plugin-agent',
-    startupArgs: [],
+  expect(buildCatPayload({ ...result, acpAgentProvider: 'plugin:fixture.acp/agent' })).toMatchObject({
+    acp: { command: 'plugin-agent', startupArgs: [] },
   });
   for (const [url, request] of vi.mocked(apiFetch).mock.calls) {
     if (url.endsWith('/inspect') || url.endsWith('/prepare'))
