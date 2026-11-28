@@ -3115,6 +3115,7 @@ export class QueueProcessor {
     threadId: string,
     responseIds: ReadonlySet<string>,
     outcome: 'failed' | 'output_rejected',
+    failureReasonByResponse: ReadonlyMap<string, string>,
   ): Promise<void> {
     for (const responseId of responseIds) {
       try {
@@ -3156,7 +3157,7 @@ export class QueueProcessor {
             invocationId,
             endedAt: Date.now(),
             ...(outcome === 'failed'
-              ? { status: 'failed', reason: 'execution_error' }
+              ? { status: 'failed', reason: failureReasonByResponse.get(responseId) ?? 'execution_error' }
               : { status: 'interrupted', reason: 'output_commit_rejected' }),
           },
         );
@@ -5232,6 +5233,7 @@ export class QueueProcessor {
       ...batchedMessageIds,
     ];
     const lifecycleResponseMessageIds = new Set<string>();
+    const failureReasonByResponse = new Map<string, string>();
     // The response each target is currently streaming into. Every event a target
     // streams names this message, so clients write by id instead of guessing.
     const lifecycleResponseMessageIdByCat = new Map<string, string>();
@@ -6999,6 +7001,18 @@ export class QueueProcessor {
         socketManager.broadcastAgentMessage(visibleMessage, threadId);
         if (msg.type === 'error' && isTerminalDispositionEvent(msg)) {
           broadcastTerminalError ??= terminalDispositions.getPrimaryTerminalError();
+          const { catId, error } = msg;
+          const responseId = catId ? lifecycleResponseMessageIdByCat.get(catId) : undefined;
+          if (
+            responseId &&
+            visibleMessage.messageId === responseId &&
+            msg.errorCode !== 'INVOCATION_CANCELLED' &&
+            typeof error === 'string' &&
+            error.trim() &&
+            !failureReasonByResponse.has(responseId)
+          ) {
+            failureReasonByResponse.set(responseId, error);
+          }
         }
         // A target's done follows its response commit: publish that committed truth
         // now instead of when the whole entry (every sibling target) settles.
@@ -7356,6 +7370,7 @@ export class QueueProcessor {
         threadId,
         lifecycleResponseMessageIds,
         exposeFailure ? 'failed' : 'output_rejected',
+        failureReasonByResponse,
       );
 
       // R4 fix (#873): correct failure cleanup sequence per messages.ts

@@ -210,12 +210,14 @@ export class InvocationOwnerReaper {
       return;
     }
 
-    // Queue owns settlement from child success through the parent completion handoff.
+    // The exact Queue producer owns a completed child through parent and reply settlement.
     const parentStatus = probe.record?.status;
     if (
       probe.verdict === 'terminal' &&
-      (parentStatus === 'running' || parentStatus === 'succeeded') &&
-      probe.children.some((child) => child.status === 'succeeded') &&
+      probe.children.some(
+        ({ status }) =>
+          (status === 'succeeded' || status === 'failed') && (parentStatus === 'running' || parentStatus === status),
+      ) &&
       [...candidate.targetCats].some((catId) =>
         this.options.hasActiveQueueProducer?.(candidate.threadId, candidate.userId, catId, candidate.executionId),
       )
