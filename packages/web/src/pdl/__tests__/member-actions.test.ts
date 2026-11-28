@@ -165,7 +165,7 @@ it('projects actual strategy capability and native launch choices without turnin
         readiness: { state: 'ready' },
         candidates: [
           {
-            id: 'dsh',
+            id: 'dsh-desktop',
             label: 'DSH',
             clientId: 'acp',
             installed: true,
@@ -184,6 +184,7 @@ it('projects actual strategy capability and native launch choices without turnin
     form: { strategy: 'hybrid', maxCompressions: '3', revision: 'strategy-4', executionStatus: { status: 'degraded' } },
   });
   expect(value.runtimes.find((runtime) => runtime.id === 'dsh')).toMatchObject({
+    discoveredId: 'dsh-desktop',
     readiness: { status: 'unknown' },
     form: {
       configurationSource: 'native_tool',

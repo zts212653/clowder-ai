@@ -189,7 +189,7 @@ export async function readMemberSettings() {
     libraries: libraries.libraries,
     runtimes: memberRuntimeTools(discovered.candidates, libraries.libraries).map((runtime) => ({
       ...runtime,
-      ...(runtime.dshDesktop ? { discoveredId: discovered.runtimes.find((item) => item.dshDesktop)?.id } : {}),
+      ...(runtime.dshDesktop ? { discoveredId: discovered.candidates.find((item) => item.dshDesktop)?.id } : {}),
       acpMaxDefault: defaultAcpPoolMaxProcesses(runtime.clientId),
       form: runtimeDefaults(runtime),
     })),
