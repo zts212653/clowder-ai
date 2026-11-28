@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { writeCatalogAccount } from '../dist/config/catalog-accounts.js';
 import { resolveKimiQuotaExecutionOwner } from '../dist/config/kimi-quota-identity.js';
-import { grantAgentAdapterNativeRuntime } from '../dist/domains/plugin/declared/agent-adapter-native-grant.js';
+import { grantAgentAdapterNativeRuntime } from '../dist/domains/plugin/declared/agent-adapter-native/agent-adapter-native-grant.js';
 
 test('default detection grants only inspect for a matching catalog identity', () => {
   const source = {

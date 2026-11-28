@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { promisify } from 'node:util';
 import { SessionImplementationRegistry } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
 import { RegisteredSessionAgentService } from '../dist/domains/cats/services/agents/session-contract/registered-session-agent-service.js';
-import { createAgentAdapterNativeProcess } from '../dist/domains/plugin/declared/agent-adapter-native-process.js';
+import { createAgentAdapterNativeProcess } from '../dist/domains/plugin/declared/agent-adapter-native/agent-adapter-native-process.js';
 import { setup } from './helpers/agent-adapter-archive.js';
 import { startLayoutModel } from './helpers/f320-layout-model.mjs';
 

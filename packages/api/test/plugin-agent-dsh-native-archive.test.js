@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { AcpClient } from '../dist/domains/cats/services/agents/providers/acp/AcpClient.js';
 import { SessionImplementationRegistry } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
 import { RegisteredSessionAgentService } from '../dist/domains/cats/services/agents/session-contract/registered-session-agent-service.js';
-import { createAgentAdapterAcpRuntime } from '../dist/domains/plugin/declared/agent-adapter-acp-runtime.js';
+import { createAgentAdapterAcpRuntime } from '../dist/domains/plugin/declared/agent-adapter-native/agent-adapter-acp-runtime.js';
 import { setup } from './helpers/agent-adapter-archive.js';
 
 const archive = process.env.CLOWDER_DSH_CANDIDATE_ARCHIVE;

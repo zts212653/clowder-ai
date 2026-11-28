@@ -12,7 +12,7 @@ import { writeCredential } from '../dist/config/credentials.js';
 import { SessionImplementationRegistry } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
 import { RegisteredSessionAgentService } from '../dist/domains/cats/services/agents/session-contract/registered-session-agent-service.js';
 import { createPluginManagerRuntimeComposition } from '../dist/domains/plugin/index.js';
-import { grantAgentAdapterNativeRuntime } from '../dist/domains/plugin/declared/agent-adapter-native-grant.js';
+import { grantAgentAdapterNativeRuntime } from '../dist/domains/plugin/declared/agent-adapter-native/agent-adapter-native-grant.js';
 import { setup } from './helpers/agent-adapter-archive.js';
 
 const archive = process.env.CLOWDER_CLAUDE_CANDIDATE_ARCHIVE;

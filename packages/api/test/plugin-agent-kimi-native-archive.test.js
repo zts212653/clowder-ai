@@ -13,7 +13,7 @@ import {
 } from '../dist/domains/cats/services/agents/providers/kimi-l0-session-fingerprint.js';
 import { SessionImplementationRegistry } from '../dist/domains/cats/services/agents/session-contract/implementation-registry.js';
 import { RegisteredSessionAgentService } from '../dist/domains/cats/services/agents/session-contract/registered-session-agent-service.js';
-import { createAgentAdapterNativeProcess } from '../dist/domains/plugin/declared/agent-adapter-native-process.js';
+import { createAgentAdapterNativeProcess } from '../dist/domains/plugin/declared/agent-adapter-native/agent-adapter-native-process.js';
 import { setup } from './helpers/agent-adapter-archive.js';
 
 const archive = process.env.CLOWDER_KIMI_CANDIDATE_ARCHIVE;

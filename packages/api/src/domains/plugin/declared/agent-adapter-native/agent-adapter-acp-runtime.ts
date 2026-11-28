@@ -1,7 +1,7 @@
 import { addAbortListener } from 'node:events';
 import type { AgentAdapterNativeRuntime } from '@clowder-ai/agent-contract';
-import { createModuleLogger } from '../../../infrastructure/logger.js';
-import { type AcpClient, AcpProtocolError } from '../../cats/services/agents/providers/acp/AcpClient.js';
+import { createModuleLogger } from '../../../../infrastructure/logger.js';
+import { type AcpClient, AcpProtocolError } from '../../../cats/services/agents/providers/acp/AcpClient.js';
 
 const log = createModuleLogger('plugin/agent-adapter-acp');
 

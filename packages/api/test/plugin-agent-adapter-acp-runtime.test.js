@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createAgentAdapterAcpRuntime } from '../dist/domains/plugin/declared/agent-adapter-acp-runtime.js';
+import { createAgentAdapterAcpRuntime } from '../dist/domains/plugin/declared/agent-adapter-native/agent-adapter-acp-runtime.js';
 
 test(
   'an acknowledged ACP session close allows a new process to resume while the old process exits',

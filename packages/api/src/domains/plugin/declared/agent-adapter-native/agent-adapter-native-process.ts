@@ -1,6 +1,6 @@
 import type { AgentAdapterNativeRuntime } from '@clowder-ai/agent-contract';
-import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../utils/cli-spawn.js';
-import type { CliSpawnOptions } from '../../../utils/cli-types.js';
+import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../utils/cli-spawn.js';
+import type { CliSpawnOptions } from '../../../../utils/cli-types.js';
 
 type NativeRun = NonNullable<AgentAdapterNativeRuntime['run']>;
 type ApprovedLaunch = Omit<CliSpawnOptions, 'signal' | 'inheritParentEnv' | 'outputMode'>;

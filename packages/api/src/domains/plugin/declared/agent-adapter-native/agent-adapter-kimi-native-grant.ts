@@ -3,17 +3,17 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { normalizeKimiEvent } from '@clowder-ai/agent-access/runtime/kimi-event-parser';
 import { buildKimiLaunchArguments } from '@clowder-ai/agent-access/runtime/kimi-launch-arguments';
-import { resolveByAccountRef, validateRuntimeProviderBinding } from '../../../config/account-resolver.js';
-import { resolveCliCommand } from '../../../utils/cli-resolve.js';
-import { resolveCatCafeDataRoot } from '../../../utils/cli-process-ownership.js';
-import { providerProfileAccountSnapshot } from '../../cats/services/agents/invocation/execution-account-binding.js';
-import { buildApiKeyEnv } from '../../cats/services/agents/providers/kimi-config.js';
+import { resolveByAccountRef, validateRuntimeProviderBinding } from '../../../../config/account-resolver.js';
+import { resolveCliCommand } from '../../../../utils/cli-resolve.js';
+import { resolveCatCafeDataRoot } from '../../../../utils/cli-process-ownership.js';
+import { providerProfileAccountSnapshot } from '../../../cats/services/agents/invocation/execution-account-binding.js';
+import { buildApiKeyEnv } from '../../../cats/services/agents/providers/kimi-config.js';
 import {
   computeKimiL0Fingerprint,
   lookupKimiL0Fingerprint,
   recordKimiL0Fingerprint,
-} from '../../cats/services/agents/providers/kimi-l0-session-fingerprint.js';
-import type { AgentAdapterRuntimeGrant } from './agent-adapter-access.js';
+} from '../../../cats/services/agents/providers/kimi-l0-session-fingerprint.js';
+import type { AgentAdapterRuntimeGrant } from '../agent-adapter-access.js';
 import { createAgentAdapterNativeProcess } from './agent-adapter-native-process.js';
 
 const nativeId = /^(?:session_)?[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;

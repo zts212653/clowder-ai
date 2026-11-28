@@ -51,7 +51,7 @@ import { PluginRuntimeCarrierRouter } from './carrier/runtime-carrier.js';
 import { ContentEditorPluginRuntime } from './content-editor-runtime/runtime.js';
 import { ContentEditorSemanticWorker } from './content-editor-runtime/semantic-worker.js';
 import { type AgentAdapterRuntimeGrant, createAgentAdapterAccess } from './declared/agent-adapter-access.js';
-import { grantAgentAdapterNativeRuntime } from './declared/agent-adapter-native-grant.js';
+import { grantAgentAdapterNativeRuntime } from './declared/agent-adapter-native/agent-adapter-native-grant.js';
 import { recoverAgentClientMetadata } from './declared/agent-client-metadata.js';
 import type { CloudConversationHostRegistry } from './declared/cloud-conversation-host-registry.js';
 import type { AgentSessionProviderLifecycle } from './declared/declared-agent-session-providers.js';
