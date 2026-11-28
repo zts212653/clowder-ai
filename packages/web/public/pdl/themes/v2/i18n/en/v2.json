@@ -5074,6 +5074,7 @@
     "show": "Show value"
   },
   "queue": {
+    "preparing": "Preparing to send",
     "targets": {
       "title": "Change recipients"
     },

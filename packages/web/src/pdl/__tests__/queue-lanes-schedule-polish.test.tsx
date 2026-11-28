@@ -247,6 +247,49 @@ describe('PDL lanes, queue drag/recall, and schedule approval regressions', () =
     expect(items[1]).toMatchObject({ key: 'q-user', queued: true, recallable: true });
   });
 
+  it('renders a preparing queue row without actions that require a queued source', async () => {
+    const data = fixtureData();
+    data.queue = [
+      {
+        id: 'q-preparing',
+        threadId: data.threadId,
+        userId: 'default-user',
+        mergedMessageIds: [],
+        intent: 'execute',
+        createdAt: 0,
+        messageId: 'msg-user',
+        content: 'Owner follow-up',
+        from: { kind: 'user', userId: 'default-user' },
+        targetCats: [],
+        status: 'processing',
+      },
+    ];
+    const item = chatModels(data, fixtureUi()).chatComposer.queue?.items[0];
+    expect(item).toMatchObject({ processing: true, queued: false, recallable: false, orderable: false });
+
+    const { dom, w, evaluate } = await bootPdlEngine();
+    try {
+      const labels = readFileSync('public/pdl/themes/default/i18n/zh/library.json', 'utf8');
+      evaluate('defineI18n("zh", ' + labels + ')');
+      const props = {
+        key: 'test',
+        label: 'Queue',
+        order: true,
+        items: { lit: [item] },
+        actions: [
+          { act: 'cafeQueueSend', label: 'Send', when: '@queued' },
+          { act: 'cafeQueue', label: 'Edit', when: '@recallable' },
+        ],
+      };
+      w.document.body.innerHTML = evaluate('PDL_COMPONENTS.queue(' + JSON.stringify(props) + ', {}, {})');
+      const row = w.document.querySelector('.qitem');
+      expect(row?.textContent).toContain('准备发送');
+      expect(row?.querySelector('[data-act="cafeQueueSend"], [data-act="cafeQueue"], .lr-grip')).toBeNull();
+    } finally {
+      dom.window.close();
+    }
+  });
+
   it('projects localized zh/en fields for create/delete schedule proposals without saying 原定时任务', () => {
     expect(scheduleApprovalCopy.zh.unavailable).not.toContain('原定时任务');
     expect(scheduleApprovalCopy.zh.checking).not.toContain('原定时任务');

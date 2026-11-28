@@ -226,6 +226,10 @@ async function projectRecallFailure(
 ): Promise<Record<string, unknown>> {
   await releasePreparation(context, preparation, 'canonical_recall_rejected');
   if (result.kind === 'draft_revision_mismatch') {
+    context.request.log.info(
+      { messageId: context.messageId, code: 'DRAFT_REVISION_MISMATCH' },
+      'Queue recall rejected',
+    );
     reply.status(409);
     return { code: 'DRAFT_REVISION_MISMATCH', actualRevision: result.actualRevision };
   }
@@ -304,6 +308,7 @@ export function createRecallMessageHandler(
     const preparation = prepared.value;
     const carrier = await resolveCarrier(context, reply);
     if (!carrier.ok) {
+      request.log.info({ messageId: context.messageId, code: carrier.body.code }, 'Queue recall rejected');
       await releasePreparation(context, preparation, 'queue_claim_rejected');
       return carrier.body;
     }

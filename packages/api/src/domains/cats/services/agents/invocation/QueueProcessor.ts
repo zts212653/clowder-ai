@@ -696,6 +696,33 @@ interface QueueAdmissionAttempt {
   readonly entry?: QueueEntry;
 }
 
+async function* readQueueRouteDuringPreparation<T>(
+  route: AsyncIterable<T>,
+  signal: AbortSignal,
+  isPreparing: () => boolean,
+): AsyncIterable<T> {
+  const iterator = route[Symbol.asyncIterator]();
+  let onTimeout!: () => void;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    onTimeout = () => reject(signal.reason);
+  });
+  signal.addEventListener('abort', onTimeout, { once: true });
+  try {
+    while (true) {
+      const next = iterator.next();
+      const event = isPreparing() ? await Promise.race([next, deadline]) : await next;
+      if (event.done) return;
+      yield event.value;
+    }
+  } finally {
+    signal.removeEventListener('abort', onTimeout);
+    // A route stuck before its first child may also never answer return().
+    // It cannot get past the expired admission fence when it resumes.
+    if (signal.aborted) void iterator.return?.().catch(() => {});
+    else await iterator.return?.();
+  }
+}
+
 export class QueueProcessor {
   /** Composed after Plugin Manager startup; plugins never enter member execution. */
   addressedDelivery?: import('../../../../plugin/manager/addressing/addressed-plugin-queue-delivery.js').AddressedPluginQueueDelivery;
@@ -729,6 +756,7 @@ export class QueueProcessor {
   private readonly pendingPrivateInputStops = new Map<string, Set<symbol>>();
   /** F118: age threshold for explicit owner-reaper candidacy (default 75min). */
   private processingSlotTtlMs: number;
+  private readonly queuePreparationTimeoutMs: number;
   private readonly sessionContinuationCoordinator?: SessionContinuationCoordinatorLike;
   /** #502 PR2: bounded auto-continuation guard, in-memory per process. */
   private continuationWindows = new Map<string, number[]>();
@@ -746,6 +774,7 @@ export class QueueProcessor {
     deps: QueueProcessorDeps,
     opts?: {
       processingSlotTtlMs?: number;
+      queuePreparationTimeoutMs?: number;
       callerDispatchProcessStart?: { processGenerationId: string };
       retryDeferral?: QueueRetryDeferralOptions;
     },
@@ -757,6 +786,7 @@ export class QueueProcessor {
       );
     }, opts?.retryDeferral);
     this.processingSlotTtlMs = opts?.processingSlotTtlMs ?? DEFAULT_PRESTART_RESERVATION_TTL_MS;
+    this.queuePreparationTimeoutMs = opts?.queuePreparationTimeoutMs ?? 2 * 60_000;
     this.sessionContinuationCoordinator =
       deps.sessionContinuationCoordinator ?? QueueProcessor.createSessionContinuationCoordinator(deps.threadStore);
     this.callerDispatchObservations = deps.callerDispatchObservationRegistry ?? new CallerDispatchObservationRegistry();
@@ -4133,6 +4163,19 @@ export class QueueProcessor {
     }
 
     reservation.producerInFlight = true;
+    if (isPublicQueueEntry(entry)) {
+      const { queue, socketManager, log } = this.deps;
+      const userId = queueEntryOwnerId(entry);
+      void emitQueueUpdated(
+        socketManager,
+        userId,
+        entry.threadId,
+        queue.list(entry.threadId, userId),
+        'preparing',
+      ).catch((err) =>
+        log.warn({ err, threadId: entry.threadId }, '[QueueProcessor] claimed Queue projection emit failed'),
+      );
+    }
     const completion = this.executeEntry(
       entry,
       reservation,
@@ -5146,6 +5189,7 @@ export class QueueProcessor {
     let prestartAdmissionDeferred = false;
     let prestartClaimRestored = false;
     let lifecycleTransferStarted = false;
+    let queuePreparationDeadline: ReturnType<typeof setTimeout> | undefined;
     let lifecycleReceiverPersisted = false;
     let preAdmissionSettlementAttempted = false;
     let undeliverableFailureWake: string | undefined;
@@ -5855,6 +5899,7 @@ export class QueueProcessor {
       const claimedInvocation = await invocationRecordStore.update(invocationId, {
         status: 'running',
         expectedStatus: expectedInvocationStatus,
+        ...(entry.claimId ? { queueClaimId: entry.claimId } : {}),
         ...(expectedInvocationStatus === 'failed' ? { error: '' } : {}),
       });
       if (claimedInvocation === null) {
@@ -6211,7 +6256,17 @@ export class QueueProcessor {
       }
 
       routePreparationStartedAt = performance.now();
-      for await (const msg of router.routeExecution(
+      const queuePreparation = new AbortController();
+      let awaitingFirstChild = true;
+      if (isPublicQueueEntry(entry)) {
+        queuePreparationDeadline = setTimeout(() => {
+          const error = new Error('queue_preparation_timeout');
+          queuePreparation.abort(error);
+          controller?.abort(error);
+        }, this.queuePreparationTimeoutMs);
+        queuePreparationDeadline.unref();
+      }
+      const route = router.routeExecution(
         userId,
         content,
         threadId,
@@ -6386,6 +6441,20 @@ export class QueueProcessor {
           onLifecycleInvocationStarted: async (
             input: Parameters<NonNullable<RouteOptions['onLifecycleInvocationStarted']>>[0],
           ) => {
+            queuePreparation.signal.throwIfAborted();
+            // A pre-provider await may outlive the parent owner. Refuse admission
+            // before publishing History or touching a claim that recovery may own.
+            const owner = invocationTracker.classifyExecutionId?.(
+              input.threadId,
+              input.catId,
+              input.parentInvocationId,
+            );
+            if (owner !== undefined && owner !== 'matching') {
+              processingReservationReplaced = true;
+              throw new Error('Lifecycle ActiveRun owner mismatch: ' + input.invocationId);
+            }
+            awaitingFirstChild = false;
+            clearTimeout(queuePreparationDeadline);
             const responseAdmissionStartedAt = performance.now();
             let interruptLifecycleResponse: ((reason: string) => Promise<void>) | undefined;
             let lifecycleResponseInterrupted = false;
@@ -6768,7 +6837,11 @@ export class QueueProcessor {
               }
             : {}),
         },
-      )) {
+      );
+      const routeEvents = queuePreparationDeadline
+        ? readQueueRouteDuringPreparation(route, queuePreparation.signal, () => awaitingFirstChild)
+        : route;
+      for await (const msg of routeEvents) {
         if (msg.providerTeardown === 'unconfirmed' && typeof msg.catId === 'string' && targetCats.includes(msg.catId)) {
           unconfirmedProviderCats.add(msg.catId);
           socketManager.broadcastAgentMessage(
@@ -7307,6 +7380,7 @@ export class QueueProcessor {
       finalStatus = 'failed';
       if (invocationId) this.routeChainTracker.fail(invocationId);
       log.error({ threadId, entryId: entry.id, err }, '[QueueProcessor] executeEntry failed');
+      if (processingReservationReplaced) return executionResult('failed');
       // F148 fix: ack cursors for cats that completed before the exception
       if (cursorBoundaries.size > 0) {
         try {
@@ -7333,7 +7407,7 @@ export class QueueProcessor {
               {
                 type: 'error',
                 catId: targetCats[0] ?? 'system',
-                error: errMsg,
+                error: errMsg === 'queue_preparation_timeout' ? '准备发送超时，消息仍保留在队列中。' : errMsg,
                 isFinal: true,
                 timestamp: Date.now(),
               },
@@ -7410,6 +7484,7 @@ export class QueueProcessor {
       // drain cannot race this durable retirement of the user-Stop snapshot.
       await pendingPrivateStop.settle();
       await liveCall?.stop();
+      clearTimeout(queuePreparationDeadline);
       if (heartbeatInterval !== undefined) clearInterval(heartbeatInterval);
       if (!prestartAdmissionDeferred && unconfirmedProviderCats.size === 0) {
         if (!replayClaimLost && invocationId && typeof invocationRecordStore.get === 'function') {

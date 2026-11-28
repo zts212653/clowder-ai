@@ -1774,6 +1774,16 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       : `bg:${threadId}:${catId}`
     : undefined;
 
+  const reportSlowPreparation = (stage: string, startedAt: number) => {
+    const durationMs = performance.now() - startedAt;
+    if (durationMs >= 1_000) {
+      log.info(
+        { threadId, catId, parentInvocationId: params.parentInvocationId, stage, durationMs },
+        'Slow invocation preparation stage',
+      );
+    }
+  };
+  const managedWorkStartedAt = performance.now();
   const managedWorkBinding = await resolveManagedWorkInvocationBinding({
     ownerAuthProvenance: params.ownerAuthProvenance,
     ownerUserId: userId,
@@ -1782,6 +1792,8 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     threadStore,
     ...(deps.workflowSopStore ? { workflowSopStore: deps.workflowSopStore } : {}),
   });
+
+  reportSlowPreparation('managed_work_binding', managedWorkStartedAt);
 
   const sharedMcpLaunch = frozenExecutionBinding.sharedMcpLaunch;
   if (!sharedMcpLaunch) throw new Error('Shared MCP admission snapshot unavailable');
@@ -1794,11 +1806,15 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
   // is no live owner and settles through the ordinary #1849 path, so it never blocks.
   if (process.platform === 'win32' && deps.turnExecutionStore) {
     callerSignal?.throwIfAborted();
+    const runningReadStartedAt = performance.now();
     const running = await deps.turnExecutionStore.listRunningByUser(userId);
+    reportSlowPreparation('running_execution_lookup', runningReadStartedAt);
+    const ownerProbeStartedAt = performance.now();
     const liveOwner = await findWindowsLiveOwner({
       store: deps.turnExecutionStore,
       records: running.filter((record) => record.threadId === threadId && record.catId === catId),
     });
+    reportSlowPreparation('windows_prior_owner_probe', ownerProbeStartedAt);
     if (liveOwner) {
       // Refused like any admission that ends before an invocation exists: an error, then done.
       yield {
@@ -1812,6 +1828,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       return;
     }
   }
+  const registryStartedAt = performance.now();
   const { invocationId, callbackToken } = await registry.create(
     userId,
     catId,
@@ -1826,6 +1843,7 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
     managedWorkBinding,
     sharedMcpContext,
   );
+  reportSlowPreparation('invocation_registration', registryStartedAt);
   let invocationMcpCredentialFile: string | undefined;
   let invocationHasAuthoritativeUsage = false;
   let invocationPolicyRecordId: string | undefined;

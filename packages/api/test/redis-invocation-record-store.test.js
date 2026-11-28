@@ -353,7 +353,7 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
     assert.equal(hydrated.executionStartedAt, 1_700_000_000_000);
   });
 
-  it('atomically clears the previous execution-start receipt when a failed record starts a new attempt', async () => {
+  it('atomically clears the previous execution-start and Queue claim receipts when a failed record starts a new attempt', async () => {
     const { invocationId } = await store.create({
       threadId: 'thread-connector-retry',
       userId: 'user-1',
@@ -362,7 +362,12 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       idempotencyKey: 'connector-retry-receipt',
       actionLeaseCarrier: { kind: 'none' },
     });
-    await store.update(invocationId, { status: 'running', expectedStatus: 'queued' });
+    await store.update(invocationId, {
+      status: 'running',
+      queueClaimId: 'first-queue-claim',
+      expectedStatus: 'queued',
+    });
+    assert.equal((await store.get(invocationId)).queueClaimId, 'first-queue-claim');
     await store.update(invocationId, {
       executionStartedAt: 1_700_000_000_000,
       expectedStatus: 'running',
@@ -381,6 +386,27 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
     const hydrated = await store.get(invocationId);
 
     assert.equal(retried.executionStartedAt, undefined);
+    assert.equal(
+      await store.update(invocationId, {
+        status: 'failed',
+        expectedStatus: 'running',
+        expectedQueueClaimId: 'first-queue-claim',
+      }),
+      null,
+    );
+    assert.equal((await store.get(invocationId)).status, 'running');
+    assert.equal((await store.get(invocationId)).queueClaimId, undefined);
+    assert.ok(
+      await store.update(invocationId, { status: 'failed', expectedStatus: 'running', expectedQueueClaimId: null }),
+    );
+    assert.ok(
+      await store.update(invocationId, {
+        status: 'running',
+        expectedStatus: 'failed',
+        queueClaimId: 'new-queue-claim',
+      }),
+    );
+    assert.equal((await store.get(invocationId)).queueClaimId, 'new-queue-claim');
     assert.equal(hydrated.executionStartedAt, undefined);
   });
 

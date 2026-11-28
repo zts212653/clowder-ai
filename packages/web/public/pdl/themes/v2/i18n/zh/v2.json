@@ -5074,6 +5074,7 @@
     "show": "显示值"
   },
   "queue": {
+    "preparing": "准备发送",
     "targets": {
       "title": "改发给谁"
     },

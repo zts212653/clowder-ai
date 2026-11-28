@@ -1575,12 +1575,17 @@ function ChatBinding({
           const { input: text, images: kept, contexts: places, reply } = current.current;
           const drafted = text.trim() || kept.length || places.length || reply;
           if (drafted && !(await window.clowderChat.confirm('queueRecallAppend', {}))) return;
-          const recalled = await requestTrueRecall({ threadId, messageId: entry.messageId });
-          if (recalled) {
-            state.setQueue(threadId, recalled.queue);
-            const insert = composerInsertFromRecall(recalled);
-            if (insert) state.setPendingChatInsert(insert);
+          try {
+            const recalled = await requestTrueRecall({ threadId, messageId: entry.messageId });
+            if (recalled) {
+              state.setQueue(threadId, recalled.queue);
+              const insert = composerInsertFromRecall(recalled);
+              if (insert) state.setPendingChatInsert(insert);
+            }
+          } finally {
+            await reconcileThreadWithServer(threadId, () => false, 'PdlQueue');
           }
+          return;
         }
         await reconcileThreadWithServer(threadId, () => false, 'PdlQueue');
         return;

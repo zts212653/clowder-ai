@@ -1438,6 +1438,8 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         };
       }
       const status = result.reason === 'custody_unavailable' ? 503 : result.reason === 'provider_rejected' ? 502 : 409;
+      const code = result.reason.toUpperCase();
+      request.log.info({ threadId, entryId, code }, 'Queue append rejected');
       reply.status(status);
       return {
         error:
@@ -1448,7 +1450,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
               : result.reason === 'provider_rejected'
                 ? '这次补充未能确认送达，正在核对消息状态'
                 : '暂时无法更新消息状态，请稍后核对',
-        code: result.reason.toUpperCase(),
+        code,
         ...(result.rejectedTargetIds ? { rejectedTargetIds: result.rejectedTargetIds } : {}),
       };
     },
@@ -2230,8 +2232,9 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         return { error: `Cannot reorder entry ${entryId} (not found)` };
       }
       if (entry.status !== 'queued') {
+        request.log.info({ threadId, entryId, code: 'ENTRY_PROCESSING' }, 'Queue reorder rejected');
         reply.status(409);
-        return { error: `Cannot reorder entry ${entryId} (processing)` };
+        return { error: `Cannot reorder entry ${entryId} (processing)`, code: 'ENTRY_PROCESSING' };
       }
       if (isSystemPinnedQueueEntry(entry)) {
         reply.status(409);
@@ -2241,6 +2244,10 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
 
     for (const { entryId, position } of parseResult.data.positions) {
       if (!(await invocationQueue.setPositionDurable(threadId, guard.userId, entryId, position))) {
+        request.log.info(
+          { threadId, entryId, code: 'ENTRY_PROCESSING', reason: 'state_changed' },
+          'Queue reorder rejected',
+        );
         reply.status(409);
         return { error: `Cannot reorder entry ${entryId} (state changed)`, code: 'ENTRY_PROCESSING' };
       }

@@ -12,10 +12,7 @@ test('production owner recovery uses a bounded running selector rather than scan
   const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
   const section = source.slice(
     source.indexOf('const invocationOwnerReaper = new InvocationOwnerReaper'),
-    source.indexOf(
-      'reconcileZombie: (zombie)',
-      source.indexOf('const invocationOwnerReaper = new InvocationOwnerReaper'),
-    ),
+    source.indexOf('reconcileZombie:', source.indexOf('const invocationOwnerReaper = new InvocationOwnerReaper')),
   );
   assert.doesNotMatch(section, /scanAll/);
   assert.match(section, /listRunningForRecovery/);

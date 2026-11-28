@@ -20,7 +20,7 @@ import type { CatId } from '@cat-cafe/shared';
 import type { IBallCustodyIngest } from '../../../../ball-custody/BallCustodyIngest.js';
 import { buildInvocationDiedEvent } from '../../../../ball-custody/ball-custody-events.js';
 import type { IInvocationRecordStore } from '../../stores/ports/InvocationRecordStore.js';
-import type { QueueEntry } from './InvocationQueue.js';
+import type { InvocationQueue } from './InvocationQueue.js';
 import type { TaskProgressStore } from './TaskProgressStore.js';
 
 /**
@@ -33,28 +33,21 @@ export interface ZombieRecord {
   catId: CatId | null;
   recordStatus: 'running';
   recordUpdatedAt: number;
+  expectedQueueClaimId?: string | null;
   reason: 'owner_lease_stale_provider_absent';
 }
 
-interface ZombieQueueConverger {
-  list(threadId: string, userId: string): QueueEntry[];
-  removeProcessedAcrossUsersDurable(
-    threadId: string,
-    entryId: string,
-    terminalOutcome: 'interrupted',
-    failureReason: 'runtime_restart',
-  ): Promise<QueueEntry | null>;
-}
+type ZombieQueueConverger = Pick<InvocationQueue, 'list' | 'removeProcessedAcrossUsersDurable'>;
 
 type QueueConvergedHandler = (info: { threadId: string; userId: string; removedEntryIds: string[] }) => void;
 
 async function convergeZombieQueueEntry(
-  queue: ZombieQueueConverger | undefined,
+  deps: ReconcileZombieDeps,
   record: { threadId: string; userId: string; userMessageId?: string | null },
-  zombie: Pick<ZombieRecord, 'invocationId' | 'reason'>,
+  zombie: ZombieRecord,
   log: NonNullable<ReconcileZombieDeps['log']>,
-  onQueueConverged: QueueConvergedHandler | undefined,
 ): Promise<{ converged: number; errors: number }> {
+  const { invocationQueue: queue, canConvergeQueue, onQueueConverged } = deps;
   if (!queue || !record.userMessageId) return { converged: 0, errors: 0 };
   const messageId = record.userMessageId;
   try {
@@ -66,11 +59,19 @@ async function convergeZombieQueueEntry(
           (entry.status === 'claimed' || entry.status === 'processing') && entry.payload.messageId === messageId,
       );
     for (const entry of stale) {
+      if (zombie.expectedQueueClaimId) {
+        if (entry.status !== 'claimed' || entry.claimId !== zombie.expectedQueueClaimId) continue;
+      } else if (canConvergeQueue?.() === false) {
+        // Older parent records have no exact claim receipt.
+        break;
+      }
       const removed = await queue.removeProcessedAcrossUsersDurable(
         record.threadId,
         entry.id,
         'interrupted',
         'runtime_restart',
+        undefined,
+        entry,
       );
       if (!removed) continue;
       removedEntryIds.push(entry.id);
@@ -114,6 +115,8 @@ export interface ReconcileZombieDeps {
    * behind a corpse. Absent → record-only cleanup (previous behavior).
    */
   invocationQueue?: ZombieQueueConverger;
+  /** The reaper rechecks for a replacement owner before each queue mutation. */
+  canConvergeQueue?: () => boolean;
   /**
    * F220 Phase 2a (#972) — optional broadcast hook, fired once per thread whose queue
    * actually changed. Kept as a callback so this module stays free of socket coupling;
@@ -206,7 +209,16 @@ async function processZombie(
       status: 'failed',
       error: 'zombie_record_detected',
       expectedStatus: 'running',
+      ...(zombie.expectedQueueClaimId !== undefined ? { expectedQueueClaimId: zombie.expectedQueueClaimId } : {}),
     });
+    const current = updated ?? (await deps.invocationRecordStore.get(zombie.invocationId));
+    if (
+      current &&
+      zombie.expectedQueueClaimId !== undefined &&
+      (current.queueClaimId ?? null) !== zombie.expectedQueueClaimId
+    ) {
+      return { reconciled: false, alreadyTerminal: false, taskProgressCleared: 0, queueConverged: 0, errors: 0 };
+    }
     if (!updated) {
       // Cloud R15 P1: CAS returned null — record is missing OR already non-running.
       // If a concurrent reconcile already flipped it to terminal, that path's
@@ -220,7 +232,6 @@ async function processZombie(
       // race) where the record is STILL running. Mis-classifying that as
       // alreadyTerminal silently drops a real zombie; the next sweep will re-surface
       // it but we should at least count it as transient error so monitors can flag.
-      const current = await deps.invocationRecordStore.get(zombie.invocationId);
       if (current === null || current === undefined) {
         log.info(
           { invocationId: zombie.invocationId, reason: zombie.reason },
@@ -247,7 +258,7 @@ async function processZombie(
         // reconcile may have flipped the record terminal but died before converging the
         // queue, and future sweeps only enumerate *running* records, so this entry would
         // pin the head forever. removeProcessed is idempotent, so retrying is safe.
-        const qc = await convergeZombieQueueEntry(deps.invocationQueue, current, zombie, log, deps.onQueueConverged);
+        const qc = await convergeZombieQueueEntry(deps, current, zombie, log);
         log.info(
           { invocationId: zombie.invocationId, currentStatus: current.status, reason: zombie.reason },
           '[reconcile-zombies] skipped (already terminal); re-attempted TaskProgress cleanup',
@@ -308,7 +319,7 @@ async function processZombie(
     );
     // #972: the record is now terminal, so its `processing` queue entry is a corpse
     // pinning the queue head. Converge it or later user work never runs.
-    const qc = await convergeZombieQueueEntry(deps.invocationQueue, updated, zombie, log, deps.onQueueConverged);
+    const qc = await convergeZombieQueueEntry(deps, updated, zombie, log);
     let terminalRecoveryErrors = 0;
     if (deps.onReconciledZombie) {
       try {

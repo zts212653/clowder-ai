@@ -737,7 +737,7 @@ export interface QueueEntry {
   /** #1354 structured routing feedback retained on the inline Queue payload. */
   routingWarnings?: readonly CatRoutingError[];
   intent: string;
-  status: 'queued';
+  status: 'queued' | 'processing';
   /** Pending-target delivery preference. History dispatchRefs own actual delivery. */
   authorIntentByTarget?: Record<string, QueueAuthorIntentReceipt>;
   createdAt: number;

@@ -93,6 +93,7 @@ function decodeInvocationRecord(data: Record<string, string>, expectedId: string
     threadId: data.threadId,
     userId: data.userId,
     userMessageId: data.userMessageId === '' ? null : (data.userMessageId ?? null),
+    ...(data.queueClaimId ? { queueClaimId: data.queueClaimId } : {}),
     targetCats: Object.freeze(targetCats) as CatId[],
     intent: (data.intent as 'execute' | 'ideate') ?? 'execute',
     status: data.status as InvocationStatus,

@@ -34,7 +34,7 @@ export interface InvocationOwnerReaperOptions extends ExitedChildRecovery {
     executionId: string,
     now?: number,
   ): CodexAppServerLifecycleSnapshot | undefined;
-  reconcileZombie(zombie: ZombieRecord): Promise<ReconcileZombieResult>;
+  reconcileZombie(zombie: ZombieRecord, canConvergeQueue: () => boolean): Promise<ReconcileZombieResult>;
   releaseExactOwner(threadId: string, targetCats: readonly string[], executionId: string): void | Promise<void>;
   /** Durable running records cover process-local owner projections that were already lost. */
   listRunningRecords?: () => InvocationRecord[] | Promise<InvocationRecord[]>;
@@ -210,16 +210,23 @@ export class InvocationOwnerReaper {
       return;
     }
 
-    // The exact Queue producer owns a completed child through parent and reply settlement.
+    // An in-flight Queue execution owns preparation before the first child and settlement after child completion.
     const parentStatus = probe.record?.status;
-    if (
+    const preparing = probe.verdict === 'absent' && parentStatus === 'running';
+    const settlingFinishedChild =
       probe.verdict === 'terminal' &&
       probe.children.some(
         ({ status }) =>
           (status === 'succeeded' || status === 'failed') && (parentStatus === 'running' || parentStatus === status),
-      ) &&
-      [...candidate.targetCats].some((catId) =>
-        this.options.hasActiveQueueProducer?.(candidate.threadId, candidate.userId, catId, candidate.executionId),
+      );
+    if (
+      (preparing || settlingFinishedChild) &&
+      [...candidate.targetCats].some(
+        (catId) =>
+          this.options.hasActiveQueueProducer?.(candidate.threadId, candidate.userId, catId, candidate.executionId) &&
+          (!preparing ||
+            this.options.invocationTracker.classifyExecutionId(candidate.threadId, catId, candidate.executionId) ===
+              'matching'),
       )
     ) {
       await this.recordActiveCandidate(candidate, probe, now, result);
@@ -308,15 +315,28 @@ export class InvocationOwnerReaper {
     result.replacements += replacements.length;
 
     const targetCats = [...new Set([...(probe.record?.targetCats ?? []), ...candidate.targetCats])];
+    const hasReplacement = () =>
+      targetCats.some(
+        (catId) =>
+          this.options.invocationTracker.classifyExecutionId(candidate.threadId, catId, candidate.executionId) ===
+          'replacement',
+      );
+    const replacementObserved = hasReplacement();
     const zombie: ZombieRecord = {
       invocationId: candidate.executionId,
       catId: (targetCats[0] as CatId | undefined) ?? null,
       recordStatus: 'running',
       recordUpdatedAt: probe.record?.updatedAt ?? candidate.startedAt,
+      expectedQueueClaimId: probe.record?.queueClaimId ?? null,
       reason: 'owner_lease_stale_provider_absent',
     };
     try {
-      const reconciliation = await this.options.reconcileZombie(zombie);
+      // A replacement can take the same source while the old record is being
+      // terminalized. Keep that source out of the old execution's cleanup.
+      const reconciliation = await this.options.reconcileZombie(
+        zombie,
+        () => !replacementObserved && !hasReplacement(),
+      );
       if (reconciliation.errors > 0 || (reconciliation.reconciled === 0 && reconciliation.alreadyTerminal === 0)) {
         result.deferredUnknown += 1;
         result.errors += reconciliation.errors || 1;

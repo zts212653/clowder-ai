@@ -52,7 +52,7 @@ export interface EnrichedQueueEntry {
   targetCats: string[];
   routingWarnings?: readonly CatRoutingError[];
   intent: string;
-  status: 'queued';
+  status: 'queued' | 'processing';
   /** Pending-target delivery preference; actual delivery lives in History dispatchRefs. */
   authorIntentByTarget?: Record<string, QueueAuthorIntentReceipt>;
   createdAt: number;
@@ -100,7 +100,7 @@ export function projectPublicQueueEntry(entry: QueueEntry): EnrichedQueueEntry {
     targetCats,
     ...(entry.payload.routingWarnings ? { routingWarnings: structuredClone(entry.payload.routingWarnings) } : {}),
     intent: entry.execution.intent,
-    status: 'queued',
+    status: entry.status === 'queued' ? 'queued' : 'processing',
     ...(authorIntentByTarget ? { authorIntentByTarget } : {}),
     createdAt: entry.enqueuedAt,
     autoExecute: entry.execution.autoExecute,
