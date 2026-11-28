@@ -20,16 +20,22 @@ export interface PreparedDshConnection {
 }
 // The automatic panel and save action may overlap; share only the unfinished read.
 const pendingInspections = new Map<string, Promise<unknown>>();
+// Desktop discovery and inspection launch native processes that can exceed the shared API deadline.
+const DSH_SETUP_TIMEOUT_MS = 90_000;
 export async function dshSetupRequest<T>(action: 'inspect' | 'prepare', body: Record<string, unknown>): Promise<T> {
   const key = action === 'inspect' ? JSON.stringify(body) : undefined;
   const reading = key ? pendingInspections.get(key) : undefined;
   if (reading) return reading as Promise<T>;
   const request = (async () => {
-    const response = await apiFetch(`/api/cats/dsh-setup/${action}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    const response = await apiFetch(
+      `/api/cats/dsh-setup/${action}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      { mutationTimeoutMs: DSH_SETUP_TIMEOUT_MS },
+    );
     const data = await response.json();
     if (!response.ok) throw Error(data.error || 'dsh_setup_unavailable');
     return data as T;

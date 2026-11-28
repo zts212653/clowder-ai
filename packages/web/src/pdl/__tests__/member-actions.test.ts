@@ -275,6 +275,7 @@ it('reads Desktop model choices without opening an ACP session', async () => {
   expect(apiFetch).toHaveBeenCalledExactlyOnceWith(
     '/api/cats/dsh-setup/inspect',
     expect.objectContaining({ method: 'POST', body: '{"runtimeId":"dsh:installed"}' }),
+    { mutationTimeoutMs: 90_000 },
   );
   vi.mocked(apiFetch).mockResolvedValueOnce(
     Response.json({ error: 'dsh_setup_auth_refresh_required' }, { status: 422 }),
