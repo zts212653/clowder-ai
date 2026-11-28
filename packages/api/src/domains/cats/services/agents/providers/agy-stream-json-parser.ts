@@ -1,6 +1,11 @@
 import { agyReplyEvidence } from './agy-reply-evidence.js';
 import { AgyStepEvidence, isAgyAnonymousCompletion } from './agy-step-evidence.js';
-import { parseAgyResultFields, parseAgyToolFields } from './agy-stream-json-fields.js';
+import {
+  joinAgySubagentOutputs,
+  parseAgyResultFields,
+  parseAgySubagentFields,
+  parseAgyToolFields,
+} from './agy-stream-json-fields.js';
 
 /**
  * F210: AGY stream-json carrier — 事件解析与回合归纳。
@@ -83,6 +88,8 @@ export type AgyStreamJsonEvent =
       readonly toolName: string | null;
       readonly toolParameters: Record<string, unknown> | null;
       readonly toolOutput: string | null;
+      /** Separate observed launch references from generic output across sparse updates. */
+      readonly subagentEvidence?: { readonly launchReceipt: string | null; readonly genericOutput: string | null };
       readonly toolErrorMessage: string | null;
       readonly anomalies: readonly AgyProtocolAnomaly[];
       readonly durationSeconds: number | null;
@@ -208,17 +215,35 @@ function parseStepEvent(step: Record<string, unknown>): AgyStreamJsonEvent {
   // Decode that recorded spelling once for both live and terminal consumers;
   // the unchanged index, owner and error fields still pass normal validation.
   const finishCompleted = step.step_type === 'finish' && step.state === 'DONE' && step.tool_name === undefined;
+  // Recorded official CLI spelling for invoking children. Keep the operation in
+  // the ordinary tool evidence path, including live identity and error checks.
+  const subagentInvocation = step.step_type === 'subagent' && step.tool_name === 'invoke_subagent';
+  let toolFields = parseAgyToolFields(step.tool_info);
+  let subagentEvidence: Extract<AgyStreamJsonEvent, { kind: 'step' }>['subagentEvidence'];
+  if (subagentInvocation) {
+    const launch = parseAgySubagentFields(step.subagent_info, step.state);
+    subagentEvidence = { launchReceipt: launch.toolOutput, genericOutput: toolFields.toolOutput };
+    toolFields = {
+      toolParameters: toolFields.toolParameters ?? launch.toolParameters,
+      // The channels are independent evidence. Receipts come first for bounded
+      // history previews; absent/empty generic output cannot erase a prior launch.
+      toolOutput: joinAgySubagentOutputs([launch.toolOutput], toolFields.toolOutput),
+      toolErrorMessage: toolFields.toolErrorMessage ?? launch.toolErrorMessage,
+      anomalies: [...toolFields.anomalies, ...launch.anomalies],
+    };
+  }
   return {
     kind: 'step',
     conversationId: asString(step.conversation_id) ?? '',
     stepIndex: asNumber(step.step_index) ?? -1,
     state: parseState(step.state),
     rawState: asString(step.state) ?? '',
-    stepType: finishCompleted ? 'tool' : (asString(step.step_type) ?? 'unknown'),
+    stepType: finishCompleted || subagentInvocation ? 'tool' : (asString(step.step_type) ?? 'unknown'),
     ...(isAgyAnonymousCompletion(step) ? { anonymousCompletion: true as const } : {}),
-    textDelta: asString(step.text_delta),
+    textDelta: subagentInvocation ? null : asString(step.text_delta),
+    ...(subagentEvidence ? { subagentEvidence } : {}),
     toolName: finishCompleted ? 'finish' : asString(step.tool_name),
-    ...parseAgyToolFields(step.tool_info),
+    ...toolFields,
     durationSeconds: asNumber(step.duration_seconds),
     usage: parseUsage(step.usage),
   };

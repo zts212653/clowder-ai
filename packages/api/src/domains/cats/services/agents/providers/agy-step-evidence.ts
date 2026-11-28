@@ -1,3 +1,4 @@
+import { joinAgySubagentOutputs } from './agy-stream-json-fields.js';
 import type { AgyProtocolAnomaly, AgyStreamJsonEvent } from './agy-stream-json-parser.js';
 
 const STEP_TYPES = new Set(['user_input', 'system_message', 'agent_response', 'tool', 'checkpoint', 'error_message']);
@@ -66,13 +67,37 @@ export function agyStepEvidenceAnomalies(
   return anomalies;
 }
 
+type StepIdentity = { type: string; toolName: string | null; conversationId: string };
+
 /** Invocation-local decoding evidence, shared by batch and live consumers.
  * Pin the first identity and retain invalid observations before a later sparse
  * completion could otherwise publish success. No execution or recovery authority.
  */
 export class AgyStepEvidence {
-  private readonly first = new Map<number, { type: string; toolName: string | null; conversationId: string }>();
+  private readonly first = new Map<number, StepIdentity>();
   private readonly invalid = new Set<number>();
+  private readonly launchReceipts = new Map<number, Set<string>>();
+
+  private retainLaunchReferences(
+    event: Extract<AgyStreamJsonEvent, { kind: 'step' }>,
+    previous: StepIdentity | undefined,
+  ): string | null {
+    if (!event.subagentEvidence) return event.toolOutput;
+    if (
+      previous &&
+      (previous.type !== event.stepType ||
+        previous.toolName !== event.toolName ||
+        previous.conversationId !== event.conversationId)
+    )
+      return event.toolOutput;
+    // A later sparse or generic result cannot erase an observed partial launch.
+    // Both live and terminal consumers retain it under the pinned identity;
+    // invalid observations still retain their sticky errors in observe().
+    const receipts = this.launchReceipts.get(event.stepIndex) ?? new Set<string>();
+    if (event.subagentEvidence.launchReceipt) receipts.add(event.subagentEvidence.launchReceipt);
+    this.launchReceipts.set(event.stepIndex, receipts);
+    return joinAgySubagentOutputs([...receipts], event.subagentEvidence.genericOutput);
+  }
 
   observe(observed: Extract<AgyStreamJsonEvent, { kind: 'step' }>): Extract<AgyStreamJsonEvent, { kind: 'step' }> {
     const previous = this.first.get(observed.stepIndex);
@@ -107,6 +132,7 @@ export class AgyStepEvidence {
       });
     return {
       ...event,
+      toolOutput: this.retainLaunchReferences(event, previous),
       anomalies,
       ...(anomalies.length && event.stepType === 'tool' && !event.toolErrorMessage
         ? { toolErrorMessage: `Native tool result unconfirmed: ${anomalies.map((a) => a.detail).join('; ')}` }

@@ -35,6 +35,101 @@ export function parseAgyToolFields(value: unknown): {
   };
 }
 
+function isNonemptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+const SUBAGENT_REQUEST_FIELDS = ['type_name', 'role', 'initial_prompt'];
+
+function hasCompleteSubagentRequest(value: unknown): boolean {
+  const child = asRecord(value);
+  return SUBAGENT_REQUEST_FIELDS.every((key) => isNonemptyString(child?.[key]));
+}
+
+export function joinAgySubagentOutputs(
+  receipts: readonly (string | null)[],
+  genericOutput: string | null,
+): string | null {
+  const parts = [
+    ...new Set([...receipts, genericOutput].filter((part): part is string => part !== null && part !== '')),
+  ];
+  return parts.length > 0 ? parts.join('\n\n') : null;
+}
+
+function invalidSubagentEntryFields(value: unknown, state: unknown): string[] {
+  const child = asRecord(value);
+  if (!child) return ['subagent_info.subagents[]'];
+  const invalid: string[] = [];
+  for (const key of [...SUBAGENT_REQUEST_FIELDS, 'conversation_id', 'log_uri']) {
+    const required = state === 'ACTIVE' && SUBAGENT_REQUEST_FIELDS.includes(key);
+    if ((required || child[key] !== undefined) && !isNonemptyString(child[key])) invalid.push(key);
+  }
+  if (
+    child.workspace_uris !== undefined &&
+    (!Array.isArray(child.workspace_uris) || child.workspace_uris.some((uri) => typeof uri !== 'string'))
+  ) {
+    invalid.push('workspace_uris');
+  }
+  return invalid.map((key) => `subagent_info.subagents[].${key}`);
+}
+
+/** Keep actual launch references before generic output/history truncation. The
+ * request prompt is input evidence, never a substitute for a launch receipt.
+ */
+function subagentLaunchReferences(entries: unknown[]): Record<string, unknown>[] {
+  return entries.flatMap((entry) => {
+    const child = asRecord(entry);
+    if (!child) return [];
+    const refs: Record<string, unknown> = {};
+    for (const key of ['conversation_id', 'log_uri']) {
+      if (isNonemptyString(child[key])) refs[key] = child[key];
+    }
+    if (Array.isArray(child.workspace_uris) && child.workspace_uris.length > 0) {
+      refs.workspace_uris = child.workspace_uris;
+    }
+    return Object.keys(refs).length > 0 ? [refs] : [];
+  });
+}
+
+/** AGY 1.5.12 invokes children through a distinct step type, carrying launch
+ * declarations/receipts in subagent_info rather than tool_info. A receipt is
+ * evidence of invocation only; it is not the child's task result.
+ */
+export function parseAgySubagentFields(value: unknown, state: unknown): ReturnType<typeof parseAgyToolFields> {
+  const info = asRecord(value);
+  const subagents = info?.subagents;
+  let invalid: string[];
+  if (value === undefined) {
+    // step_update is sparse: omission neither fabricates a receipt nor invalidates
+    // the request retained from ACTIVE. Explicit unreadable values still fail.
+    invalid = [];
+  } else if (!info || !Array.isArray(subagents) || subagents.length === 0) {
+    invalid = ['subagent_info.subagents'];
+  } else {
+    invalid = subagents.flatMap((entry) => invalidSubagentEntryFields(entry, state));
+  }
+  const anomalies: AgyProtocolAnomaly[] = invalid.map((field) => ({
+    kind: 'invalid_tool_evidence',
+    detail: `unrecognized ${field}`,
+  }));
+  const references = subagentLaunchReferences(Array.isArray(subagents) ? subagents : []);
+  const completeRequest =
+    Array.isArray(subagents) && subagents.length > 0 && subagents.every(hasCompleteSubagentRequest);
+  return {
+    // A complete terminal snapshot can be the first observation. Reference-only
+    // sparse updates must not replace the request already retained from ACTIVE.
+    toolParameters: completeRequest ? info : null,
+    toolOutput: references.length > 0 ? JSON.stringify({ subagents: references }) : null,
+    toolErrorMessage:
+      anomalies.length > 0
+        ? 'Native subagent invocation unconfirmed: unreadable launch evidence.'
+        : state === 'ERROR'
+          ? 'Native subagent invocation failed.'
+          : null,
+    anomalies,
+  };
+}
+
 export function parseAgyResultFields(result: Record<string, unknown>): {
   error: string | null;
   deniedActions: readonly AgyDeniedAction[];
