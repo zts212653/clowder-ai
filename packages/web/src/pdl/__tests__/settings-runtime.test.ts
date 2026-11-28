@@ -446,6 +446,25 @@ function capabilityData() {
   };
 }
 
+it('renders the declared model options and refresh control in a v2 settings input', async () => {
+  const { dom, w } = await boot();
+  try {
+    const source = 'public/pdl/themes/v2/components/v2/v2c.js';
+    runInContext(readFileSync(path.join(process.cwd(), source), 'utf8'), dom.getInternalVMContext(), {
+      filename: source,
+    });
+    const model = { v: '["magpie-devin","devin/swe-2"]', label: 'SWE-2 · magpie-devin' };
+    const props = { id: 'f-model', value: '', listFrom: [model], reload: { act: 'memberCatalogRefresh' } };
+    const field = w.document.createElement('div');
+    field.innerHTML = w.eval(`PDL_COMPONENTS.v2Input(${JSON.stringify(props)}, {}, {})`);
+    expect(field.querySelector('[data-act="comboOpen"][data-for="f-model"]')).not.toBeNull();
+    expect(field.querySelector('[data-act="memberCatalogRefresh"]')).not.toBeNull();
+    expect(w.eval('COMBO["f-model"]')).toMatchObject([model]);
+  } finally {
+    dom.window.close();
+  }
+});
+
 it('projects the inherited member model and its source from the requested catalog without changing native account binding', async () => {
   const { dom, w, action, data, port, errors } = await boot();
   const runtime = {
