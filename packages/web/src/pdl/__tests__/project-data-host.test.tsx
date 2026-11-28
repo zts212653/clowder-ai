@@ -2,10 +2,17 @@ import { useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { getThreadDraft } from '@/components/thread-drafts';
 import type { useWorkspace } from '@/hooks/useWorkspace';
+import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { observeApiSessionOwner } from '@/utils/api-session-identity';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { request } from '../owner-api';
-import { ComposerInputBinding, FirstMessageBinding } from '../PdlAppHost';
+import {
+  ComposerInputBinding,
+  FirstMessageBinding,
+  fitRestoredComposerAttachments,
+  useThreadDraftMarker,
+} from '../PdlAppHost';
 import { type ProjectBindings, ProjectDataBinding } from '../ProjectDataBinding';
 import type { useServerComposerDraft } from '../useServerComposerDraft';
 import { fixtureData, fixtureUi } from './chat-fixture';
@@ -182,6 +189,7 @@ it('hydrates the first-message admission once across 30 parent commits', async (
 });
 
 it('keeps draft typing in its leaf, persists it, and publishes only a changed routing result', async () => {
+  observeApiSessionOwner('composer-leaf-owner');
   const ui = { current: fixtureUi() };
   ui.current.draft!['chat-input'] = 'a';
   const inputChanged: { current: (() => void) | undefined } = { current: undefined };
@@ -428,4 +436,43 @@ it('keeps an existing error/retry component on refresh failure and detects its l
   Object.assign(owners.ops, { data: { read: { load: '', title: 'Recovered owner' } } });
   expect(read()).toHaveProperty('title', 'Recovered owner');
   expect(owners.ops.models).not.toHaveBeenCalled();
+});
+
+it('marks the departing conversation using its own draft when switching A to B to A to C', async () => {
+  const original = useChatStore.getState().setThreadHasDraft;
+  const mark = vi.fn();
+  useChatStore.setState({ setThreadHasDraft: mark });
+  try {
+    let threadId = 'A';
+    let hasDraft = true;
+    const hook = renderHook(() => {
+      const draft = useThreadDraftMarker(threadId);
+      draft.current = hasDraft;
+    });
+    for (const [destination, draft] of [
+      ['B', false],
+      ['A', true],
+      ['C', false],
+    ] as const) {
+      threadId = destination;
+      hasDraft = draft;
+      await act(hook.rerender);
+    }
+    expect(mark.mock.calls).toEqual([
+      ['A', true],
+      ['B', false],
+      ['A', true],
+    ]);
+  } finally {
+    useChatStore.setState({ setThreadHasDraft: original });
+  }
+});
+
+it('keeps all five saved attachments and explains why a new local file did not fit', () => {
+  const restored = Array.from({ length: 5 }, (_, index) => new File(['old'], `restored-${index}.png`));
+  const picked = new File(['new'], 'new-picked.png');
+  const result = fitRestoredComposerAttachments(restored, [picked]);
+  expect(result.files.map((file) => file.name)).toEqual(restored.map((file) => file.name));
+  expect(result.omitted).toBe(1);
+  expect(fitRestoredComposerAttachments(restored.slice(0, 4), [picked]).files.at(-1)).toBe(picked);
 });

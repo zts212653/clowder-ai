@@ -14,7 +14,7 @@ import {
   type ThreadArtifactDTO,
   workReferenceSchema,
 } from '@cat-cafe/shared';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { z } from 'zod';
 import { createQuoteContextAttachment } from '@/components/chat-context-reference';
 import { workspaceFileSourceFromUrl } from '@/components/content-review/file-source';
@@ -178,15 +178,31 @@ interface Source {
 
 /** Message metadata supplies locators; the original owners supply all displayed evidence and work versions. */
 export function useMessageSourceBindings(data: ChatData, needed: boolean | number = false) {
-  const records = useRef<{
+  const session = useSyncExternalStore(
+    apiSessionIdentity.subscribe,
+    apiSessionIdentity.getSnapshot,
+    apiSessionIdentity.getSnapshot,
+  );
+  const generationReads = useRef<{
+    scope: string;
+    entries: Map<string, { version: string; result: Promise<Generation> }>;
+    messageIds: Set<string>;
+  }>();
+  type Records = {
     evidence: Record<string, { blockId: string; view: MessageSearchAnswerView & { response: MessageSearchResponse } }>;
     works: Record<string, ThreadArtifactDTO>;
     generations: Record<string, Generation>;
     holds?: Record<string, HoldRead>;
     memoryGroups?: Record<string, GroupRead>;
-  }>({ evidence: {}, works: {}, generations: {}, holds: {} });
-  const inboxProposals = useRef<Record<string, ProposalBinding>>({});
-  const failure = useRef<unknown>(null);
+  };
+  const { records, inboxProposals, failure } = useMemo(
+    () => ({
+      records: { current: { evidence: {}, works: {}, generations: {}, holds: {} } as Records },
+      inboxProposals: { current: {} as Record<string, ProposalBinding> },
+      failure: { current: null as unknown },
+    }),
+    [session.generation, data.threadId],
+  );
   const [groupRevision, refreshGroup] = useState(0);
   const [holdBusy, setHoldBusy] = useState<Record<string, boolean>>({});
   const [holdRevision, recheckHold] = useState(0);
@@ -240,15 +256,39 @@ export function useMessageSourceBindings(data: ChatData, needed: boolean | numbe
       return [];
     }),
   ]);
-  for (const message of data.messages)
-    if (message.lifecycle?.kind === 'response')
-      sources.push({ mid: message.id, blockId: '', kind: 'generation', query: {} });
-  const identity = JSON.stringify([sources, data.messages.map((m) => [m.id, m.lifecycle])]);
+  const generationVersions = new Map<string, string>();
+  const inputVersion = JSON.stringify(data.messages.map((message) => [message.id, message.deliveredAt]));
+  for (const message of data.messages) {
+    const lifecycle = message.lifecycle;
+    if (lifecycle?.kind !== 'response') continue;
+    sources.push({ mid: message.id, blockId: '', kind: 'generation', query: {} });
+    // Reaching the end of a scan does not make a live response final. New inputs can still arrive.
+    generationVersions.set(
+      message.id,
+      JSON.stringify([lifecycle, lifecycle.status === 'processing' ? inputVersion : null]),
+    );
+  }
+  const identity = JSON.stringify([sources, data.messages.map((m) => [m.id, m.lifecycle]), inputVersion]);
   useEffect(() => {
     if (!needed) return;
     let active = true;
-    records.current = { ...records.current, evidence: {}, works: {}, generations: {} };
+    const scope = JSON.stringify([session.generation, data.threadId, needed]);
+    const messageIds = new Set(data.messages.map((message) => message.id));
+    const previous = generationReads.current;
+    const sameScope = previous?.scope === scope && [...previous.messageIds].every((id) => messageIds.has(id));
+    const reads = sameScope ? previous.entries : new Map<string, { version: string; result: Promise<Generation> }>();
+    generationReads.current = { scope, entries: reads, messageIds };
+    const clearSources = !sameScope && Object.keys(records.current.generations).length > 0;
+    records.current = {
+      ...records.current,
+      evidence: {},
+      works: {},
+      generations: sameScope
+        ? Object.fromEntries(Object.entries(records.current.generations).filter(([mid]) => generationVersions.has(mid)))
+        : {},
+    };
     failure.current = null;
+    if (clearSources) changed((n) => n + 1);
     void Promise.all(
       sources.map(async (source) => {
         if (source.kind === 'memory_group') {
@@ -266,13 +306,24 @@ export function useMessageSourceBindings(data: ChatData, needed: boolean | numbe
           return;
         }
         if (source.kind === 'generation') {
-          const result = await request<Generation>(
-            '/api/threads/' +
-              encodeURIComponent(data.threadId) +
-              '/messages/' +
-              encodeURIComponent(source.mid) +
-              '/generation-messages',
-          );
+          const version = generationVersions.get(source.mid)!;
+          let entry = reads.get(source.mid);
+          if (entry?.version !== version) {
+            const result = request<Generation>(
+              '/api/threads/' +
+                encodeURIComponent(data.threadId) +
+                '/messages/' +
+                encodeURIComponent(source.mid) +
+                '/generation-messages',
+            ).catch((error) => {
+              if (reads.get(source.mid)?.result === result) reads.delete(source.mid);
+              throw error;
+            });
+            entry = { version, result };
+            reads.set(source.mid, entry);
+          }
+          // An effect invalidated by unrelated activity and its replacement share the same read.
+          const result = await entry.result;
           if (active)
             records.current = {
               ...records.current,
@@ -320,7 +371,7 @@ export function useMessageSourceBindings(data: ChatData, needed: boolean | numbe
       },
       (error) => {
         if (active) {
-          records.current = { ...records.current, evidence: {}, works: {}, generations: {} };
+          records.current = { ...records.current, evidence: {}, works: {} };
           failure.current = error;
           changed((n) => n + 1);
         }
@@ -329,7 +380,7 @@ export function useMessageSourceBindings(data: ChatData, needed: boolean | numbe
     return () => {
       active = false;
     };
-  }, [needed, identity, groupRevision]);
+  }, [needed, identity, groupRevision, data.threadId, session.generation]);
   useEffect(() => {
     if (!needed) return;
     const ids = JSON.parse(holdIds) as string[];
@@ -381,7 +432,7 @@ export function useMessageSourceBindings(data: ChatData, needed: boolean | numbe
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', poll);
     };
-  }, [needed, holdIds, holdRevision]);
+  }, [needed, holdIds, holdRevision, records]);
   const rawData = useMemo<{
     records: typeof records.current;
     error: unknown;

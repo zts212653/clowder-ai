@@ -51,6 +51,7 @@ import { configurationRequest } from '@/components/settings/plugin-manager/plugi
 import type { AgentClientLibrary, AgentClientProfile } from '@/hooks/useAgentClientLibraries';
 import { type CatData, refreshCatsNow, saveCatOrder } from '@/hooks/useCatData';
 import { primeCoCreatorConfigCache } from '@/hooks/useCoCreatorConfig';
+import { isDshMember } from '@/lib/member-model-display';
 import { API_URL, apiFetch } from '@/utils/api-client';
 import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { beginMemberSave } from '@/utils/member-save-trace';
@@ -166,19 +167,28 @@ export async function readVoiceChoices() {
 }
 
 export async function readMemberSettings() {
-  const [accounts, templates, snapshot, strategies, discovered, directory, libraries, l0] = await Promise.all([
-    request<AccountsResponse>('/api/accounts'),
-    request<{ templates: TemplateCard[] }>('/api/cat-templates'),
-    request<{ config: ConfigData }>('/api/config'),
-    request<{ cats: CatStrategyEntry[] }>('/api/config/session-strategy'),
-    readAgentAccessDetection(false),
-    request<AgentAccessClientDirectory>('/api/agent-access/v1/clients'),
-    request<{ libraries: AgentClientLibrary[] }>('/api/agent-providers'),
-    // The fixed-prompt (L0) estimate may be unavailable (503): the page then shows no estimate.
-    request<{ referenceTokens: number; members: { catId: string; tokens: number }[] }>('/api/cats/l0-budget').catch(
-      () => null,
-    ),
-  ]);
+  const [accounts, templates, snapshot, strategies, discovered, directory, libraries, l0, { cats }] = await Promise.all(
+    [
+      request<AccountsResponse>('/api/accounts'),
+      request<{ templates: TemplateCard[] }>('/api/cat-templates'),
+      request<{ config: ConfigData }>('/api/config'),
+      request<{ cats: CatStrategyEntry[] }>('/api/config/session-strategy'),
+      readAgentAccessDetection(false),
+      request<AgentAccessClientDirectory>('/api/agent-access/v1/clients'),
+      request<{ libraries: AgentClientLibrary[] }>('/api/agent-providers'),
+      // The fixed-prompt (L0) estimate may be unavailable (503): the page then shows no estimate.
+      request<{ referenceTokens: number; members: { catId: string; tokens: number }[] }>('/api/cats/l0-budget').catch(
+        () => null,
+      ),
+      refreshCatsNow(),
+    ],
+  );
+  const runtimes = memberRuntimeTools(discovered.candidates, libraries.libraries).map((runtime) => ({
+    ...runtime,
+    ...(runtime.dshDesktop ? { discoveredId: discovered.candidates.find((item) => item.dshDesktop)?.id } : {}),
+    acpMaxDefault: defaultAcpPoolMaxProcesses(runtime.clientId),
+    form: runtimeDefaults(runtime),
+  }));
   return {
     accounts: accounts.providers,
     l0,
@@ -187,12 +197,8 @@ export async function readMemberSettings() {
     codex: toCodexRuntimeSettings(snapshot.config),
     strategies: strategies.cats.map((entry) => ({ id: entry.catId, form: toStrategyForm(entry) })),
     libraries: libraries.libraries,
-    runtimes: memberRuntimeTools(discovered.candidates, libraries.libraries).map((runtime) => ({
-      ...runtime,
-      ...(runtime.dshDesktop ? { discoveredId: discovered.candidates.find((item) => item.dshDesktop)?.id } : {}),
-      acpMaxDefault: defaultAcpPoolMaxProcesses(runtime.clientId),
-      form: runtimeDefaults(runtime),
-    })),
+    runtimes,
+    dshMembers: cats.filter((cat) => isDshMember(cat, runtimes)).map((cat) => cat.id),
     clients: directory.clients.map((client) => ({
       id: client.id,
       acpMaxDefault: defaultAcpPoolMaxProcesses(client.id),

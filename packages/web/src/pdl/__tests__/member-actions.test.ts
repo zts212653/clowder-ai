@@ -76,6 +76,7 @@ const template = {
 let writes: { path: string; body: Record<string, unknown> }[], rejectWrite: boolean;
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(refreshCatsNow).mockResolvedValue({ cats, fromApi: true });
   sessionStorage.clear();
   writes = [];
   rejectWrite = false;
@@ -194,6 +195,28 @@ it('projects actual strategy capability and native launch choices without turnin
   });
 });
 
+it('reads the current member catalog when opening settings, including externally added DSH members', async () => {
+  vi.mocked(refreshCatsNow).mockResolvedValueOnce({
+    fromApi: true,
+    cats: [
+      ...cats,
+      {
+        ...cats[0],
+        id: 'new-dsh',
+        clientId: 'acp',
+        carrier: 'acp',
+        acp: {
+          command: 'G:\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\dsh.cmd',
+          startupArgs: ['--profile', 'acp'],
+        },
+      },
+    ],
+  });
+  const settings = await readMemberSettings();
+  expect(refreshCatsNow).toHaveBeenCalledOnce();
+  expect(settings.dshMembers).toEqual(['new-dsh']);
+});
+
 it('saves strategy intent through its owner, validates thresholds once and returns the confirmed capability', async () => {
   const form: StrategyFormState = {
     strategy: 'hybrid',
@@ -262,6 +285,7 @@ it('reads Desktop model choices without opening an ACP session', async () => {
   expect(apiFetch).toHaveBeenCalledExactlyOnceWith(
     '/api/cats/dsh-setup/inspect',
     expect.objectContaining({ method: 'POST', body: '{"runtimeId":"dsh:installed"}' }),
+    { mutationTimeoutMs: 90_000 },
   );
   vi.mocked(apiFetch).mockResolvedValueOnce(
     Response.json({ error: 'dsh_setup_auth_refresh_required' }, { status: 422 }),

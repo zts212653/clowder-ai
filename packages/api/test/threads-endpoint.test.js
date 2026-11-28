@@ -783,7 +783,7 @@ describe('Thread API', () => {
     assert.deepEqual((await threadStore.get(thread.id)).preferredCats, ['codex-sol']);
   });
 
-  it('PATCH /api/threads/:id marks renamed threads dirty for evidence search', async () => {
+  it('PATCH /api/threads/:id returns the renamed title without waiting for the evidence index', async () => {
     const { threadsRoutes } = await import('../dist/routes/threads.js');
     const calls = [];
     const indexBuilder = {
@@ -807,7 +807,8 @@ describe('Thread API', () => {
     });
 
     assert.equal(res.statusCode, 200);
-    assert.deepEqual(calls, [['mark', thread.id], ['flush']]);
+    assert.equal(res.json().title, 'New Indexed Title');
+    assert.deepEqual(calls, [['mark', thread.id]]);
 
     await isolated.close();
   });

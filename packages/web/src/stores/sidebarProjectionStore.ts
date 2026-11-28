@@ -45,6 +45,7 @@ export interface PendingSidebarCommand<F extends SidebarCommandField = SidebarCo
   readonly threadId: string;
   readonly field: F;
   readonly value: SidebarCommandValueMap[F];
+  readonly confirmed?: boolean;
 }
 
 export interface SidebarProjectionState {
@@ -62,6 +63,7 @@ export interface SidebarProjectionState {
     threadId: string,
     field: F,
     value: SidebarCommandValueMap[F],
+    confirmed?: boolean,
   ) => string;
   failSidebarCommand: (commandId: string) => void;
   clearSidebarCommand: (threadId: string, field: SidebarCommandField) => void;
@@ -157,14 +159,14 @@ export const useSidebarProjectionStore = create<SidebarProjectionState>((set, ge
     return true;
   },
 
-  beginSidebarCommand: (threadId, field, value) => {
+  beginSidebarCommand: (threadId, field, value, confirmed) => {
     commandSequence += 1;
     const id = `sidebar-command-${commandSequence}`;
     const key = commandKey(threadId, field);
     set((state) => ({
       pendingThreadCommands: {
         ...state.pendingThreadCommands,
-        [key]: { id, threadId, field, value } as PendingSidebarCommand,
+        [key]: { id, threadId, field, value, ...(confirmed ? { confirmed } : {}) } as PendingSidebarCommand,
       },
     }));
     return id;

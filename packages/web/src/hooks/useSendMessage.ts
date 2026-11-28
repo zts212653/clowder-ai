@@ -19,11 +19,15 @@ export interface SendMessageAdmissionOptions {
   /** A recoverable first-message owner supplies the same key on every retry. */
   idempotencyKey?: string;
   messageDisposition?: MessageWorkDisposition;
+  composerDraftRevision?: number | 'current';
+  composerDraftConsumed?: (revision: number) => void;
+  signal?: AbortSignal;
 }
 
 interface MessageAdmissionResponse {
   status?: string;
   gameThreadId?: string;
+  composerDraftConsumption?: { threadId: string; revision: number };
 }
 
 /**
@@ -83,6 +87,8 @@ export function useSendMessage(activeThreadId?: string, confirm?: RoutingConfirm
     ) => {
       const threadId = overrideThreadId ?? activeThreadId ?? useChatStore.getState().currentThreadId;
       const hasImages = Boolean(images?.length);
+      const { composerDraftRevision, composerDraftConsumed, signal } = admissionOptions ?? {};
+      if (signal?.aborted) return false;
       setUploadError(null);
       setUploadStatus(hasImages ? 'uploading' : 'idle');
 
@@ -98,6 +104,8 @@ export function useSendMessage(activeThreadId?: string, confirm?: RoutingConfirm
             formData.append('content', content);
             formData.append('threadId', threadId);
             formData.append('idempotencyKey', clientMessageId);
+            if (composerDraftRevision !== undefined)
+              formData.append('composerDraftRevision', String(composerDraftRevision));
             if (admissionOptions?.messageDisposition) {
               formData.append('messageDisposition', admissionOptions.messageDisposition);
             }
@@ -112,15 +120,17 @@ export function useSendMessage(activeThreadId?: string, confirm?: RoutingConfirm
               formData.append('contextAttachments', JSON.stringify(contextAttachments));
             }
             for (const image of images ?? []) formData.append('images', image);
-            return apiFetch('/api/messages', { method: 'POST', body: formData });
+            return apiFetch('/api/messages', { method: 'POST', body: formData, ...(signal ? { signal } : {}) });
           } else {
             return apiFetch('/api/messages', {
               method: 'POST',
+              ...(signal ? { signal } : {}),
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 content,
                 threadId,
                 idempotencyKey: clientMessageId,
+                ...(composerDraftRevision === undefined ? {} : { composerDraftRevision }),
                 ...(admissionOptions?.messageDisposition
                   ? { messageDisposition: admissionOptions.messageDisposition }
                   : {}),
@@ -160,6 +170,10 @@ export function useSendMessage(activeThreadId?: string, confirm?: RoutingConfirm
         if (admission?.status !== 'game_started' && admission?.status !== 'queued') {
           throw new Error('Server did not return a canonical Queue admission');
         }
+        const consumed = admission.composerDraftConsumption;
+        if (consumed?.threadId === threadId && Number.isSafeInteger(consumed.revision)) {
+          composerDraftConsumed?.(consumed.revision);
+        }
         // A successful send must remain visible even if its Queue socket event was
         // missed. Reuse the same fenced server snapshot as reconnect, not a local bubble.
         if (admission.status === 'queued') void reconcileThreadWithServer(threadId, () => false, 'SendAdmission');
@@ -168,6 +182,10 @@ export function useSendMessage(activeThreadId?: string, confirm?: RoutingConfirm
         window.dispatchEvent(new CustomEvent('guide:confirm', { detail: { target: 'chat.input' } }));
         return true;
       } catch (error) {
+        if (signal?.aborted) {
+          setUploadStatus('idle');
+          return false;
+        }
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         if (hasImages) {
           setUploadStatus('failed');

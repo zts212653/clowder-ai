@@ -8,6 +8,19 @@ const mockLoadSidebarSnapshot = vi.fn();
 const mockSetThreads = vi.fn();
 const mockInitThreadUnread = vi.fn();
 const mockSetLoadingThreads = vi.fn();
+const mockFailSidebarCommand = vi.fn();
+const mockUpdateThreadTitle = vi.fn();
+let confirmedSidebarCommands: Record<
+  string,
+  {
+    id: string;
+    threadId: string;
+    field: string;
+    value: string;
+    confirmed?: boolean;
+  }
+> = {};
+let rows: { id: string; title: string }[] = [];
 
 vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
@@ -22,6 +35,9 @@ vi.mock('@/stores/sidebarProjectionStore', () => ({
   useSidebarProjectionStore: {
     getState: () => ({
       applySidebarSnapshot: mockApplySidebarSnapshot,
+      pendingThreadCommands: confirmedSidebarCommands,
+      rows,
+      failSidebarCommand: mockFailSidebarCommand,
       setRefreshing: mockSetRefreshing,
     }),
   },
@@ -33,6 +49,7 @@ vi.mock('@/stores/chatStore', () => ({
       setThreads: mockSetThreads,
       initThreadUnread: mockInitThreadUnread,
       setLoadingThreads: mockSetLoadingThreads,
+      updateThreadTitle: mockUpdateThreadTitle,
     }),
   },
 }));
@@ -72,6 +89,8 @@ describe('sidebar snapshot refresh controller', () => {
     vi.clearAllMocks();
     __resetSidebarRefreshForTests();
     nextMockGetGeneration = 0;
+    confirmedSidebarCommands = {};
+    rows = [];
   });
 
   it('delegates concurrent ordinary refresh callers to the exact-GET coordinator', async () => {
@@ -213,5 +232,46 @@ describe('sidebar snapshot refresh controller', () => {
     expect(mockApplySidebarSnapshot).toHaveBeenCalledWith([{ id: 'cached' }], 0, { source: 'cache' });
     expect(mockSetThreads).not.toHaveBeenCalled();
     expect(mockSetLoadingThreads).not.toHaveBeenCalled();
+  });
+
+  it('retires only rename receipts covered by a successful post-write sidebar read, including after a failed refresh', async () => {
+    const old = deferred<Response>();
+    const postWrite = deferred<Response>();
+    mockApiFetch.mockReturnValueOnce(old.promise).mockReturnValueOnce(postWrite.promise);
+    const staleRead = refreshSidebarThreadSnapshot();
+    confirmedSidebarCommands = {
+      rename: { id: 'local-receipt', field: 'title', threadId: 'thread', value: 'local confirmed', confirmed: true },
+    };
+    const revalidation = invalidateSidebarProjection();
+    old.resolve(ok([{ id: 'thread', title: 'before the rename' }], 1));
+    await expect(staleRead).resolves.toBe(true);
+    expect(mockFailSidebarCommand).not.toHaveBeenCalled();
+
+    postWrite.resolve(new Response(null, { status: 500 }));
+    await expect(revalidation).resolves.toBe(false);
+    expect(mockFailSidebarCommand).not.toHaveBeenCalled();
+
+    const serverTitle = { id: 'thread', title: 'remote latest' };
+    rows = [serverTitle];
+    mockApiFetch.mockResolvedValueOnce(ok(rows, 3));
+    await expect(refreshSidebarThreadSnapshot()).resolves.toBe(true);
+    expect(mockApiFetch).toHaveBeenNthCalledWith(3, '/api/threads?view=sidebar', undefined, { afterCurrentGet: true });
+    expect(mockFailSidebarCommand).toHaveBeenCalledWith('local-receipt');
+    expect(mockUpdateThreadTitle).toHaveBeenLastCalledWith('thread', 'remote latest');
+  });
+
+  it('lets a fresh 304 confirm the canonical title without parsing the snapshot again', async () => {
+    rows = [{ id: 'thread', title: 'remote latest' }];
+    mockApiFetch.mockResolvedValueOnce(ok(rows, 1, '"latest"'));
+    await expect(refreshSidebarThreadSnapshot()).resolves.toBe(true);
+    confirmedSidebarCommands = {
+      rename: { id: 'local-receipt', field: 'title', threadId: 'thread', value: 'local confirmed', confirmed: true },
+    };
+    mockApiFetch.mockResolvedValueOnce(notModified('"latest"'));
+
+    await expect(invalidateSidebarProjection()).resolves.toBe(true);
+    expect(mockApplySidebarSnapshot).toHaveBeenCalledOnce();
+    expect(mockFailSidebarCommand).toHaveBeenCalledWith('local-receipt');
+    expect(mockUpdateThreadTitle).toHaveBeenLastCalledWith('thread', 'remote latest');
   });
 });

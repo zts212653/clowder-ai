@@ -58,6 +58,7 @@ export interface ChatData {
   projectNames?: ReadonlyMap<string, string>;
   messages: ChatMessage[];
   drafts: Record<string, boolean>;
+  legacyDraft?: boolean;
   cats: CatData[];
   routingPreview: RoutingPreviewState;
   me: {
@@ -1016,6 +1017,21 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
   };
   const chosen = () => sourceMessages().filter((item) => ui.picked[item.id]);
   const notices = () => [
+    ...(data.legacyDraft &&
+    !locked() &&
+    !data.input.trim() &&
+    !data.images.length &&
+    !data.contexts.length &&
+    !data.reply
+      ? [
+          {
+            id: 'legacy-draft',
+            text: '检查本机旧草稿',
+            act: 'cafeLegacyDraftRecover',
+            args: { threadId: data.threadId },
+          },
+        ]
+      : []),
     ...(data.uploadError ? [{ id: 'upload', text: data.uploadError }] : []),
     // Another conversation's new reply: its name opens that message, hovering shows what was said.
     ...data.replyNotices.map((n) => {

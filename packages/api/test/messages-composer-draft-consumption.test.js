@@ -258,3 +258,28 @@ test('an older mounted ticket cannot consume a newer draft already saved before 
   assert.deepEqual(store.getOwnerComposerDraft(OWNER, THREAD), before);
   assert.equal(response.json().composerDraftConsumption, undefined);
 });
+
+test('an admitted send can consume the revision captured while the first browser read is still outstanding', async () => {
+  const { send, store } = await fixture();
+  const response = await send({ composerDraftRevision: 'current', content: '先发送，再收到旧草稿读回' });
+  assert.equal(response.statusCode, 202, response.body);
+  assert.ok(response.json().userMessageId);
+  assert.equal(store.getOwnerComposerDraft(OWNER, THREAD).text, '');
+  assert.deepEqual(response.json().composerDraftConsumption, { threadId: THREAD, expectedRevision: 1, revision: 2 });
+});
+
+test('current capture still leaves an edit committed after message admission began', async () => {
+  const { send, store } = await fixture({
+    beforeAppend: (current) => {
+      current.putOwnerComposerDraft(OWNER, THREAD, {
+        expectedRevision: 1,
+        text: 'new edit',
+        updatedAt: Date.now(),
+      });
+    },
+  });
+  const response = await send({ composerDraftRevision: 'current' });
+  assert.equal(response.statusCode, 202, response.body);
+  assert.equal(store.getOwnerComposerDraft(OWNER, THREAD).text, 'new edit');
+  assert.equal(response.json().composerDraftConsumption, undefined);
+});

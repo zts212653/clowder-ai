@@ -16,7 +16,7 @@ export type ParsedMultipart =
       userId?: string;
       threadId?: string;
       idempotencyKey?: string;
-      composerDraftRevision?: number;
+      composerDraftRevision?: number | 'current';
       contentBlocks: MessageContent[];
       visibility?: string;
       whisperTo?: string[];
