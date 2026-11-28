@@ -9450,13 +9450,14 @@ describe('declared plugin ACP runtime picker', () => {
       picker!.dispatchEvent(new w.Event('change', { bubbles: true }));
       await w.__settled();
       expect(w.eval('VM.memberNew().form.fromPlugin')).toBe('plugin:acme/agent');
-      const handleInput = w.document.querySelector<HTMLInputElement>('#mc-aliases-in')!;
+      const handleInput = w.document.querySelector('#mc-aliases-in') as HTMLInputElement;
       handleInput.value = 'declared-agent';
-      w.document.querySelector<HTMLButtonElement>('[data-for="mc-aliases"] [data-act="fieldGo"]')!.click();
+      const addHandle = w.document.querySelector('[data-for="mc-aliases"] [data-act="fieldGo"]') as HTMLButtonElement;
+      addHandle.click();
       await w.__settled();
       expect(w.eval('VM.memberNew().form.d.aliases')).toContain('@declared-agent');
       expect(w.document.querySelector('#ms-handles')?.textContent).toContain('@declared-agent');
-      const save = w.document.querySelector<HTMLButtonElement>('#mform #savebar button[type="submit"]');
+      const save = w.document.querySelector('#mform #savebar button[type="submit"]') as HTMLButtonElement | null;
       expect(save).not.toBeNull();
       expect(Boolean(save!.closest('[hidden]'))).toBe(false);
     } finally {
