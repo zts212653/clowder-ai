@@ -1,5 +1,24 @@
 [
   {
+    "id": "capability-message-artifact-dock",
+    "kind": "capability",
+    "sourceRef": { "path": "docs/design/message-artifact-dock/implementation.md", "anchor": "消息里的交付物入口" },
+    "structureSource": {
+      "path": "packages/web/public/pdl/library/message-artifacts.js",
+      "anchor": "messageArtifactHtml"
+    },
+    "bodySource": { "path": "docs/design/message-artifact-dock/implementation.md", "anchor": "消息里的交付物入口" },
+    "contexts": ["review", "waiting_external", "concierge_open"],
+    "audience": ["all"],
+    "body": "读到 PR、提交或文档引用时，可从消息末尾的紧凑分段条统一打开：GitHub 目标在新标签打开，文件留在工作台预览。同类编号各自可点，悬停短哈希或文件名可核对完整值。",
+    "action": {
+      "type": "open_source",
+      "label": "查看消息交付物入口",
+      "sourceRef": { "path": "docs/design/message-artifact-dock/implementation.md", "anchor": "消息里的交付物入口" }
+    },
+    "owner": "cat-xooblf7l"
+  },
+  {
     "id": "feature-f051-sidebar-quota-ring",
     "kind": "feature",
     "sourceRef": {

@@ -3,6 +3,51 @@ import { cliQuoteSelection, messageQuoteSelection, selectedItems, wholeSelection
 import { fixtureData } from './chat-fixture';
 
 describe('message parts retain server block identities', () => {
+  it('restores a fully selected shortened value and excludes destination chrome from quote evidence', () => {
+    const sha = 'a'.repeat(40),
+      row = document.createElement('div');
+    row.dataset.mid = 'reply-1';
+    row.innerHTML =
+      '<div class="artifact-prose">HEAD <span data-quote-source-text="' +
+      sha +
+      '">aaaaaaa</span></div><nav data-artifact-dock data-quote-exclude>aaaaaaa</nav>';
+    document.body.append(row);
+    const span = row.querySelector('span')!,
+      range = document.createRange(),
+      selection = window.getSelection()!;
+    range.selectNodeContents(span);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    expect(messageQuoteSelection(fixtureData().messages[1], row, selection)).toEqual({
+      kind: 'quote',
+      messageId: 'reply-1',
+      text: sha,
+      renderedOccurrences: 1,
+    });
+    range.selectNodeContents(row.querySelector('nav')!);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    expect(() => messageQuoteSelection(fixtureData().messages[1], row, selection)).toThrow('正文');
+    selection.removeAllRanges();
+    row.remove();
+  });
+  it('preserves whole-prose export when an artifact label abbreviates the original path', () => {
+    const data = fixtureData(),
+      row = document.createElement('div');
+    data.messages[1].content = '报告 docs/deep/report.md';
+    data.messages[1].extra = { rich: { v: 1, blocks: [{ kind: 'card', v: 1, id: 'unselected-card', title: 'Card' }] } };
+    row.dataset.mid = 'reply-1';
+    row.innerHTML =
+      '<div class="artifact-prose">报告 <span data-quote-source-text="docs/deep/report.md">report.md</span></div><nav data-artifact-dock data-quote-exclude>report.md</nav>';
+    const stream = document.createElement('div');
+    stream.dataset.stream = 'chat';
+    stream.append(row);
+    document.body.append(stream);
+    expect(selectedItems(data.messages, { 'reply-1': { text: true, blocks: {} } })).toMatchObject([
+      { kind: 'quote', text: data.messages[1].content, renderedOccurrences: 1 },
+    ]);
+    stream.remove();
+  });
   it('keeps CLI offsets relative to the selected owner leaf and opens the common text selection state', () => {
     const body = document.createElement('div');
     body.textContent = 'before owner result after';

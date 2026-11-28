@@ -418,6 +418,7 @@ function chatMessageVM(x) {
   let body = chatMarkdown.get(x.mid);
   if (!body || body.md !== x.md) {
     body = msgMd({ md: x.md });
+    body.html = messageArtifactHtml(body.html, 'zts212653/clowder-ai');
     chatMarkdown.set(x.mid, body);
   }
   return chatOwnerMessageVM(

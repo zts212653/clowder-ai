@@ -57,6 +57,56 @@ function declaredMenu(w: any, action: string, scope = '') {
   return w.eval('S.menu.items');
 }
 const { JSDOM } = createRequire(import.meta.url)('jsdom');
+it.each([
+  ['sys:1', false],
+  ['pkg:v2', false],
+  ['sys:1', true],
+  ['pkg:v2', true],
+] as const)('groups message artifacts at the end in %s (hold=%s) and preserves their native destinations', async (theme, hold) => {
+  const sha = 'f4212a2d84adf58e18fdd04968e988bdab586b02';
+  const { dom, w, action } = await boot(
+    undefined,
+    (data) => {
+      data.messages[1].content =
+        '已提交 [PR #2131](https://github.com/zts212653/clowder-ai/pull/2131)，HEAD `' +
+        sha +
+        '`。处理 #2128/#2130；报告 `docs/bug-report/pending-decisions-host/verification.md`。';
+      if (hold) {
+        data.messages[1].catId = undefined;
+        data.messages[1].from = { kind: 'system', service: 'hold-ball' };
+        data.messages[1].source = { connector: 'hold-ball', label: '持球通知', icon: 'clock' };
+      }
+    },
+    undefined,
+    {},
+    (port) => {
+      const get = port.get;
+      port.get = async (path, params) => {
+        if (path === '/api/config/console-themes') return { themes: { active: theme, customs: [] } };
+        if (path === '/api/accounts') return { providers: [] };
+        if (path.startsWith('/api/accounts/')) return { selection: { members: [] } };
+        return get(path, params);
+      };
+    },
+  );
+  try {
+    const message = w.document.querySelector('[data-stream] > [data-mid="reply-1"]');
+    const dock = message.querySelector('[data-artifact-dock]');
+    expect(dock).not.toBeNull();
+    expect(dock.querySelectorAll('a')).toHaveLength(4);
+    expect(dock.querySelector('a').href).toBe('https://github.com/zts212653/clowder-ai/pull/2131');
+    expect(dock.querySelector('svg').getAttribute('viewBox')).toBe('0 0 16 16');
+    expect(message.querySelectorAll('.artifact-inline a')).toHaveLength(0);
+    expect(message.querySelector('.artifact-inline--commit').textContent).toBe(sha.slice(0, 7));
+    const file = dock.querySelector('[data-act="fileOpen"]');
+    expect(file.dataset.v).toBe('docs/bug-report/pending-decisions-host/verification.md');
+    file.click();
+    await w.__settled();
+    expect(action).toHaveBeenCalledWith('fileOpen', expect.objectContaining({ p: file.dataset.v }), undefined);
+  } finally {
+    dom.window.close();
+  }
+});
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn(), API_URL: 'https://api.test' }));
 type EngineData = Window['clowderChat'];
 type FixtureApi = {
@@ -422,7 +472,11 @@ async function boot(
                                         },
                                         errorHints: [],
                                       }
-                                    : undefined,
+                                    : path === '/api/accounts'
+                                      ? { providers: [] }
+                                      : path.startsWith('/api/accounts/')
+                                        ? { selection: { members: [] } }
+                                        : undefined,
     ),
     post: vi.fn(async () => undefined),
     file: (s: string) => (s ? new URL(s, 'https://api.test').href : ''),
@@ -801,6 +855,11 @@ describe('unmodified runtime and project chat bindings', () => {
       ];
     });
     try {
+      // Keep elapsed-run ticks out of assertions about owner-arrival render coalescing.
+      const now = w.Date.now();
+      w.Date.now = () => now;
+      w.eval('CS.clock=Math.floor(Date.now()/30000)*30000');
+      await w.__settled();
       const user = w.document.querySelector('[data-stream] > [data-mid="user-1"]'),
         reply = w.document.querySelector('[data-stream] > [data-mid="reply-1"]');
       const runner = w.eval('VM.chatComposer().runners[0]');
@@ -2030,6 +2089,11 @@ describe('unmodified runtime and project chat bindings', () => {
       ui.memberCard = 'codex';
     });
     try {
+      // Measure the owner push, independently of the shell's half-minute wall-clock repaint.
+      const now = w.Date.now();
+      w.Date.now = () => now;
+      w.eval('CS.clock=Math.floor(Date.now()/30000)*30000');
+      await w.__settled();
       w.eval(
         'window.ownerRenders=0;onRender(function(){window.ownerRenders++;});window.heldFirst=chatDataSnapshot.chat.messages[0];',
       );

@@ -3,14 +3,24 @@ import {
   type MessageBundleSelectionItem,
   projectMarkdownReadableText,
 } from '@cat-cafe/shared';
-import { projectDomSelectionOffsets } from '@cat-cafe/ui';
+import { projectDomSelectionOffsets, readableSelectionText } from '@cat-cafe/ui';
 import { isWholeMessageSelected, wholeMessageSelection } from '@/components/message-part-selection';
 import type { ChatMessage } from '@/stores/chat-types';
 import type { ChatUiState } from './types';
 
 export type MessageQuoteSelection = Extract<MessageBundleSelectionItem, { kind: 'quote' }>;
 
-function renderedQuoteOccurrences(row: HTMLElement, text: string) {
+function renderedQuoteOccurrences(row: HTMLElement, text: string, restoreLabels = false) {
+  if (row.querySelector('[data-artifact-dock]')) {
+    row = row.cloneNode(true) as HTMLElement;
+    row.querySelectorAll('[data-artifact-dock]').forEach((dock) => {
+      dock.remove();
+    });
+    if (restoreLabels)
+      row.querySelectorAll<HTMLElement>('[data-quote-source-text]').forEach((label) => {
+        label.textContent = label.getAttribute('data-quote-source-text');
+      });
+  }
   const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
   const rendered = normalize(row.innerText ?? row.textContent ?? ''),
     needle = normalize(text);
@@ -24,27 +34,33 @@ export function messageQuoteSelection(
   body: HTMLElement,
   selection: Selection,
 ): MessageQuoteSelection {
-  const text = selection.toString().trim();
+  const rawText = selection.toString().trim();
+  const prose = body.querySelector<HTMLElement>('.artifact-prose') ?? body;
   if (
-    !text ||
+    !rawText ||
     !selection.rangeCount ||
-    !body.contains(selection.anchorNode) ||
-    !body.contains(selection.focusNode) ||
+    !prose.contains(selection.anchorNode) ||
+    !prose.contains(selection.focusNode) ||
     message.extra?.recall ||
     message.isStreaming
   )
     throw new Error('请选择一条已完成消息中的正文');
+  const text = readableSelectionText(selection, prose);
+  if (!text) throw new Error('请选择原文中可核对的文字');
+  const abbreviated = Array.from(prose.querySelectorAll('[data-quote-source-text]')).some(
+    (label) => label.getAttribute('data-quote-source-text') !== label.textContent,
+  );
   const offsets = projectDomSelectionOffsets(
-    { kind: 'message', coordinateRoot: body, coordinateRange: selection.getRangeAt(0) },
+    { kind: 'message', coordinateRoot: prose, coordinateRange: selection.getRangeAt(0) },
     selection,
-    body,
+    prose,
   );
   return {
     kind: 'quote',
     messageId: message.id,
     text,
-    renderedOccurrences: renderedQuoteOccurrences(body.closest<HTMLElement>('[data-mid]')!, text),
-    ...(offsets ? { selectionStart: offsets.start, selectionEnd: offsets.end } : {}),
+    renderedOccurrences: renderedQuoteOccurrences(body.closest<HTMLElement>('[data-mid]')!, rawText),
+    ...(!abbreviated && offsets ? { selectionStart: offsets.start, selectionEnd: offsets.end } : {}),
   };
 }
 
@@ -78,7 +94,7 @@ export function selectedItems(messages: ChatMessage[], picked: ChatUiState['pick
           (el) => el.dataset.mid === message.id,
         );
         if (!row || !text) throw new Error('正文还未加载，请回到消息处重试');
-        const renderedOccurrences = renderedQuoteOccurrences(row, text);
+        const renderedOccurrences = renderedQuoteOccurrences(row, text, true);
         if (renderedOccurrences !== 1) throw new Error('正文与卡片存在重复内容，请选择整条消息或只选卡片');
         parts.push({ kind: 'quote', messageId: message.id, text, renderedOccurrences });
       }

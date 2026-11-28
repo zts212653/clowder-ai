@@ -51,6 +51,7 @@ export {
 export type { SelectionProjectionAdapter, TextSelectionAction } from './selection-action-projection';
 export { ToggleSwitch } from './ToggleSwitch';
 export { projectDomSelectionOffsets, type SelectionOffsetSource } from './text-selection-offsets';
+export { readableSelectionText } from './text-selection-readable';
 export { useTextSelectionAction } from './useTextSelectionAction';
 export { VoiceInputButton } from './VoiceInputButton';
 export { VoiceCapture, type VoiceCaptureEvents } from './voice-capture';
