@@ -11,6 +11,12 @@ const { InvocationOwnerReaper } = await import(
   '../dist/domains/cats/services/agents/invocation/InvocationOwnerReaper.js'
 );
 const { reconcileZombies } = await import('../dist/domains/cats/services/agents/invocation/reconcileZombies.js');
+const { createZombieTerminalRecovery } = await import(
+  '../dist/domains/cats/services/agents/invocation/ZombieTerminalRecovery.js'
+);
+const { lifecycleResponseIdempotencyKey, settleResponseFromDraft } = await import(
+  '../dist/domains/cats/services/agents/invocation/response-draft-settlement.js'
+);
 const { InvocationRecordStore } = await import('../dist/domains/cats/services/stores/ports/InvocationRecordStore.js');
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { DraftStore } = await import('../dist/domains/cats/services/stores/ports/DraftStore.js');
@@ -27,7 +33,7 @@ async function until(predicate) {
   assert.fail('Queue did not reach the expected settlement boundary');
 }
 
-async function settlingQueue(t, { pauseBeforeChild = false, queuePreparationTimeoutMs } = {}) {
+async function settlingQueue(t, { pauseBeforeChild = false, queuePreparationTimeoutMs, providerError } = {}) {
   const threadId = 'settlement-thread';
   const userId = 'settlement-user';
   const catId = pauseBeforeChild ? 'codex' : 'opus';
@@ -70,6 +76,17 @@ async function settlingQueue(t, { pauseBeforeChild = false, queuePreparationTime
         rejectLateAdmission(error);
         throw error;
       });
+      if (providerError) {
+        await turnExecutionStore.transitionTerminal(child.invocationId, {
+          status: 'failed',
+          terminalReason: 'provider_error',
+          endedAt: Date.now(),
+        });
+        yield { type: 'error', catId, error: providerError, errorDisposition: 'terminal', timestamp: Date.now() };
+        invocationTracker.complete(threadId, catId);
+        await pauseProducer();
+        return;
+      }
       const content = 'The review is durably delivered.';
       yield { type: 'text', catId, content, timestamp: Date.now() };
       await turnExecutionStore.transitionTerminal(child.invocationId, { status: 'succeeded', endedAt: Date.now() });
@@ -86,7 +103,7 @@ async function settlingQueue(t, { pauseBeforeChild = false, queuePreparationTime
       invocationTracker.complete(threadId, catId);
     },
     async ackCollectedCursors() {
-      if (!pauseBeforeChild) await pauseProducer();
+      if (!pauseBeforeChild && !providerError) await pauseProducer();
     },
   };
   const processor = new QueueProcessor(
@@ -158,7 +175,9 @@ async function settlingQueue(t, { pauseBeforeChild = false, queuePreparationTime
       .join('\n'),
   );
   assert.equal(invocationTracker.has(threadId, catId), pauseBeforeChild);
-  if (!pauseBeforeChild) assert.equal((await turnExecutionStore.get('settlement-child')).status, 'succeeded');
+  if (!pauseBeforeChild) {
+    assert.equal((await turnExecutionStore.get('settlement-child')).status, providerError ? 'failed' : 'succeeded');
+  }
   assert.equal(processor.hasProcessingSlotReservation(threadId, catId), true, 'producer still owns settlement');
   // Advance only wall-clock observation, without waiting a minute or changing durable records.
   const observedAt = Date.now() + 60_000;
@@ -169,6 +188,7 @@ async function settlingQueue(t, { pauseBeforeChild = false, queuePreparationTime
     queue,
     invocationTracker,
     messageStore,
+    draftStore,
     invocationRecordStore,
     turnExecutionStore,
     log,
@@ -190,7 +210,7 @@ async function assertSuccessfulSettlement(harness) {
   assert.equal(harness.log.error.mock.callCount(), 0, 'ordinary completion must not reject a terminal update');
 }
 
-function queueOwnerReaper(h) {
+function queueOwnerReaper(h, overrides) {
   return new InvocationOwnerReaper({
     invocationTracker: h.invocationTracker,
     invocationRecordStore: h.invocationRecordStore,
@@ -212,6 +232,7 @@ function queueOwnerReaper(h) {
     releaseExactOwner: (threadId, targetCats, executionId) =>
       h.processor.releaseExactTerminalExecutionOwner(threadId, targetCats, executionId),
     log: h.log,
+    ...overrides,
   });
 }
 
@@ -464,6 +485,84 @@ it('owner sweep recovers an orphan without interrupting a successful Queue settl
     .getRecent(10, h.userId)
     .filter((message) => message.from.kind === 'agent' && message.content === 'The review is durably delivered.');
   assert.equal(replies.length, 1);
+});
+
+it('owner sweep preserves the real error and exact response through failed Queue settlement', async (t) => {
+  const providerError = 'The provider refused the original request';
+  const h = await settlingQueue(t, { providerError });
+  const childId = 'settlement-child';
+  const responseKey = lifecycleResponseIdempotencyKey(childId);
+  const getResponse = () => h.messageStore.getByIdempotencyKey(h.userId, h.threadId, responseKey);
+  const pendingResponse = await getResponse();
+  assert.equal(pendingResponse?.lifecycle?.status, 'processing');
+  const onReconciledZombie = createZombieTerminalRecovery({
+    queueProcessor: h.processor,
+    log: h.log,
+    childResponses: {
+      listChildTurns: (id) => h.turnExecutionStore.listByParent(id),
+      settle: (turn) =>
+        settleResponseFromDraft(
+          {
+            messageStore: h.messageStore,
+            draftStore: h.draftStore,
+            turnStore: h.turnExecutionStore,
+            invocationRecords: h.invocationRecordStore,
+          },
+          {
+            userId: turn.userId,
+            threadId: turn.threadId,
+            invocationId: turn.invocationId,
+            status: 'interrupted',
+            reason: 'zombie_record_detected',
+            endedAt: turn.endedAt,
+          },
+        ),
+    },
+  });
+  const reconcileZombie = t.mock.fn((zombie, canConvergeQueue) =>
+    reconcileZombies([zombie], {
+      invocationRecordStore: h.invocationRecordStore,
+      invocationQueue: h.queue,
+      onReconciledZombie,
+      canConvergeQueue,
+      log: h.log,
+    }),
+  );
+  const reaper = queueOwnerReaper(h, { getProviderLifecycle: () => ({ stage: 'failed' }), reconcileZombie });
+  const onComplete = t.mock.method(h.processor, 'onInvocationComplete');
+  const finishFailureWrite = Promise.withResolvers();
+  const update = h.invocationRecordStore.update.bind(h.invocationRecordStore);
+  t.mock.method(h.invocationRecordStore, 'update', async (id, patch) => {
+    const record = await update(id, patch);
+    if (id === h.parentId && patch.status === 'failed' && record?.error === providerError) {
+      await finishFailureWrite.promise;
+    }
+    return record;
+  });
+
+  let beforeWrite;
+  let afterWrite;
+  try {
+    beforeWrite = await reaper.runOnce();
+    h.resumeProducer();
+    await until(() => h.invocationRecordStore.get(h.parentId)?.status === 'failed');
+    afterWrite = await reaper.runOnce();
+  } finally {
+    finishFailureWrite.resolve();
+  }
+  await until(() => !h.processor.hasProcessingSlotReservation(h.threadId, h.catId, h.parentId));
+  const parent = await h.invocationRecordStore.get(h.parentId);
+  const response = await getResponse();
+  assert.equal(parent.error, providerError);
+  assert.equal(response.id, pendingResponse.id);
+  assert.equal(response.lifecycle.status, 'failed');
+  assert.equal(response.lifecycle.reason, providerError);
+  assert.equal(beforeWrite.keptActive, 1);
+  assert.equal(afterWrite.keptActive, 1);
+  assert.equal(reconcileZombie.mock.callCount(), 0);
+  assert.equal(onComplete.mock.callCount(), 1);
+  assert.deepEqual(onComplete.mock.calls[0].arguments.slice(0, 4), [h.threadId, h.catId, 'failed', h.parentId]);
+  assert.deepEqual(await h.queue.listAllDurable(h.threadId), []);
 });
 
 describe('active execution read-repair during Queue settlement', () => {

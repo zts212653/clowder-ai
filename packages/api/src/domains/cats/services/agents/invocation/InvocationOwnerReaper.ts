@@ -210,15 +210,17 @@ export class InvocationOwnerReaper {
       return;
     }
 
-    // An in-flight Queue execution owns preparation before the first child and settlement after child success.
+    // An in-flight Queue execution owns preparation before the first child and settlement after child completion.
     const parentStatus = probe.record?.status;
     const preparing = probe.verdict === 'absent' && parentStatus === 'running';
-    const settlingSuccessfulChild =
+    const settlingFinishedChild =
       probe.verdict === 'terminal' &&
-      (parentStatus === 'running' || parentStatus === 'succeeded') &&
-      probe.children.some((child) => child.status === 'succeeded');
+      probe.children.some(
+        ({ status }) =>
+          (status === 'succeeded' || status === 'failed') && (parentStatus === 'running' || parentStatus === status),
+      );
     if (
-      (preparing || settlingSuccessfulChild) &&
+      (preparing || settlingFinishedChild) &&
       [...candidate.targetCats].some(
         (catId) =>
           this.options.hasActiveQueueProducer?.(candidate.threadId, candidate.userId, catId, candidate.executionId) &&
