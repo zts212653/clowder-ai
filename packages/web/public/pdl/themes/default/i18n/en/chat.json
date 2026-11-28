@@ -1,4 +1,11 @@
 {
+  "messageArtifacts": {
+    "label": "Related artifacts",
+    "pr": "Pull request",
+    "commit": "Commit",
+    "issue": "Issue",
+    "file": "Preview file"
+  },
   "threadSettings": {
     "reveal": {
       "title": "Reveal private messages"

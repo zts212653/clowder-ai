@@ -1,4 +1,11 @@
 {
+  "messageArtifacts": {
+    "label": "关联交付物",
+    "pr": "拉取请求",
+    "commit": "提交",
+    "issue": "问题",
+    "file": "打开文档预览"
+  },
   "works": {
     "groupBy": "分组",
     "searchPlaceholder": "搜索作品",
