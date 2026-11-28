@@ -1,6 +1,7 @@
 import type { ContextAttachment, FileContent, ImageContent } from '@cat-cafe/shared';
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { type ApiSessionIdentity, apiSessionIdentity } from '@/utils/api-session-identity';
 
 /** An uploaded attachment the draft keeps as the server stored it: an image, or a file with its name, type and size. */
 export type DraftFile = Pick<ImageContent, 'type' | 'url'> | FileContent;
@@ -42,11 +43,11 @@ function mergeList<T>(base: T[], ours: T[], server: T[], key: (item: T) => strin
   return [...kept, ...ours.filter((item) => !had.has(key(item)) && !seen.has(key(item)))];
 }
 
-/** This tab's draft over the server's: its words and reply stand; attachments merge against what it last knew. */
+/** Apply this tab's edits over the latest server draft. */
 function mergeDraft(base: ComposerDraft, ours: ComposerDraft, server: ComposerDraft): ComposerDraft {
-  const replyTo = ours.replyTo ?? (base.replyTo ? undefined : server.replyTo);
+  const replyTo = ours.replyTo === base.replyTo ? server.replyTo : ours.replyTo;
   return {
-    text: ours.text,
+    text: ours.text === base.text ? server.text : ours.text,
     images: mergeList(base.images, ours.images, server.images, (file) => file.url),
     contexts: mergeList(base.contexts, ours.contexts, server.contexts, (attachment) => attachment.id),
     ...(replyTo ? { replyTo } : {}),
@@ -54,10 +55,86 @@ function mergeDraft(base: ComposerDraft, ours: ComposerDraft, server: ComposerDr
 }
 const isEmpty = (draft: ComposerDraft) =>
   !draft.text.trim() && !draft.images.length && !draft.contexts.length && !draft.replyTo;
-/** What the server holds for a conversation, as far as this tab knows: its revision and the draft it saved. */
-type Known = Map<string, { revision: number; signature: string }>;
-/** Puts a merged draft into the input, when that conversation is still the one open. */
+const emptyDraft: ComposerDraft = { text: '', images: [], contexts: [] };
+const emptySignature = JSON.stringify(emptyDraft);
+type Edit = { draft: ComposerDraft; base?: ComposerDraft; beforeRead?: true };
+type KnownDraft = { revision: number; signature: string; afterSend?: true };
+type Scope = {
+  session: ApiSessionIdentity;
+  known: Map<string, KnownDraft>;
+  pending: { threadId: string; draft: ComposerDraft } | null;
+  edits: Map<string, Edit>;
+  sends: Set<string>;
+};
+export type DraftSendRevision = number | 'current';
 type Show = (threadId: string, merged: ComposerDraft) => void;
+
+const currentSession = (scope: Scope) => apiSessionIdentity.getSnapshot() === scope.session;
+const editKey = (scope: Scope, threadId: string) =>
+  'cat-cafe:composer-edit:' + encodeURIComponent(scope.session.ownerUserId ?? '') + ':' + encodeURIComponent(threadId);
+
+function isStoredDraft(value: unknown): value is ComposerDraft {
+  if (!value || typeof value !== 'object') return false;
+  const draft = value as Partial<ComposerDraft>;
+  return (
+    typeof draft.text === 'string' &&
+    Array.isArray(draft.images) &&
+    Array.isArray(draft.contexts) &&
+    (draft.replyTo === undefined || typeof draft.replyTo === 'string')
+  );
+}
+
+function readEdit(scope: Scope, threadId: string): Edit | undefined {
+  const held = scope.edits.get(threadId);
+  if (held) return held;
+  try {
+    const raw = localStorage.getItem(editKey(scope, threadId));
+    if (!raw) return undefined;
+    const edit = JSON.parse(raw) as Partial<Edit> | null;
+    if (edit && isStoredDraft(edit.draft) && (edit.base === undefined || isStoredDraft(edit.base))) {
+      return { draft: edit.draft, base: edit.base, beforeRead: edit.beforeRead === true ? true : undefined };
+    }
+  } catch {
+    // Browser storage can be unavailable. The edit remains usable in this page.
+  }
+  return undefined;
+}
+
+function rememberEdit(scope: Scope, threadId: string, edit?: Edit, previous?: Edit): void {
+  if (edit) scope.edits.set(threadId, edit);
+  else scope.edits.delete(threadId);
+  try {
+    if (edit) localStorage.setItem(editKey(scope, threadId), JSON.stringify(edit));
+    else if (previous && localStorage.getItem(editKey(scope, threadId)) === JSON.stringify(previous)) {
+      localStorage.removeItem(editKey(scope, threadId));
+    }
+  } catch {
+    // Keep the in-page edit until the server acknowledges it.
+  }
+}
+
+// Abort while apiFetch waits for a refreshed session too, to avoid retrying a body as a different owner.
+async function inDraftSession<T>(scope: Scope, run: (signal: AbortSignal) => Promise<T>): Promise<T | undefined> {
+  if (!currentSession(scope) || !scope.session.ownerUserId) return undefined;
+  const controller = new AbortController();
+  const release = apiSessionIdentity.subscribe(() => {
+    if (!currentSession(scope)) controller.abort();
+  });
+  try {
+    const result = await run(controller.signal);
+    return currentSession(scope) ? result : undefined;
+  } finally {
+    release();
+  }
+}
+
+function readSaved(scope: Scope, threadId: string, fresh = false) {
+  return inDraftSession(scope, async (signal) => {
+    const response = await apiFetch(draftPath(threadId), { signal }, fresh ? { afterCurrentGet: true } : undefined);
+    if (response.ok) return (await response.json()) as { draft: SavedDraft | null; revision: number };
+    return undefined;
+  });
+}
 
 /**
  * The owner's draft of each conversation lives on the server, so a refresh or another device continues it, and a
@@ -73,175 +150,283 @@ export function useServerComposerDraft(input: {
   /** Shows a saved draft in the input; what it returns settles once the input shows all of it (attachments are read back).
    *  `current` says whether the input still belongs to that conversation: what arrives after a switch is dropped. */
   restore: (draft: ComposerDraft, current: () => boolean) => void | Promise<unknown>;
+  /** IME is composing: keep the transient text, but no draft write/delete may persist uncommitted pinyin. */
+  holdWrites?: boolean;
+  /** Bumped for every composer edit, including composition input. A later edit wins over an older server restore. */
+  revision?: number;
 }) {
-  const known = useRef<Known>(new Map());
-  const pending = useRef<{ threadId: string; draft: ComposerDraft } | null>(null);
-  // The conversation whose server draft the input shows in full (attachments read back). Until then nothing is written:
-  // the input is not yet what the owner left. Each opening starts unshown; a restore after a switch never counts.
+  const session = useSyncExternalStore(
+    apiSessionIdentity.subscribe,
+    apiSessionIdentity.getSnapshot,
+    apiSessionIdentity.getSnapshot,
+  );
+  const scope = useMemo<Scope>(
+    () => ({ session, known: new Map(), edits: new Map(), pending: null, sends: new Set() }),
+    [session],
+  );
+  const opening = useRef<{
+    threadId: string;
+    recoverySignature: string;
+    images?: { visible: DraftFile[]; complete: DraftFile[] };
+  }>();
+  // An opening starts unshown. A slow restore can queue edits using the saved attachment descriptors,
+  // and only flushes them if the owner leaves before all attachments are available.
   const shown = useRef<string | null>(null);
+  const [restoreRevision, setRestoreRevision] = useState(0);
   const latest = useRef(input);
   latest.current = input;
   const { threadId, enabled } = input;
   // A conflict's merge goes into the input (attachments only: the words there may have moved on); nothing is written
   // while its attachments are read back.
   const show: Show = (id, merged) => {
-    if (latest.current.threadId !== id) return;
+    if (!currentSession(scope) || latest.current.threadId !== id) return;
+    const owner = opening.current;
+    const isCurrent = () => currentSession(scope) && opening.current === owner && latest.current.threadId === id;
     shown.current = null;
-    void Promise.resolve(
-      latest.current.restore({ ...merged, text: latest.current.draft.text }, () => latest.current.threadId === id),
-    ).then(
+    void Promise.resolve(latest.current.restore({ ...merged, text: latest.current.draft.text }, isCurrent)).then(
       () => {
-        if (latest.current.threadId === id) shown.current = id;
+        if (isCurrent()) shown.current = id;
       },
       () => undefined,
     );
   };
   const signature = JSON.stringify(input.draft);
+  const holdWrites = input.holdWrites === true;
   useEffect(() => {
-    if (!enabled) return;
-    let live = true;
-    shown.current = null;
+    if (!enabled || !session.ownerUserId) return;
     const opened = JSON.stringify(latest.current.draft);
-    void apiFetch(draftPath(threadId))
-      .then(async (response) => {
-        if (!response.ok) return;
-        const body = (await response.json()) as { draft: SavedDraft | null; revision: number };
-        if (!live) return;
+    const owner: NonNullable<typeof opening.current> = { threadId, recoverySignature: opened };
+    opening.current = owner;
+    const isCurrent = () => currentSession(scope) && opening.current === owner && latest.current.threadId === threadId;
+    shown.current = null;
+    const recovery = readEdit(scope, threadId);
+    if (recovery?.beforeRead) scope.edits.set(threadId, recovery);
+    const openedRevision = latest.current.revision ?? 0;
+    // Reopening can race the write flushed on the previous departure.
+    const readDraft = () => readSaved(scope, threadId);
+    const previousWrite = writing.get(editKey(scope, threadId));
+    void (previousWrite ? previousWrite.then(() => (isCurrent() ? readDraft() : undefined)) : readDraft())
+      .then(async (body) => {
+        if (!body || !isCurrent()) return;
         const saved = fromSaved(body.draft);
-        known.current.set(threadId, { revision: body.revision, signature: JSON.stringify(saved) });
+        const waiting = readEdit(scope, threadId);
+        const resumed = waiting?.base ? mergeDraft(waiting.base, waiting.draft, saved) : (waiting?.draft ?? saved);
+        scope.known.set(threadId, { revision: body.revision, signature: JSON.stringify(saved) });
         const now = latest.current.draft;
         // What the owner typed before the server answered stays; the server's attachments they haven't seen join it.
-        const merged =
-          opened === JSON.stringify(now) ? saved : mergeDraft(JSON.parse(opened) as ComposerDraft, now, saved);
+        const typedSinceOpen = openedRevision !== (latest.current.revision ?? 0) || opened !== JSON.stringify(now);
+        const merged = typedSinceOpen ? mergeDraft(JSON.parse(opened) as ComposerDraft, now, resumed) : resumed;
         if (JSON.stringify(now) !== JSON.stringify(merged)) {
-          // A draft whose attachments can't be read back is as unknown as an unreachable one: nothing overwrites it.
-          const ok = await Promise.resolve(latest.current.restore(merged, () => live)).then(
+          owner.images = { visible: now.images, complete: merged.images };
+          // A draft whose attachments can't be read back is as unknown as an unreachable one.
+          const ok = await Promise.resolve(latest.current.restore(merged, isCurrent)).then(
             () => true,
             () => false,
           );
-          // Only this opening's own failure counts: a later opening may already have read a newer draft.
+          if (!isCurrent()) return;
+          owner.images = undefined;
           if (!ok) {
-            if (live) known.current.delete(threadId);
+            scope.known.delete(threadId);
+            if (scope.pending?.threadId === threadId) scope.pending = null;
             return;
           }
         }
-        if (!live) return;
         shown.current = threadId;
-        // What the owner typed first is written at once, with the server's attachments it now carries.
-        if (JSON.stringify(merged) !== JSON.stringify(saved)) await saveDraft(threadId, merged, known.current, show);
+        // The restore can queue attachment state in React. Save the committed composer on its next render.
+        setRestoreRevision((revision) => revision + 1);
       })
       // An unreachable draft leaves this tab's composer as it is; the next edit writes again.
       .catch(() => undefined);
     return () => {
-      live = false;
+      if (opening.current === owner) opening.current = undefined;
     };
-  }, [threadId, enabled]);
+  }, [threadId, enabled, scope, session.ownerUserId]);
   useEffect(() => {
-    const server = known.current.get(threadId);
-    // Nothing to write until the server's draft is known and shown, or while the composer shows exactly that draft.
-    if (!enabled || !server || shown.current !== threadId) return;
-    if (server.signature === signature) {
-      pending.current = null;
+    const server = scope.known.get(threadId);
+    const view = opening.current;
+    const restoreImages = view?.images;
+    // Keep any previous committed edit queued while the native IME owns its candidate text.
+    if (!enabled || holdWrites) return;
+    if (!server) {
+      const recovery = scope.edits.get(threadId);
+      if (
+        recovery?.beforeRead &&
+        view?.threadId === threadId &&
+        view.recoverySignature !== signature &&
+        currentSession(scope)
+      ) {
+        view.recoverySignature = signature;
+        rememberEdit(scope, threadId, { ...recovery, draft: JSON.parse(signature) as ComposerDraft });
+      }
       return;
     }
-    pending.current = { threadId, draft: JSON.parse(signature) as ComposerDraft };
-    const timer = setTimeout(() => flush(pending, known.current, show), 600);
+    if (!restoreImages && shown.current !== threadId) return;
+    let draft = JSON.parse(signature) as ComposerDraft;
+    if (server.afterSend) {
+      if (isEmpty(draft)) return;
+      draft = mergeDraft(emptyDraft, draft, JSON.parse(server.signature) as ComposerDraft);
+    }
+    if (restoreImages) {
+      draft.images = mergeList(restoreImages.visible, draft.images, restoreImages.complete, (file) => file.url);
+    }
+    if (server.signature === JSON.stringify(draft)) {
+      scope.pending = null;
+      return;
+    }
+    scope.pending = { threadId, draft };
+    if (restoreImages) return;
+    const timer = setTimeout(() => flush(scope, show), 600);
     return () => clearTimeout(timer);
-  }, [threadId, enabled, signature]);
-  useEffect(() => () => flush(pending, known.current, show), [threadId]);
+  }, [threadId, enabled, signature, holdWrites, restoreRevision, scope]);
+  useEffect(() => () => flush(scope, show), [threadId, scope]);
   useEffect(() => {
-    const leave = () => flush(pending, known.current, show, true);
+    const leave = () => flush(scope, show, true);
     window.addEventListener('pagehide', leave);
     return () => window.removeEventListener('pagehide', leave);
-  }, []);
+  }, [scope]);
+
   return {
-    /** A send the server took: that conversation's saved draft is gone too. */
-    clear: (sent: string) =>
-      void saveDraft(sent, { text: '', images: [], contexts: [] }, known.current, show).catch(() => undefined),
+    holdRecoveredDraft: (draft: ComposerDraft): boolean => {
+      if (!enabled || !scope.session.ownerUserId || !currentSession(scope) || latest.current.holdWrites) return false;
+      if (!isEmpty(latest.current.draft) || scope.sends.has(threadId) || readEdit(scope, threadId)) return false;
+      const known = scope.known.get(threadId);
+      if (known && known.signature !== emptySignature) return false;
+      rememberEdit(scope, threadId, { draft, base: emptyDraft, beforeRead: known ? undefined : true });
+      return true;
+    },
+    /** Accepted sends consume an exact revision captured by the message route, even before the browser's first read. */
+    send: async (
+      sent: string,
+      admit: (revision: DraftSendRevision, signal: AbortSignal) => Promise<false | { revision?: number }>,
+    ): Promise<boolean> => {
+      if (scope.sends.has(sent)) return false;
+      scope.sends.add(sent);
+      try {
+        await writing.get(editKey(scope, sent));
+        const expected = scope.known.get(sent)?.revision ?? 'current';
+        const submittedEdit = readEdit(scope, sent);
+        const accepted = await inDraftSession(scope, (signal) => admit(expected, signal));
+        if (!accepted) return false;
+        if (opening.current?.threadId === sent) {
+          opening.current = undefined;
+          shown.current = sent;
+        }
+        if (scope.pending?.threadId === sent) scope.pending = null;
+        rememberEdit(scope, sent, undefined, scope.edits.get(sent) ?? submittedEdit);
+
+        if (accepted.revision !== undefined || expected === 0) {
+          scope.known.set(sent, { revision: accepted.revision ?? 0, signature: emptySignature });
+        } else {
+          // A different revision may have arrived elsewhere. Learn its base without filling the input just sent.
+          scope.known.delete(sent);
+          void readSaved(scope, sent, true)
+            .then((saved) => {
+              if (!saved || !currentSession(scope) || scope.known.has(sent)) return;
+              scope.known.set(sent, {
+                revision: saved.revision,
+                signature: JSON.stringify(fromSaved(saved.draft)),
+                afterSend: true,
+              });
+              setRestoreRevision((revision) => revision + 1);
+            })
+            .catch(() => undefined);
+        }
+        return true;
+      } finally {
+        scope.sends.delete(sent);
+        if (scope.pending?.threadId === sent) flush(scope, show);
+      }
+    },
   };
 }
 
-function flush(
-  pending: { current: { threadId: string; draft: ComposerDraft } | null },
-  known: Known,
-  show: Show,
-  keepalive = false,
-) {
-  const waiting = pending.current;
-  pending.current = null;
-  if (waiting) void saveDraft(waiting.threadId, waiting.draft, known, show, keepalive).catch(() => undefined);
-}
-
-/** The write still going for each conversation: the next one waits for it (its conflict read and merge included),
- *  so a later edit is written over the revision the earlier one left, never raced by it. */
-const writing = new Map<string, Promise<void>>();
-function saveDraft(threadId: string, draft: ComposerDraft, known: Known, show: Show, keepalive = false) {
-  // The draft was made over what the server held when it was queued; an earlier write may have moved that on (a
-  // merge from another tab): this draft's own changes go over the newer one.
-  const queuedOn = known.get(threadId)?.signature;
+function flush(scope: Scope, show: Show, keepalive = false) {
+  const waiting = scope.pending;
+  if (!waiting) return;
+  const queuedOn = scope.known.get(waiting.threadId)?.signature;
+  const edit = { draft: waiting.draft, base: queuedOn ? (JSON.parse(queuedOn) as ComposerDraft) : undefined };
+  rememberEdit(scope, waiting.threadId, edit);
+  if (scope.sends.has(waiting.threadId)) return;
+  scope.pending = null;
+  const threadId = waiting.threadId;
+  const key = editKey(scope, threadId);
   const run = () => {
-    const now = known.get(threadId)?.signature;
-    const rebased =
-      queuedOn && now && now !== queuedOn
-        ? mergeDraft(JSON.parse(queuedOn) as ComposerDraft, draft, JSON.parse(now) as ComposerDraft)
-        : draft;
-    if (rebased !== draft && JSON.stringify(rebased) !== JSON.stringify(draft)) show(threadId, rebased);
-    return writeDraft(threadId, rebased, known, show, false, keepalive);
+    if (!currentSession(scope)) return;
+    const now = scope.known.get(threadId)?.signature;
+    const draft =
+      queuedOn && now && now !== queuedOn && edit.base
+        ? mergeDraft(edit.base, edit.draft, JSON.parse(now) as ComposerDraft)
+        : edit.draft;
+    if (draft !== edit.draft && JSON.stringify(draft) !== JSON.stringify(edit.draft)) show(threadId, draft);
+    return writeDraft(threadId, draft, scope, show, false, keepalive).then((saved) => {
+      if (saved && scope.edits.get(threadId) === edit) rememberEdit(scope, threadId, undefined, edit);
+    });
   };
-  const next = (writing.get(threadId) ?? Promise.resolve()).then(run, run);
-  const tail = next.catch(() => undefined);
-  writing.set(threadId, tail);
+  const tail = (writing.get(key) ?? Promise.resolve()).then(run).catch(() => undefined);
+  writing.set(key, tail);
   void tail.then(() => {
-    if (writing.get(threadId) === tail) writing.delete(threadId);
+    if (writing.get(key) === tail) writing.delete(key);
   });
-  return next;
 }
+
+/** Serialize draft writes as well as the base read they may need, for each account and conversation. */
+const writing = new Map<string, Promise<void>>();
 
 async function writeDraft(
   threadId: string,
   draft: ComposerDraft,
-  known: Known,
+  scope: Scope,
   show: Show,
   retried = false,
   keepalive = false,
-): Promise<void> {
-  const expectedRevision = known.get(threadId)?.revision ?? 0;
-  if (isEmpty(draft) && !expectedRevision) return;
-  const response = await apiFetch(draftPath(threadId), {
-    method: isEmpty(draft) ? 'DELETE' : 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    keepalive,
-    body: JSON.stringify(
-      isEmpty(draft)
-        ? { expectedRevision }
-        : {
-            expectedRevision,
-            text: draft.text,
-            ...(draft.images.length || draft.contexts.length
-              ? {
-                  contentBlocks: [
-                    ...draft.images,
-                    ...draft.contexts.map((attachment) => ({ type: 'context_attachment', attachment })),
-                  ],
-                }
-              : {}),
-            ...(draft.replyTo ? { replyTo: draft.replyTo } : {}),
-          },
-    ),
+): Promise<boolean> {
+  const expectedRevision = scope.known.get(threadId)?.revision;
+  if (expectedRevision === undefined) return false;
+  const empty = isEmpty(draft);
+  if (empty && expectedRevision === 0) return true;
+  const result = await inDraftSession(scope, async (signal) => {
+    const response = await apiFetch(draftPath(threadId), {
+      signal,
+      method: empty ? 'DELETE' : 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      keepalive,
+      body: JSON.stringify(
+        empty
+          ? { expectedRevision }
+          : {
+              expectedRevision,
+              text: draft.text,
+              ...(draft.images.length || draft.contexts.length
+                ? {
+                    contentBlocks: [
+                      ...draft.images,
+                      ...draft.contexts.map((attachment) => ({ type: 'context_attachment', attachment })),
+                    ],
+                  }
+                : {}),
+              ...(draft.replyTo ? { replyTo: draft.replyTo } : {}),
+            },
+      ),
+    });
+    if (response.status === 409) return { conflict: true as const };
+    if (!response.ok) return undefined;
+    return (await response.json()) as { draft?: { revision?: number } | null; revision?: number };
   });
-  if (response.status === 409 && !retried) {
-    // The draft changed elsewhere: read it, keep what arrived there, apply this tab's own changes, show and write that.
-    const read = await apiFetch(draftPath(threadId));
-    if (!read.ok) return;
-    const body = (await read.json()) as { draft: SavedDraft | null; revision: number };
-    const before = known.get(threadId)?.signature;
-    const server = fromSaved(body.draft),
-      merged = mergeDraft(before ? (JSON.parse(before) as ComposerDraft) : draft, draft, server);
-    known.set(threadId, { revision: body.revision, signature: JSON.stringify(server) });
+  if (!result) return false;
+  if ('conflict' in result) {
+    if (retried) return false;
+    const body = await readSaved(scope, threadId, true);
+    if (!body || !currentSession(scope)) return false;
+    const before = scope.known.get(threadId)?.signature;
+    const server = fromSaved(body.draft);
+    const merged = mergeDraft(before ? (JSON.parse(before) as ComposerDraft) : draft, draft, server);
+    scope.known.set(threadId, { revision: body.revision, signature: JSON.stringify(server) });
     if (JSON.stringify(merged) !== JSON.stringify(draft)) show(threadId, merged);
-    return writeDraft(threadId, merged, known, show, true, keepalive);
+    return writeDraft(threadId, merged, scope, show, true, keepalive);
   }
-  if (!response.ok) return;
-  const saved = (await response.json()) as { draft?: { revision?: number } | null; revision?: number };
-  known.set(threadId, { revision: saved.draft?.revision ?? saved.revision ?? 0, signature: JSON.stringify(draft) });
+  scope.known.set(threadId, {
+    revision: result.draft?.revision ?? result.revision ?? 0,
+    signature: JSON.stringify(draft),
+  });
+  return true;
 }

@@ -8,7 +8,7 @@ import { approvalResultRead } from '@/lib/approval-result-read';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
 import { apiFetch } from '@/utils/api-client';
-import { observeApiSessionOwner } from '@/utils/api-session-identity';
+import { apiSessionIdentity, observeApiSessionOwner } from '@/utils/api-session-identity';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { request } from '../owner-api';
 import { ProposalRecordBinding } from '../PdlAppHost';
@@ -177,10 +177,10 @@ it('pulls recall once on entry and uses message increments without re-reading wh
   await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(4));
 });
 
-it('posts read receipts on entry and new bubbles, then invalidates the sidebar after each acknowledgement', async () => {
+function readReceiptHarness() {
   const source = readFileSync('src/pdl/PdlAppHost.tsx', 'utf8');
   const effect = source.split('  const messageCount = history.messages.length;')[1].split('\n  const patchThread =')[0];
-  const readReceipt = new Function(
+  const invoke = new Function(
     'useEffect',
     'history',
     'exportMids',
@@ -191,36 +191,66 @@ it('posts read receipts on entry and new bubbles, then invalidates the sidebar a
     'threadId',
     'notifyHandledMentionRead',
     'invalidateSidebarProjection',
+    'useSidebarProjectionStore',
+    'apiSessionIdentity',
     transpileModule('const messageCount = history.messages.length;' + effect, {
       compilerOptions: { target: ScriptTarget.ES2022 },
     }).outputText,
   );
+  return (...args: unknown[]) => invoke(...args, apiSessionIdentity);
+}
+
+it('skips a full sidebar read for no-op acknowledgements and refreshes on advance', async () => {
+  const readReceipt = readReceiptHarness();
   const notify = vi.fn(),
     invalidate = vi.fn(async () => true);
-  vi.mocked(apiFetch).mockImplementation(async () => Response.json({ caughtUp: true, messageId: 'latest' }));
+  let advanced = false;
+  vi.mocked(apiFetch).mockImplementation(async () =>
+    Response.json({ caughtUp: true, advanced, handledMention: false, messageId: 'latest' }),
+  );
   let messages: ReturnType<typeof fixtureData>['messages'] = [],
     needed: number | false = false;
   const hook = renderHook(() =>
-    readReceipt(useEffect, { messages }, undefined, true, true, () => needed, request, 'thread', notify, invalidate),
+    readReceipt(useEffect, { messages }, undefined, true, true, () => needed, request, 'thread', notify, invalidate, {
+      getState: () => ({ rows: [] }),
+    }),
   );
   expect(apiFetch).not.toHaveBeenCalled();
   needed = 1;
   await act(hook.rerender);
-  await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(notify).toHaveBeenCalledTimes(1));
+  expect(invalidate).not.toHaveBeenCalled();
+
+  advanced = true;
   messages = fixtureData().messages;
   await act(hook.rerender);
-  await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2));
-  messages = messages.map((message) => ({ ...message }));
-  await act(hook.rerender);
-  expect(apiFetch).toHaveBeenCalledTimes(2);
-  messages = [...messages, { ...messages[1], id: 'new-reply' }];
-  await act(hook.rerender);
-  await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(3));
-  for (const [path, init] of vi.mocked(apiFetch).mock.calls) {
-    expect(path).toBe('/api/threads/thread/read/latest');
-    expect(init?.method).toBe('POST');
-  }
-  expect(notify).toHaveBeenCalledTimes(3);
+  await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1));
+  expect(notify).toHaveBeenCalledTimes(2);
+});
+
+it('keeps the canonical read when an acknowledgement is not caught up', async () => {
+  const readReceipt = readReceiptHarness();
+  const notify = vi.fn(),
+    invalidate = vi.fn(async () => true);
+  vi.mocked(apiFetch).mockImplementation(async () => Response.json({ caughtUp: false, messageId: 'latest' }));
+  let needed: number | false = 1;
+  renderHook(() =>
+    readReceipt(
+      useEffect,
+      { messages: fixtureData().messages },
+      undefined,
+      true,
+      true,
+      () => needed,
+      request,
+      'thread',
+      notify,
+      invalidate,
+      { getState: () => ({ rows: [] }) },
+    ),
+  );
+  await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1));
+  needed = false;
 });
 
 it('keeps the sidebar source through conversation changes and re-pulls it only on an explicit invalidation', async () => {
@@ -344,4 +374,35 @@ it('shares uncertain approval and explicit readback between inbox and native car
   } finally {
     useApprovalHubStore.setState(oldHub);
   }
+});
+
+it('reconciles a durable read receipt after a newer request or a thread switch', async () => {
+  const readReceipt = readReceiptHarness();
+  const notify = vi.fn();
+  const invalidate = vi.fn(async () => true);
+  const late = Promise.withResolvers<Response>();
+  const wrongOwner = Promise.withResolvers<Response>();
+  const committed = () => Response.json({ caughtUp: true, advanced: true, handledMention: true });
+  vi.mocked(apiFetch)
+    .mockReturnValueOnce(late.promise)
+    .mockResolvedValueOnce(Response.json({ caughtUp: true, advanced: false, handledMention: false }))
+    .mockReturnValueOnce(wrongOwner.promise);
+  let threadId = 'first';
+  let messages: ReturnType<typeof fixtureData>['messages'] = [];
+  const hook = renderHook(() =>
+    readReceipt(useEffect, { messages }, undefined, true, true, () => 1, request, threadId, notify, invalidate, {
+      getState: () => ({ rows: [] }),
+    }),
+  );
+  messages = fixtureData().messages;
+  await act(hook.rerender);
+  await waitFor(() => expect(notify).toHaveBeenCalledOnce());
+  threadId = 'second';
+  await act(hook.rerender);
+  await act(() => late.resolve(committed()));
+  expect(notify).toHaveBeenLastCalledWith(expect.objectContaining({ handledMention: true }));
+  expect(invalidate).toHaveBeenCalledOnce();
+  observeApiSessionOwner('another owner');
+  await act(() => wrongOwner.resolve(committed()));
+  expect(invalidate).toHaveBeenCalledOnce();
 });

@@ -320,7 +320,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     let threadId: string | undefined;
     let contentBlocks: MessageContent[] | undefined;
     let idempotencyKey: string | undefined;
-    let composerDraftRevision: number | undefined;
+    let composerDraftRevision: number | 'current' | undefined;
     // F35: Whisper fields
     let whisperVisibility: 'whisper' | undefined;
     let whisperRecipients: readonly CatId[] | undefined;

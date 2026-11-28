@@ -26,6 +26,10 @@ function hydrateLegacyThreadStore(threads: SidebarThread[]): void {
   // hydrated for legacy Chat-owned surfaces until their separate migration.
   const chatStore = useChatStore.getState();
   chatStore.setThreads(threads);
+  // Keep a pending title in the live legacy view while the canonical snapshot is persisted unchanged.
+  for (const command of Object.values(useSidebarProjectionStore.getState().pendingThreadCommands)) {
+    if (command.field === 'title') chatStore.updateThreadTitle(command.threadId, command.value as string);
+  }
   for (const thread of threads) {
     if ((thread.unreadCount ?? 0) > 0 || thread.hasUserMention) {
       chatStore.initThreadUnread(thread.id, thread.unreadCount ?? 0, !!thread.hasUserMention);
@@ -55,15 +59,32 @@ async function applySidebarResponse(response: Response, responseEtag: string | n
 
 async function fetchAndApplySidebarSnapshot(afterCurrentGet: boolean): Promise<boolean> {
   try {
+    const receipts = Object.values(useSidebarProjectionStore.getState().pendingThreadCommands).filter(
+      (command) => command.field === 'title' && command.confirmed,
+    );
     const ifNoneMatch = sidebarSnapshotEtag;
     const response = await apiFetch('/api/threads?view=sidebar', undefined, {
-      afterCurrentGet,
+      // A read begun before these PATCH receipts may still carry the previous title.
+      afterCurrentGet: afterCurrentGet || receipts.length > 0,
       ...(ifNoneMatch ? { ifNoneMatch } : {}),
     });
+    if (!response.ok && response.status !== 304) return false;
     const responseEtag = response.headers.get('etag');
-    if (isUnchangedSnapshot(response, responseEtag)) return true;
-    if (!response.ok) return false;
-    return await applySidebarResponse(response, responseEtag);
+    const observed =
+      isUnchangedSnapshot(response, responseEtag) ||
+      (response.ok && (await applySidebarResponse(response, responseEtag)));
+    if (!observed) return false;
+    if (receipts.length) {
+      const projection = useSidebarProjectionStore.getState();
+      const pendingIds = new Set(Object.values(projection.pendingThreadCommands).map((command) => command.id));
+      for (const { id, threadId } of receipts) {
+        if (!pendingIds.has(id)) continue;
+        projection.failSidebarCommand(id);
+        const row = projection.rows.find((thread) => thread.id === threadId);
+        if (row) useChatStore.getState().updateThreadTitle(threadId, row.title ?? '');
+      }
+    }
+    return true;
   } catch {
     return false;
   }
