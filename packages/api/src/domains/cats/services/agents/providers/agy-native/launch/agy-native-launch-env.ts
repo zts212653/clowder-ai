@@ -62,16 +62,19 @@ function hasExecutableRg(dir: string): boolean {
 export function sanitizeAgyToolPath(rawPath?: string): string {
   const seen = new Set<string>();
   const segments: string[] = [];
-  for (const raw of (rawPath ?? '/usr/bin:/bin').split(delimiter)) {
+  const fallback = process.platform === 'win32' ? '' : '/usr/bin:/bin';
+  for (const raw of (rawPath ?? fallback).split(delimiter)) {
     const seg = raw.trim();
     if (!seg || /[\r\n\0]/.test(raw) || !isAbsolute(seg) || seen.has(seg)) continue;
     seen.add(seg);
     segments.push(seg);
   }
-  for (const base of ['/usr/bin', '/bin']) {
-    if (!seen.has(base)) {
-      seen.add(base);
-      segments.push(base);
+  if (process.platform !== 'win32') {
+    for (const base of ['/usr/bin', '/bin']) {
+      if (!seen.has(base)) {
+        seen.add(base);
+        segments.push(base);
+      }
     }
   }
   if (!segments.some(hasExecutableRg)) {
@@ -103,7 +106,9 @@ export function isolatedOAuthEnv(home: string, accountEnv?: Record<string, strin
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter(
       (entry): entry is [string, string] =>
-        entry[1] !== undefined && !/^(AGY_|GEMINI_|GOOGLE_|CAT_CAFE_)/.test(entry[0]),
+        entry[1] !== undefined &&
+        !/^(AGY_|GEMINI_|GOOGLE_|CAT_CAFE_)/.test(entry[0]) &&
+        !(process.platform === 'win32' && entry[0].toLowerCase() === 'path'),
     ),
   );
   const host = homedir();
@@ -117,16 +122,18 @@ export function isolatedOAuthEnv(home: string, accountEnv?: Record<string, strin
     if (!inherited[key]) inherited[key] = fallback;
   }
   if (!inherited.GH_CONFIG_DIR) inherited.GH_CONFIG_DIR = join(inherited.XDG_CONFIG_HOME, 'gh');
+  const rawPath = process.env.PATH ?? (process.platform === 'win32' ? process.env.Path : undefined);
   const env: Record<string, string | null> = {
     ...inherited,
     ...safeAccountEnv,
-    PATH: sanitizeAgyToolPath(process.env.PATH),
+    PATH: sanitizeAgyToolPath(rawPath),
     LANG: safeAccountEnv.LANG ?? process.env.LANG ?? 'en_US.UTF-8',
     TMPDIR: tmpdir(),
     TERM: 'dumb',
     // Managed invocations must not mutate the installed carrier in the background.
     AGY_CLI_DISABLE_AUTO_UPDATE: 'true',
     HOME: home,
+    ...(process.platform === 'win32' ? { USERPROFILE: home } : {}),
     GEMINI_HOME: join(home, '.gemini'),
     // Only the command shell consumes this; the carrier keeps its account HOME.
     CAT_CAFE_NATIVE_TOOL_HOME: host,

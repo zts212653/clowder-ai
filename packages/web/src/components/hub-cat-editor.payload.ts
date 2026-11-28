@@ -1,5 +1,5 @@
 import type { CatData } from '@/hooks/useCatData';
-import { buildAgyProfilePatch, usesAgyAcp } from './hub-cat-editor.agy';
+import { buildAgyProfilePatch, usesAgyAcp, usesAgyNative } from './hub-cat-editor.agy';
 import {
   type ClientId,
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
@@ -194,9 +194,10 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
   // #712: always send the form's mcpSupport value so the user can toggle it explicitly
   const mcpSupportPatch = { mcpSupport: form.mcpSupport };
   const cliCarrier = usesCliCarrier(form);
+  const agyNativeCarrier = usesAgyNative(form);
   const trimmedCliEffort = trimText(form.cliEffort);
   const cliFields: Record<string, unknown> = {};
-  if ((cliCarrier || nativeTool) && trimmedCliEffort.length > 0) {
+  if ((cliCarrier || agyNativeCarrier || nativeTool) && trimmedCliEffort.length > 0) {
     cliFields.effort = trimmedCliEffort;
   } else if (cat?.cli?.effort) {
     cliFields.effort = null as null;

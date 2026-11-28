@@ -538,6 +538,74 @@ describe('F325 AGY Work Parity Slice 2 — Contracts', () => {
         await plan.disposeCredentials?.();
       }
 
+      const neonOverridePlan = await prepareAgyNativeLaunch({
+        catId: 'gemini-neon',
+        model: 'gemini-4-neon-high',
+        workspace,
+        profileConfig: {
+          enabled: true,
+          carrier: 'native',
+          autoApprove: true,
+          model: 'gemini-4-neon-high',
+          profileId: 'gemini-neon',
+          homeRoot,
+          trustedWorkspaces: [workspace],
+        },
+        prompt: 'hi',
+        body: '# L0',
+        command: '/usr/bin/true',
+        options: {
+          invocationId: 'inv-neon-xhigh',
+          reasoningEffortOverride: 'xhigh',
+          spawnCliOverride: async function* () {},
+        },
+      });
+      try {
+        const modelIdx = neonOverridePlan.cliOptions.args.indexOf('--model');
+        const effortIdx = neonOverridePlan.cliOptions.args.indexOf('--effort');
+        assert.equal(neonOverridePlan.cliOptions.args[modelIdx + 1], 'gemini-4-neon-xhigh');
+        assert.equal(neonOverridePlan.cliOptions.args[effortIdx + 1], 'xhigh');
+      } finally {
+        await neonOverridePlan.disposeCredentials?.();
+      }
+
+      const neonMemberEffortPlan = await prepareAgyNativeLaunch({
+        catId: 'gemini-neon',
+        model: 'gemini-4-neon-high',
+        workspace,
+        profileConfig: {
+          enabled: true,
+          carrier: 'native',
+          autoApprove: true,
+          model: 'gemini-4-neon-high',
+          profileId: 'gemini-neon',
+          homeRoot,
+          trustedWorkspaces: [workspace],
+        },
+        prompt: 'hi',
+        body: '# L0',
+        command: '/usr/bin/true',
+        options: {
+          invocationId: 'inv-neon-member-xhigh',
+          executionPreferences: {
+            configurationSource: 'managed_account',
+            model: 'gemini-4-neon-high',
+            effort: 'xhigh',
+            effortSource: 'member',
+            nativeAuthentication: false,
+          },
+          spawnCliOverride: async function* () {},
+        },
+      });
+      try {
+        const modelIdx = neonMemberEffortPlan.cliOptions.args.indexOf('--model');
+        const effortIdx = neonMemberEffortPlan.cliOptions.args.indexOf('--effort');
+        assert.equal(neonMemberEffortPlan.cliOptions.args[modelIdx + 1], 'gemini-4-neon-xhigh');
+        assert.equal(neonMemberEffortPlan.cliOptions.args[effortIdx + 1], 'xhigh');
+      } finally {
+        await neonMemberEffortPlan.disposeCredentials?.();
+      }
+
       // Dangerous accountEnv keys rejected on both Native and ACP
       for (const badKey of [
         'GEMINI_API_KEY',

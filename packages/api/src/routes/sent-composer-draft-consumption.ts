@@ -29,12 +29,12 @@ function matchesStoredSend(capture: CapturedDraft, message: StoredMessage): bool
   );
 }
 
-/** Capture the authenticated mounted revision; consume only the Human newly appended by this admission. */
+/** Capture the authenticated owner's draft at admission; consume only for the Human newly appended here. */
 export async function captureSentComposerDraftConsumption(
   store: IMessageStore,
   userId: string,
   threadId: string,
-  expectedRevision?: number,
+  expectedRevision?: number | 'current',
 ) {
   let draft: OwnerComposerDraft | null = null;
   if (expectedRevision !== undefined) {
@@ -44,7 +44,10 @@ export async function captureSentComposerDraftConsumption(
       log.warn({ threadId, expectedRevision }, 'Composer draft capture failed; sending continues');
     }
   }
-  const capture = draft && draft.revision === expectedRevision ? { userId, threadId, draft } : null;
+  const capture =
+    draft && (expectedRevision === 'current' || draft.revision === expectedRevision)
+      ? { userId, threadId, draft }
+      : null;
   return async (message: StoredMessage | null): Promise<SentComposerDraftConsumptionReceipt> => {
     if (!capture || !message || !matchesStoredSend(capture, message)) return {};
     try {

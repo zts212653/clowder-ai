@@ -1,21 +1,26 @@
-import { type CatConfig, normalizeCliEffortForProvider } from '@cat-cafe/shared';
+import { type CatConfig, inferGoogleModelEffort, normalizeCliEffortForProvider } from '@cat-cafe/shared';
 import { usesNativeToolConfiguration } from '../../../../../config/cat-account-binding.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 
 /** Admission-owned choices. Empty native preferences preserve the CLI's own defaults. */
 export function captureMemberExecutionPreferences(catId: string, config: CatConfig, model?: string) {
+  const resolvedModel =
+    model ??
+    (config.configurationSource === 'native_tool' ? config.defaultModel : getCatModel(catId, config.defaultModel));
+  const explicitEffort = config.cli?.effort?.trim();
+  const isGoogle = config.clientId === 'google' || config.clientId === 'antigravity';
   return Object.freeze({
     configurationSource: config.configurationSource,
-    model:
-      model ??
-      (config.configurationSource === 'native_tool' ? config.defaultModel : getCatModel(catId, config.defaultModel)),
+    model: resolvedModel,
     effort:
-      config.cli?.effort?.trim() ||
+      explicitEffort ||
       (config.configurationSource === 'native_tool'
         ? ''
-        : (normalizeCliEffortForProvider(config.clientId, undefined) ?? 'high')),
-    ...(config.clientId === 'kimi'
-      ? { effortSource: config.cli?.effort?.trim() ? ('member' as const) : ('platform_default' as const) }
+        : ((isGoogle ? inferGoogleModelEffort(resolvedModel) : null) ??
+          normalizeCliEffortForProvider(config.clientId, undefined) ??
+          'high')),
+    ...(config.clientId === 'kimi' || isGoogle
+      ? { effortSource: explicitEffort ? ('member' as const) : ('platform_default' as const) }
       : {}),
     nativeAuthentication: usesNativeToolConfiguration(config),
   });

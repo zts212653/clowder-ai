@@ -902,6 +902,10 @@ function liveInput(key, idKey, stateKey) {
   return function (e) { S[stateKey] = e.target.value; render(true); };
 }
 const INPUTS = { dirty: markDirty };   /* 输入时的处理（data-input）：各模块登记 */
+/* IME 组词期间输入框的值归输入法：只记标记，渲染不拿旧状态覆盖（见 frame.js patchEl）。 */
+const COMPOSING_FIELDS = new WeakSet();
+document.addEventListener('compositionstart', function (e) { COMPOSING_FIELDS.add(e.target); });
+document.addEventListener('compositionend', function (e) { COMPOSING_FIELDS.delete(e.target); });
 document.addEventListener('input', function (e) { const k = e.target.dataset && e.target.dataset.input; if (k && INPUTS[k]) INPUTS[k](e); });
 document.addEventListener('change', function (e) {
   const ck = e.target.dataset && e.target.dataset.change; if (ck && CHANGES[ck]) CHANGES[ck](e);

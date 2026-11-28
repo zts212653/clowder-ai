@@ -3,6 +3,7 @@ import { markApiGetGeneration } from '@/utils/api-get-generation';
 
 const mockApiFetch = vi.fn();
 const mockSetThreads = vi.fn();
+const mockUpdateThreadTitle = vi.fn();
 const mockInitThreadUnread = vi.fn();
 const mockSetLoadingThreads = vi.fn();
 
@@ -19,6 +20,7 @@ vi.mock('@/stores/chatStore', () => ({
   useChatStore: {
     getState: () => ({
       setThreads: mockSetThreads,
+      updateThreadTitle: mockUpdateThreadTitle,
       initThreadUnread: mockInitThreadUnread,
       setLoadingThreads: mockSetLoadingThreads,
     }),
@@ -92,6 +94,18 @@ describe('refreshSidebarThreadSnapshot', () => {
     expect(mockSetThreads).toHaveBeenCalledWith(canonicalThreads);
     expect(mockInitThreadUnread).toHaveBeenCalledWith('thread-new', 2, true);
     expect(mockSetLoadingThreads).toHaveBeenCalledWith(false);
+  });
+
+  it('keeps a pending rename on the live row without changing the canonical snapshot', async () => {
+    const threads = [{ id: 'thread-a', title: 'Last server snapshot' }];
+    useSidebarProjectionStore.getState().beginSidebarCommand('thread-a', 'title', 'Still pending');
+    mockApiFetch.mockResolvedValue(snapshotResponse(threads));
+
+    await expect(refreshSidebarThreadSnapshot()).resolves.toBe(true);
+
+    expect(useSidebarProjectionStore.getState().rows[0]?.title).toBe('Last server snapshot');
+    expect(mockSetThreads).toHaveBeenCalledWith(threads);
+    expect(mockUpdateThreadTitle).toHaveBeenCalledWith('thread-a', 'Still pending');
   });
 
   it('routes causal invalidation to a bounded trailing GET generation', async () => {

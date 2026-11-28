@@ -4641,7 +4641,9 @@ describe('unmodified runtime and project chat bindings', () => {
       expect(card.textContent).toContain('Owner role');
       expect(card.querySelector('[role="dialog"]').getAttribute('aria-label')).toBe('Owner nickname');
       card.querySelector('[data-act="mention"]').click();
-      await vi.waitFor(() => expect(action).toHaveBeenCalledWith('compose', { v: '@owner-handle ', pos: '14' }));
+      await vi.waitFor(() =>
+        expect(action).toHaveBeenCalledWith('compose', { v: '@owner-handle ', pos: '14', composing: '0' }),
+      );
       expect(ui.memberCard).toBeNull();
       expect(w.document.querySelector('[data-pop="memberCard"]')).toBeNull();
       await w.eval("A.memberCard({ who:'codex'})");
@@ -6267,12 +6269,71 @@ describe('unmodified runtime and project chat bindings', () => {
       input.focus();
       input.value = '真实输入';
       input.dispatchEvent(new w.Event('input', { bubbles: true }));
-      await vi.waitFor(() => expect(action).toHaveBeenCalledWith('compose', { v: '真实输入', pos: '4' }));
+      await vi.waitFor(() =>
+        expect(action).toHaveBeenCalledWith('compose', { v: '真实输入', pos: '4', composing: '0' }),
+      );
       data.input = '真实输入';
       w.clowderChat.update();
       expect(w.document.getElementById('chat-input')).toBe(input);
       input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       await vi.waitFor(() => expect(action.mock.calls.some((args) => args[0] === 'send')).toBe(true));
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('keeps IME composition in the textarea and commits the composed text once', async () => {
+    const { dom, w, action } = await boot();
+    try {
+      const input = w.document.getElementById('chat-input');
+      input.focus();
+      input.value = 'ni';
+      input.dispatchEvent(new w.CompositionEvent('compositionstart', { bubbles: true }));
+      input.dispatchEvent(new w.InputEvent('input', { bubbles: true, data: 'ni', isComposing: true }));
+      await vi.waitFor(() => expect(action).toHaveBeenCalledWith('compose', { v: 'ni', pos: '2', composing: '1' }));
+
+      // A render carrying the old draft must not replace the composing textarea.
+      w.eval("CS.draft['chat-input'] = ''");
+      w.eval('render(true)');
+      expect(w.document.getElementById('chat-input')).toBe(input);
+      expect(input.value).toBe('ni');
+
+      input.value = '你';
+      input.dispatchEvent(new w.CompositionEvent('compositionend', { bubbles: true, data: '你' }));
+      input.dispatchEvent(new w.InputEvent('input', { bubbles: true, data: '你', isComposing: false }));
+      await vi.waitFor(() => expect(action).toHaveBeenCalledWith('compose', { v: '你', pos: '1', composing: '0' }));
+      w.eval("CS.draft['chat-input'] = '你'");
+      w.eval('render(true)');
+      expect(input.value).toBe('你');
+      await w.__settled();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('replaces a composing textarea when the conversation changes without compositionend', async () => {
+    const { dom, w, data, ui, port, action } = await boot(undefined, (data) => {
+      data.threads.push({ ...data.threads[0], id: 'thread-after-composition' });
+    });
+    try {
+      const input = w.document.getElementById('chat-input');
+      input.focus();
+      input.value = 'ni';
+      input.dispatchEvent(new w.CompositionEvent('compositionstart', { bubbles: true }));
+      input.dispatchEvent(new w.InputEvent('input', { bubbles: true, data: 'ni', isComposing: true }));
+      await vi.waitFor(() => expect(action).toHaveBeenCalledWith('compose', { v: 'ni', pos: '2', composing: '1' }));
+
+      ui.draft = { 'chat-input': '新会话的草稿' };
+      data.threadId = 'thread-after-composition';
+      port.threadId = data.threadId;
+      port.data = { ...port.data, chat: fixtureInput(data).chat };
+      port.sidebarData = fixtureSidebar(data);
+      w.clowderChat.update(port);
+      await w.__settled();
+      const incoming = w.document.getElementById('chat-input');
+      expect(input.isConnected).toBe(false);
+      expect(incoming.value).toBe('新会话的草稿');
+      expect(action.mock.calls.filter(([name]) => name === 'compose')).toHaveLength(1);
     } finally {
       dom.window.close();
     }
