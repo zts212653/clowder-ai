@@ -140,5 +140,5 @@ export async function resolveKimiMcpSurface(
     throw new Error('Kimi native project root changed since admission; retry this invocation.');
   const servers = structuredClone(plan.mcpConfig.servers);
   await denyUnapprovedNativeServers(servers, plan.denialLayers);
-  return materializeProviderMcpConfig({ ...plan.mcpConfig, servers }, input).servers;
+  return (await materializeProviderMcpConfig({ ...plan.mcpConfig, servers }, input)).servers;
 }

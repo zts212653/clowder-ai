@@ -94,7 +94,7 @@ async function resolveDshConnectionTarget(
   const toolIssues = config.mcpSupport !== false ? invocationPluginMcpIssues(acp.mcpWhitelist) : [];
   // Binding removes inherited invocation credentials. A check never borrows the
   // current author's turn or gains a business tools/call forwarding path.
-  const admitted = materializeSessionMcpServers(servers, { CAT_CAFE_USER_ID: owner, CAT_CAFE_CAT_ID: catId });
+  const admitted = await materializeSessionMcpServers(servers, { CAT_CAFE_USER_ID: owner, CAT_CAFE_CAT_ID: catId });
   const manifest = await readDshToolManifest(admitted, root);
   const effort = config.cli?.effort?.trim() || undefined;
   const model = config.defaultModel || JSON.stringify([binding.route.provider, binding.route.model]);

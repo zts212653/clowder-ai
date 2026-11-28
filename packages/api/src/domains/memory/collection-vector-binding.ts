@@ -10,7 +10,7 @@ import { inspectVectorGeneration } from './vector-generation-readiness.js';
 export async function prepareCollectionVectorBinding(
   store: SqliteEvidenceStore,
   resolveService: () => IEmbeddingService | undefined,
-  resolveMode: () => 'on' | 'shadow' | undefined = () => 'shadow',
+  resolveMode: () => 'on' | 'shadow' | undefined,
 ): Promise<{ deps: CollectionEmbedDeps; publish: () => boolean } | undefined> {
   const service = resolveService();
   if (!service?.isReady() || !resolveMode()) return;

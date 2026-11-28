@@ -2314,7 +2314,7 @@ export class CodexAgentService implements AgentService {
         ? mergeCodexConfig(
             liveConfig ??
               (privateMcpRpc
-                ? codexNativeMcpThreadConfig(catCafeMcpArgs, mcpCallbackEnv!, privateMcpServers)
+                ? await codexNativeMcpThreadConfig(catCafeMcpArgs, mcpCallbackEnv!, privateMcpServers)
                 : usePooledAppServer
                   ? codexConfigObjectFromArgs(catCafeMcpArgs)
                   : {}),
@@ -2695,7 +2695,10 @@ export class CodexAgentService implements AgentService {
           removeCredentialFileFromMcpConfig(appServerThreadConfig ?? {});
           return createDirectSession(sessionOptions);
         }
-        if (pooledCredentialEnv && !writeSessionCredentialFile(options?.callbackEnv, pooledCredentialEnv.path)) {
+        if (
+          pooledCredentialEnv &&
+          !(await writeSessionCredentialFile(options?.callbackEnv, pooledCredentialEnv.path))
+        ) {
           await wire.close().catch(() => {});
           forceDirectAppServer = true;
           removeCredentialFileFromMcpConfig(appServerThreadConfig ?? {});

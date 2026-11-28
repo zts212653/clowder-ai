@@ -16,7 +16,7 @@ import { projectMessagePartsForImage } from '@/components/message-export-parts';
 import { selectMessagesForExport } from '@/components/message-export-selection';
 import type { ReplyOutputProjection } from '@/components/reply-layers/reply-output';
 import { projectReplySubexecutions, type ReplySubexecution } from '@/components/reply-layers/reply-subexecution';
-import { scheduleEffect, scheduleTask } from '@/components/rich/read-schedule-approval';
+import { formatScheduleFields, scheduleEffect, scheduleTask } from '@/components/rich/read-schedule-approval';
 import { adaptServiceState } from '@/components/settings/service-ui-adapter';
 import { projectDisplayName } from '@/components/ThreadSidebar/thread-utils';
 import { projectTargetReply } from '@/components/target-response-projection';
@@ -333,6 +333,8 @@ export interface ChatProjectionInput {
     ready?: boolean;
     optionsLocked?: boolean;
     preferredCats?: string[];
+    title?: string;
+    pinned?: boolean;
     homeState?: { busy: boolean; state: string };
   };
   export?: {
@@ -604,6 +606,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
     isReadonly: !!data.readonly,
     forwardingBlocked: data.forwardingBlocked !== false,
   });
+  const availableMemberIds = () => data.cats.filter((cat) => cat.roster?.available !== false).map((cat) => cat.id);
   const memberItems = (selected: readonly string[], among?: readonly string[]) =>
     members()
       .filter((member) => !among || among.includes(member.id))
@@ -803,45 +806,64 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
             : memory
               ? memoryMessageView(memory, ui.f)
               : scheduleRecord
-                ? {
-                    title: scheduleTask(scheduleRecord).display.label,
-                    schedule: scheduleRecord,
-                    task: scheduleTask(scheduleRecord),
-                    load: schedule!.current || scheduleSettled ? '' : 'loading',
-                    canApproveSchedule: !scheduleSettled && !schedule!.blocked && !schedule!.drifted,
-                    changes: (() => {
-                      const mutation = scheduleRecord.mutation;
-                      if (mutation.kind !== 'update') return [];
-                      const template = schedule!.templates?.find(
-                        (entry) => entry.templateId === mutation.taskSnapshot.templateId,
-                      );
-                      return Object.keys({ ...mutation.taskSnapshot.params, ...mutation.params })
-                        .filter(
-                          (key) =>
-                            JSON.stringify(mutation.taskSnapshot.params[key]) !== JSON.stringify(mutation.params[key]),
-                        )
-                        .map((key) => ({
-                          key,
-                          description: template?.paramSchema[key]?.description,
-                          before: mutation.taskSnapshot.params[key],
-                          after: mutation.params[key],
-                        }));
-                    })(),
-                    effect: scheduleEffect(scheduleRecord) !== null,
-                    scheduleError: schedule!.error || schedule!.templateError,
-                    canEditInPlace: false,
-                    canRequestChange: false,
-                    decided: scheduleSettled,
-                    result: scheduleSettled
-                      ? {
-                          key: scheduleRecord.proposalId,
-                          status: scheduleRecord.status,
-                          reason: scheduleRecord.status,
-                        }
-                      : null,
-                  }
+                ? (() => {
+                    const task = scheduleTask(scheduleRecord);
+                    const language = ui.lang === 'en' ? 'en' : 'zh';
+                    const threadTitle = task.deliveryThreadId
+                      ? (data.threads.find((entry) => entry.id === task.deliveryThreadId)?.title ?? undefined)
+                      : undefined;
+                    const fields = formatScheduleFields(scheduleRecord, {
+                      language,
+                      threadTitle,
+                    });
+                    return {
+                      title: task.display.label,
+                      schedule: scheduleRecord,
+                      task,
+                      ...(fields ? { fields } : {}),
+                      load: schedule!.current || scheduleSettled ? '' : 'loading',
+                      canApproveSchedule: !scheduleSettled && !schedule!.blocked && !schedule!.drifted,
+                      changes: (() => {
+                        const mutation = scheduleRecord.mutation;
+                        if (mutation.kind !== 'update') return [];
+                        const template = schedule!.templates?.find(
+                          (entry) => entry.templateId === mutation.taskSnapshot.templateId,
+                        );
+                        return Object.keys({ ...mutation.taskSnapshot.params, ...mutation.params })
+                          .filter(
+                            (key) =>
+                              JSON.stringify(mutation.taskSnapshot.params[key]) !==
+                              JSON.stringify(mutation.params[key]),
+                          )
+                          .map((key) => ({
+                            key,
+                            description: template?.paramSchema[key]?.description,
+                            before: mutation.taskSnapshot.params[key],
+                            after: mutation.params[key],
+                          }));
+                      })(),
+                      effect: scheduleEffect(scheduleRecord) !== null,
+                      scheduleError: schedule!.error || schedule!.templateError,
+                      canEditInPlace: false,
+                      canRequestChange: false,
+                      decided: scheduleSettled,
+                      result: scheduleSettled
+                        ? {
+                            key: scheduleRecord.proposalId,
+                            status: scheduleRecord.status,
+                            reason: scheduleRecord.status,
+                          }
+                        : null,
+                    };
+                  })()
                 : proposal
-                  ? proposalView(proposal, !!ui.editing?.[message.id], !!ui.asking?.[message.id], ui.f)
+                  ? proposalView(
+                      proposal,
+                      !!ui.editing?.[message.id],
+                      !!ui.asking?.[message.id],
+                      ui.f,
+                      messageRichBlocks(message).find((b) => b.id === proposal.target.blockId),
+                    )
                   : ask
                     ? runtimeAskView(
                         bound
@@ -1333,6 +1355,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
       return {
         spot: false,
         home: data.threadId === 'default',
+        homePin: !!(input?.admission?.pinned ?? ui.homePin),
         multi: ui.multi,
         picked: chosen().length,
         locked: locked(),
@@ -1376,6 +1399,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
                   });
                 })(),
                 queued: q.status === 'queued',
+                recallable: q.status === 'queued' && (!q.from || q.from.kind === 'user'),
                 orderable: q.status === 'queued',
               })),
             }
@@ -1391,6 +1415,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
               : null,
           id: 'chat-input',
           home: data.threadId === 'default',
+          title: input?.admission?.title ?? ui.homeTitle ?? '',
           whisper: ui.whisper,
           history: data.historyEntries,
           value: data.input,
@@ -1435,29 +1460,24 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
         },
         toolsCtx: { inputId: 'chat-input', rec: data.voice?.state === 'recording' },
         voiceAvailable: services() ? available('voice-input') : (data.voice?.available ?? false),
-        send: {
-          stop:
-            !data.input.trim() &&
-            !ctx().length &&
-            !attachments().length &&
-            data.executions.some((e) => e.threadId === data.threadId),
-          stopping: false,
-          disabled:
-            locked() ||
-            (ui.whisper && !ui.whisperTo.length) ||
-            (!data.input.trim() &&
-              !ctx().length &&
-              !attachments().length &&
-              !data.executions.some((e) => e.threadId === data.threadId)),
-          reason: data.readonly
-            ? 'readonly'
-            : data.preparingImages || data.uploadStatus === 'uploading'
-              ? 'uploading'
-              : ui.whisper && !ui.whisperTo.length
-                ? 'whisper'
-                : 'send',
-          home: data.threadId === 'default',
-        },
+        send: (() => {
+          const empty = !data.input.trim() && !ctx().length,
+            stop = empty && !attachments().length && data.executions.some((e) => e.threadId === data.threadId);
+          return {
+            stop,
+            stopping: false,
+            // A message needs words or a context attachment; attachments alone are not one (the server refuses them).
+            disabled: locked() || (ui.whisper && !ui.whisperTo.length) || (empty && !stop),
+            reason: data.readonly
+              ? 'readonly'
+              : data.preparingImages || data.uploadStatus === 'uploading'
+                ? 'uploading'
+                : ui.whisper && !ui.whisperTo.length
+                  ? 'whisper'
+                  : 'send',
+            home: data.threadId === 'default',
+          };
+        })(),
       };
     },
     get chatPop() {
@@ -1544,7 +1564,8 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
                   ? preferredIds()
                   : recipients(),
             // "View as" lists this conversation's members (its participants, or who has spoken here), not everyone.
-            kind === 'people' ? conversationMembers() : undefined,
+            // Recipient pickers ("target", "whisper", "prefer") only offer currently enabled cats.
+            kind === 'people' ? conversationMembers() : availableMemberIds(),
           ),
         };
       if (kind === 'plus' && subpage === 'mode') return { ...base, sendScope: ui.sendScope, sendMode: ui.sendMode };
@@ -1557,7 +1578,7 @@ export function chatModels(data: ChatData, ui: ChatUiState, input?: ChatProjecti
           preferNames: preferredIds().map((id) => members().find((member) => member.id === id)?.name ?? id),
           preferredIds: preferredIds(),
           preferredExpanded: !!pop()?.preferredExpanded,
-          members: memberItems(preferredIds()),
+          members: memberItems(preferredIds(), availableMemberIds()),
           connection: connection(),
           homeState: data.threadId === 'default' ? (input?.admission?.homeState ?? null) : null,
           attachments: attachments(),

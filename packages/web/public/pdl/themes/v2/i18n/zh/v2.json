@@ -46,6 +46,8 @@
     "workCount": "{0} 件",
     "replied": "已回复",
     "unread": "{0} 未读",
+    "atYou": "@你",
+    "pending": "等你决定",
     "recall": "召回 {0}",
     "tools": "{0} 次工具调用",
     "errors": "其中 {0} 次出错",
@@ -2831,7 +2833,8 @@
     "file": {
       "openProject": "打开项目文件",
       "openLocal": "用默认应用打开",
-      "noPreview": "这种文件不能在这里预览"
+      "noPreview": "这种文件不能在这里预览",
+      "collabEdit": "协作编辑"
     },
     "pageActionState": {
       "ready": "待预检",
@@ -5357,5 +5360,13 @@
     "barTitle": "在左侧栏显示额度",
     "selectedCount": "已选 {0} 个账号",
     "item": "{0} 剩 {1}%"
+  },
+  "recovery": {
+    "paused": "自动恢复已暂停",
+    "pending": "正在恢复",
+    "needsAttention": "需要检查",
+    "parked": "已停放",
+    "interrupted": "已中断",
+    "recheck": "重新检查"
   }
 }

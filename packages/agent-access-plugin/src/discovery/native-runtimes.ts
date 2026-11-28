@@ -1,9 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
+import { getCliEffortOptionsForProvider, inferGoogleModelEffort } from '@cat-cafe/shared';
 import { isDshLauncher } from '@cat-cafe/shared/dsh-launcher';
 import type { AgentAccessDetectionContext } from '@clowder-ai/agent-contract';
 import { parse } from 'smol-toml';
+import { AGY_NATIVE_KNOWN_MODELS } from '../roles/agy-gemini-models.js';
 import { resolveCliCommand } from '../workstation/cli-resolve.js';
 import { resolveDshSetupLaunch } from './dsh-setup-launch.js';
 import { discoverAdditionalRuntimes } from './native-additional-runtimes.js';
@@ -120,9 +122,21 @@ export async function discoverNativeRuntimes(
     ];
   });
   const dsh = await discoverDshRuntimes();
-  const agyModels = members
+  const configuredAgyModels = members
     .filter((cat) => cat.clientId === 'google' && cat.agyProfile?.enabled)
     .flatMap((cat) => (cat.agyProfile?.model ? [cat.agyProfile.model] : []));
+  const agyKnownLabels = new Map(AGY_NATIVE_KNOWN_MODELS.map((entry) => [entry.id, entry.label]));
+  const agyModelIds = [...new Set([...configuredAgyModels, ...AGY_NATIVE_KNOWN_MODELS.map((entry) => entry.id)])];
+  const agyModelCatalog = agyModelIds.map((value) => {
+    const efforts = getCliEffortOptionsForProvider('google', value);
+    const defaultEffort = inferGoogleModelEffort(value) ?? undefined;
+    return {
+      value,
+      label: agyKnownLabels.get(value) ?? value,
+      ...(defaultEffort ? { defaultEffort } : {}),
+      ...(efforts ? { efforts: efforts.map((effort) => ({ value: effort, label: effort })) } : {}),
+    };
+  });
   const agy = (
     [
       ['agy-native', 'AGY Native', 'agy', 'native'],
@@ -139,7 +153,8 @@ export async function discoverNativeRuntimes(
       agyCarrier,
       command: command ?? undefined,
       installed: Boolean(command),
-      models: [...new Set(agyModels)],
+      modelCatalog: agyModelCatalog,
+      models: agyModelIds,
       defaultsStatus: 'configured_only',
       ...(agyCarrier === 'acp' ? { acp: { command: executable, startupArgs: [], transport: 'stdio' as const } } : {}),
     };

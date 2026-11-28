@@ -11,9 +11,9 @@ import {
 import { assertMediaAnchor } from './anchors.js';
 import { annotate, editAnnotationBody, replyToAnnotation, setAnnotationState } from './annotation-actions.js';
 import { addVisualMarks, deleteVisualMark, requestImageEdit, requestMediaEdit } from './artwork-actions.js';
-import { publicationLedgerId } from './canonical-ledger.js';
 import { ArtifactReviewError } from './errors.js';
 import { judgeResponse } from './response-judgment.js';
+import { publicationLedgerId } from './storage/canonical-ledger.js';
 
 interface ReviewActionContext {
   action: ArtifactReviewAction;

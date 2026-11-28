@@ -10,7 +10,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { opendir, stat } from 'node:fs/promises';
+import { mkdir, opendir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
@@ -58,7 +58,10 @@ export function resolveSessionCredentialFile(
   return { env: { ...callbackEnv, CAT_CAFE_CREDENTIAL_FILE: path }, path };
 }
 
-export function writeSessionCredentialFile(callbackEnv: Record<string, string> | undefined, path: string): boolean {
+export async function writeSessionCredentialFile(
+  callbackEnv: Record<string, string> | undefined,
+  path: string,
+): Promise<boolean> {
   const payload = parseCredentialPayload(callbackEnv);
   if (!payload) return false;
   const dir = dirname(path);
@@ -69,20 +72,20 @@ export function writeSessionCredentialFile(callbackEnv: Record<string, string> |
     ts: Date.now(),
   });
   try {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(temporaryPath, serialized, { mode: 0o600 });
+    await mkdir(dir, { recursive: true });
+    await writeFile(temporaryPath, serialized, { mode: 0o600 });
     try {
-      renameSync(temporaryPath, path);
+      await rename(temporaryPath, path);
     } catch {
       // Windows cannot always replace an existing destination with rename.
-      unlinkSync(temporaryPath);
-      writeFileSync(path, serialized, { mode: 0o600 });
+      await unlink(temporaryPath);
+      await writeFile(path, serialized, { mode: 0o600 });
     }
     void sweepStaleFiles(dir);
     return true;
   } catch (err) {
     try {
-      unlinkSync(temporaryPath);
+      await unlink(temporaryPath);
     } catch {
       // Best-effort cleanup of an uncommitted temp file.
     }
@@ -99,14 +102,14 @@ export function writeSessionCredentialFile(callbackEnv: Record<string, string> |
   }
 }
 
-export function prepareSessionCredentialFile(
+export async function prepareSessionCredentialFile(
   namespace: string,
   callbackEnv: Record<string, string> | undefined,
   resumeSessionId?: string,
-): PreparedCredentialEnv | null {
+): Promise<PreparedCredentialEnv | null> {
   const prepared = resolveSessionCredentialFile(namespace, callbackEnv, resumeSessionId);
   if (!prepared) return null;
-  if (!writeSessionCredentialFile(callbackEnv, prepared.path)) return null;
+  if (!(await writeSessionCredentialFile(callbackEnv, prepared.path))) return null;
   return prepared;
 }
 

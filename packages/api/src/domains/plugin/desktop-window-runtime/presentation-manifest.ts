@@ -28,14 +28,17 @@ export function validateHostPluginManifest(value: unknown): ReturnType<typeof va
 function validateBaseManifest(value: unknown): ReturnType<typeof validateManifest> {
   let legacy = validateManifest(value);
   const version = value && typeof value === 'object' && 'version' in value ? value.version : undefined;
-  // A newer general schema must not widen the Host's pinned desktop bridge ABI. A version without a
-  // pinned release is a local build: the current contract reads it, and the runtime decides whether it may run.
+  // This Host supports up to bridge 1.7.0. The shared schema also describes livingBody in 1.8.0.
+  // Keep the published reader for pinned 1.7.0 releases and the generic reader for local 1.7.0 builds.
   if (legacy.valid) {
-    if (
-      !legacy.manifest.contributions?.some((c) => c.type === 'desktop-window' && c.bridgeVersion === '1.7.0') ||
-      !COMPANION_ARCHIVE_CONTRACTS.some((row) => row.version === version)
-    )
-      return legacy;
+    const bridgeVersion = legacy.manifest.contributions
+      ?.filter((c) => c.type === 'desktop-window')
+      .find(
+        (c) =>
+          c.bridgeVersion === '1.8.0' ||
+          (c.bridgeVersion === '1.7.0' && COMPANION_ARCHIVE_CONTRACTS.some((row) => row.version === version)),
+      )?.bridgeVersion;
+    if (!bridgeVersion) return legacy;
     legacy = {
       valid: false,
       errors: [
@@ -43,7 +46,10 @@ function validateBaseManifest(value: unknown): ReturnType<typeof validateManifes
           instancePath: '/contributions',
           schemaPath: '#/desktop-window/bridgeVersion',
           keyword: 'enum',
-          message: 'Bridge 1.7.0 requires a pinned companion release',
+          message:
+            bridgeVersion === '1.8.0'
+              ? 'Bridge 1.8.0 is not supported by this Host'
+              : 'Bridge 1.7.0 requires a pinned companion release',
         },
       ],
     };

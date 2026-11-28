@@ -83,14 +83,16 @@ test('an unknown write outcome is not replayed; gateway reconnect and closing on
     writeFileSync(credentialFile, JSON.stringify({ invocationId: owner, callbackToken: `fixture-token-${owner}` }), {
       mode: 0o600,
     });
-    const config = materializeNativeMcpHttp(
-      { own: { command: process.execPath, args: [resolve('dist/index.js')] } },
-      {
-        CAT_CAFE_API_URL: apiUrl,
-        CAT_CAFE_INVOCATION_ID: owner,
-        CAT_CAFE_CREDENTIAL_FILE: credentialFile,
-        CAT_CAFE_MCP_TRANSPORT: 'shared',
-      },
+    const config = (
+      await materializeNativeMcpHttp(
+        { own: { command: process.execPath, args: [resolve('dist/index.js')] } },
+        {
+          CAT_CAFE_API_URL: apiUrl,
+          CAT_CAFE_INVOCATION_ID: owner,
+          CAT_CAFE_CREDENTIAL_FILE: credentialFile,
+          CAT_CAFE_MCP_TRANSPORT: 'shared',
+        },
+      )
     ).own;
     const client = new Client({ name: 'f333-lifecycle', version: '1' });
     const transport = new StreamableHTTPClientTransport(new URL(String(config.url)), {

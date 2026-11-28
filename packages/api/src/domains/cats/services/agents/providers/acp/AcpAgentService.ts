@@ -853,7 +853,7 @@ export class AcpAgentService implements AgentService {
       // its own file, which stops updating — its late callbacks fail registry.isLatest().
       const unavailableBeforeSetup = removeUnavailablePluginMcp();
       if (unavailableBeforeSetup) yield unavailableBeforeSetup;
-      const buildSessionConfig = (preparedCreds: PreparedCredentialEnv | null) => {
+      const buildSessionConfig = async (preparedCreds: PreparedCredentialEnv | null) => {
         options?.signal?.throwIfAborted();
         const invocationBound = isInvocationBoundMcpLaunch(options?.callbackEnv);
         if (agy && options?.callbackEnv?.CAT_CAFE_INVOCATION_ID && !preparedCreds && !invocationBound)
@@ -885,10 +885,9 @@ export class AcpAgentService implements AgentService {
             envDiag: callbackEnvDiagnostic(sessionCallbackEnv),
           };
         }
-        return {
-          mcpServers: materializeSessionMcpServers(invokeServers, sessionCallbackEnv, Boolean(agy)),
-          envDiag: callbackEnvDiagnostic(sessionCallbackEnv),
-        };
+        const mcpServers = await materializeSessionMcpServers(invokeServers, sessionCallbackEnv, Boolean(agy));
+        options?.signal?.throwIfAborted();
+        return { mcpServers, envDiag: callbackEnvDiagnostic(sessionCallbackEnv) };
       };
       let sessionMcpServers: AcpMcpServer[] = invokeServers;
       let envDiag = callbackEnvDiagnostic(options?.callbackEnv);
@@ -938,9 +937,9 @@ export class AcpAgentService implements AgentService {
         const resumeCreds = isInvocationBoundMcpLaunch(options?.callbackEnv)
           ? null
           : agy
-            ? prepareSessionCredentialFile(options?.callbackEnv, resumeSessionId)
+            ? await prepareSessionCredentialFile(options?.callbackEnv, resumeSessionId)
             : resolveSessionCredentialFile(options?.callbackEnv, resumeSessionId);
-        const resumeConfig = buildSessionConfig(resumeCreds);
+        const resumeConfig = await buildSessionConfig(resumeCreds);
         // iCode: the per-turn overlay (externals + member gateway with fresh
         // credentials) is re-injected on load — the previous turn's live
         // instance was closed, so the rebuild takes the new overlay instead of
@@ -968,7 +967,7 @@ export class AcpAgentService implements AgentService {
           this.pool.rememberSession?.(this.poolKey, sessionId, lease);
           if (sessionId !== resumeSessionId) this.pool.rememberSession?.(this.poolKey, resumeSessionId, lease);
           if (resumeCreds) {
-            writeSessionCredentialFile(options?.callbackEnv, resumeCreds.path);
+            await writeSessionCredentialFile(options?.callbackEnv, resumeCreds.path);
             bindSessionCredentialFile(sessionId, resumeCreds.path);
             if (sessionId !== resumeSessionId) bindSessionCredentialFile(resumeSessionId, resumeCreds.path);
           }
@@ -1011,8 +1010,8 @@ export class AcpAgentService implements AgentService {
       if (resumeDisposition !== 'resumed') {
         const freshCreds = isInvocationBoundMcpLaunch(options?.callbackEnv)
           ? null
-          : prepareSessionCredentialFile(options?.callbackEnv);
-        let freshConfig = buildSessionConfig(freshCreds);
+          : await prepareSessionCredentialFile(options?.callbackEnv);
+        let freshConfig = await buildSessionConfig(freshCreds);
         sessionMcpServers = freshConfig.mcpServers;
         envDiag = freshConfig.envDiag;
         log.info(
@@ -1028,7 +1027,7 @@ export class AcpAgentService implements AgentService {
           if (!unavailable) throw error;
           initializationRecoveryUsed = true;
           yield unavailable;
-          freshConfig = buildSessionConfig(freshCreds);
+          freshConfig = await buildSessionConfig(freshCreds);
           sessionMcpServers = freshConfig.mcpServers;
           envDiag = freshConfig.envDiag;
           session = await client.newSession(cwd, sessionMcpServers, agy?.meta);
@@ -1369,8 +1368,8 @@ export class AcpAgentService implements AgentService {
         try {
           const retryCreds = isInvocationBoundMcpLaunch(options?.callbackEnv)
             ? null
-            : prepareSessionCredentialFile(options?.callbackEnv);
-          const retryConfig = buildSessionConfig(retryCreds);
+            : await prepareSessionCredentialFile(options?.callbackEnv);
+          const retryConfig = await buildSessionConfig(retryCreds);
           const freshSession = await client.newSession(cwd, retryConfig.mcpServers);
           await configureNative(freshSession, true);
           const freshSessionId = freshSession.sessionId;

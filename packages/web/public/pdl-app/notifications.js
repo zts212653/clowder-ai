@@ -251,8 +251,17 @@ function bindNotifications() {
     };
   };
   INPUTS.vp = function (e) {
+    const had = Object.values(vapid).some(function (v) {
+      return v.trim();
+    });
     vapid[e.target.dataset.k] = e.target.value;
-    render(true);
+    if (
+      had !==
+      Object.values(vapid).some(function (v) {
+        return v.trim();
+      })
+    )
+      render(true);
   };
   async function run(work) {
     busy = true;

@@ -285,7 +285,16 @@ function bindSetup() {
   });
   const composer = VM.chatComposer;
   VM.chatComposer = function () {
-    const model = S.route === 'home' ? projectChat(projectChatData(), CS, chatDataSnapshot).chatComposer : composer(),
+    const base = S.route === 'home' ? projectChat(projectChatData(), CS, chatDataSnapshot).chatComposer : composer(),
+      model =
+        S.route === 'home'
+          ? Object.assign({}, base, {
+              homePin: CS.homePin != null ? !!CS.homePin : !!base.homePin,
+              input: Object.assign({}, base.input, {
+                title: CS.homeTitle != null ? CS.homeTitle : (base.input && base.input.title) || '',
+              }),
+            })
+          : base,
       data = projectChatData(),
       path =
         data.threadId === 'default'

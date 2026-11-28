@@ -4,6 +4,7 @@ import {
   type AgyProfileConfig,
   type CatId,
   type CliEffortPreset,
+  isValidCliEffortForProvider,
   type NativeSessionBinding,
   resolveCliEffortOverride,
 } from '@cat-cafe/shared';
@@ -110,15 +111,27 @@ function assertNoUntrustedProfilePrograms(home: string): void {
 function resolveAgyEffectiveModelAndEffort(
   configuredModel: string,
   override?: CliEffortPreset,
+  explicitMemberEffort?: string,
 ): { readonly effectiveModel: string; readonly effortArg?: string } {
   const suffixMatch = configuredModel.match(/-(low|medium|high|xhigh|max)$/i);
-  const inherited = suffixMatch?.[1]?.toLowerCase() ?? 'high';
+  const suffixEffort = suffixMatch?.[1]?.toLowerCase();
+  const inherited = suffixEffort ?? 'high';
   const resolved = resolveCliEffortOverride('google', configuredModel, inherited, override);
   if (resolved.source === 'thread_override' && resolved.compatibility === 'compatible' && resolved.effective) {
     const rewrittenModel = suffixMatch
       ? `${configuredModel.slice(0, -suffixMatch[0].length)}-${resolved.effective}`
       : configuredModel;
     return { effectiveModel: rewrittenModel, effortArg: resolved.effective };
+  }
+  const memberEffort = explicitMemberEffort?.trim().toLowerCase();
+  if (memberEffort && isValidCliEffortForProvider('google', memberEffort, configuredModel)) {
+    const rewrittenModel = suffixMatch
+      ? `${configuredModel.slice(0, -suffixMatch[0].length)}-${memberEffort}`
+      : configuredModel;
+    if (memberEffort !== suffixEffort) {
+      return { effectiveModel: rewrittenModel, effortArg: memberEffort };
+    }
+    return { effectiveModel: configuredModel, effortArg: memberEffort };
   }
   return { effectiveModel: configuredModel };
 }
@@ -151,9 +164,16 @@ export async function prepareAgyNativeLaunch(input: AgyNativeLaunchInput): Promi
     !member &&
     Boolean(options?.runtimeInteractionPort && options?.auditContext);
   const allowWorkspaceWrites = input.profileConfig.allowWorkspaceWrites === true && !readOnly && !member;
+  const explicitMemberEffort =
+    options?.executionPreferences?.effortSource === 'member' ||
+    (options?.executionPreferences?.configurationSource === 'native_tool' &&
+      Boolean(options.executionPreferences.effort?.trim()))
+      ? options.executionPreferences.effort
+      : undefined;
   const { effectiveModel, effortArg } = resolveAgyEffectiveModelAndEffort(
     input.model,
     options?.reasoningEffortOverride,
+    explicitMemberEffort,
   );
   const policy = buildAgyNativePolicy({
     workspaceRoot: input.workspace,

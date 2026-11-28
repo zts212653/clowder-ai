@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import sharp from 'sharp';
 import { ArtifactReviewService } from '../src/domains/collaborative-content/artifact-review/service.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { createReviewFixture, reviewCat, reviewHuman } from './helpers/artifact-review-fixture.js';
 
 test('real PNG ranges keep their original source and Task through one request and returned candidate', async (t) => {

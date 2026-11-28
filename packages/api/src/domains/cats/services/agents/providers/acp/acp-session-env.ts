@@ -50,11 +50,11 @@ const _CALLBACK_ENV_KEYS = [
  *
  * @returns New array (never mutates input)
  */
-export function materializeSessionMcpServers(
+export async function materializeSessionMcpServers(
   baseServers: AcpMcpServer[],
   callbackEnv?: Record<string, string>,
   _credentialFileOnly = false,
-): AcpMcpServer[] {
+): Promise<AcpMcpServer[]> {
   const resolved = baseServers.map((server) => {
     if (!('command' in server)) return server;
     const registered = Object.fromEntries((server.env ?? []).map((e) => [e.name, e.value]));
@@ -88,10 +88,13 @@ export function materializeSessionMcpServers(
               headers: Object.fromEntries(server.headers.map(({ name, value }) => [name, value])),
               transport: server.type,
             };
-      return [server.name, bindManagedMcpStdioConfig(record, callbackEnv)];
+      return [
+        server.name,
+        callbackEnv?.CAT_CAFE_MCP_TRANSPORT === 'shared' ? record : bindManagedMcpStdioConfig(record, callbackEnv),
+      ];
     }),
   );
-  const native = materializeNativeMcpHttp(records, callbackEnv ?? {});
+  const native = await materializeNativeMcpHttp(records, callbackEnv ?? {});
   return Object.entries(native).map(([name, record]): AcpMcpServer => {
     if (typeof record.command !== 'string')
       return {

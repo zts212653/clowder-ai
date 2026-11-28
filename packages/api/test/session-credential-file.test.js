@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import fsPromises from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import cookie from '@fastify/cookie';
+import Fastify from 'fastify';
+import { sessionAuthPlugin, sessionRoute } from '../dist/infrastructure/session-auth.js';
 
 const credsDir = mkdtempSync(join(tmpdir(), 'cat-cafe-provider-creds-'));
 process.env.CAT_CAFE_MCP_CREDS_DIR = credsDir;
@@ -29,16 +34,58 @@ function readCreds(path) {
   return JSON.parse(readFileSync(path, 'utf8'));
 }
 
-test('provider namespaces cannot alias the same provider session id', () => {
-  const acp = prepareSessionCredentialFile('acp', callbackEnv('acp-1', 'acp-token'));
-  const codex = prepareSessionCredentialFile('codex', callbackEnv('codex-1', 'codex-token'));
+test('browser session responds while an invocation credential is waiting to be published', async (t) => {
+  const app = Fastify();
+  await app.register(cookie);
+  await app.register(sessionAuthPlugin);
+  await app.register(sessionRoute);
+
+  const publishing = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const rename = fsPromises.rename;
+  const delayedRename = t.mock.method(fsPromises, 'rename', async (source, destination) => {
+    publishing.resolve();
+    await release.promise;
+    await rename(source, destination);
+  });
+  syncBuiltinESMExports();
+  const pending = Promise.resolve(
+    prepareSessionCredentialFile('codex', callbackEnv('pending-publication', 'fixture-token')),
+  );
+  try {
+    assert.equal(
+      await Promise.race([publishing.promise.then(() => 'publishing'), pending.then(() => 'returned')]),
+      'publishing',
+    );
+
+    const response = await app.inject('/api/session');
+    assert.equal(response.statusCode, 200);
+    release.resolve();
+    const prepared = await pending;
+    assert.equal(readCreds(prepared.path).invocationId, 'pending-publication');
+  } finally {
+    release.resolve();
+    await pending;
+    delayedRename.mock.restore();
+    syncBuiltinESMExports();
+    await app.close();
+  }
+});
+
+test('provider namespaces cannot alias the same provider session id', async () => {
+  const acp = await prepareSessionCredentialFile('acp', callbackEnv('acp-1', 'acp-token'));
+  const codex = await prepareSessionCredentialFile('codex', callbackEnv('codex-1', 'codex-token'));
   assert.ok(acp);
   assert.ok(codex);
   bindSessionCredentialFile('acp', 'same-session-id', acp.path);
   bindSessionCredentialFile('codex', 'same-session-id', codex.path);
 
-  const acpResume = prepareSessionCredentialFile('acp', callbackEnv('acp-2', 'acp-token-2'), 'same-session-id');
-  const codexResume = prepareSessionCredentialFile('codex', callbackEnv('codex-2', 'codex-token-2'), 'same-session-id');
+  const acpResume = await prepareSessionCredentialFile('acp', callbackEnv('acp-2', 'acp-token-2'), 'same-session-id');
+  const codexResume = await prepareSessionCredentialFile(
+    'codex',
+    callbackEnv('codex-2', 'codex-token-2'),
+    'same-session-id',
+  );
 
   assert.equal(acpResume.path, acp.path);
   assert.equal(codexResume.path, codex.path);
@@ -47,11 +94,11 @@ test('provider namespaces cannot alias the same provider session id', () => {
   assert.equal(readCreds(codex.path).invocationId, 'codex-2');
 });
 
-test('credential files are owner-only and input env is never mutated', () => {
+test('publication preserves POSIX owner-only file mode and does not mutate the input env', async () => {
   const input = callbackEnv('invocation-1', 'token-1');
-  const prepared = prepareSessionCredentialFile('codex', input);
+  const prepared = await prepareSessionCredentialFile('codex', input);
   assert.ok(prepared);
-  assert.equal(statSync(prepared.path).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') assert.equal(statSync(prepared.path).mode & 0o777, 0o600);
   assert.equal(prepared.env.CAT_CAFE_CREDENTIAL_FILE, prepared.path);
   assert.equal(input.CAT_CAFE_CREDENTIAL_FILE, undefined);
 });

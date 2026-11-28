@@ -1,6 +1,9 @@
 import type { GlobalArtifactDTO, GlobalArtifactsResponse, ThreadArtifactDTO } from '@cat-cafe/shared';
 import { projectRecentWorks } from '@cat-cafe/shared/recent-works';
-import { collectRecentGlobalWorkCandidates } from '../domains/cats/services/agents/routing/recent-global-work-reader.js';
+import {
+  collectRecentGlobalWorkCandidates,
+  collectRecentProjectWorkCandidates,
+} from '../domains/cats/services/agents/routing/recent-global-work-reader.js';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import {
@@ -29,16 +32,17 @@ export async function readRecentWorksView(input: {
   );
   if (input.projectId !== undefined && threads.length === 0)
     return { artifacts: [], total: 0, workLineage: 'resolved', complete: true };
+  if (input.projectId !== undefined) {
+    threads.sort((a, b) => b.lastActiveAt - a.lastActiveAt || b.id.localeCompare(a.id));
+  }
   const threadTitles = new Map(threads.map((thread) => [thread.id, thread.title ?? thread.id]));
   const scan = await (async () => {
     if (input.messageStore) {
       try {
-        return await collectRecentGlobalWorkCandidates({
-          store: input.messageStore,
-          userId: input.userId,
-          threadTitles,
-          limit: input.limit,
-        });
+        const scanInput = { store: input.messageStore, userId: input.userId, threadTitles };
+        return input.projectId === undefined
+          ? await collectRecentGlobalWorkCandidates({ ...scanInput, limit: input.limit })
+          : await collectRecentProjectWorkCandidates(scanInput);
       } catch {
         /* An unavailable source cannot certify empty history. Other original sources remain useful. */
       }

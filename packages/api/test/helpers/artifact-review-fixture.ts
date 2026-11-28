@@ -1,7 +1,7 @@
 import { createCatId, type TaskItem } from '@cat-cafe/shared';
 import type { StoredMessage } from '../../src/domains/cats/services/stores/ports/MessageStore.js';
 import type { Thread } from '../../src/domains/cats/services/stores/ports/ThreadStore.js';
-import type { ArtifactReviewStore } from '../../src/domains/collaborative-content/artifact-review/store.js';
+import type { ArtifactReviewStore } from '../../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { ModificationPublicationGrants } from '../../src/domains/collaborative-content/modification/request-authority.js';
 import { F232PreparedArtifactReader } from '../../src/domains/growing/F232PreparedArtifactReader.js';
 import {

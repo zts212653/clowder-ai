@@ -102,21 +102,27 @@ function sidebarMatch(t, query) {
   );
 }
 function sidebarSubmit(m) {
+  const ids = Object.keys(m.sel).filter(function (id) {
+    return m.sel[id];
+  });
   return Promise.resolve(
     chatPort.action('sidebarGroupWrite', {
       value: JSON.stringify({
         action: 'organize',
-        threadIds: Object.keys(m.sel).filter(function (id) {
-          return m.sel[id];
+        threadIds: ids,
+        // The groups this change touches, as seen when the dialog opened: the destination and the groups of the chosen.
+        expectedGroups: m.groups.filter(function (g) {
+          return (
+            g.id === CS.f['org-to'] ||
+            g.threadIds.some(function (id) {
+              return m.sel[id];
+            })
+          );
         }),
-        expectedGroups: m.groups,
         ...(CS.f['org-to'] === 'new' ? { name: m.newName } : { groupId: CS.f['org-to'] }),
       }),
     }),
   ).then(function () {
-    const ids = Object.keys(m.sel).filter(function (id) {
-      return m.sel[id];
-    });
     const group = sidebarOwner().preferences.groups.find(function (g) {
       return ids.every(function (id) {
         return g.threadIds.includes(id);
@@ -212,6 +218,7 @@ function bindSidebar() {
           : '',
       lastWho: lastWho,
       unread: attention ? attention.unreadCount : 0,
+      pending: typeof inboxPendingCount === 'function' ? inboxPendingCount(t.id) : 0,
       at: !!attention && attention.hasUserMention,
       replied: !!presence && presence.status === 'done',
       status: presence ? presence.status : '',
@@ -278,7 +285,7 @@ function bindSidebar() {
               (path === 'default' ? '' : /^[a-z]:[\\/]+$/i.test(path) ? path : parts[parts.length - 1] || path);
           return {
             key: 'proj:' + path,
-            collapsed: !open[path],
+            override: open[path],
             rows: list.map(row),
             head: {
               kind: 'proj',
@@ -351,8 +358,7 @@ function bindSidebar() {
         groupRows.flatMap(function (g) {
           return g.ids;
         }),
-      ),
-      runningIds = new Set(o.runningThreadIds);
+      );
     const rows = model.sections.reduce(function (all, section) {
       return all.concat(section.rows);
     }, []);
@@ -371,22 +377,38 @@ function bindSidebar() {
           return rowsById.get(id);
         })
         .filter(Boolean);
-      const running = function (id) {
-        return runningIds.has(id);
-      };
       list = orderMembers(list, g.sort);
+      const attentionRows = list
+        .filter(function (r) {
+          return (r.pending || 0) > 0 || !!r.at || (r.unread || 0) > 0;
+        })
+        .sort(function (a, b) {
+          return (
+            Number((b.pending || 0) > 0) - Number((a.pending || 0) > 0) ||
+            Number(!!b.at) - Number(!!a.at) ||
+            Number((b.unread || 0) > 0) - Number((a.unread || 0) > 0) ||
+            b.time - a.time ||
+            a.id.localeCompare(b.id)
+          );
+        });
       if (list.length)
         sections.push({
           key: 'grp:' + g.id,
           gid: g.id,
           collapsed: !g.open,
           rows: list,
-          peek: g.peek
-            ? list.filter(function (r) {
-                return !!(r.unread || r.at) || running(r.id);
-              })
-            : [],
-          head: { kind: 'group', id: g.id, name: g.name, n: list.length, open: g.open, peek: g.peek, sort: g.sort },
+          peek: g.peek ? attentionRows.slice(0, 3) : [],
+          peekMore: g.peek ? Math.max(0, attentionRows.length - 3) : 0,
+          head: {
+            kind: 'group',
+            id: g.id,
+            name: g.name,
+            n: list.length,
+            attention: attentionRows.length,
+            open: g.open,
+            peek: g.peek,
+            sort: g.sort,
+          },
         });
     });
     const recent = rows.filter(function (r) {

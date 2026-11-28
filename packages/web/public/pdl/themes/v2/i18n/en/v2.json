@@ -46,6 +46,8 @@
     "workCount": "{0} works",
     "replied": "Replied",
     "unread": "{0} unread",
+    "atYou": "@you",
+    "pending": "Needs decision",
     "recall": "Recall {0}",
     "tools": "{0} tool calls",
     "errors": "{0} errors",
@@ -2831,7 +2833,8 @@
     "file": {
       "openProject": "Open project file",
       "openLocal": "Open with default application",
-      "noPreview": "This file type cannot be previewed here"
+      "noPreview": "This file type cannot be previewed here",
+      "collabEdit": "Collaborative edit"
     },
     "pageActionState": {
       "ready": "Ready to inspect",
@@ -5357,5 +5360,13 @@
     "barTitle": "Show usage in the sidebar",
     "selectedCount": "{0} accounts selected",
     "item": "{0} {1}% left"
+  },
+  "recovery": {
+    "paused": "Automatic recovery paused",
+    "pending": "Recovery pending",
+    "needsAttention": "Needs attention",
+    "parked": "Parked",
+    "interrupted": "Interrupted",
+    "recheck": "Recheck"
   }
 }

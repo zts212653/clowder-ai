@@ -3,6 +3,7 @@ import { afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 
 const { threadsRoutes } = await import('../dist/routes/threads.js');
+const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const AUTH = { 'x-cat-cafe-user': 'alice' };
 const T1 = { id: 'T1', title: 'Recent works', createdBy: 'alice' };
 const T2 = { id: 'T2', title: 'More works', createdBy: 'alice' };
@@ -53,13 +54,27 @@ async function makeApp({
   messageReadLog = [],
   artifactWorkLineage,
   withMessageStore = true,
+  store,
 } = {}) {
   const globalMessages = Object.entries(threadMessages)
     .flatMap(([threadId, messages]) =>
       messages.map((message) => ({ userId: 'alice', threadId, mentions: [], ...message })),
     )
     .sort((left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id));
-  const messageStore = {
+  const readPage = (eligible, budget) => {
+    const raw = eligible.slice(0, budget);
+    const lookahead = eligible[raw.length];
+    const oldest = raw.at(-1);
+    return {
+      messages: [...raw].reverse(),
+      scannedCount: raw.length,
+      storageRoundTrips: 0,
+      exhausted: lookahead === undefined,
+      oldestTimelineGroupComplete: !oldest || !lookahead || lookahead.timestamp !== oldest.timestamp,
+      ...(oldest ? { nextCursor: { timestamp: oldest.timestamp, id: oldest.id } } : {}),
+    };
+  };
+  const messageStore = store ?? {
     getByThread: async (threadId) => {
       messageReadLog.push({ kind: 'thread', threadId });
       return threadMessages[threadId] ?? [];
@@ -77,17 +92,14 @@ async function makeApp({
             (message.timestamp === timestamp && beforeId !== undefined && message.id < beforeId),
         )
         .sort((left, right) => right.timestamp - left.timestamp || right.id.localeCompare(left.id));
-      const raw = eligible.slice(0, Math.min(limit, scanLimit));
-      const lookahead = eligible[raw.length];
-      const oldest = raw.at(-1);
-      return {
-        messages: [...raw].reverse(),
-        scannedCount: raw.length,
-        storageRoundTrips: 0,
-        exhausted: lookahead === undefined,
-        oldestTimelineGroupComplete: !oldest || !lookahead || lookahead.timestamp !== oldest.timestamp,
-        ...(oldest ? { nextCursor: { timestamp: oldest.timestamp, id: oldest.id } } : {}),
-      };
+      return readPage(eligible, Math.min(limit, scanLimit));
+    },
+    getByThreadBeforeBounded: async (threadId, timestamp, limit, _beforeId, userId, scanLimit) => {
+      messageReadLog.push({ kind: 'thread-bounded', threadId, userId, limit: scanLimit });
+      return readPage(
+        globalMessages.filter((message) => message.threadId === threadId && message.timestamp < timestamp).reverse(),
+        Math.min(limit, scanLimit),
+      );
     },
   };
   const app = Fastify();
@@ -185,6 +197,109 @@ describe('GET /api/artifacts bounded recent works view (F232 KD-9)', () => {
     assert.equal(empty.complete, true);
     assert.deepEqual(messageReadLog, []);
     assert.equal((await read('')).statusCode, 400);
+  });
+
+  it('finds a project image behind 600 newer messages in another project using the in-memory store', async () => {
+    const store = new MessageStore({ maxMessages: 1024 });
+    const append = (threadId, timestamp, extra) =>
+      store.append({
+        threadId,
+        userId: 'alice',
+        from: { kind: 'agent', catId: 'opus' },
+        timestamp,
+        content: 'fixture',
+        mentions: [],
+        ...(extra ? { extra } : {}),
+      });
+    append(T1.id, 1, imageMessage('target', 1, 'target.png').extra);
+    nonWorks(600).forEach(({ timestamp }) => append(T2.id, timestamp + 1));
+    app = await makeApp({
+      threads: [
+        { ...T1, projectPath: '/target' },
+        { ...T2, projectPath: '/other' },
+      ],
+      store,
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/artifacts?view=recent-works&projectId=%2Ftarget',
+      headers: AUTH,
+    });
+    const body = response.json();
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(
+      body.artifacts.map((work) => work.name),
+      ['target.png'],
+    );
+    assert.equal(body.complete, true);
+  });
+
+  it('retains a known newer project work and withholds a timestamp group cut by the read budget', async () => {
+    const messageReadLog = [];
+    app = await makeApp({
+      threads: [
+        { ...T1, projectPath: '/target' },
+        { ...T2, projectPath: '/target' },
+      ],
+      threadMessages: {
+        T1: [
+          imageMessage('newer', 101, 'newer.png'),
+          imageMessage('tie-work', 100, 'tie-cut.png'),
+          ...nonWorks(256).map((message) => ({ ...message, timestamp: 100 })),
+        ],
+        T2: [imageMessage('other-thread-tie', 100, 'same-time.png')],
+      },
+      messageReadLog,
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/artifacts?view=recent-works&projectId=%2Ftarget',
+      headers: AUTH,
+    });
+    const body = response.json();
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(
+      body.artifacts.map((work) => work.name),
+      ['newer.png'],
+    );
+    assert.equal(body.complete, false);
+    assert.equal(messageReadLog.length, 2);
+    assert.ok(messageReadLog.every((read) => read.kind === 'thread-bounded' && read.userId === 'alice'));
+    assert.equal(
+      messageReadLog.reduce((sum, read) => sum + read.limit, 0),
+      512,
+    );
+  });
+
+  it('caps project thread reads, keeps a found work, and reports the result as partial', async () => {
+    const messageReadLog = [];
+    const threads = Array.from({ length: 33 }, (_, index) => ({
+      ...T1,
+      id: String(index),
+      lastActiveAt: index,
+      projectPath: '/target',
+    }));
+    app = await makeApp({
+      threads,
+      threadMessages: { 32: [imageMessage('active', 100, 'active.png')] },
+      messageReadLog,
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/artifacts?view=recent-works&projectId=%2Ftarget',
+      headers: AUTH,
+    });
+    const body = response.json();
+    assert.equal(response.statusCode, 200);
+    assert.equal(body.artifacts[0]?.name, 'active.png');
+    assert.equal(body.complete, false);
+    assert.deepEqual(
+      messageReadLog.map((read) => read.threadId),
+      threads
+        .slice(1)
+        .reverse()
+        .map((thread) => thread.id),
+    );
   });
 
   it('caps an artifact-free history and reports unknown rather than verified empty', async () => {

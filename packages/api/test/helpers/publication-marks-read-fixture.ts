@@ -9,7 +9,7 @@ import sharp from 'sharp';
 import { InvocationRegistry } from '../../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { StoredMessage } from '../../src/domains/cats/services/stores/ports/MessageStore.js';
 import { ArtifactReviewService } from '../../src/domains/collaborative-content/artifact-review/service.js';
-import { ArtifactReviewStore } from '../../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { WorkspaceContentReviewService } from '../../src/domains/collaborative-content/workspace-review/service.js';
 import { WorkspaceContentSourceService } from '../../src/domains/workspace/workspace-content-source.js';
 import { registerCallbackArtifactReviewRoutes } from '../../src/routes/callback-artifact-review-routes.js';

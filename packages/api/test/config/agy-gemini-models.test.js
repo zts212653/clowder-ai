@@ -21,6 +21,11 @@ describe('AGY Gemini legacy selector compatibility', () => {
   test('does not silently replace explicit cross-model or cross-tier choices', () => {
     assert.equal(resolveAgyGeminiDefaultModel('gemini', 'Gemini 3.1 Pro (High)'), undefined);
     assert.equal(resolveAgyGeminiDefaultModel('gemini', 'Gemini 3.1 Pro (Low)'), undefined);
+    assert.equal(resolveAgyGeminiDefaultModel('gemini', 'gemini-4-neon-xhigh'), undefined);
+    assert.equal(resolveAgyGeminiDefaultModel('gemini', 'gemini-4-neon-high'), undefined);
+    assert.equal(resolveAgyGeminiDefaultModel('gemini38', 'gemini-4-argon-high'), undefined);
+    assert.equal(resolveAgyGeminiDefaultModel('gemini38', 'gemini-4-hydrogen-xhigh'), undefined);
+    assert.equal(resolveAgyGeminiDefaultModel('gemini', 'gemini-pro-orchestrator-neon'), undefined);
     assert.equal(resolveAgyGeminiDefaultModel('gemini25', 'Gemini 3.5 Flash (Medium)'), undefined);
     assert.equal(resolveAgyGeminiDefaultModel('gemini38', 'Gemini 3.8 Flash (Medium)'), undefined);
     assert.equal(resolveAgyGeminiDefaultModel('gemini38', 'gemini-3.8-flash-medium'), 'Gemini 3.8 Flash (Medium)');

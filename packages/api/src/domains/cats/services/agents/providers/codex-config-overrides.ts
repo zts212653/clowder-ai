@@ -38,11 +38,11 @@ export function codexDeclaredServerNames(
 }
 
 /** Native headers belong to the private thread RPC, never the CLI assignment. */
-export function codexNativeMcpThreadConfig(
+export async function codexNativeMcpThreadConfig(
   args: readonly string[],
   callback: Record<string, string>,
   privateServers: Record<string, Record<string, unknown>> = {},
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   const config = codexConfigObjectFromArgs(args);
   const servers = isCodexConfigObject(config.mcp_servers) ? config.mcp_servers : {};
   const records = Object.fromEntries(
@@ -50,7 +50,7 @@ export function codexNativeMcpThreadConfig(
   ) as Record<string, Record<string, unknown>>;
   // Raw plugin launches stay off argv and still pass the existing exact Host matcher.
   const sources = { ...records, ...privateServers };
-  const native = materializeNativeMcpHttp(sources, callback);
+  const native = await materializeNativeMcpHttp(sources, callback);
   return {
     mcp_servers: Object.fromEntries(
       Object.entries(native).flatMap(([name, server]) => {

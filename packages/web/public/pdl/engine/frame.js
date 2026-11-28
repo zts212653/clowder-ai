@@ -358,7 +358,7 @@ function syncAttrs(live, next) {
   }
   let i, a;
   for (i = 0; i < next.attributes.length; i++) { a = next.attributes[i]; if (live.getAttribute(a.name) !== a.value) live.setAttribute(a.name, a.value); }
-  for (i = live.attributes.length - 1; i >= 0; i--) { a = live.attributes[i]; if (a.name !== 'data-aname' && !next.hasAttribute(a.name)) live.removeAttribute(a.name); }
+  for (i = live.attributes.length - 1; i >= 0; i--) { a = live.attributes[i]; if (a.name !== 'data-aname' && a.name !== 'data-typing' && !next.hasAttribute(a.name)) live.removeAttribute(a.name); }
   if (cursor) live.style.cursor = cursor;
 }
 /* 同一个元素就地改属性、再往下比孩子；返回 false 表示结构不同，交给调用处整块换 */
@@ -381,8 +381,8 @@ function patchEl(live, next) {
    消息和孤岛不就地改：内容一样留着，不一样交给 reuseApply 按版本换。最后由 placeKids 摆：留下的顺序没变就一个都不挪 */
 function kidKey(n) {
   if (n.nodeType !== 1) return null;
-  if (n.dataset.layer) return 'layer:' + n.dataset.layer + '|' + (n.dataset.lc || '');
-  if (n.dataset.view) return 'view:' + n.dataset.view;
+  if (n.hasAttribute('data-layer')) return 'layer:' + n.getAttribute('data-layer') + '|' + (n.getAttribute('data-lc') || '');
+  if (n.hasAttribute('data-view')) return 'view:' + n.getAttribute('data-view');
   const id = nodeId(n); return id ? 'id:' + id : null;
 }
 function kidPatch(o, n) {
@@ -805,13 +805,29 @@ function projSlots(ls) { return ls.filter(function (l) { return LAYER_DOM[l.id];
 function projCover(c, l) {
   const fr = navNodeOf(l);
   if (fr && fr.focus) PROJ_FOCUS = true;
-  const html = navWith(c, l, function () { const bk = navBackOf(c); return backIn(bk ? bk.role : 'page', bk, function () { return ENGINE_PARTS.layerExit(c, l) + projFrame(l); }); });
+  const html = navWith(c, l, function () { const bk = navBackOf(c); return backIn(bk ? bk.role : 'page', bk, function () { return ENGINE_PARTS.layerExit(c, l) + projFrame(c, l); }); });
   /* 覆盖层的面就是主窗口的面：同一张全局图 + 页面容器的不透明度（--bg-veil），不是另一种不透明的底。
      面（底色 + 背景图）画在容器上，滚动层在它里面：滚动的边缘渐隐透出的是容器自己的面，不是后面外壳的背景图 */
   return { key: 'cover:' + c, html: '<section class="cover' + (fr && fr.focus ? ' occ' : '') + '" data-bg-owner="' + h(ctPages()) + '" data-layer="' + l.id + '" data-lc="' + h(c) + '"' + (fr ? ' data-occ="' + h(l.f.slice(5)) + '"' : '') + '><div class="scroll cover-in"' + ctGridAttr(c) + '>' + html + '</div></section>', col: 'minmax(0, 1fr)' };
 }
 /* 一层的内容：页面（路由）或插件界面框（它声明的路由） */
-function projFrame(l) { const nd = navNodeOf(l); if (nd && nd.type !== 'frame') return pdlView(l.f.slice(5)); const r = navRouteOf(l); return r && PAGES[r] ? PAGES[r]() : ''; }   /* 帧声明了视图就画视图，否则是路由对应的页面 */
+const FRAME_ERR = new Map();
+function projFrame(c, l) {
+  try {
+    const nd = navNodeOf(l);
+    const html = nd && nd.type !== 'frame' ? pdlView(l.f.slice(5)) : PAGES[navRouteOf(l)]?.() ?? '';
+    FRAME_ERR.delete(c);
+    return html;
+  } catch (err) {
+    const message = String((err && err.message) || err);
+    if (FRAME_ERR.get(c) !== message) {
+      FRAME_ERR.set(c, message);
+      console.error(err);
+    }
+    CT_UP.forEach(function (k) { LEAF_DIRTY.add(k); });
+    return PV_DRAW.state('error', { text: tc('common.viewError') });
+  }
+}
 /* 画之前：记下 DOM 里每一层（缓存）；这一次要被盖住的层记下滚动位置（它的滚动区和它所在的滚动容器）。返回新出现的层 */
 function navVisible() {
   const out = {};

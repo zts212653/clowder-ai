@@ -4,7 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { CliRawArchive } from '../src/domains/cats/services/session/CliRawArchive.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { mediaPublicationFixture as fixture } from './helpers/media-publication-fixture.js';
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;

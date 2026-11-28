@@ -1,6 +1,7 @@
 /* Member settings: real owner data and generic form controls; no React UI. */
 'use strict';
 function bindMembers() {
+  const dshClientName = 'DeepSeek Harness（DSH Desktop）';
   let meta = null,
     failed = false, // the member list could not be read: its place says so instead of loading forever
     pending = null,
@@ -303,6 +304,14 @@ function bindMembers() {
     return chatAction('memberAvailable', { id: data.id, v: String(next) }).then(read);
   };
 
+  function canFollowAccount(f) {
+    return (
+      ['openai', 'anthropic'].includes(f.clientId) &&
+      f.carrier !== 'acp' &&
+      f.configurationSource !== 'native_tool' &&
+      !!f.accountRef
+    );
+  }
   function selectedRuntime(form) {
     return meta.runtimes.find(function (row) {
       return (
@@ -318,6 +327,32 @@ function bindMembers() {
       );
     });
   }
+  function savedDshBinding(state) {
+    const f = state.form,
+      original = state.original;
+    return (
+      meta.dshMembers?.includes(state.id) &&
+      f.clientId === 'acp' &&
+      f.carrier === 'acp' &&
+      !f.acpAgentProvider &&
+      f.acpCommand === original.acpCommand &&
+      f.acpStartupArgs === original.acpStartupArgs &&
+      f.acpTransport === original.acpTransport
+    );
+  }
+  function dshTemplate(form) {
+    return (
+      form.clientId === 'acp' &&
+      form.carrier === 'acp' &&
+      !form.acpAgentProvider &&
+      form.acpCommand === 'dsh' &&
+      form.acpStartupArgs === '--profile acp' &&
+      meta.runtimes.some((row) => row.dshDesktop && row.installed)
+    );
+  }
+  function isDshDraft(state, runtime = selectedRuntime(state.form)) {
+    return runtime?.dshDesktop || savedDshBinding(state) || (!state.id && dshTemplate(state.form));
+  }
   const catalogs = new Map();
   // The model a catalog is read for: the one the form had, then each committed model (change: blur, Enter, a picked
   // candidate) — typing alone doesn't read.
@@ -327,7 +362,9 @@ function bindMembers() {
   }
   // A typed model the catalog doesn't list has no catalog of its own: only following the tool or a listed model re-reads.
   function listedModel(f, id, runtime) {
-    const state = runtimeCatalogState(f, id, runtime),
+    const resolvedRuntime = runtime || selectedRuntime(f);
+    if (resolvedRuntime && resolvedRuntime.agyCarrier) return true;
+    const state = runtimeCatalogState(f, id, resolvedRuntime),
       catalog = state && state.value;
     return (
       !f.defaultModel ||
@@ -338,19 +375,32 @@ function bindMembers() {
     );
   }
   function runtimeCatalogState(f = draft().form, id = draft().id, runtime = selectedRuntime(f)) {
-    if (!runtime && !f.acpAgentProvider) return null;
+    const state = id && draft();
+    const saved = state && f === state.form && savedDshBinding(state);
+    const desktop =
+      !f.accountRef &&
+      f.configurationSource === 'native_tool' &&
+      (runtime?.dshDesktop
+        ? runtime
+        : meta.runtimes.find(
+            (row) => row.dshDesktop && (dshTemplate(f) || (saved && row.form.acpCommand === f.acpCommand)),
+          ));
+    if (desktop && !desktop.installed) return null;
+    if (!runtime && !f.acpAgentProvider && !desktop) return null;
     // Manual or draft entries are not discovered tools: their models are entered by hand, nothing to read.
-    if (!f.acpAgentProvider && /^(manual|draft):/.test(runtime.id)) return null;
+    if (!f.acpAgentProvider && /^(manual|draft):/.test(runtime?.id)) return null;
     if (!catalogModels.has(f)) commitModel(f);
-    const request = Object.assign(
-      f.acpAgentProvider ? { ref: f.acpAgentProvider } : { runtimeId: runtime.id, catId: id || undefined },
-      {
-        accountRef: f.accountRef || undefined,
-        model: catalogModels.get(f) || undefined,
-        customStartup: !!f.cliConfigArgs.length,
-        refresh: false,
-      },
-    );
+    const request = desktop
+      ? { runtimeId: desktop.discoveredId || desktop.id, dshDesktop: true, refresh: false }
+      : Object.assign(
+          f.acpAgentProvider ? { ref: f.acpAgentProvider } : { runtimeId: runtime.id, catId: id || undefined },
+          {
+            accountRef: f.accountRef || undefined,
+            model: catalogModels.get(f) || undefined,
+            customStartup: !!f.cliConfigArgs.length,
+            refresh: false,
+          },
+        );
     const key = JSON.stringify(request);
     if (!catalogs.has(key)) catalogs.set(key, { request: request, load: 'loading', value: null });
     if (projectionNeeded) projectionNeeded.add('memberCatalog:' + key);
@@ -359,7 +409,7 @@ function bindMembers() {
   // Refresh: read the current catalog again past the server's cache; the list on screen stays until it arrives.
   A.memberCatalogRefresh = function () {
     const state = runtimeCatalogState();
-    if (!state) return;
+    if (!state) return read();
     state.load = 'loading';
     render(true);
     settleHold(
@@ -400,7 +450,25 @@ function bindMembers() {
       });
   });
   function memberPreferences(f, catalogState, poolDefault) {
-    const catalog = catalogState && catalogState.value;
+    let catalog = catalogState && catalogState.value;
+    const account =
+      meta &&
+      meta.accounts.find(function (a) {
+        return a.id === f.accountRef;
+      });
+    if (
+      (!catalog || !catalog.models.length) &&
+      f.configurationSource === 'managed_account' &&
+      account &&
+      account.models &&
+      account.models.length
+    )
+      catalog = Object.assign({}, catalog, {
+        status: catalog ? catalog.status : 'configured',
+        models: account.models.map(function (value) {
+          return { value: value, label: value };
+        }),
+      });
     if (!catalog)
       return {
         catalog: null,
@@ -423,7 +491,7 @@ function bindMembers() {
       });
     return {
       catalog: catalog,
-      catalogLoading: catalogState.load === 'loading',
+      catalogLoading: catalogState ? catalogState.load === 'loading' : !!pending,
       catalogRead: true,
       acpMaxDefault: poolDefault,
       selectedModel: selected,
@@ -622,6 +690,11 @@ function bindMembers() {
       cloud = !!(current && current.identityProtection && current.identityProtection.kind === 'builtin-cloud'),
       catalogState = runtimeCatalogState(),
       runtime = selectedRuntime(f),
+      desktop = meta.runtimes.find((row) => row.dshDesktop),
+      isDsh = isDshDraft(state, runtime),
+      savedLaunch = savedDshBinding(state) ? f : state.dshBinding,
+      legacyDsh =
+        savedLaunch && !/\/resources\/runtime\/cli\/bin\/dsh\.cmd$/i.test(savedLaunch.acpCommand.replaceAll('\\', '/')),
       shared = clientSettingsState(),
       pluginRuntimes = meta.runtimes
         .filter(function (row) {
@@ -701,15 +774,28 @@ function bindMembers() {
       cloud: cloud,
       configurationSource: f.configurationSource,
       accountRef: f.accountRef,
-      clientName: client && client.label,
+      clientName: isDsh ? (legacyDsh ? 'DeepSeek Harness' : dshClientName) : client && client.label,
       nativeLogin: runtime && runtime.readiness,
       d: d,
-      clients: meta.clients.map(function (c) {
-        return { value: c.id, name: c.label, type: c.plugin ? 'plugin' : 'name', pluginName: c.plugin, why: '' };
-      }),
       pluginRuntimes: pluginRuntimes,
       hasPluginRuntimes: pluginRuntimes.length > 1,
       runtimeChoice: f.acpAgentProvider || '',
+      clientChoice: isDsh ? 'dsh' : f.clientId,
+      dsh: !!isDsh,
+      clients: meta.clients
+        .map(function (c) {
+          return { value: c.id, name: c.label, type: c.plugin ? 'plugin' : 'name', pluginName: c.plugin, why: '' };
+        })
+        .concat({
+          value: 'dsh',
+          name: legacyDsh
+            ? 'DeepSeek Harness'
+            : desktop?.installed
+              ? dshClientName
+              : dshClientName + ' · ' + tc('common.status.notInstalled'),
+          type: 'name',
+          why: desktop?.installed || state.dshBinding || isDsh ? '' : tc('common.status.notInstalled'),
+        }),
       via: (client ? client.carriers : []).map(function (c) {
         return { value: c[0], name: c[0], type: 'name', why: '' };
       }),
@@ -732,11 +818,15 @@ function bindMembers() {
       preferences: cloud
         ? null
         : memberPreferences(f, catalogState, runtime ? runtime.acpMaxDefault : client && client.acpMaxDefault),
+      dshSetupError:
+        catalogState?.request.dshDesktop && (catalogState.value?.message || catalogState.load === 'error')
+          ? tcOr('runtime.dshSetupError.' + catalogState.value?.message, 'runtime.dshSetupError.default')
+          : '',
       identityProtection: cat && cat.identityProtection,
-      follow: f.accountBindingMode === 'follow',
-      overrideAccount: f.accountBindingMode === 'override',
+      follow: canFollowAccount(f) && f.accountBindingMode === 'follow',
+      overrideAccount: canFollowAccount(f) && f.accountBindingMode === 'override',
       required: { provider: f.clientId === 'opencode' },
-      noAccount: !meta.accounts.length,
+      noAccount: !isDsh && !meta.accounts.length,
       active: active,
       fromPlugin: f.acpAgentProvider,
       model: { provider: providerVM(), plugin: null },
@@ -819,6 +909,45 @@ function bindMembers() {
     const state = draft(),
       key = memberFields[e.target.dataset.k] || e.target.dataset.k;
     if (!state) return;
+    if (key === 'clientId') {
+      const f = state.form;
+      const fromDsh = isDshDraft(state);
+      if (e.target.value === 'dsh') {
+        if (fromDsh) return;
+        const runtime = meta.runtimes.find((row) => row.dshDesktop && row.installed);
+        const binding = state.dshBinding || runtime?.form;
+        if (binding) {
+          Object.assign(f, pdlClone(binding));
+          delete f.accountBindingMode;
+          commitModel(f);
+          render(true);
+        }
+        return;
+      }
+      if (fromDsh) {
+        state.dshBinding = {
+          clientId: f.clientId,
+          carrier: f.carrier,
+          configurationSource: f.configurationSource,
+          accountRef: f.accountRef,
+          acpAgentProvider: f.acpAgentProvider,
+          acpCommand: f.acpCommand,
+          acpStartupArgs: f.acpStartupArgs,
+          acpTransport: f.acpTransport,
+          env: f.env,
+          defaultModel: f.defaultModel,
+          cliEffort: f.cliEffort,
+        };
+        const { DSH_HOME, ...env } = f.env || {};
+        Object.assign(f, {
+          env: Object.keys(env).length ? env : undefined,
+          acpCommand: '',
+          acpStartupArgs: '',
+          acpTransport: 'stdio',
+          defaultModel: '',
+        });
+      }
+    }
     const strategy = {
       ctxStrat: 'strategy',
       ctxWarn: 'warnThreshold',
@@ -835,7 +964,7 @@ function bindMembers() {
     if (key === 'name') state.form.displayName = e.target.value;
     if (key === 'accountRef' && e.target.value) {
       state.form.configurationSource = 'managed_account';
-      state.form.accountBindingMode = 'override';
+      if (canFollowAccount(state.form)) state.form.accountBindingMode = 'override';
     } else if (key === 'accountRef') state.form.configurationSource = 'native_tool'; // the client's own login and configuration
     if (key === 'clientId') {
       const client = meta.clients.find(function (row) {
@@ -845,6 +974,7 @@ function bindMembers() {
       state.form.accountRef = '';
       state.form.cliEffort = '';
     }
+    if (!canFollowAccount(state.form)) delete state.form.accountBindingMode;
     render(true);
   }
   SET_AFTER['ss.draft.{k}'] = function (v, d) {
@@ -855,7 +985,7 @@ function bindMembers() {
   A.followAcc = async function () {
     const state = draft(),
       client = state.form.clientId;
-    if (client !== 'openai' && client !== 'anthropic') return;
+    if (!canFollowAccount(state.form)) return;
     if ((await chatAction('settingsFollowRead', { clientId: client })) === false) return;
     const selected = chatDataSnapshot.project.settings.follows[client];
     if (selected.accountRef) {
@@ -890,6 +1020,7 @@ function bindMembers() {
       return;
     }
     Object.assign(state.form, pdlClone(runtime.form));
+    delete state.form.accountBindingMode;
     commitModel(state.form);
     render(true);
   };
@@ -907,6 +1038,8 @@ function bindMembers() {
     if (
       f.configurationSource !== 'native_tool' ||
       f.accountRef ||
+      runtime?.dshDesktop ||
+      (!state.id && dshTemplate(f)) ||
       (!prepared && !(runtime && runtime.dshSetupSupported))
     )
       return null;
@@ -1466,7 +1599,7 @@ function bindMembers() {
         return {
           id: p.id,
           name: p.form.displayName,
-          runtime: p.runtime,
+          runtime: p.runtime.dshDesktop ? Object.assign({}, p.runtime, { label: dshClientName }) : p.runtime,
           selected: p.selected,
           existingId: p.existingId,
           selectable: p.selectable && !p.existingId && !p.identityConflict,

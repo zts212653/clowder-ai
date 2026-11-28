@@ -8,18 +8,17 @@ import { useOwnerProjection } from './owner-console';
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
 beforeEach(() => vi.clearAllMocks());
 afterEach(cleanup);
-it('shares the selected draft project and current conversation project without fetching a global prefix', async () => {
+it('loads global works in the lobby and keeps explicit project results scoped', async () => {
   const data = fixtureData();
   data.threadId = 'default';
-  const hook = renderHook(() => useOwnerProjection('recentWorks', useRecentWorks(data, true), { data }));
-  expect(hook.result.current.project().recentWorks.rw.load).toBe('empty');
-  expect(apiFetch).not.toHaveBeenCalled();
-  vi.mocked(apiFetch).mockImplementation(async () =>
-    Response.json({
+  const projectRead = Promise.withResolvers<void>();
+  vi.mocked(apiFetch).mockImplementation(async (url) => {
+    if (url.endsWith('projectId=%2Ftarget')) await projectRead.promise;
+    return Response.json({
       artifacts: [
         {
           type: 'image',
-          name: 'owner.png',
+          name: url.includes('projectId=') ? 'project.png' : 'lobby.png',
           ref: 'content:owner',
           catId: 'codex',
           createdAt: 1,
@@ -30,16 +29,30 @@ it('shares the selected draft project and current conversation project without f
       ],
       workLineage: 'resolved',
       complete: true,
-    }),
-  );
+    });
+  });
+  const hook = renderHook(() => useOwnerProjection('recentWorks', useRecentWorks(data, true), { data }));
+  await waitFor(() => expect(hook.result.current.project().recentWorks.rw.works.items[0]?.name).toBe('lobby.png'));
+  expect(apiFetch).toHaveBeenLastCalledWith('/api/artifacts?view=recent-works&limit=3', expect.anything(), undefined);
+
   data.newProjectId = '/target';
-  await act(() => hook.result.current.action('cafeRwRetry'));
-  await waitFor(() => expect(hook.result.current.project().recentWorks.rw.works.items[0]?.name).toBe('owner.png'));
+  await act(hook.rerender);
+  expect(hook.result.current.project().recentWorks.rw).toEqual({ load: 'loading', works: { items: [] } });
+  projectRead.resolve();
+  await waitFor(() => expect(hook.result.current.project().recentWorks.rw.works.items[0]?.name).toBe('project.png'));
   expect(apiFetch).toHaveBeenLastCalledWith(
     '/api/artifacts?view=recent-works&limit=3&projectId=%2Ftarget',
     expect.anything(),
     undefined,
   );
+  data.newProjectId = 'default';
+  await act(() => hook.result.current.action('cafeRwRetry'));
+  expect(apiFetch).toHaveBeenLastCalledWith(
+    '/api/artifacts?view=recent-works&limit=3&projectId=default',
+    expect.anything(),
+    undefined,
+  );
+
   data.threadId = 'pdl-test';
   await act(() => hook.result.current.action('cafeRwRetry'));
   await waitFor(() =>

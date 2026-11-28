@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { after, before, test } from 'node:test';
+import { after, before, describe, test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 
 const keys = [
@@ -16,8 +16,15 @@ const keys = [
   'CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT',
 ];
 const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
-let root, workspace, runtime, invokeSingleCat, ThreadStore, resolveInvocationCapacitySnapshot;
-const catId = 'oc-default-workspace-fixture';
+let root,
+  workspace,
+  runtime,
+  invokeSingleCat,
+  prepareInvocationExecutionBinding,
+  ThreadStore,
+  resolveInvocationCapacitySnapshot;
+const providers = ['opencode', 'google'];
+const fixtureCatId = (provider) => `${provider}-default-workspace-fixture`;
 
 before(async () => {
   root = await realpath(await mkdtemp(join(tmpdir(), 'oc-default-workspace-')));
@@ -32,7 +39,9 @@ before(async () => {
     CAT_CAFE_RUNTIME_ROOT: runtime,
     CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT: '1',
   });
-  ({ invokeSingleCat } = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js'));
+  ({ invokeSingleCat, prepareInvocationExecutionBinding } = await import(
+    '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js'
+  ));
   const { _resetOpenCodeKnownModels } = await import(
     '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js'
   );
@@ -41,22 +50,23 @@ before(async () => {
   ({ resolveInvocationCapacitySnapshot } = await import(
     '../dist/domains/cats/services/agents/invocation/invocation-capacity-snapshot.js'
   ));
-  catRegistry.register(catId, {
-    id: catId,
-    name: 'OpenCode',
-    displayName: 'OpenCode',
-    clientId: 'opencode',
-    provider: 'opencode',
-    configurationSource: 'native_tool',
-    defaultModel: 'opencode/fixture',
-    avatar: '/avatars/opencode.png',
-    color: { primary: '#000', secondary: '#fff' },
-    mentionPatterns: ['@opencode'],
-    mcpSupport: false,
-    roleDescription: 'fixture',
-    relationshipKey: 'oc-default-workspace-fixture',
-    personality: 'fixture',
-  });
+  for (const provider of providers)
+    catRegistry.register(fixtureCatId(provider), {
+      id: fixtureCatId(provider),
+      name: provider,
+      displayName: provider,
+      clientId: provider,
+      provider,
+      configurationSource: 'native_tool',
+      defaultModel: provider === 'opencode' ? 'opencode/fixture' : 'gemini-3.8-flash-high',
+      avatar: '/avatars/opencode.png',
+      color: { primary: '#000', secondary: '#fff' },
+      mentionPatterns: ['@opencode'],
+      mcpSupport: false,
+      roleDescription: 'fixture',
+      relationshipKey: 'oc-default-workspace-fixture',
+      personality: 'fixture',
+    });
 });
 after(async () => {
   for (const [key, value] of Object.entries(previous)) {
@@ -66,13 +76,15 @@ after(async () => {
   if (root) await rm(root, { recursive: true, force: true });
 });
 
-async function dispatch(threadStore, threadId = 'default', userId = 'user-1') {
+async function dispatchProvider(provider, threadStore, threadId = 'default', userId = 'user-1', afterAdmission) {
+  const catId = fixtureCatId(provider);
   const optionsSeen = [],
     messages = [];
   const service = {
     l0CompilerFn: async () => '# Test identity',
+    ...(provider === 'google' ? { freshnessCarrierCapability: () => ({ provider, carrier: 'agy_stream_json' }) } : {}),
     contextCapability: () => ({
-      provider: 'opencode',
+      provider,
       carrier: 'test',
       reportsRuntimeWindow: false,
       authoritativeUsage: true,
@@ -102,7 +114,7 @@ async function dispatch(threadStore, threadId = 'default', userId = 'user-1') {
     threadStore,
     apiUrl: 'http://127.0.0.1:1',
   };
-  for await (const message of invokeSingleCat(deps, {
+  const params = {
     catId,
     service,
     capacitySnapshot,
@@ -110,24 +122,169 @@ async function dispatch(threadStore, threadId = 'default', userId = 'user-1') {
     userId,
     threadId,
     isLastCat: true,
-  }))
-    messages.push(message);
+  };
+  if (afterAdmission) {
+    params.executionBinding = await prepareInvocationExecutionBinding(deps, params);
+    await afterAdmission();
+  }
+  for await (const message of invokeSingleCat(deps, params)) messages.push(message);
+
   return { optionsSeen, messages };
 }
 
-test('literal default lobby uses the existing persistent default workspace without rebinding', async () => {
-  const store = new ThreadStore();
-  const before = structuredClone(store.get('default'));
-  const result = await dispatch(store);
-  assert.equal(
-    result.optionsSeen.length,
-    1,
-    JSON.stringify(result.messages.filter((message) => message.type === 'error')),
-  );
-  assert.equal(result.optionsSeen[0].workingDirectory, workspace);
-  assert.equal(store.get('default').projectPath, before.projectPath);
-  assert.ok(result.messages.some((message) => message.type === 'system_info' && message.content?.includes(workspace)));
-});
+for (const provider of providers)
+  describe(`${provider} default workspace admission`, () => {
+    const catId = fixtureCatId(provider);
+    const dispatch = (...args) => dispatchProvider(provider, ...args);
+
+    test('literal default lobby uses the existing persistent default workspace without rebinding', async () => {
+      const store = new ThreadStore();
+      const before = structuredClone(store.get('default'));
+      const result = await dispatch(store);
+      assert.equal(
+        result.optionsSeen.length,
+        1,
+        JSON.stringify(result.messages.filter((message) => message.type === 'error')),
+      );
+      assert.equal(result.optionsSeen[0].workingDirectory, workspace);
+      assert.equal(store.get('default').projectPath, before.projectPath);
+      assert.ok(
+        result.messages.some((message) => message.type === 'system_info' && message.content?.includes(workspace)),
+      );
+    });
+
+    test('real messages route admits the literal default target and dispatch uses its canonical workspace', async () => {
+      const { default: Fastify } = await import('fastify');
+      const { messagesRoutes } = await import('../dist/routes/messages.js');
+      const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+      const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+      const store = new ThreadStore(),
+        queue = new InvocationQueue(),
+        app = Fastify();
+      await app.register(messagesRoutes, {
+        threadStore: store,
+        messageStore: new MessageStore(),
+        invocationQueue: queue,
+        uploadDir: join(root, 'uploads'),
+        socketManager: { emitToUser() {} },
+        router: {
+          previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
+          resolveExplicitTargets: async (ids) => ids,
+        },
+      });
+      try {
+        const response = await app.inject({
+          method: 'POST',
+          url: '/api/messages',
+          headers: { 'x-cat-cafe-user': 'user-1' },
+          payload: { content: '@opencode hi', threadId: 'default', mentions: [catId] },
+        });
+        assert.equal(response.statusCode, 202, response.body);
+        const admitted = queue.peekNextQueued('default', 'user-1');
+        assert.equal(admitted.threadId, 'default');
+        assert.deepEqual(admitted.targets, [catId]);
+        // The consumer is controlled; admission/store/invocation workspace resolution are real.
+        const result = await dispatch(store, admitted.threadId, admitted.userId);
+        assert.equal(
+          result.optionsSeen.length,
+          1,
+          JSON.stringify(result.messages.filter((message) => message.type === 'error')),
+        );
+        assert.equal(result.optionsSeen[0].workingDirectory, workspace);
+        assert.equal(store.get('default').projectPath, 'default');
+      } finally {
+        await app.close();
+      }
+    });
+
+    test('owned new conversation with no selected project uses the same default workspace', async () => {
+      const store = new ThreadStore();
+      const thread = store.create('user-1');
+      const result = await dispatch(store, thread.id);
+      assert.equal(
+        result.optionsSeen.length,
+        1,
+        JSON.stringify(result.messages.filter((message) => message.type === 'error')),
+      );
+      assert.equal(result.optionsSeen[0].workingDirectory, workspace);
+      assert.equal(store.get(thread.id).projectPath, 'default');
+    });
+
+    test('provider consumes the admitted default cwd after the thread selects another project', async () => {
+      const selected = await realpath(await mkdtemp(join(root, 'later-project-')));
+      const store = new ThreadStore();
+      const thread = store.create('user-1');
+      const result = await dispatch(store, thread.id, 'user-1', () => store.updateProjectPath(thread.id, selected));
+      assert.equal(
+        result.optionsSeen.length,
+        1,
+        JSON.stringify(result.messages.filter((message) => message.type === 'error')),
+      );
+      assert.equal(result.optionsSeen[0].workingDirectory, workspace);
+      assert.equal(store.get(thread.id).projectPath, selected);
+    });
+
+    test('an explicitly selected project remains authoritative', async () => {
+      const selected = await realpath(await mkdtemp(join(root, 'selected-')));
+      const store = new ThreadStore();
+      const thread = store.create('user-1', null, selected);
+      const result = await dispatch(store, thread.id);
+      assert.equal(
+        result.optionsSeen.length,
+        1,
+        JSON.stringify(result.messages.filter((message) => message.type === 'error')),
+      );
+      assert.equal(result.optionsSeen[0].workingDirectory, selected);
+      assert.equal(store.get(thread.id).projectPath, selected);
+    });
+
+    for (const mode of [
+      'missing-runtime-workspace',
+      'invalid-default',
+      'runtime-is-default',
+      'denied-default',
+      'foreign-owner',
+      'system-thread',
+      'deleted-thread',
+      'missing-thread',
+      'lookup-failed',
+      'invalid-selected',
+      'virtual-game',
+    ]) {
+      test(`default workspace never bypasses ${mode}`, async () => {
+        const store = new ThreadStore();
+        const thread = store.create(mode === 'foreign-owner' ? 'other-user' : 'user-1');
+        if (mode === 'system-thread') thread.systemKind = 'connector_hub';
+        if (mode === 'deleted-thread') store.softDelete(thread.id);
+        if (mode === 'invalid-selected') store.updateProjectPath(thread.id, join(root, 'missing-selected'));
+        if (mode === 'virtual-game') store.updateProjectPath(thread.id, 'games/werewolf');
+        const saved = process.env.CAT_CAFE_WORKSPACE_ROOT;
+        const savedRoots = process.env.PROJECT_ALLOWED_ROOTS;
+        if (mode === 'missing-runtime-workspace') delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+        if (mode === 'invalid-default') process.env.CAT_CAFE_WORKSPACE_ROOT = join(root, 'missing-workspace');
+        if (mode === 'runtime-is-default') process.env.CAT_CAFE_WORKSPACE_ROOT = runtime;
+        if (mode === 'denied-default') process.env.PROJECT_ALLOWED_ROOTS = runtime;
+        const target =
+          mode === 'lookup-failed'
+            ? {
+                ...store,
+                get: async () => {
+                  throw new Error('controlled store failure');
+                },
+              }
+            : store;
+        try {
+          const result = await dispatch(target, mode === 'missing-thread' ? 'does-not-exist' : thread.id);
+          assert.equal(result.optionsSeen.length, 0, 'unsafe defaults must not reach the provider');
+          assert.ok(result.messages.some((message) => message.type === 'error'));
+        } finally {
+          process.env.CAT_CAFE_WORKSPACE_ROOT = saved;
+          if (savedRoots === undefined) delete process.env.PROJECT_ALLOWED_ROOTS;
+          else process.env.PROJECT_ALLOWED_ROOTS = savedRoots;
+        }
+      });
+    }
+  });
 
 test('a detected Kimi member can freeze the approved default workspace from an ordinary new conversation', async () => {
   const { freezeExecutionWorkspace } = await import(
@@ -145,121 +302,3 @@ test('a detected Kimi member can freeze the approved default workspace from an o
   assert.equal(binding.usesDefaultWorkspace, true);
   assert.equal(store.get(thread.id).projectPath, thread.projectPath);
 });
-
-test('real messages route admits the literal default target and dispatch uses its canonical workspace', async () => {
-  const { default: Fastify } = await import('fastify');
-  const { messagesRoutes } = await import('../dist/routes/messages.js');
-  const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
-  const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-  const store = new ThreadStore(),
-    queue = new InvocationQueue(),
-    app = Fastify();
-  await app.register(messagesRoutes, {
-    threadStore: store,
-    messageStore: new MessageStore(),
-    invocationQueue: queue,
-    uploadDir: join(root, 'uploads'),
-    socketManager: { emitToUser() {} },
-    router: {
-      previewTargets: async () => ({ targetCats: [], reason: { kind: 'default_cat' } }),
-      resolveExplicitTargets: async (ids) => ids,
-    },
-  });
-  try {
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/messages',
-      headers: { 'x-cat-cafe-user': 'user-1' },
-      payload: { content: '@opencode hi', threadId: 'default', mentions: [catId] },
-    });
-    assert.equal(response.statusCode, 202, response.body);
-    const admitted = queue.peekNextQueued('default', 'user-1');
-    assert.equal(admitted.threadId, 'default');
-    assert.deepEqual(admitted.targets, [catId]);
-    // The consumer is controlled; admission/store/invocation workspace resolution are real.
-    const result = await dispatch(store, admitted.threadId, admitted.userId);
-    assert.equal(
-      result.optionsSeen.length,
-      1,
-      JSON.stringify(result.messages.filter((message) => message.type === 'error')),
-    );
-    assert.equal(result.optionsSeen[0].workingDirectory, workspace);
-    assert.equal(store.get('default').projectPath, 'default');
-  } finally {
-    await app.close();
-  }
-});
-
-test('owned new conversation with no selected project uses the same default workspace', async () => {
-  const store = new ThreadStore();
-  const thread = store.create('user-1');
-  const result = await dispatch(store, thread.id);
-  assert.equal(
-    result.optionsSeen.length,
-    1,
-    JSON.stringify(result.messages.filter((message) => message.type === 'error')),
-  );
-  assert.equal(result.optionsSeen[0].workingDirectory, workspace);
-  assert.equal(store.get(thread.id).projectPath, 'default');
-});
-
-test('an explicitly selected project remains authoritative', async () => {
-  const selected = await realpath(await mkdtemp(join(root, 'selected-')));
-  const store = new ThreadStore();
-  const thread = store.create('user-1', null, selected);
-  const result = await dispatch(store, thread.id);
-  assert.equal(
-    result.optionsSeen.length,
-    1,
-    JSON.stringify(result.messages.filter((message) => message.type === 'error')),
-  );
-  assert.equal(result.optionsSeen[0].workingDirectory, selected);
-  assert.equal(store.get(thread.id).projectPath, selected);
-});
-
-for (const mode of [
-  'missing-runtime-workspace',
-  'invalid-default',
-  'runtime-is-default',
-  'denied-default',
-  'foreign-owner',
-  'system-thread',
-  'deleted-thread',
-  'missing-thread',
-  'lookup-failed',
-  'invalid-selected',
-  'virtual-game',
-]) {
-  test(`default workspace never bypasses ${mode}`, async () => {
-    const store = new ThreadStore();
-    const thread = store.create(mode === 'foreign-owner' ? 'other-user' : 'user-1');
-    if (mode === 'system-thread') thread.systemKind = 'connector_hub';
-    if (mode === 'deleted-thread') store.softDelete(thread.id);
-    if (mode === 'invalid-selected') store.updateProjectPath(thread.id, join(root, 'missing-selected'));
-    if (mode === 'virtual-game') store.updateProjectPath(thread.id, 'games/werewolf');
-    const saved = process.env.CAT_CAFE_WORKSPACE_ROOT;
-    const savedRoots = process.env.PROJECT_ALLOWED_ROOTS;
-    if (mode === 'missing-runtime-workspace') delete process.env.CAT_CAFE_WORKSPACE_ROOT;
-    if (mode === 'invalid-default') process.env.CAT_CAFE_WORKSPACE_ROOT = join(root, 'missing-workspace');
-    if (mode === 'runtime-is-default') process.env.CAT_CAFE_WORKSPACE_ROOT = runtime;
-    if (mode === 'denied-default') process.env.PROJECT_ALLOWED_ROOTS = runtime;
-    const target =
-      mode === 'lookup-failed'
-        ? {
-            ...store,
-            get: async () => {
-              throw new Error('controlled store failure');
-            },
-          }
-        : store;
-    try {
-      const result = await dispatch(target, mode === 'missing-thread' ? 'does-not-exist' : thread.id);
-      assert.equal(result.optionsSeen.length, 0, 'unsafe defaults must not reach the provider');
-      assert.ok(result.messages.some((message) => message.type === 'error'));
-    } finally {
-      process.env.CAT_CAFE_WORKSPACE_ROOT = saved;
-      if (savedRoots === undefined) delete process.env.PROJECT_ALLOWED_ROOTS;
-      else process.env.PROJECT_ALLOWED_ROOTS = savedRoots;
-    }
-  });
-}

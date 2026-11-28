@@ -2,13 +2,24 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { profileUserRelativePath } from '@cat-cafe/shared/profile-contract';
+import type Database from 'better-sqlite3';
 import { CollectionIndexBuilder } from './CollectionIndexBuilder.js';
 import type { CollectionManifest } from './collection-types.js';
-import { resolveCollectionStorePath } from './external-collections.js';
+import { readEmbeddingDeployment } from './embedding-generation-config.js';
+import { resolveCollectionStorePath, updateExternalCollection } from './external-collections.js';
 import type { IEvidenceStore } from './interfaces.js';
 import type { LibraryCatalog } from './LibraryCatalog.js';
 import { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import { resolveCollectionScanner } from './scanner-resolver.js';
+import { missingVectorSource } from './vector-generation-identity.js';
+import { generationInvalidationState } from './vector-generation-invalidation.js';
+import { hasVectorGeneration } from './vector-generation-readiness.js';
+import {
+  type VectorGenerationId,
+  type VectorGenerationTables,
+  vectorGenerationTables,
+} from './vector-generation-tables.js';
+import { ELIGIBLE_VECTOR_PASSAGE } from './vector-source-fields.js';
 
 interface PersonalStoreOptions {
   dataDir: string;
@@ -49,6 +60,143 @@ interface PrivateBindingsOptions {
   privateUserId?: string;
   personalStore?: SqliteEvidenceStore;
   now: string;
+  /** Optional override for deployment active generation intent (defaults to readEmbeddingDeployment().activeId). */
+  activeGenerationId?: VectorGenerationId;
+}
+
+type ExternalVectorState = 'none' | 'ready' | 'stale';
+
+function resolveActiveGenerationId(explicit?: VectorGenerationId): VectorGenerationId {
+  if (explicit) return explicit;
+  try {
+    return readEmbeddingDeployment().activeId;
+  } catch {
+    return 'g0';
+  }
+}
+
+function hasGenerationTables(db: Database.Database, tables: VectorGenerationTables): boolean {
+  return Boolean(
+    db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name IN (?,?) LIMIT 1")
+      .get(tables.documents, tables.passages),
+  );
+}
+
+function isGenerationCoverageStale(db: Database.Database, id: VectorGenerationId): boolean {
+  const tables = vectorGenerationTables(id);
+  const requiredTables = [
+    tables.documents,
+    tables.passages,
+    `${tables.documents}_rowids`,
+    `${tables.passages}_rowids`,
+    tables.metadata,
+  ];
+  const presentCount = (
+    db
+      .prepare(
+        `SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name IN (${requiredTables.map(() => '?').join(',')})`,
+      )
+      .get(...requiredTables) as { n: number }
+  ).n;
+  if (presentCount !== requiredTables.length) return true;
+  if (generationInvalidationState(db, tables).quarantined) return true;
+
+  const registry = db.prepare('SELECT fingerprint, state FROM vector_generations WHERE id = ?').get(id) as
+    | { fingerprint: string; state: string }
+    | undefined;
+  if (id === 'g1') {
+    if (registry?.state !== 'ready') return true;
+    const meta = db
+      .prepare(`SELECT value FROM ${tables.metadata} WHERE key='embedding_representation_fingerprint'`)
+      .get() as { value: string } | undefined;
+    if (!meta?.value || meta.value !== registry.fingerprint) return true;
+  } else if (registry && registry.state !== 'ready') {
+    return true;
+  }
+
+  const hasMissingDoc = db
+    .prepare(
+      `SELECT 1 FROM evidence_docs d
+       LEFT JOIN ${tables.documentSources} s ON s.anchor = d.anchor
+       LEFT JOIN ${tables.documents}_rowids v ON v.id = d.anchor
+       WHERE ${missingVectorSource('documents', id)}
+       LIMIT 1`,
+    )
+    .get();
+  if (hasMissingDoc) return true;
+
+  const hasMissingPassage = db
+    .prepare(
+      `SELECT 1 FROM evidence_passages p
+       LEFT JOIN ${tables.passageSources} s ON s.passage_key = json_array(p.doc_anchor, p.passage_id)
+       LEFT JOIN ${tables.passages}_rowids v ON v.id = json_array(p.doc_anchor, p.passage_id)
+       WHERE (${ELIGIBLE_VECTOR_PASSAGE}) AND (${missingVectorSource('passages', id)})
+       LIMIT 1`,
+    )
+    .get();
+  if (hasMissingPassage) return true;
+
+  const hasOrphanDoc = db
+    .prepare(
+      `SELECT 1 FROM ${tables.documents}_rowids v
+       LEFT JOIN evidence_docs d ON d.anchor = v.id
+       WHERE d.anchor IS NULL
+       LIMIT 1`,
+    )
+    .get();
+  if (hasOrphanDoc) return true;
+
+  const hasOrphanPassage = db
+    .prepare(
+      `SELECT 1 FROM ${tables.passages}_rowids v
+       LEFT JOIN evidence_passages p
+         ON json_valid(v.id)
+         AND p.doc_anchor = CASE WHEN json_valid(v.id) THEN json_extract(v.id, '$[0]') END
+         AND p.passage_id = CASE WHEN json_valid(v.id) THEN json_extract(v.id, '$[1]') END
+       WHERE p.id IS NULL OR NOT (${ELIGIBLE_VECTOR_PASSAGE})
+       LIMIT 1`,
+    )
+    .get();
+  return Boolean(hasOrphanPassage);
+}
+
+/**
+ * Inspect persisted SQLite vector state for an external collection without relying on
+ * collections.json status. Selects the generation from deployment intent (`configuredId`):
+ * - Under `g1`, verifies `g1` readiness and full coverage.
+ * - Under `g0`, verifies `g0` whenever `g0` tables exist so paused/quarantined `g1` shadow
+ *   builds never disqualify a complete serving `g0` store. If only `g1` tables exist, a
+ *   previously `ready` `g1` store is verified as `g1`, whereas an inactive `building` `g1`
+ *   shadow without `g0` is not counted as serving vectors.
+ */
+function inspectExternalVectorState(db: Database.Database, configuredId: VectorGenerationId): ExternalVectorState {
+  if (!hasVectorGeneration(db)) return 'none';
+  try {
+    return db
+      .transaction((): ExternalVectorState => {
+        const hasG0 = hasGenerationTables(db, vectorGenerationTables('g0'));
+        const hasG1 = hasGenerationTables(db, vectorGenerationTables('g1'));
+        if (configuredId === 'g1') {
+          if (!hasG1) return 'stale';
+          return isGenerationCoverageStale(db, 'g1') ? 'stale' : 'ready';
+        }
+        if (hasG0) {
+          return isGenerationCoverageStale(db, 'g0') ? 'stale' : 'ready';
+        }
+        if (hasG1) {
+          const g1Registry = db.prepare("SELECT state FROM vector_generations WHERE id = 'g1'").get() as
+            | { state: string }
+            | undefined;
+          if (g1Registry?.state !== 'ready') return 'none';
+          return isGenerationCoverageStale(db, 'g1') ? 'stale' : 'ready';
+        }
+        return 'none';
+      })
+      .deferred();
+  } catch {
+    return 'stale';
+  }
 }
 
 export async function registerPrivateAndExternalCollections(options: PrivateBindingsOptions): Promise<void> {
@@ -81,21 +229,78 @@ export async function registerPrivateAndExternalCollections(options: PrivateBind
   }
 
   for (const externalManifest of options.externalManifests) {
-    try {
-      const manifest = bindLegacyPrivateOwner(externalManifest, privateUserId);
+    await registerOneExternalCollection(externalManifest, options);
+  }
+}
+
+async function registerOneExternalCollection(
+  externalManifest: CollectionManifest,
+  options: PrivateBindingsOptions,
+): Promise<void> {
+  const { catalog, stores, dataDir, privateUserId } = options;
+  let store: SqliteEvidenceStore | undefined;
+  try {
+    const manifest = bindLegacyPrivateOwner(externalManifest, privateUserId);
+    if (manifest.status === 'archived') {
       catalog.register(manifest);
-      if (manifest.status === 'archived') continue;
-      const storePath = resolveCollectionStorePath(dataDir, manifest.id);
-      mkdirSync(dirname(storePath), { recursive: true });
-      const store = new SqliteEvidenceStore(storePath, undefined, {
-        sourceRoot: manifest.root,
-        sourceRef: manifest.id,
-      });
-      await store.initialize();
-      stores.set(manifest.id, store);
-    } catch {
-      // fail-open: skip broken external collections
+      return;
     }
+    const storePath = resolveCollectionStorePath(dataDir, manifest.id);
+    mkdirSync(dirname(storePath), { recursive: true });
+    store = new SqliteEvidenceStore(storePath, undefined, {
+      sourceRoot: manifest.root,
+      sourceRef: manifest.id,
+    });
+    await store.initialize();
+    let finalStatus = manifest.status;
+    if (manifest.indexPolicy?.autoRebuild === true) {
+      const db = store.getDb();
+      const targetGenerationId = resolveActiveGenerationId(options.activeGenerationId);
+      if (existsSync(manifest.root)) {
+        const startMs = Date.now();
+        const hadPhysicalVectors = hasVectorGeneration(db);
+        const docsBefore = (db.prepare('SELECT count(*) AS n FROM evidence_docs').get() as { n: number }).n;
+        const builder = new CollectionIndexBuilder(store, manifest, resolveCollectionScanner(manifest));
+        const result = await builder.rebuild();
+        const docsAfter = (db.prepare('SELECT count(*) AS n FROM evidence_docs').get() as { n: number }).n;
+        const lexicalChanged = result.indexed > 0 || docsAfter !== docsBefore;
+        const vectorStateAfter = inspectExternalVectorState(db, targetGenerationId);
+        // Separate selected-generation SQLite coverage from physical-vector lexical mutation isolation:
+        // MemoryEmbeddingLifecycle.enabledStores() selects cohort members via physical hasVectorGeneration(db),
+        // so any lexical mutation on a store carrying physical vector tables (including an inactive G1 shadow)
+        // must isolate the store as stale, and subsequent zero-change boots must preserve that persisted
+        // 'stale' isolation whenever SQLite cannot prove active-generation readiness (vectorStateAfter === 'none').
+        const vectorsStale =
+          vectorStateAfter === 'stale' ||
+          (hadPhysicalVectors && (lexicalChanged || (vectorStateAfter === 'none' && manifest.status === 'stale')));
+        finalStatus = result.blocked ? 'blocked' : vectorsStale ? 'stale' : 'active';
+        console.info('[memory] external collection startup autoRebuild', {
+          id: manifest.id,
+          indexed: result.indexed,
+          skipped: result.skipped,
+          blocked: result.blocked,
+          status: finalStatus,
+          durationMs: Date.now() - startMs,
+        });
+        try {
+          updateExternalCollection(dataDir, manifest.id, { status: finalStatus });
+        } catch {
+          // in-memory or unsaved manifest in tests
+        }
+      } else if (inspectExternalVectorState(db, targetGenerationId) === 'stale') {
+        finalStatus = 'stale';
+        try {
+          updateExternalCollection(dataDir, manifest.id, { status: finalStatus });
+        } catch {
+          // in-memory or unsaved manifest in tests
+        }
+      }
+    }
+    catalog.register(finalStatus ? { ...manifest, status: finalStatus } : manifest);
+    stores.set(manifest.id, store);
+  } catch {
+    store?.close();
+    // fail-open: skip broken external collections
   }
 }
 

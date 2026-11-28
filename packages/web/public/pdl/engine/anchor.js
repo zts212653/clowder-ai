@@ -121,11 +121,13 @@ function caretRect(ta) {
   return { left: tr.left + kr.left - mr.left - ta.scrollLeft, top: tr.top + kr.top - mr.top - ta.scrollTop, width: 1, height: kr.height };
 }
 /* 右键：PDL 里声明了 ⋯ 菜单的节点（type: more / prop: menu，见 PDL_POPUPS.menu.via）画出来的元素带 data-menu-decl（渲染器写，MENU_DECL）。
-   从点到的地方往上找，第一个装着 ⋯ 的祖先就是菜单的主人：只装着一个时，在点击处（看不见的锚点）打开同一个菜单；装着好几个（分不清是谁的）、
+   从点到的地方往上找，在当前视图或导航层的边界前停下。边界内第一个装着 ⋯ 的祖先就是菜单的主人：
+   只装着一个时，在点击处（看不见的锚点）打开同一个菜单；装着好几个（分不清是谁的）、
    或者点在可编辑的地方，就不管，交给浏览器。覆盖浏览器的右键菜单是有意的（应用也作为安装的客户端发布） */
 document.addEventListener('contextmenu', function (e) {
   const t = e.target; if (!t.closest || t.closest('input, textarea, [contenteditable]')) return;
   for (let n = t; n && n !== document.documentElement; n = n.parentElement) {
+    if (n.matches('[data-view], [data-layer]')) return;
     const ds = n.matches('[data-menu-decl]') ? [n] : n.querySelectorAll('[data-menu-decl]');
     if (!ds.length) continue;
     if (ds.length > 1) return;

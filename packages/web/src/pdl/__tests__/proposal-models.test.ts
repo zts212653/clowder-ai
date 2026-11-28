@@ -140,6 +140,36 @@ describe('producer-specific proposal bindings', () => {
     );
     expect(transport.post.mock.calls[0][0]).toBe('/api/session-handoff/handoff-1/reject');
   });
+  it('shows a Session handoff with the title, words and fields its card carries, pending and decided', async () => {
+    const block = {
+      id: 'handoff-block',
+      v: 1 as const,
+      kind: 'card' as const,
+      title: '提议 session 接力',
+      bodyMarkdown: 'opus 想在干净断点封印当前 session。',
+      fields: [{ label: 'worktree', value: 'feat/x' }],
+      actions: [{ label: '同意', action: 'handoff:approve', payload: { proposalId: 'handoff-1' } }],
+    };
+    const target = proposalTarget(block, 'thread-1', 'message-1')!;
+    for (const status of ['pending', 'approved'] as const) {
+      transport.read.mockResolvedValue({ proposal: { proposalId: 'handoff-1', status, sealedSessionId: 's' } });
+      const view = proposalView(
+        { target, record: await readProposal(target, undefined, true), current: true, refresh: vi.fn() },
+        false,
+        false,
+        {},
+        block,
+      )!;
+      expect(view).toMatchObject({
+        title: '提议 session 接力',
+        titleType: '',
+        first: block.bodyMarkdown,
+        firstTitle: '',
+      });
+      expect(view.fields).toEqual([{ k: 'worktree', v: 'feat/x' }]);
+      if (status === 'approved') expect(view.result).toMatchObject({ status: 'approved', first: block.bodyMarkdown });
+    }
+  });
 });
 
 describe('uncertain proposal approval recovery', () => {

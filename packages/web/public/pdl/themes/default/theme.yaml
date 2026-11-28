@@ -845,6 +845,8 @@ pdl:
           icon: reply
           open:
             action: reply
+            args:
+              mid: "@mid"
           scope: page
           move: chat.message.actions
         - id: msg.speak
@@ -3104,6 +3106,8 @@ pdl:
     THREAD_SECTION_ITEM:
       key: "@key"
       rows: "@rows"
+      peek: "@peek"
+      peekMore: "@peekMore"
       collapsed:
         of: "@head.kind"
         map:
@@ -3143,6 +3147,7 @@ pdl:
         warn: "@head.warn"
         fixed: "@head.fixed"
         peek: "@head.peek"
+        attention: "@head.attention"
         sort: "@head.sort"
         open:
           of: "@head.kind"
@@ -6067,7 +6072,7 @@ pdl:
                 control:
                   type: select
                   id: f-client
-                  value: $.form.d.client
+                  value: $.form.clientChoice
                   change: md
                   args:
                     k: client
@@ -6163,6 +6168,7 @@ pdl:
                   gte: 2
               - kind: field
                 label: t:memberForm.fields.account
+                when: "!$.form.dsh"
                 id: f-acc
                 control:
                   type: select
@@ -6496,6 +6502,9 @@ pdl:
                             $frag: MEMBER_MODEL_SOURCE
                         - $.form.preferences.catalog.defaultModelLabel
                     when: $.form.preferences.catalog.defaultModelLabel
+                  - text: $.form.dshSetupError
+                    tone: danger
+                    when: $.form.dshSetupError
               - kind: field
                 label: t:memberForm.fields.collaborationTools
                 help: t:memberForm.fields.collaborationHelp
@@ -6668,71 +6677,9 @@ pdl:
         title: t:wsSessions.runtime
         keep: true
         blocks:
-          - type: box
-            when: $.form.runtime.savedCheck
-            blocks:
-              - type: status
-                text:
-                  of: $.form.runtime.savedCheck.state
-                  map:
-                    unchecked: t:runtime.dshCheck.unchecked
-                    checking: t:runtime.dshCheck.checking
-                    passed: t:runtime.dshCheck.passed
-                    partial: t:runtime.dshCheck.partial
-                    failed: t:runtime.dshCheck.failed
-                    unknown: t:runtime.dshCheck.unknown
-                    stale: t:runtime.dshCheck.stale
-                tone:
-                  of: $.form.runtime.savedCheck.state
-                  map:
-                    passed: ok
-                    failed: danger
-                    partial: warn
-                    stale: warn
-                    _: info
-              - type: text
-                variant: meta
-                when: $.form.runtime.savedCheck.reasonCode
-                text:
-                  of: $.form.runtime.savedCheck.reasonCode
-                  map:
-                    tool_schema_rejected: t:runtime.dshCheck.tool_schema_rejected
-                    dsh_setup_auth_refresh_required: t:runtime.dshSetupError.dsh_setup_auth_refresh_required
-                    dsh_setup_credential_missing: t:runtime.dshSetupError.dsh_setup_credential_missing
-                    dsh_setup_credential_invalid: t:runtime.dshSetupError.dsh_setup_credential_invalid
-                    dsh_setup_custom_startup: t:runtime.dshSetupError.dsh_setup_custom_startup
-                    session_configuration_unavailable: t:runtime.dshCheck.session_configuration_unavailable
-                    check_timed_out: t:runtime.dshCheck.check_timed_out
-                    check_store_unavailable: t:runtime.dshCheck.check_store_unavailable
-                    model_reply_unconfirmed: t:runtime.dshCheck.model_reply_unconfirmed
-                    _: t:runtime.dshCheck.unknown
-              - type: list
-                from: $.form.runtime.savedCheck.toolIssues
-                optional: true
-                row:
-                  layout: two
-                  title: "@pluginId"
-                  sub:
-                    of: "@reasonCode"
-                    map:
-                      plugin_activation_unavailable: t:runtime.dshCheck.plugin_activation_unavailable
-                      _: t:runtime.dshCheck.invalidTool
-              - type: toolbar
-                items:
-                  - type: button
-                    label: t:runtime.dshCheck.refresh
-                    act: memberDshRefresh
-                    busy: $.form.runtime.checkBusy
-                  - type: button
-                    label: t:runtime.dshCheck.check
-                    tip: t:runtime.dshCheck.cost
-                    act: memberDshCheck
-                    busy: $.form.runtime.checkBusy
-                    when:
-                      of: $.form.runtime.savedCheck.state
-                      map:
-                        checking: false
-                        _: true
+          - type: view
+            id: member.runtime.dsh-check
+            data: $.form.runtime
           - type: settings
             rows:
               - label: t:runtime.hooks.label
@@ -8058,6 +8005,15 @@ pdl:
                   args:
                     i: "@rich.file.work"
                   when: "@rich.file.work"
+                - type: button
+                  label: t:chatRich.openWork
+                  act: workOpen
+                  args:
+                    mid: "@rich.file.mid"
+                    url: "@rich.file.url"
+                  when:
+                    - "!@rich.file.work"
+                    - "@rich.file.mid"
                 - type: button
                   iconOnly: true
                   icon: download
@@ -16594,7 +16550,6 @@ pdl:
                           label: t:composer.jump
                           tip: t:composer.jumpTip
                           act: streamLatest
-                          hideWhileTyping: true
                         - type: notices
                           items:
                             slot: chat.composer.notice
@@ -16639,7 +16594,7 @@ pdl:
                             args:
                               v: edit
                               i: "@index"
-                            when: "@queued"
+                            when: "@recallable"
                           - label: t:common.delete
                             icon: delete
                             act: cafeQueue
@@ -16785,11 +16740,10 @@ pdl:
                             lost: cafe-att lost
                             _: cafe-att
                         x:
-                          act: listOp
+                          act: remove
                           args:
-                            path: cs.att
-                            op: del
-                            i: "@index"
+                            entity: att
+                            id: "@index"
                           label:
                             t: chip.remove
                             args:
@@ -18935,6 +18889,8 @@ pdl:
           item:
             key: "@key"
             rows: "@rows"
+            peek: "@peek"
+            peekMore: "@peekMore"
             rowDrop:
               of: "@key"
               map:
@@ -18983,6 +18939,7 @@ pdl:
               warn: "@head.warn"
               fixed: "@head.fixed"
               peek: "@head.peek"
+              attention: "@head.attention"
               sort: "@head.sort"
               open:
                 of: "@head.kind"
@@ -21360,31 +21317,33 @@ pdl:
           blocks:
             - type: text
               variant: meta
-              text:
-                t: mediaReview.lightbox.sub
-                args:
-                  - $.author
-                  - $.version
-                  - of: $.at
-                    fmt: at
-                  - of: $.many
-                    map:
-                      "true":
-                        of:
-                          - 0
-                          - 1
-                          - 2
-                          - 3
-                        item:
-                          of: "@"
-                          map:
-                            "0": " · "
-                            "1": $.index
-                            "2": " / "
-                            "3": $.total
-                        sep: ""
-                      "false": ""
-                      _: $.many
+              parts:
+                sep: " · "
+                parts:
+                  - text: $.author
+                    when: $.author
+                  - text:
+                      t: films.version
+                      args:
+                        - $.version
+                    when: $.version
+                  - text:
+                      of: $.at
+                      fmt: at
+                    when: $.at
+                  - text:
+                      of:
+                        - 0
+                        - 1
+                        - 2
+                      item:
+                        of: "@"
+                        map:
+                          "0": $.index
+                          "1": " / "
+                          "2": $.total
+                      sep: ""
+                    when: $.many
               when:
                 of: $.target.kind
                 map:
@@ -22828,7 +22787,7 @@ pdl:
                   control:
                     type: button
                     iconOnly: true
-                    icon: down
+                    icon: chevboth
                     label: t:chat.sidebar.expandProjects
                     act: set
                     args:
@@ -22840,7 +22799,7 @@ pdl:
                   control:
                     type: button
                     iconOnly: true
-                    icon: right
+                    icon: chevin
                     label: t:chat.sidebar.collapseProjects
                     act: set
                     args:
@@ -22918,7 +22877,11 @@ pdl:
                     act: workOpen
                     args:
                       i: "@work"
-                  _: null
+                  _:
+                    act: workOpen
+                    args:
+                      mid: "@mid"
+                      url: "@url"
           blocks:
             - type: component
               use: media
@@ -25878,6 +25841,73 @@ pdl:
           note: "1"
           help: t:mcpNew.desc
         - $frag: MCP_FORM
+    member.runtime.dsh-check:
+      blocks:
+        - type: box
+          when: $.savedCheck
+          blocks:
+            - type: status
+              text:
+                of: $.savedCheck.state
+                map:
+                  unchecked: t:runtime.dshCheck.unchecked
+                  checking: t:runtime.dshCheck.checking
+                  passed: t:runtime.dshCheck.passed
+                  partial: t:runtime.dshCheck.partial
+                  failed: t:runtime.dshCheck.failed
+                  unknown: t:runtime.dshCheck.unknown
+                  stale: t:runtime.dshCheck.stale
+              tone:
+                of: $.savedCheck.state
+                map:
+                  passed: ok
+                  failed: danger
+                  partial: warn
+                  stale: warn
+                  _: info
+            - type: text
+              variant: meta
+              when: $.savedCheck.reasonCode
+              text:
+                of: $.savedCheck.reasonCode
+                map:
+                  tool_schema_rejected: t:runtime.dshCheck.tool_schema_rejected
+                  dsh_setup_auth_refresh_required: t:runtime.dshSetupError.dsh_setup_auth_refresh_required
+                  dsh_setup_credential_missing: t:runtime.dshSetupError.dsh_setup_credential_missing
+                  dsh_setup_credential_invalid: t:runtime.dshSetupError.dsh_setup_credential_invalid
+                  dsh_setup_custom_startup: t:runtime.dshSetupError.dsh_setup_custom_startup
+                  session_configuration_unavailable: t:runtime.dshCheck.session_configuration_unavailable
+                  check_timed_out: t:runtime.dshCheck.check_timed_out
+                  check_store_unavailable: t:runtime.dshCheck.check_store_unavailable
+                  model_reply_unconfirmed: t:runtime.dshCheck.model_reply_unconfirmed
+                  _: t:runtime.dshCheck.unknown
+            - type: list
+              from: $.savedCheck.toolIssues
+              optional: true
+              row:
+                layout: two
+                title: "@pluginId"
+                sub:
+                  of: "@reasonCode"
+                  map:
+                    plugin_activation_unavailable: t:runtime.dshCheck.plugin_activation_unavailable
+                    _: t:runtime.dshCheck.invalidTool
+            - type: toolbar
+              items:
+                - type: button
+                  label: t:runtime.dshCheck.refresh
+                  act: memberDshRefresh
+                  busy: $.checkBusy
+                - type: button
+                  label: t:runtime.dshCheck.check
+                  tip: t:runtime.dshCheck.cost
+                  act: memberDshCheck
+                  busy: $.checkBusy
+                  when:
+                    of: $.savedCheck.state
+                    map:
+                      checking: false
+                      _: true
     page.member:
       error: t:runtime.readError
       retry:
@@ -27403,6 +27433,24 @@ pdl:
               when:
                 - $.binary
                 - "!$.media"
+                - "!$.documentFrame"
+            - type: toolbar
+              when: $.documentEditor
+              items:
+                - type: button
+                  label: t:workbench.file.collabEdit
+                  act: fileOffice
+                  when: "!$.documentFrame"
+                - type: button
+                  label: t:common.back
+                  act: fileOffice
+                  when: $.documentFrame
+            - type: frame
+              title: $.name
+              key: $.documentFrame
+              src: $.documentFrame
+              tall: true
+              when: $.documentFrame
             - $frag: FILE_INFO
             - type: notice
               tone: warn
@@ -32867,8 +32915,6 @@ pdl:
             variant: row
             value: "@selected"
             label: "@title"
-            act: "@act"
-            args: "@args"
           when: "@selectable"
       title:
         - parts: "@title"

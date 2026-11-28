@@ -9,7 +9,7 @@ import Fastify from 'fastify';
 import { InvocationRegistry } from '../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { deriveGrowingSourceMessageRevision } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { ArtifactReviewService } from '../src/domains/collaborative-content/artifact-review/service.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { createWorkAuthorizer, workMediaPrincipal } from '../src/domains/collaborative-content/works/access.js';
 import { WorkReviewResponseService } from '../src/domains/collaborative-content/works/review-response.js';
 import { createWorkResponseAuthority } from '../src/domains/collaborative-content/works/review-response-authority.js';

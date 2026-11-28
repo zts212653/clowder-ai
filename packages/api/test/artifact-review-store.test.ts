@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import Database from 'better-sqlite3';
 import type { ArtifactReview } from '../../shared/src/types/artifact-review.js';
-import { publicationLedgerId } from '../src/domains/collaborative-content/artifact-review/canonical-ledger.js';
 import { applyArtifactReviewAction } from '../src/domains/collaborative-content/artifact-review/reducer.js';
-import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { publicationLedgerId } from '../src/domains/collaborative-content/artifact-review/storage/canonical-ledger.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/storage/store.js';
 import { publicationLedgerSource } from '../src/domains/collaborative-content/workspace-review/publication-review-source.js';
 
 const actor = { kind: 'human', actorId: 'operator' } as const;

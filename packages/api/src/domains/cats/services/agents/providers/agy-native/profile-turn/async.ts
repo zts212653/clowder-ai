@@ -6,6 +6,7 @@ import {
   sameUnixProcess,
   type UnixProcessIdentity,
 } from '../../../../../../../utils/cli-process-ownership.js';
+import { currentWindowsApiJob } from '../../../../../../../utils/windows-job-owner.js';
 import {
   AgyNativeProfileBusyError,
   type AgyNativeTurnScope,
@@ -16,6 +17,7 @@ import {
   parseNativeTurnOwner,
   retireOrphanCredentials,
 } from './store.js';
+import { isWin32NativeTurnRetired, readWin32ProcessIdentity } from './win32-process-identity.js';
 
 let ownIdentity: UnixProcessIdentity | undefined;
 function sqliteBusy(error: unknown): boolean {
@@ -26,6 +28,7 @@ function sqliteBusy(error: unknown): boolean {
 async function isRetired(owner: ProfileTurnOwner, home: string): Promise<boolean> {
   // A verified birth identity is stable for this API's entire lifetime.
   if (owner.identity.pid === process.pid && sameUnixProcess(owner.identity, ownIdentity)) return false;
+  if (process.platform === 'win32') return isWin32NativeTurnRetired(owner, home);
   const exact = await readUnixProcessSnapshot({ pids: [owner.identity.pid] });
   if (!exact || sameUnixProcess(owner.identity, exact.get(owner.identity.pid))) return false;
   const snapshot = await readUnixProcessSnapshot({
@@ -43,7 +46,10 @@ export async function acquireAgyNativeProfileTurnAsync(
   signal?: AbortSignal,
 ): Promise<() => Promise<void>> {
   signal?.throwIfAborted();
-  ownIdentity ??= (await readUnixProcessSnapshot({ pids: [process.pid] }))?.get(process.pid);
+  ownIdentity ??=
+    process.platform === 'win32'
+      ? ((await readWin32ProcessIdentity(process.pid)) ?? undefined)
+      : (await readUnixProcessSnapshot({ pids: [process.pid] }))?.get(process.pid);
   if (!ownIdentity) throw new Error('Native profile ownership requires a verified process birth identity');
   const identity = ownIdentity;
   let store: ReturnType<typeof openNativeTurnStore>;
@@ -70,12 +76,21 @@ export async function acquireAgyNativeProfileTurnAsync(
       if (current?.token !== previous?.token || current?.owner !== previous?.owner)
         throw new AgyNativeProfileBusyError('Native profile ownership changed during process observation');
       if (owner && !owner.preparation) retireOrphanCredentials(owner.runHome ?? home, home);
+      const activeWinJob = process.platform === 'win32' ? currentWindowsApiJob() : null;
       const next: ProfileTurnOwner = {
         identity,
         dataRoot: resolveCatCafeDataRoot(),
         ...(invocationId ? { invocationId } : {}),
         ...(scope.runHome ? { runHome: scope.runHome } : {}),
         ...(scope.preparation ? { preparation: true } : {}),
+        ...(activeWinJob
+          ? {
+              windowsJob: {
+                jobName: activeWinJob.record.jobName,
+                sessionId: activeWinJob.record.sessionId,
+              },
+            }
+          : {}),
       };
       db.prepare(`INSERT INTO ${table} (${key}, token, owner) VALUES (?, ?, ?)
         ON CONFLICT(${key}) DO UPDATE SET token = excluded.token, owner = excluded.owner`).run(

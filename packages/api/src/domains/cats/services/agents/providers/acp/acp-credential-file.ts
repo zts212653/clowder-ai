@@ -28,7 +28,7 @@ export function resolveSessionCredentialFile(
 export function prepareSessionCredentialFile(
   callbackEnv: Record<string, string> | undefined,
   resumeSessionId?: string,
-): PreparedCredentialEnv | null {
+): Promise<PreparedCredentialEnv | null> {
   return prepareProviderSessionCredentialFile(ACP_CREDENTIAL_NAMESPACE, callbackEnv, resumeSessionId);
 }
 

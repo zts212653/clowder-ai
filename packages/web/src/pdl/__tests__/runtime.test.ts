@@ -257,8 +257,16 @@ async function boot(
   };
   w.document.getAnimations = () => [];
   w.document.fonts = { ready: Promise.resolve() };
+  const context = dom.getInternalVMContext();
+  const appendToHead = w.document.head.appendChild.bind(w.document.head);
+  w.document.head.appendChild = (node: Node) => {
+    if (node.nodeName === 'STYLE') return node; // jsdom cannot parse the theme's browser CSS.
+    const appended = appendToHead(node);
+    if (node.nodeName === 'SCRIPT' && node.textContent) runInContext(node.textContent, context);
+    return appended;
+  };
   for (const source of scriptSources)
-    runInContext(readFileSync(path.join(process.cwd(), 'public', source), 'utf8'), dom.getInternalVMContext(), {
+    runInContext(readFileSync(path.join(process.cwd(), 'public', source), 'utf8'), context, {
       filename: source,
     });
   const terminals = new Map<
@@ -1865,6 +1873,18 @@ describe('unmodified runtime and project chat bindings', () => {
       expect(w.eval('S.ws.pawSource')).toBeNull();
     } finally {
       await w.__settled();
+      dom.window.close();
+    }
+  });
+  it('the message toolbar quote names the message it quotes', async () => {
+    const { dom, w, action } = await boot();
+    try {
+      const button = w.document.querySelector('[data-act="reply"][data-i]') as HTMLElement;
+      const mid = w.eval(`chatRead('chatStream').items[${button.dataset.i}].mid`);
+      button.click();
+      await w.__settled();
+      expect(action).toHaveBeenCalledWith('reply', expect.objectContaining({ mid }), expect.anything());
+    } finally {
       dom.window.close();
     }
   });
@@ -3566,7 +3586,11 @@ describe('unmodified runtime and project chat bindings', () => {
       sidebarOwner: {
         classification: { phase: 'idle', suggestions: [], newLabels: [], error: '' },
         preferences: {
-          groups: [{ id: 'attention_owner', name: 'Owner group', threadIds: ['pdl-test', 'other'] }],
+          groups: [
+            { id: 'attention_owner', name: 'Owner group', threadIds: ['pdl-test', 'other'] },
+            // a group this change does not touch is not part of the snapshot the owner compares
+            { id: 'attention_unrelated', name: 'Unrelated group', threadIds: ['third', 'fourth'] },
+          ],
           aliases: {},
           open: {},
         },
@@ -3578,6 +3602,8 @@ describe('unmodified runtime and project chat bindings', () => {
       undefined,
       (data) => {
         data.threads.push({ ...data.threads[0], id: 'other', title: 'Other owner thread' });
+        data.threads.push({ ...data.threads[0], id: 'third', title: 'Third thread' });
+        data.threads.push({ ...data.threads[0], id: 'fourth', title: 'Fourth thread' });
       },
       undefined,
       project,
@@ -4354,7 +4380,7 @@ describe('unmodified runtime and project chat bindings', () => {
       dom.window.close();
     }
   });
-  it('renders r126 file media and generic Office metadata through the original file view', async () => {
+  it('keeps file media and Office metadata and opens the declared document surfaces', async () => {
     const media = {
       id: 'file:/project/owner.png',
       kind: 'image',
@@ -4407,11 +4433,35 @@ describe('unmodified runtime and project chat bindings', () => {
         },
       });
       await w.__settled();
-      expect(page().textContent).toContain(w.eval("tc('workbench.file.noPreview')"));
+      expect(page().querySelector('iframe')?.getAttribute('src')).toBe(
+        '/workspace-document?worktreeId=wt&path=owner.pptx',
+      );
       expect(page().textContent).toContain(w.eval("tc('workbench.fileInfoField.size')"));
       expect(page().textContent).toContain(w.eval("tc('workbench.fileInfoField.slides')"));
       expect(page().textContent).toContain('2 KB');
       expect(page().querySelector('pre,video,audio,img')).toBeNull();
+      await w.eval("A.wsFile({ p:'owner.docx',w:'wt'})");
+      w.clowderChat.pushProject({
+        workbench: {
+          ...bench,
+          opened: {
+            worktreeId: 'wt',
+            file: {
+              ...file,
+              path: 'owner.docx',
+              absolutePath: '/project/owner.docx',
+              mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            },
+          },
+        },
+      });
+      await w.__settled();
+      expect(page().querySelector('iframe')).toBeNull();
+      page().querySelector('[data-act="fileOffice"]').click();
+      await w.__settled();
+      expect(page().querySelector('iframe')?.getAttribute('src')).toBe(
+        '/workspace-document?worktreeId=wt&path=owner.docx',
+      );
       expect(errors).not.toHaveBeenCalled();
     } finally {
       dom.window.close();
@@ -4443,14 +4493,18 @@ describe('unmodified runtime and project chat bindings', () => {
       toggle.click();
       await w.__settled();
       expect(ui.projOpen?.[alpha]).toBe(false);
-      expect(sections()[0].collapsed).toBe(true);
+      const drawn = () =>
+        [...w.document.querySelectorAll('section.gsec[data-sec^="proj:"]')].map((s) =>
+          s.hasAttribute('data-collapsed'),
+        );
+      expect(drawn()).toEqual([true, false]);
       expect(Object.keys(ui.projOpen!)).toEqual([alpha, beta]);
       w.document.querySelector('[data-path="cs.projAll"][data-v="1"]').click();
       await w.__settled();
-      expect(sections().every((s: { collapsed: boolean }) => !s.collapsed)).toBe(true);
+      expect(drawn()).toEqual([false, false]);
       w.document.querySelector('[data-path="cs.projAll"][data-v="0"]').click();
       await w.__settled();
-      expect(sections().every((s: { collapsed: boolean }) => s.collapsed)).toBe(true);
+      expect(drawn()).toEqual([true, true]);
       w.eval("A.set({path:'cs.tag',v:'selected'})");
       await w.__settled();
       expect(sections()).toHaveLength(1);
@@ -6100,6 +6154,114 @@ describe('unmodified runtime and project chat bindings', () => {
     }
   });
 
+  it('keeps an absent completion idle and still accepts and clears a matching completion', async () => {
+    const { dom, w } = await boot();
+    try {
+      const input = w.document.getElementById('chat-input');
+      const ghost = input.parentElement.querySelector('.ta-ghost');
+      w.eval("TA_COMPLETE['chat-input']=['continue']");
+      const observer = new w.MutationObserver(() => {});
+      observer.observe(ghost, { childList: true, subtree: true });
+      input.value = 'unmatched';
+      input.setSelectionRange(input.value.length, input.value.length);
+      w.eval("taGhost(document.getElementById('chat-input'))");
+      expect(ghost.textContent).toBe('');
+      expect(observer.takeRecords()).toHaveLength(0);
+      input.focus();
+      input.value = 'co';
+      input.setSelectionRange(2, 2);
+      w.eval("taGhost(document.getElementById('chat-input'))");
+      expect(ghost.children[1].textContent).toBe('ntinue');
+      expect(input.dataset.ghost).toBe('continue');
+      input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+      expect(input.value).toBe('continue');
+      expect(ghost.textContent).toBe('');
+      expect(input.dataset.ghost).toBeUndefined();
+      observer.disconnect();
+    } finally {
+      await w.__settled();
+      dom.window.close();
+    }
+  });
+
+  it('preserves the other-choice input during IME composition and further typing', async () => {
+    const { dom, w, ui, data, push } = await boot(undefined, (data, state) => {
+      data.messages[1].extra = {
+        rich: {
+          v: 1,
+          blocks: [
+            {
+              id: 'ime-choice',
+              v: 1,
+              kind: 'interactive',
+              interactiveType: 'select',
+              options: [{ id: 'other', label: 'Other', customInput: true }],
+            },
+          ],
+        },
+      };
+      state.f['pick:reply-1:ime-choice'] = ['other'];
+    });
+    try {
+      const id = 'pick-reply-1:ime-choice-t';
+      const input = w.document.getElementById(id);
+      const submit = () => w.document.querySelector('[data-act="richSubmit"]');
+      expect(input).not.toBeNull();
+      expect(submit().disabled).toBe(true);
+      input.focus();
+      input.dispatchEvent(new w.CompositionEvent('compositionstart', { bubbles: true }));
+      input.value = 'y';
+      input.dispatchEvent(new w.InputEvent('input', { bubbles: true, data: 'y', isComposing: true }));
+      expect(w.document.getElementById(id) === input).toBe(true);
+      expect(w.document.activeElement === input).toBe(true);
+      await w.__settled();
+      w.eval(
+        'window.cardInputRenders=0; var cardRender=render; render=function(){window.cardInputRenders++;return cardRender.apply(this,arguments);}; window.cardStreamReads=0; var cardStream=VM.chatStream; VM.chatStream=function(){window.cardStreamReads++;return cardStream.apply(this,arguments);};',
+      );
+      const changes: unknown[] = [];
+      const observer = new w.MutationObserver((items: unknown[]) => changes.push(...items));
+      observer.observe(w.document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+      input.value = 'yu';
+      input.dispatchEvent(new w.InputEvent('input', { bubbles: true, data: 'u', isComposing: true }));
+      input.value = '语';
+      input.dispatchEvent(new w.InputEvent('input', { bubbles: true, data: '语', isComposing: true }));
+      input.dispatchEvent(new w.CompositionEvent('compositionend', { bubbles: true, data: '语' }));
+      expect(ui.f[id]).toBe('语');
+      expect(submit().disabled).toBe(false);
+      const committed = w.document.getElementById(id);
+      committed.value = '语音';
+      committed.dispatchEvent(new w.InputEvent('input', { bubbles: true, data: '音', isComposing: false }));
+      expect(ui.f[id]).toBe('语音');
+      expect(w.document.getElementById(id) === committed).toBe(true);
+      await w.__settled();
+      observer.disconnect();
+      expect(w.cardInputRenders).toBe(0);
+      expect(w.cardStreamReads).toBe(0);
+      expect(changes).toHaveLength(0);
+      const next = w.document.getElementById(id);
+      next.focus();
+      next.dispatchEvent(new w.CompositionEvent('compositionstart', { bubbles: true }));
+      next.value = '语音y';
+      next.dispatchEvent(new w.InputEvent('input', { bubbles: true, data: 'y', isComposing: true }));
+      data.messages[0].content += ' new push';
+      push();
+      await w.__settled();
+      expect(w.document.getElementById(id) === next).toBe(true);
+      expect(next.value).toBe('语音y');
+      next.value = '语音语';
+      next.dispatchEvent(new w.InputEvent('input', { bubbles: true, data: '语', isComposing: true }));
+      next.dispatchEvent(new w.CompositionEvent('compositionend', { bubbles: true, data: '语' }));
+      expect(ui.f[id]).toBe('语音语');
+      const cleared = w.document.getElementById(id);
+      cleared.value = '';
+      cleared.dispatchEvent(new w.InputEvent('input', { bubbles: true }));
+      expect(submit().disabled).toBe(true);
+    } finally {
+      await w.__settled();
+      dom.window.close();
+    }
+  });
+
   it('sends input through the registered action without replacing the active textarea', async () => {
     const { dom, w, data, action } = await boot();
     try {
@@ -6459,6 +6621,206 @@ it('keeps context policy and reference audio in the current member draft until t
     expect(w.document.querySelector('#ms-voice')?.textContent).toContain('/uploads/reference.wav');
     await w.eval('FORMS.member()');
     expect(JSON.parse(memberWrites.at(-1)!.value).voiceRefAudio).toBe('/uploads/reference.wav');
+  } finally {
+    dom.window.close();
+  }
+});
+
+it.each(['sys:1', 'pkg:v2'])('selects DeepSeek Harness and checks the saved binding in %s', async (theme) => {
+  const meta = {
+    ...advancedMemberMetadata(),
+    dshMembers: ['codex'],
+  };
+  const command = 'C:/DSH/resources/runtime/cli/bin/dsh.cmd';
+  const savedArgs = ['--profile', 'acp', '--patch', 'member.patch.yml'];
+  const savedEnv = { DSH_HOME: 'C:/isolated/member', OTHER: 'kept' };
+  const model = JSON.stringify(['deepseek-official', 'deepseek-flash']);
+  const calls = vi.fn<FixtureApi['action']>();
+  const partner = {
+    id: 'dsh',
+    selected: true,
+    selectable: true,
+    creationRequestKey: 'new-dsh',
+    runtime: { id: 'dsh', dshDesktop: true, installed: true, label: 'DSH Desktop' },
+    form: { ...initialState(), clientId: 'acp', carrier: 'acp', acpCommand: command },
+  };
+  meta.runtimes = [
+    {
+      id: 'dsh',
+      label: 'DSH Desktop',
+      dshDesktop: true,
+      dshSetupSupported: true,
+      installed: true,
+      models: [],
+      form: {
+        clientId: 'acp',
+        carrier: 'acp',
+        configurationSource: 'native_tool',
+        accountRef: '',
+        acpCommand: command,
+        acpStartupArgs: '--profile acp',
+        acpTransport: 'stdio',
+        defaultModel: '',
+        cliEffort: '',
+      },
+    },
+  ];
+  const { dom, w } = await boot(
+    undefined,
+    (data) => {
+      Object.assign(data.cats[0], {
+        clientId: 'acp',
+        carrier: 'acp',
+        configurationSource: 'native_tool',
+        accountRef: '',
+        defaultModel: model,
+        env: savedEnv,
+        acp: { command, startupArgs: savedArgs, transport: 'stdio' },
+      });
+    },
+    undefined,
+    {},
+    (port) => {
+      const { action, get } = port;
+      port.get = async (path) => {
+        if (path === '/api/config/console-themes') return { themes: { active: theme, customs: [] } };
+        if (path === '/api/accounts') return { providers: [] };
+        if (path.startsWith('/api/accounts/')) return { selection: { members: [] } };
+        return get(path);
+      };
+      port.action = (name, args, element) => {
+        calls(name, args, element);
+        if (name === 'membersRead') return meta;
+        if (name === 'nativeDetect') return [structuredClone(partner)];
+        if (name === 'nativePrepare') return partner.form;
+        if (name === 'nativeCreate') return { id: 'new-dsh' };
+        if (name === 'memberRuntimeModels') return { status: 'configured', models: [{ value: model, label: 'Flash' }] };
+        if (name === 'memberDshRead') return { state: 'unchecked' };
+        if (name === 'memberDshCheck') return { state: 'passed' };
+        if (name === 'memberSave') return { id: args.id, configurationRevision: 'saved', form: JSON.parse(args.value) };
+        return action(name, args, element);
+      };
+    },
+  );
+  try {
+    expect(w.eval('PACK_LOADED')).toBe(theme === 'pkg:v2' ? 'v2' : null);
+    w.eval("go('memberNew')");
+    await w.__settled();
+    const client = () => w.document.getElementById('f-client') as HTMLSelectElement;
+    expect([...client().options].map((option) => option.textContent)).toEqual(
+      expect.arrayContaining(['DeepSeek Harness（DSH Desktop）', 'ACP Client']),
+    );
+    client().value = 'dsh';
+    client().dispatchEvent(new w.Event('change', { bubbles: true }));
+    await w.__settled();
+    expect(client().value).toBe('dsh');
+    expect(w.eval('VM.memberNew().form.d.acpArgs')).toBe('--profile acp');
+    client().value = 'acp';
+    client().dispatchEvent(new w.Event('change', { bubbles: true }));
+    expect(client().value).toBe('acp');
+    expect(w.eval('VM.memberNew().form.d.acpArgs')).toBe('');
+
+    w.eval("go('member-codex')");
+    await w.__settled();
+    expect(client().value).toBe('dsh');
+    expect(w.eval('VM.member().form.d.acpArgs')).toBe(savedArgs.join(' '));
+    client().value = 'acp';
+    client().dispatchEvent(new w.Event('change', { bubbles: true }));
+    expect(w.eval('VM.member().form.d.acpArgs')).toBe('');
+    client().value = 'dsh';
+    client().dispatchEvent(new w.Event('change', { bubbles: true }));
+    expect(w.eval('VM.member().form.d.acpArgs')).toBe(savedArgs.join(' '));
+    const check = w.document.querySelector('[data-act="memberDshCheck"]') as HTMLButtonElement;
+    expect(check).not.toBeNull();
+    const runtimeSection = () => w.document.getElementById('ms-runtime')?.textContent;
+    expect(runtimeSection()).toContain(w.eval("tc('runtime.dshCheck.unchecked')"));
+    check.click();
+    await w.__settled();
+    expect(calls.mock.calls.find(([name]) => name === 'memberDshCheck')?.[1]).toMatchObject({ id: 'codex' });
+    expect(runtimeSection()).toContain(w.eval("tc('runtime.dshCheck.passed')"));
+    w.eval("INPUTS.md({type:'input',target:{dataset:{k:'name'},value:'Renamed DSH'}})");
+    await w.eval('FORMS.member()');
+    const save = calls.mock.calls.find(([name]) => name === 'memberSave')?.[1];
+    expect(save?.id).toBe('codex');
+    expect(JSON.parse(save?.value ?? '{}')).toMatchObject({
+      nickname: 'Renamed DSH',
+      clientId: 'acp',
+      carrier: 'acp',
+      acpCommand: command,
+      acpStartupArgs: savedArgs.join(' '),
+      defaultModel: model,
+      env: savedEnv,
+    });
+
+    w.eval("go('members')");
+    await w.__settled();
+    const detect = [...w.document.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('探测可用 Client'),
+    );
+    expect(detect).toBeDefined();
+    detect?.click();
+    await w.__settled();
+    expect(calls.mock.calls.some(([name]) => name === 'nativeDetect')).toBe(true);
+    const create = w.document.querySelector('[data-act="nativeCreate"]') as HTMLButtonElement;
+    expect(create).not.toBeNull();
+    expect(create.disabled).toBe(false);
+    create.click();
+    await w.__settled();
+    const creation = calls.mock.calls.find(([name]) => name === 'nativeCreate')?.[1];
+    expect(JSON.parse(creation?.value ?? '{}').creationForm).toMatchObject({ clientId: 'acp', acpCommand: command });
+  } finally {
+    dom.window.close();
+  }
+});
+
+it.each(['desktop error', 'CLI only'])('keeps DSH member setup usable with %s', async (scenario) => {
+  const meta = advancedMemberMetadata();
+  const cli = scenario === 'CLI only';
+  const command = cli ? 'dsh' : 'C:/DSH/resources/runtime/cli/bin/dsh.cmd';
+  const form = {
+    clientId: 'acp',
+    carrier: 'acp',
+    configurationSource: 'native_tool',
+    accountRef: '',
+    acpCommand: command,
+    acpStartupArgs: '--profile acp',
+    acpTransport: 'stdio',
+    cliConfigArgs: [],
+  };
+  const desktop = { id: 'dsh', label: 'DSH Desktop', dshDesktop: true, installed: !cli, models: [], form };
+  const runtime = cli ? { id: 'acp:dsh-cli', label: 'DSH CLI', installed: true, models: [], form } : desktop;
+  meta.runtimes = cli
+    ? [
+        { ...runtime, dshSetupSupported: true },
+        { ...desktop, form: { ...form, acpCommand: '' } },
+      ]
+    : [desktop];
+  const reads = vi.fn();
+  const { dom, w } = await boot(undefined, undefined, undefined, {}, (port) => {
+    const previous = port.action;
+    port.action = (name, args, element) => {
+      if (name === 'membersRead') return meta;
+      if (name === 'memberRuntimeModels') {
+        reads(JSON.parse(args.value));
+        return { status: 'unavailable', models: [], message: 'dsh_setup_unavailable' };
+      }
+      return previous(name, args, element);
+    };
+  });
+  try {
+    w.eval("go('memberNew')");
+    await w.__settled();
+    w.eval(`CHANGES.memberRuntime({target:{value:${JSON.stringify(runtime.id)}}})`);
+    await w.__settled();
+    if (cli) {
+      expect(w.document.getElementById('f-client').value).toBe('acp');
+      expect(w.document.querySelector('#ms-model [data-k="dsh-provider"]')).not.toBeNull();
+      expect(reads).toHaveBeenCalledWith(expect.objectContaining({ runtimeId: 'acp:dsh-cli' }));
+    } else {
+      const text = w.document.querySelector('#ms-model')?.textContent;
+      expect(text).toContain(w.eval("tc('runtime.dshSetupError.default')"));
+      expect(text).not.toContain('runtime.dshSetupError.');
+    }
   } finally {
     dom.window.close();
   }

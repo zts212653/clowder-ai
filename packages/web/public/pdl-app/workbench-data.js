@@ -287,6 +287,8 @@ function workbenchModels() {
         ? ['image', 'video', 'audio'].find((kind) => file.mime.startsWith(`${kind}/`))
         : undefined;
       const fileParams = opened ? new URLSearchParams({ worktreeId: opened.worktreeId, path: opened.file.path }) : null;
+      const documentEditor = Boolean(file && /\.docx$/i.test(file.path));
+      const pluginPreview = Boolean(file && !documentEditor && !mediaKind && file.binary);
       const filePage = file
         ? {
             path: file.absolutePath ?? file.path,
@@ -301,6 +303,8 @@ function workbenchModels() {
             markdown,
             mode: rendered ? 'render' : 'src',
             binary: file.binary,
+            documentEditor,
+            documentFrame: (documentEditor || pluginPreview) && fileParams ? '/workspace-document?' + fileParams : null,
             hasBody: !file.binary,
             quote: !file.binary,
             media: mediaKind
@@ -939,41 +943,42 @@ function recentWorksModels() {
     data = projectChatData(),
     projectId =
       data.threadId === 'default'
-        ? data.newProjectId
+        ? data.newProjectId || null
         : data.threads.find(function (t) {
             return t.id === data.threadId;
-          }).projectPath,
+          })?.projectPath,
     owners = read.projectId === projectId && read.load === '' ? read.artifacts : [];
   return {
     recentWorkOwners: owners,
     recentWorks: {
-      rw: !projectId
-        ? { load: 'empty', works: { items: [] } }
-        : read.projectId !== projectId
-          ? { load: 'loading', works: { items: [] } }
-          : {
-              load: read.load,
-              works: {
-                items: read.artifacts.map(function (w, index) {
-                  const c = data.cats.find(function (c) {
-                    return c.id === w.catId;
-                  });
-                  return {
-                    id: w.navigationId,
-                    index: index,
-                    args: { id: w.navigationId },
-                    name: w.name,
-                    type: w.type,
-                    cat: w.catId,
-                    catName: c ? c.displayName : w.catId,
-                    catHandle: c ? c.mentionPatterns[0] : '',
-                    threadTitle: w.threadTitle,
-                    thread: w.threadId,
-                    at: w.createdAt,
-                  };
-                }),
+      rw:
+        projectId === undefined
+          ? { load: 'empty', works: { items: [] } }
+          : read.projectId !== projectId
+            ? { load: 'loading', works: { items: [] } }
+            : {
+                load: read.load,
+                works: {
+                  items: read.artifacts.map(function (w, index) {
+                    const c = data.cats.find(function (c) {
+                      return c.id === w.catId;
+                    });
+                    return {
+                      id: w.navigationId,
+                      index: index,
+                      args: { id: w.navigationId },
+                      name: w.name,
+                      type: w.type,
+                      cat: w.catId,
+                      catName: c ? c.displayName : w.catId,
+                      catHandle: c ? c.mentionPatterns[0] : '',
+                      threadTitle: w.threadTitle,
+                      thread: w.threadId,
+                      at: w.createdAt,
+                    };
+                  }),
+                },
               },
-            },
     },
   };
 }

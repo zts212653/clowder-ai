@@ -16,8 +16,6 @@ pdl:
             props:
               value: "@selected"
               label: "@title"
-              act: "@act"
-              args: "@args"
               role: row
           when: "@selectable"
       title:
@@ -5531,6 +5529,17 @@ pdl:
             - type: component
               use: v2Action
               props:
+                label: t:chatRich.openWork
+                act: workOpen
+                args:
+                  mid: "@rich.file.mid"
+                  url: "@rich.file.url"
+              when:
+                - "!@rich.file.work"
+                - "@rich.file.mid"
+            - type: component
+              use: v2Action
+              props:
                 iconOnly: true
                 icon: download
                 label: t:common.download
@@ -6149,6 +6158,9 @@ pdl:
               title: t:wsSessions.runtime
               keep: true
               blocks:
+                - type: view
+                  id: member.runtime.dsh-check
+                  data: $.form.runtime
                 - type: component
                   use: v2SettingsFields
                   props:
@@ -6486,6 +6498,9 @@ pdl:
               title: t:wsSessions.runtime
               keep: true
               blocks:
+                - type: view
+                  id: member.runtime.dsh-check
+                  data: $.form.runtime
                 - type: component
                   use: v2SettingsFields
                   props:
@@ -7431,7 +7446,7 @@ pdl:
           use: v2Select
           props:
             id: f-client
-            value: $.form.d.client
+            value: $.form.clientChoice
             change: md
             args:
               k: client
@@ -7529,6 +7544,7 @@ pdl:
           gte: 2
       - kind: field
         label: t:memberForm.fields.account
+        when: "!$.form.dsh"
         id: f-acc
         control:
           type: component
@@ -7912,6 +7928,9 @@ pdl:
                     account_config: t:memberForm.runtime.source.account_config
                 - $.form.preferences.catalog.defaultModelLabel
             when: $.form.preferences.catalog.defaultModelLabel
+          - text: $.form.dshSetupError
+            tone: danger
+            when: $.form.dshSetupError
       - kind: field
         label: t:memberForm.fields.collaborationTools
         help: t:memberForm.fields.collaborationHelp
@@ -11686,6 +11705,55 @@ pdl:
       closeArgs:
         path: cs.modal
   views:
+    recovery.notice:
+      blocks:
+        - type: component
+          use: v2Box
+          props:
+            role: group
+            blocks:
+              - type: component
+                use: v2Status
+                props:
+                  tone: warn
+                  text: t:recovery.paused
+                when: $.incidents
+              - type: component
+                use: v2Status
+                props:
+                  tone: info
+                  text: t:recovery.pending
+                when: $.pending
+              - type: component
+                use: v2List
+                props:
+                  from: $.incidents
+                  optional: true
+                  row:
+                    layout: two
+                    title:
+                      - text:
+                          of: "@disposition"
+                          map:
+                            needs_attention: t:recovery.needsAttention
+                            parked: t:recovery.parked
+                            interrupted: t:recovery.interrupted
+                            _: "@disposition"
+                      - lit: " "
+                      - use: v2Text
+                        props:
+                          text: "@reasonCode"
+                          mono: true
+                    sub: "@executionRef"
+              - type: component
+                use: v2Action
+                props:
+                  label: t:recovery.recheck
+                  act: recoveryRecheck
+                  args:
+                    taskId: $.taskId
+                  busy: $.busy
+                when: $.canRecheck
     v2.quotaPin.rail:
       vm: quotaPin
       bare: true
@@ -16271,6 +16339,17 @@ pdl:
                   label: t:v2a.collapse
                   act: toggle
                   args:
+                    path: s.navOpen
+                  attrs: ' data-v2-nav-drawer="1"'
+                  role: icon
+                  icon: panelLeft
+                when: "!$.navHidden"
+              - type: component
+                use: v2ChatIconButton
+                props:
+                  label: t:v2a.collapse
+                  act: toggle
+                  args:
                     path: cs.navHidden
                   role: icon
                   icon: panelLeft
@@ -16753,6 +16832,8 @@ pdl:
                                       act: workOpen
                                       args:
                                         i: "@work"
+                                        mid: "@mid"
+                                        url: "@url"
                         when: "@rich"
                       - type: component
                         use: v2StatusText
@@ -16881,6 +16962,55 @@ pdl:
                   when:
                     - "@meta.open"
                     - "@exec"
+                - type: view
+                  id: recovery.notice
+                  data: "@recovery"
+                  when: "@recovery"
+              acts:
+                slot: chat.message.actions
+                ctx: "@actsCtx"
+                when: "@actsCtx"
+                items:
+                  - label: t:chatMessage.menu.label
+                    act: copy
+                    args:
+                      v: "@mid"
+                  - label: t:placement.relatedDisposition
+                    act: msgDisposition
+                    args:
+                      mid: "@mid"
+                  - label: t:chatMessage.menu.viewExecution
+                    act: traceOpen
+                    args:
+                      i: "@i"
+                    when: "@isCat"
+                  - label: t:chatMessage.menu.revealWhisper
+                    act: setStatus
+                    args:
+                      entity: msg
+                      id: "@i"
+                      field: revealed
+                      v: "true"
+                      cast: bool
+                    when: "@canReveal"
+                  - label: t:chatMessage.menu.branchHere
+                    act: modal
+                    args:
+                      v: branch
+                      i: "@i"
+                  - label: t:composerPop.forwardMore
+                    act: modal
+                    args:
+                      v: forward
+                      id: msg
+                  - label: t:chatMessage.menu.deleteMenu
+                    act: setStatus
+                    args:
+                      entity: msgDel
+                      id: "@i"
+                      v: "true"
+                      cast: bool
+                    tone: danger
     chat.ticks:
       vm: chatTicks
       bare: true
@@ -16907,6 +17037,107 @@ pdl:
           use: v2Composer
           props:
             home: $.home
+            runners:
+              - type: component
+                use: v2Runners
+                props:
+                  from: $.runners
+                  label: t:composer.running
+                  item:
+                    who: "@who"
+                    name: "@name"
+                    what: "@what"
+                    time: "@time"
+                    ticking: "@ticking"
+                    stop:
+                      label:
+                        t: composer.actions.stopNamed
+                        args:
+                          - "@name"
+                      act: cafeRunStop
+                      args:
+                        id: "@who"
+                        kind: "@kind"
+                when:
+                  - "!$.home"
+                  - $.runners
+            queue:
+              - type: component
+                use: queue
+                props:
+                  key: $.queue.key
+                  items: $.queue.items
+                  label: t:chat.deliveryState.pending
+                  order: cafeQueueOrder
+                  targets:
+                    - who: "@id"
+                      form: avatar
+                      size: sm
+                    - text:
+                        t: queue.delivery.state
+                        args:
+                          - of: "@failure.acceptance"
+                            map:
+                              unknown:
+                                of: "@dispatch.inputRead.status"
+                                map:
+                                  read: read_uncertain
+                                  _: uncertain
+                              not_accepted: failed
+                              _:
+                                of: "@dispatch.appendAcceptance"
+                                map:
+                                  pending: confirming
+                                  written:
+                                    of: "@dispatch.inputRead.status"
+                                    map:
+                                      read: read_wait
+                                      _: written
+                                  _:
+                                    of: "@dispatch.inputRead.status"
+                                    map:
+                                      read: read
+                                      _: delivered
+                      when:
+                        of: "@failure.acceptance"
+                        map:
+                          unknown: true
+                          not_accepted: true
+                          _: "@dispatch"
+                  actions:
+                    - label: t:queue.item.label
+                      icon: send
+                      act: cafeQueueSend
+                      args:
+                        i: "@index"
+                      when: "@queued"
+                    - label: t:queue.item.recallAndEdit
+                      icon: pen
+                      act: cafeQueue
+                      args:
+                        v: edit
+                        i: "@index"
+                      when: "@recallable"
+                    - label: t:common.delete
+                      icon: delete
+                      act: cafeQueue
+                      args:
+                        v: drop
+                        i: "@index"
+                      when: "@queued"
+                    - type: more
+                      label: t:common.moreActions
+                      items:
+                        - label: t:queue.targets.title
+                          act: queueTargets
+                          args:
+                            entryId: "@key"
+                      when:
+                        - "@queued"
+                        - "@key"
+                when:
+                  - "!$.home"
+                  - $.queue
             header:
               - type: component
                 use: v2ComposerTitle
@@ -16916,6 +17147,18 @@ pdl:
                   input: cafeHomeTitle
                 when: $.home
             field:
+              - type: component
+                use: v2Chip
+                props:
+                  icon: reply
+                  label:
+                    of: $.input.draft.reply.text
+                    slice: [0, 80]
+                  x:
+                    act: close
+                    args: {path: cs.reply}
+                    label: t:composer.cancelQuote
+                when: $.input.draft.reply
               - type: component
                 use: v2Box
                 props:
@@ -16938,8 +17181,8 @@ pdl:
                               map: {image: draftAttachment, _: ""}
                             args: "@preview"
                             x:
-                              act: listOp
-                              args: {path: cs.att, op: del, i: "@index"}
+                              act: remove
+                              args: {entity: att, id: "@index"}
                               label: t:common.remove
                 when: $.input.draft.att
               - type: component
@@ -17625,6 +17868,63 @@ pdl:
           use: v2Threads
           props:
             from: $.sections
+            groupMore:
+              label: t:threadRow.groupMore
+              items:
+                - label: t:chat.group.menu.label
+                  act: modal
+                  args:
+                    v: org
+                    gid: "@id"
+                - label: t:chat.group.menu.showPendingWhenCollapsed
+                  act: setStatus
+                  args:
+                    entity: group
+                    id: "@id"
+                    field: peek
+                  cur: "@peek"
+                - label: t:chat.group.menu.renameMenu
+                  act: rename
+                  args:
+                    entity: group
+                    id: "@id"
+                - scope: t:chat.group.menu.group
+                - label: t:hub.lastActive
+                  act: setStatus
+                  args:
+                    entity: group
+                    id: "@id"
+                    field: sort
+                    v: recent
+                  cur:
+                    of: "@sort"
+                    map:
+                      recent: true
+                      _: false
+                - label: t:chat.group.menu.manualOrder
+                  act: setStatus
+                  args:
+                    entity: group
+                    id: "@id"
+                    field: sort
+                    v: manual
+                  cur:
+                    of: "@sort"
+                    map:
+                      manual: true
+                      _: false
+                - label: t:chat.group.menu.runningFirst
+                  act: setStatus
+                  args:
+                    entity: group
+                    id: "@id"
+                    field: sort
+                    v: running
+                  cur:
+                    of: "@sort"
+                    map:
+                      running: true
+                      _: false
             row:
               rename:
                 form: cafeRowRename
@@ -17650,8 +17950,12 @@ pdl:
                         "": "@who"
                         _: "@lastWho"
                     participants: "@participants"
+                    runs: "@runs"
                     running: "@running"
                     error: "@failed"
+                    pending: "@pending"
+                    pendingLabel: t:v2a.pending
+                    at: "@at"
                     unread: "@unread"
                     unreadLabel:
                       t: v2a.unread
@@ -17666,26 +17970,71 @@ pdl:
                           map:
                             "true": t:v2a.working
                             _:
-                              of: "@lastWho"
+                              of: "@replied"
                               map:
-                                "": "@note"
-                                _: t:v2a.replied
+                                "true": t:v2a.replied
+                                _:
+                                  of: "@lastWho"
+                                  map:
+                                    "": "@note"
+                                    _: t:v2a.replied
                     replied:
-                      of: "@lastWho"
+                      of: "@replied"
                       map:
-                        "": false
-                        _: true
+                        "true": true
+                        _:
+                          of: "@lastWho"
+                          map:
+                            "": false
+                            _: true
                   when:
                     of: "@unread"
                     map:
                       "0":
-                        of: "@lastWho"
+                        of: "@pending"
                         map:
-                          "":
-                            of: "@running"
+                          "0":
+                            of: "@at"
                             map:
                               "true": true
-                              _: "@note"
+                              _:
+                                of: "@failed"
+                                map:
+                                  "true": true
+                                  _:
+                                    of: "@running"
+                                    map:
+                                      "true": true
+                                      _:
+                                        of: "@replied"
+                                        map:
+                                          "true": true
+                                          _:
+                                            of: "@lastWho"
+                                            map:
+                                              "": "@note"
+                                              _: true
+                          "":
+                            of: "@at"
+                            map:
+                              "true": true
+                              _:
+                                of: "@failed"
+                                map:
+                                  "true": true
+                                  _:
+                                    of: "@running"
+                                    map:
+                                      "true": true
+                                      _:
+                                        of: "@replied"
+                                        map:
+                                          "true": true
+                                          _:
+                                            of: "@lastWho"
+                                            map:
+                                              "": "@note"
+                                              _: true
                           _: true
                       _: true
               more:
@@ -19968,31 +20317,33 @@ pdl:
               - type: component
                 use: v2Text
                 props:
-                  text:
-                    t: mediaReview.lightbox.sub
-                    args:
-                      - $.author
-                      - $.version
-                      - of: $.at
-                        fmt: at
-                      - of: $.many
-                        map:
-                          "true":
-                            of:
-                              - 0
-                              - 1
-                              - 2
-                              - 3
-                            item:
-                              of: "@"
-                              map:
-                                "0": " · "
-                                "1": $.index
-                                "2": " / "
-                                "3": $.total
-                            sep: ""
-                          "false": ""
-                          _: $.many
+                  parts:
+                    sep: " · "
+                    parts:
+                      - text: $.author
+                        when: $.author
+                      - text:
+                          t: films.version
+                          args:
+                            - $.version
+                        when: $.version
+                      - text:
+                          of: $.at
+                          fmt: at
+                        when: $.at
+                      - text:
+                          of:
+                            - 0
+                            - 1
+                            - 2
+                          item:
+                            of: "@"
+                            map:
+                              "0": $.index
+                              "1": " / "
+                              "2": $.total
+                          sep: ""
+                        when: $.many
                   role: meta
                 when:
                   of: $.target.kind
@@ -21503,7 +21854,11 @@ pdl:
                       act: workOpen
                       args:
                         i: "@work"
-                    _: null
+                    _:
+                      act: workOpen
+                      args:
+                        mid: "@mid"
+                        url: "@url"
             blocks:
               - type: component
                 use: v2Media
@@ -22256,6 +22611,8 @@ pdl:
                 use: v2MemberListPage
                 props:
                   heading:
+                    - type: slot
+                      slot: members.actions
                     - type: component
                       use: v2SettingsButton
                       props:
@@ -24767,6 +25124,29 @@ pdl:
                 when:
                   - $.binary
                   - "!$.media"
+                  - "!$.documentFrame"
+              - type: component
+                use: v2Action
+                props:
+                  label: t:workbench.file.collabEdit
+                  act: fileOffice
+                when:
+                  - $.documentEditor
+                  - "!$.documentFrame"
+              - type: component
+                use: v2Action
+                props:
+                  label: t:common.back
+                  act: fileOffice
+                when:
+                  - $.documentEditor
+                  - $.documentFrame
+              - type: frame
+                title: $.name
+                key: $.documentFrame
+                src: $.documentFrame
+                tall: true
+                when: $.documentFrame
               - type: component
                 use: v2Each
                 props:
@@ -24883,7 +25263,6 @@ pdl:
                     map:
                       src: false
                       _: true
-      bare: true
     ws.tasks:
       loading: t:wsTasks.load.loading
       error: t:wsTasks.load.error
@@ -24998,6 +25377,13 @@ pdl:
                     role: cycle
               title: "@title"
               inline:
+                - control:
+                    type: component
+                    use: v2Status
+                    props:
+                      tone: warn
+                      text: t:recovery.paused
+                  when: "@recovery.incidents"
                 - icon:
                     of: "@kind"
                     map:
@@ -25077,6 +25463,10 @@ pdl:
                 slot: ws.tasks.task
                 ctx: "@actsCtx"
               expand:
+                - type: view
+                  id: recovery.notice
+                  data: "@recovery"
+                  when: "@recovery"
                 - type: component
                   use: v2Text
                   props:
@@ -27874,6 +28264,10 @@ pdl:
                     path: ws.execDetail
                 when: "!$.inExec"
             blocks:
+              - type: view
+                id: recovery.notice
+                data: $.recovery
+                when: $.recovery
               - type: component
                 use: v2Pre
                 props:
@@ -34244,6 +34638,10 @@ pdl:
                               args:
                                 mid: "@mid"
           when: "@supp"
+        - type: view
+          id: recovery.notice
+          data: "@recovery"
+          when: "@recovery"
         - type: toolbar
           when: "@hold"
           items:
@@ -34802,6 +35200,10 @@ pdl:
                               args:
                                 mid: "@mid"
           when: "@supp"
+        - type: view
+          id: recovery.notice
+          data: "@recovery"
+          when: "@recovery"
     chat.node/user:
       frame: msg
       who: "@who"
@@ -35076,6 +35478,10 @@ pdl:
                               args:
                                 mid: "@mid"
           when: "@supp"
+        - type: view
+          id: recovery.notice
+          data: "@recovery"
+          when: "@recovery"
       acts:
         slot: chat.message.actions
         ctx: "@actsCtx"
@@ -37425,6 +37831,10 @@ pdl:
                               args:
                                 mid: "@mid"
           when: "@supp"
+        - type: view
+          id: recovery.notice
+          data: "@recovery"
+          when: "@recovery"
       acts:
         slot: chat.message.actions
         ctx: "@actsCtx"
@@ -37964,6 +38374,10 @@ pdl:
                               args:
                                 mid: "@mid"
           when: "@supp"
+        - type: view
+          id: recovery.notice
+          data: "@recovery"
+          when: "@recovery"
       acts:
         slot: chat.message.actions
         ctx: "@actsCtx"

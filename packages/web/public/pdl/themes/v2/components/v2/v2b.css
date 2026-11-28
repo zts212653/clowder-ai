@@ -43,6 +43,10 @@
 .v2-shell .lr-node[data-open="false"] > .lr-kids { display:none; }
 .v2-shell .ws-split { display:grid; min-height:0; flex:1; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px; }
 .v2-shell .ws-pane { display:flex; flex-direction:column; overflow:hidden; min-height:0; border:1px solid var(--shell-hairline); border-radius:8px; background:var(--console-card-bg); }
+.v2-frame.tall { min-height:calc(var(--row-h) * 12); }
+.v2-frame[src].tall { min-height:round(down, 100vh - 5 * var(--row-h-1), var(--row-h-1)); }
+.vw-page-full.page .v2-frame[src].tall { flex:1 1 0; min-height:0; height:auto; }
+.v2-starry-page > .v2-frame { height:100%; min-height:0; }
 .v2-shell .annotation-quote { color:inherit; background:var(--opus-bg); border-bottom:1px solid var(--opus-light); }
 .v2-shell .annotation-mark { vertical-align:middle; margin-left:4px; }
 
