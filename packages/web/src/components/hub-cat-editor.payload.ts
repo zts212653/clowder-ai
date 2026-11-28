@@ -1,3 +1,4 @@
+import { isDshLauncher } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
 import { buildAgyProfilePatch, usesAgyAcp, usesAgyNative } from './hub-cat-editor.agy';
 import {
@@ -93,7 +94,11 @@ function preserveHiddenAcpFields(cat?: CatData | null): Record<string, unknown> 
 }
 
 function buildAcpTransportConfig(form: HubCatEditorFormState, cat?: CatData | null) {
-  if (form.acpAgentProvider) return { command: 'plugin-agent', startupArgs: [] };
+  const usesDshDesktopAdapter =
+    form.acpAgentProvider === 'plugin:official.agent-dsh/dsh' &&
+    form.configurationSource === 'native_tool' &&
+    isDshLauncher(form.acpCommand, splitCommandArgs(form.acpStartupArgs));
+  if (form.acpAgentProvider && !usesDshDesktopAdapter) return { command: 'plugin-agent', startupArgs: [] };
   const transport = form.acpTransport ?? 'stdio';
   const officialAgy = usesAgyAcp(form);
   const command =

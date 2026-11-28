@@ -1,7 +1,9 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { useMemberModelCatalogs } from '@/lib/member-model-display';
 import { apiFetch } from '@/utils/api-client';
+import { buildNativeCreationPayload } from '../../first-run-quest/native-creation-payload';
 import { initialState } from '../../hub-cat-editor.model';
+import { buildCatPayload } from '../../hub-cat-editor.payload';
 import { needsDshPreparation, prepareNativeMember } from '../members/prepare-native-member';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
@@ -88,6 +90,20 @@ it('prepares the selected independent DSH binding before the shared Desktop with
     { ...adapter, label: 'Independent DSH', clientId: 'acp', models: [] },
   );
   expect(result.acpAgentProvider).toBe(ref);
+  const binding = {
+    agentProvider: ref,
+    acp: {
+      command: '/desktop/dsh.cmd',
+      startupArgs: ['--profile', 'acp', '--patch', '/private/member.yml'],
+    },
+    env: { DSH_HOME: '/private/home' },
+  };
+  expect(buildNativeCreationPayload(result)).toMatchObject(binding);
+  expect(buildCatPayload(result)).toMatchObject(binding);
+  expect(buildCatPayload({ ...result, acpAgentProvider: 'plugin:fixture.acp/agent' }).acp).toEqual({
+    command: 'plugin-agent',
+    startupArgs: [],
+  });
   for (const [url, request] of vi.mocked(apiFetch).mock.calls) {
     if (url.endsWith('/inspect') || url.endsWith('/prepare'))
       expect(JSON.parse(String(request?.body)).runtimeId).toBe(ref);
