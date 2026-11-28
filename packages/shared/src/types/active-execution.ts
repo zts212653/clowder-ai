@@ -41,6 +41,8 @@ export interface ActiveExecutionProjection {
   readonly projectPath?: string;
   readonly catId: string;
   readonly kind: ActiveExecutionKind;
+  /** Reply generation finished and the host is verifying provider shutdown. */
+  readonly phase?: 'finalizing';
   /** Human running-work UI role from the exact durable child, never a display-name guess. */
   readonly executionKind?: TurnExecutionKind;
   /** Allowlisted category only; raw managed-command text never crosses this boundary. */

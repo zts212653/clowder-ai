@@ -1,4 +1,5 @@
 import type { TurnExecutionRecord } from '@cat-cafe/shared';
+import { isWindowsProviderFinalizing } from '../../../../../utils/windows-provider-host.js';
 import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.js';
 import type { OwnerCandidate } from './InvocationOwnerLeaseCandidates.js';
 
@@ -35,6 +36,17 @@ export async function retireExitedChildExecutions(
   if (!running.length) return false;
   const exits = new Map<string, { exitedAt: number; origins?: readonly string[] }>();
   for (const child of running) {
+    // A Windows provider host can exit before its job closes. Its current finalizer owns this outcome.
+    if (
+      isWindowsProviderFinalizing({
+        executionId: child.parentInvocationId,
+        invocationId: child.invocationId,
+        threadId: child.threadId,
+        userId: child.userId,
+        catId: child.catId,
+      })
+    )
+      return false;
     const exit = deps.getChildProcessExit(child);
     if (
       !exit ||

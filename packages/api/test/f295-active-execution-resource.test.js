@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 import Fastify from 'fastify';
 
 const { registerActiveExecutionRoutes } = await import('../dist/routes/active-execution-routes.js');
+const { waitForWindowsProviderFinalization } = await import('../dist/utils/windows-provider-host.js');
 
 const USER_ID = 'user-a';
 
@@ -84,6 +85,40 @@ describe('F295 user/project active execution resource', () => {
 
   afterEach(async () => {
     await app?.close();
+  });
+
+  it('keeps a finalizing turn occupied without exposing Stop or changing another execution', async () => {
+    const execution = {
+      executionId: 'inv-a',
+      invocationId: 'child-inv-a',
+      threadId: 'thread-a',
+      userId: USER_ID,
+      catId: 'codex-sol',
+    };
+    let confirm;
+    const exit = new Promise((resolve) => {
+      confirm = resolve;
+    });
+    const completed = waitForWindowsProviderFinalization(execution, () => exit);
+    try {
+      const response = await inject(app, '/project/cafe');
+      const [first, second] = response.json().executions;
+      assert.equal(first.phase, 'finalizing');
+      assert.deepEqual(first.cancelability, { state: 'not_cancelable', reason: 'terminalizing' });
+      assert.equal(second.phase, undefined);
+      const stop = await app.inject({
+        method: 'POST',
+        url: '/api/threads/thread-a/executions/live/inv-a/cancel',
+        payload: { catId: 'codex-sol', expectedInvocationId: 'child-inv-a' },
+        headers: { 'x-cat-cafe-user': USER_ID },
+      });
+      assert.equal(stop.statusCode, 409);
+      assert.equal(stop.json().code, 'EXECUTION_TERMINALIZING');
+      assert.equal(deps.cancelExactLiveInvocation.mock.callCount(), 0);
+    } finally {
+      confirm(true);
+      await completed;
+    }
   });
 
   it('uses the same user-wide resource across project anchors and hydrates only admitted live candidates', async () => {

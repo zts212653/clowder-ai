@@ -185,9 +185,12 @@ test(
   },
 );
 
-const { createWindowsProviderHostScope, bindWindowsProviderHostScope } = await import(
-  new URL('../dist/utils/windows-provider-host.js', import.meta.url)
-);
+const {
+  createWindowsProviderHostScope,
+  bindWindowsProviderHostScope,
+  isWindowsProviderFinalizing,
+  waitForWindowsProviderFinalization,
+} = await import(new URL('../dist/utils/windows-provider-host.js', import.meta.url));
 const { readWindowsJobExecutionLinks } = await import(
   new URL('../dist/utils/windows-job-execution-links.js', import.meta.url)
 );
@@ -228,6 +231,37 @@ test(
       assert.deepEqual(readWindowsJobExecutionLinks(host.job.jobName, dataDir).links, []);
       assert.equal(existsSync(host.job.path), false, 'link and owner record leave together');
     }
+  },
+);
+
+test(
+  'a transient stop probe failure is repaired online with real Windows jobs',
+  { skip: !isWindows, timeout: 90_000 },
+  async (t) => {
+    const { dataDir } = fixture(t);
+    const scope = await createWindowsProviderHostScope({ execution: EXECUTION, dataDir });
+    const host = await scope.take();
+    t.after(() => killOwned(host.job.apiPid));
+    let attempts = 0;
+    const completed = waitForWindowsProviderFinalization(
+      EXECUTION,
+      async () => {
+        if (++attempts === 1) {
+          assert.equal(alive(host.job.apiPid), true);
+          return false;
+        }
+        return scope.close();
+      },
+      { retryMs: 1 },
+    );
+
+    assert.equal(isWindowsProviderFinalizing(EXECUTION), true);
+    assert.equal(await completed, true);
+    assert.equal(attempts, 2);
+    assert.equal(isWindowsProviderFinalizing(EXECUTION), false);
+    assert.equal(alive(host.job.apiPid), false);
+    await assert.rejects(() => scope.take(), /windows_provider_scope_closing/);
+    scope.clearEvidence();
   },
 );
 

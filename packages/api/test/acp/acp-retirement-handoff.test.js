@@ -118,6 +118,54 @@ test('AcpClient concurrent close callers wait for the same real process exit', a
 });
 
 for (const pi of [false, true]) {
+  test(`idle eviction after a shutdown timeout ${pi ? 'keeps forced Pi retirement blocked' : 'recovers after real exit'}`, async () => {
+    const retiring = gate();
+    const child = Object.assign(new EventEmitter(), {
+      stdin: new PassThrough(),
+      kill() {
+        return true;
+      },
+    });
+    let spawned = 0;
+    const pool = new AcpProcessPool({ maxLiveProcesses: 2, idleTtlMs: 1 }, { supportsMultiplexing: false }, () => {
+      const first = ++spawned === 1;
+      return {
+        isAlive: true,
+        async initialize() {},
+        async close() {
+          if (!first) return;
+          retiring.resolve();
+          await shutdownAcpChild(child, 1, pi);
+        },
+      };
+    });
+    const key = { projectPath: '/handoff', providerProfile: pi ? 'pi' : 'dsh' };
+    try {
+      const first = await pool.acquire(key);
+      const peer = await pool.acquire(key);
+      assert.notEqual(peer.client, first.client);
+      await first.release();
+      await retiring.promise;
+      await assert.rejects(pool.acquire(key), /did not exit after forced shutdown/);
+      await assert.rejects(pool.acquire(key), /did not exit after forced shutdown/);
+      assert.equal(spawned, 2, 'A timeout must not admit a replacement writer');
+      assert.equal(await peer.release(), false, 'An unrelated process must not change a normal lease release');
+
+      child.emit('exit', null, 'SIGTERM');
+      await tick();
+      if (pi) {
+        await assert.rejects(pool.acquire(key), /did not exit after forced shutdown/);
+        assert.equal(spawned, 2, 'A forced Pi bridge exit does not prove its native writers exited');
+        return;
+      }
+      const next = await pool.acquire(key);
+      assert.notEqual(next.client, first.client);
+      await next.release();
+    } finally {
+      await pool.closeAll().catch((error) => assert.match(error.message, /did not exit after forced shutdown/));
+    }
+  });
+
   test(`forced shutdown ${pi ? 'rejects unconfirmed Pi retirement' : 'still waits for actual exit'}`, async () => {
     const killed = gate();
     const child = Object.assign(new EventEmitter(), {

@@ -91,7 +91,7 @@ PDL_COMPONENTS.v2ThreadSignals = function (p, sc, root) {
   const q = pvDeep(p, root, sc);
   const isPending = Number(q.pending) > 0;
   const runText = q.running && Array.isArray(q.runs) && q.runs.length
-    ? q.runs.map(function (r) { return tc('threadRow.meta.run', whoInfo(r.who).name, Math.max(1, Math.round((r.secs || 0) / 60))); }).join(' · ')
+    ? q.runs.map(function (r) { return r.finalizing ? tc('threadRow.meta.finalizing', whoInfo(r.who).name) : tc('threadRow.meta.run', whoInfo(r.who).name, Math.max(1, Math.round((r.secs || 0) / 60))); }).join(' · ')
     : '';
   const statusText = q.error ? q.status : q.running ? (runText || q.status) : isPending ? (q.pendingLabel || tc('v2a.pending')) : q.status;
   const isReplied = !!(q.replied || q.who) && !q.running && !q.error && !isPending;

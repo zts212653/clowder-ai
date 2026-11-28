@@ -36,8 +36,41 @@ const READY_TIMEOUT_MS = 20_000;
 // After the host exits the helper still has to close the job, so a present verdict is re-read.
 const CLOSE_QUERY_ATTEMPTS = 5;
 const CLOSE_QUERY_INTERVAL_MS = 300;
+const FINALIZATION_RETRY_MS = 5_000;
 // A descendant can keep the provider's pipes open after it exits; its output gets this long.
 const OUTPUT_GRACE_MS = 2_000;
+
+const finalizingProviders = new Map<string, CliExecutionOwnerRef>();
+
+export function isWindowsProviderFinalizing(execution: CliExecutionOwnerRef): boolean {
+  const current = finalizingProviders.get(execution.invocationId);
+  return (
+    current?.executionId === execution.executionId &&
+    current.threadId === execution.threadId &&
+    current.userId === execution.userId &&
+    current.catId === execution.catId
+  );
+}
+
+/** Keep the original invocation and its queue completion alive until physical stop is verified. */
+export async function waitForWindowsProviderFinalization(
+  execution: CliExecutionOwnerRef,
+  confirmStop: () => Promise<boolean>,
+  options: { retryMs?: number; isShuttingDown?: () => boolean | Promise<boolean> } = {},
+): Promise<boolean> {
+  finalizingProviders.set(execution.invocationId, execution);
+  try {
+    if (await confirmStop()) return true;
+    while (!(await options.isShuttingDown?.())) {
+      await delay(options.retryMs ?? FINALIZATION_RETRY_MS);
+      if (await options.isShuttingDown?.()) return false;
+      if (await confirmStop()) return true;
+    }
+    return false;
+  } finally {
+    finalizingProviders.delete(execution.invocationId);
+  }
+}
 
 export interface WindowsProviderLaunch {
   command: string;
@@ -136,7 +169,9 @@ export interface WindowsProviderHostScope {
   /** A linked host to launch the next provider in: the prepared first one, then a new one each time. */
   take(): Promise<WindowsProviderHost>;
   /** Ends every host and reports whether all of their jobs are verifiably closed. */
-  close(): Promise<boolean>;
+  close(
+    reportPending?: (attempt: { durationMs: number; evidence: readonly WindowsJobStopEvidence[] }) => void,
+  ): Promise<boolean>;
   /**
    * Removes this execution's links and its hosts' owner records together. Only once its stop is
    * recorded: until then they are its only native proof, and a restart needs both to find it.
@@ -171,16 +206,31 @@ export async function createWindowsProviderHostScope(options: {
     return host;
   };
   let first: WindowsProviderHost | undefined = await prepareLinked();
+  let closing = false;
+  const confirmed = new Set<WindowsProviderHost>();
   return {
     execution: options.execution,
     async take() {
+      if (closing) throw new Error('windows_provider_scope_closing');
       const host = first ?? (await prepareLinked());
       first = undefined;
       return host;
     },
-    async close() {
-      const verdicts = await Promise.all(hosts.map((host) => host.close()));
-      return verdicts.every((evidence) => evidence.verdict === 'absent');
+    async close(reportPending) {
+      closing = true;
+      const startedAt = performance.now();
+      const evidence = await Promise.all(
+        hosts
+          .filter((host) => !confirmed.has(host))
+          .map(async (host) => {
+            const observation = await host.close();
+            if (observation.verdict === 'absent') confirmed.add(host);
+            return observation;
+          }),
+      );
+      if (confirmed.size === hosts.length) return true;
+      reportPending?.({ durationMs: Math.round(performance.now() - startedAt), evidence });
+      return false;
     },
     clearEvidence() {
       for (const path of linkPaths) clearWindowsJobExecutionLink(path);

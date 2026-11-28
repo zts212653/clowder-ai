@@ -1,5 +1,11 @@
 import type { ChildProcess } from 'node:child_process';
 
+export class AcpChildExitTimeout extends Error {
+  constructor(readonly lateExit: Promise<void>) {
+    super('ACP process did not exit after forced shutdown');
+  }
+}
+
 /** Resolve on an exit event, never on ChildProcess.killed or a grace-period timeout. */
 export function shutdownAcpChild(child: ChildProcess, graceMs: number, endStdin: boolean): Promise<void> {
   if (child.exitCode != null || child.signalCode != null) return Promise.resolve();
@@ -23,7 +29,15 @@ export function shutdownAcpChild(child: ChildProcess, graceMs: number, endStdin:
     child.once('error', failed);
     const graceTimer = setTimeout(() => {
       forced = true;
-      forcedTimer = setTimeout(() => finish(new Error('ACP process did not exit after forced shutdown')), 1000);
+      forcedTimer = setTimeout(() => {
+        if (endStdin) {
+          finish(new Error('ACP process did not exit after forced shutdown'));
+          return;
+        }
+        // A late exit can confirm direct ownership ended. A forcibly killed Pi bridge cannot confirm its native writers.
+        const lateExit = new Promise<void>((confirm) => child.once('exit', () => confirm()));
+        finish(new AcpChildExitTimeout(lateExit));
+      }, 1000);
       try {
         child.kill('SIGKILL');
       } catch {

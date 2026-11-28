@@ -117,6 +117,7 @@ import {
   bindWindowsProviderHostScope,
   createWindowsProviderHostScope,
   type WindowsProviderHostScope,
+  waitForWindowsProviderFinalization,
 } from '../../../../../utils/windows-provider-host.js';
 import { resolveEntrustedWorkTaskRefFromSource } from '../../../../growing/EntrustedWorkRuntimeInteractionBinding.js';
 import {
@@ -7061,11 +7062,45 @@ async function* invokePreparedSingleCat(deps: InvocationDeps, params: Invocation
       try {
         // #1838: a host exit is not a stopped tree. A provider in host jobs is torn down only once
         // every one of them is verifiably closed; otherwise the turn keeps its stop protection.
-        if (unclosedServiceIterators.size === 0 && (!windowsHostScope || (await windowsHostScope.close()))) {
-          terminal = { ...terminal, providerTeardownAt: terminal.endedAt };
-          await deps.turnExecutionStore.recordProviderTeardown?.(invocationId, terminal.endedAt);
+        const turnStore = deps.turnExecutionStore;
+        const commitTerminal = async (providerTeardownAt?: number) => {
+          if (providerTeardownAt !== undefined) {
+            terminal = { ...terminal, providerTeardownAt };
+            await turnStore.recordProviderTeardown?.(invocationId, providerTeardownAt);
+          }
+          return turnStore.transitionTerminal(invocationId, terminal);
+        };
+        const scope = windowsHostScope;
+        let result: Awaited<ReturnType<typeof commitTerminal>> | undefined;
+        if (unclosedServiceIterators.size === 0 && scope) {
+          let loggedPendingExit = false;
+          await waitForWindowsProviderFinalization(
+            scope.execution,
+            async () => {
+              const confirmed = await scope.close(({ durationMs, evidence }) => {
+                if (loggedPendingExit) return;
+                loggedPendingExit = true;
+                log.warn(
+                  {
+                    invocationId,
+                    durationMs,
+                    stopEvidence: evidence.map(({ verdict, reason, activeProcesses }) => ({
+                      verdict,
+                      reason: reason.split(':', 2).join(':'),
+                      activeProcesses,
+                    })),
+                  },
+                  'Windows provider exit proof pending; retrying online',
+                );
+              });
+              if (!confirmed) return false;
+              result = await commitTerminal(Date.now());
+              return true;
+            },
+            { isShuttingDown: deps.isRuntimeShuttingDown },
+          );
         }
-        const result = await deps.turnExecutionStore.transitionTerminal(invocationId, terminal);
+        result ??= await commitTerminal(!scope && unclosedServiceIterators.size === 0 ? terminal.endedAt : undefined);
         // A restart's cut turns are owed in the store and continued by the next boot.
         if (
           hostCut?.kind === 'host_sleep' &&

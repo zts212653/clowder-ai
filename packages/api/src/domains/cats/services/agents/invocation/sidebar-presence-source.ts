@@ -21,6 +21,7 @@
 export interface SidebarPresenceValue {
   readonly status: 'idle' | 'working' | 'done' | 'error';
   readonly cats?: readonly string[];
+  readonly finalizingCats?: readonly string[];
   readonly activeSince?: number;
 }
 
@@ -52,7 +53,12 @@ export interface SidebarPresenceSourceDeps<TSnapshot extends SidebarActiveExecut
     threadId: string,
     userId: string,
     snapshot: TSnapshot,
-  ): Promise<{ readonly catIds: readonly string[]; readonly activeSince?: number; readonly complete: boolean }>;
+  ): Promise<{
+    readonly catIds: readonly string[];
+    readonly finalizingCats?: readonly string[];
+    readonly activeSince?: number;
+    readonly complete: boolean;
+  }>;
   /** Batch lifecycle witness; absent means no indexed terminal evidence, never "infer done". */
   listLatestTerminalExecutions(
     threadIds: readonly string[],
@@ -116,6 +122,9 @@ export function createSidebarPresenceSource<TSnapshot extends SidebarActiveExecu
           presence.set(threadId, {
             status: 'working',
             cats: [...new Set(working.catIds)],
+            ...('finalizingCats' in working && working.finalizingCats?.length
+              ? { finalizingCats: working.finalizingCats }
+              : {}),
             ...(working.activeSince !== undefined ? { activeSince: working.activeSince } : {}),
           });
           continue;
