@@ -87,11 +87,21 @@ export async function readMemoryMessage(target: MemoryMessageTarget, signal: Abo
       { owner: source.ownerUserId, producer: target.feature, proposalId: target.id },
       '/api/taste-proposals/' + encodeURIComponent(target.id),
       { signal, fresh },
-    )) as { proposal: TasteProposal };
-    const proposal = body.proposal;
-    if (proposal.id !== target.id || proposal.threadId !== target.threadId || proposal.userId !== source.ownerUserId)
+    )) as { proposalId?: unknown; status?: unknown } | null;
+    if (
+      body?.proposalId !== target.id ||
+      typeof body.status !== 'string' ||
+      !['pending', 'approving', 'approved', 'rejected'].includes(body.status)
+    )
       throw new Error('提议来源已变化');
-    return { item: source.item, status: proposal.status, evidence: proposal, effect: false };
+    // The authenticated original-card source carries the content/owner; the public GET is status-only.
+    const status = body.status as TasteProposal['status'];
+    return {
+      item: source.item,
+      status,
+      evidence: { proposalId: target.id, status, detail: source.item.detail },
+      effect: false,
+    };
   }
   const result = await readDomainApprovalResult(target.block, coordinate, undefined, !fresh);
   return result

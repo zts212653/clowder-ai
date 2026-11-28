@@ -1,5 +1,4 @@
 import type {
-  ProfileUpdateProposal,
   RichBlock,
   RichCardBlock,
   ScheduleMutationProposal,
@@ -13,6 +12,11 @@ import { approvalResultRead } from '@/lib/approval-result-read';
 import { apiFetch } from '@/utils/api-client';
 import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { invalidateThreadAttentionPreferences } from '@/utils/thread-attention-invalidation';
+import {
+  type ProfileMessageProposal,
+  profileMessageFromBody,
+  readProfileMessageProposal,
+} from './profile-message-proposal';
 
 export interface ProposalTarget {
   feature: 'F128' | 'F225' | 'F231';
@@ -20,10 +24,11 @@ export interface ProposalTarget {
   threadId: string;
   mid: string;
   blockId: string;
+  block?: RichCardBlock;
 }
 export interface ProposalBinding {
   target: ProposalTarget;
-  record?: ThreadProposal | SessionHandoffProposal | ProfileUpdateProposal;
+  record?: ThreadProposal | SessionHandoffProposal | ProfileMessageProposal;
   current: boolean;
   refresh: () => Promise<unknown>;
   revision?: number;
@@ -38,7 +43,7 @@ export function proposalTarget(block: RichCardBlock, threadId: string, mid: stri
     );
     const stamp = block.meta?.approval as { canonicalProposalId?: string } | undefined;
     const id = action?.payload?.proposalId ?? stamp?.canonicalProposalId;
-    return typeof id === 'string' && id ? { feature: 'F231', id, threadId, mid, blockId: block.id } : null;
+    return typeof id === 'string' && id ? { feature: 'F231', id, threadId, mid, blockId: block.id, block } : null;
   }
   const action = block.actions?.find((a) => a.action === 'propose:approve' || a.action === 'handoff:approve');
   const id = action?.payload?.proposalId;
@@ -57,8 +62,9 @@ export function proposalPath(target: ProposalTarget) {
 }
 /** The approval read keeps the original response body; this is the one place that turns it into the card's proposal. */
 export function proposalFromBody(target: ProposalTarget, raw: unknown) {
+  if (target.feature === 'F231') return profileMessageFromBody(target, raw);
   const owner = apiSessionIdentity.getSnapshot().ownerUserId;
-  const body = raw as { proposal?: ThreadProposal | SessionHandoffProposal | ProfileUpdateProposal } | undefined;
+  const body = raw as { proposal?: ThreadProposal | SessionHandoffProposal } | undefined;
   const proposal = body?.proposal;
   // A session handoff read answers only the proposal's owner and returns its status; the card carries the content.
   if (
@@ -91,6 +97,7 @@ export async function readProposal(target: ProposalTarget, signal?: AbortSignal,
     proposalPath(target),
     { signal, fresh },
   );
+  if (target.feature === 'F231') return readProfileMessageProposal(target, body, fresh);
   return proposalFromBody(target, body);
 }
 // Transient attempt evidence shares the existing approval identity across inbox and chat.
@@ -231,7 +238,7 @@ export function proposalView(
   const card = block?.kind === 'card' ? block : undefined;
   if (!p) return null;
   const thread = binding.target.feature === 'F128' ? (p as ThreadProposal) : null,
-    profile = binding.target.feature === 'F231' ? (p as ProfileUpdateProposal) : null,
+    profile = binding.target.feature === 'F231' ? (p as ProfileMessageProposal) : null,
     terminal = ['approved', 'rejected', 'withdrawn', 'expired'].includes(p.status),
     recovery = proposalRecoveryState(binding.target) ?? binding.recovery,
     writable = binding.current && !recovery?.reading && (!recovery?.phase || recovery.phase === 'retryable');
@@ -242,12 +249,7 @@ export function proposalView(
         { field: 'parent', v: thread.parentThreadId },
         { field: 'reason', v: thread.reason },
       ]
-    : profile
-      ? [
-          { field: 'target', v: profile.targetPath },
-          { field: 'reason', v: profile.rationale },
-        ]
-      : (card?.fields ?? []).map((f) => ({ k: f.label, v: f.value }));
+    : (card?.fields ?? profile?.card.fields ?? []).map((f) => ({ k: f.label, v: f.value }));
   const rows = thread
     ? (
         [
@@ -270,7 +272,7 @@ export function proposalView(
         };
       })
     : [];
-  const first = thread ? thread.initialMessage : profile ? profile.afterContent : (card?.bodyMarkdown ?? null);
+  const first = thread ? thread.initialMessage : (card?.bodyMarkdown ?? profile?.card.bodyMarkdown ?? null);
   return {
     title: thread ? thread.title : profile ? '' : (card?.title ?? ''),
     titleType: profile ? 'profile' : '',
@@ -322,7 +324,9 @@ export async function requestProposalRevision(
   if (current.status !== 'pending' || JSON.stringify(current) !== JSON.stringify(binding.record))
     throw new Error('提议已变化，请重新读取');
   if (binding.target.feature === 'F231') {
-    await send!((current as ProfileUpdateProposal).sourceCatId, instruction.trim());
+    const author = (current as ProfileMessageProposal).sourceCatId;
+    if (!author) throw new Error('提议来源不可用');
+    await send!(author, instruction.trim());
     return;
   }
   const response = await apiFetch(`/api/proposals/${encodeURIComponent(binding.target.id)}/request-revision`, {

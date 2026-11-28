@@ -56,7 +56,145 @@ function declaredMenu(w: any, action: string, scope = '') {
   w.eval('A.menu(actionArgs(window.menuTrigger),window.menuTrigger)');
   return w.eval('S.menu.items');
 }
+
+it.each([
+  'sys:1',
+  'pkg:v2',
+])('shows and updates the conversation decision entry in %s without altering its draft', async (theme) => {
+  let rows = ['old-approval', 'reply-1'].map((mid) => ({
+    decisionRef: mid,
+    summary: 'Review ' + mid,
+    approval: {
+      proposalId: mid,
+      sourceFeatureId: 'F221',
+      resolution: 'open',
+      createdAt: 1,
+      expiresAt: 2,
+      navigation: { state: 'anchored', approvalCardRef: { threadId: 'pdl-test', messageId: mid } },
+    },
+    originalApprovalCard: { cardRef: { threadId: 'pdl-test', messageId: mid, blockId: 'taste-' + mid } },
+  }));
+  const { dom, w, data, action, errors } = await boot(
+    undefined,
+    (data) => {
+      data.input = 'Keep this draft';
+    },
+    undefined,
+    {},
+    (port) => {
+      const get = port.get;
+      port.get = async (path, params) => {
+        if (path === '/api/config/console-themes') return { themes: { active: theme, customs: [] } };
+        if (path === '/api/accounts') return { providers: [] };
+        if (path.startsWith('/api/accounts/')) return { selection: { members: [] } };
+        if (path === '/api/concierge/work/decisions')
+          return {
+            identity: { ownerUserId: 'owner' },
+            status: 'available',
+            attentionCount: rows.length,
+            page: { offset: 0, limit: 20, hasMore: false },
+            items: params?.mentionPeriod === 'handled' ? [] : [...rows, ...rows.slice(0, 1)],
+          };
+        return get(path, params);
+      };
+    },
+  );
+  try {
+    const entry = w.document.querySelector('.typing-scope [data-act="pendingDecisions"]') as HTMLElement;
+    expect(entry).not.toBeNull();
+    expect(entry.textContent).toContain('2');
+    expect(w.document.querySelector('[data-tid="pdl-test"] [data-act="pendingDecisions"]')).not.toBeNull();
+    entry.click();
+    const items = w.eval('S.menu.items');
+    expect(items).toHaveLength(2);
+    expect(items[0].label).toContain('old-approval');
+    expect(items[0].label).toContain(w.eval("tc('pendingDecisions.stale')"));
+    expect(items[0].data).toMatchObject({ t: 'pdl-test', mid: 'old-approval' });
+    expect(w.eval("VM.chatTicks().ticks.find(function(x){return x.mid==='reply-1'}).wait")).toBe(true);
+    action.mockClear();
+    w.document.querySelector('#menu [data-act="msgJump"]').click();
+    await w.__settled();
+    expect(action).toHaveBeenCalledWith(
+      'jump',
+      expect.objectContaining({ t: 'pdl-test', mid: 'old-approval' }),
+      undefined,
+    );
+    rows = [];
+    await w.clowderChat.emit('cat-cafe:proposal-updated', {});
+    await w.__settled();
+    expect(w.document.querySelector('.typing-scope [data-act="pendingDecisions"]')).toBeNull();
+    expect(data.input).toBe('Keep this draft');
+    expect(errors).not.toHaveBeenCalled();
+  } finally {
+    dom.window.close();
+  }
+});
+
+it('keeps a history jump pending while another page is loading and resumes it after rendering', async () => {
+  const { dom, w, data, push, action } = await boot(undefined, (data) => {
+    data.hasMore = true;
+  });
+  try {
+    w.document.documentElement.dataset.motion = 'reduce';
+    w.HTMLElement.prototype.scrollTo = () => {};
+    data.loading = true;
+    push();
+    await w.__settled();
+    w.eval(
+      "window.historyJumpResults=[];scrollToMessage('older-approval',function(ok){window.historyJumpResults.push(ok);})",
+    );
+    expect(w.historyJumpResults).toEqual([]);
+    data.messages.unshift({ ...data.messages[1], id: 'older-approval' });
+    data.loading = false;
+    push();
+    await w.__settled();
+    await vi.waitFor(() =>
+      expect({
+        results: w.historyJumpResults,
+        state: w.eval("chatRead('chatPage').older"),
+        target: !!w.document.querySelector('[data-stream] > [data-mid="older-approval"]'),
+      }).toEqual({ results: [true], state: 'idle', target: true }),
+    );
+    expect(action.mock.calls.filter(([name]) => name === 'older')).toHaveLength(0);
+  } finally {
+    dom.window.close();
+  }
+});
 const { JSDOM } = createRequire(import.meta.url)('jsdom');
+it('does not let an old conversation pagination result complete a newer conversation load', async () => {
+  const complete: Array<(value: boolean) => void> = [];
+  const { dom, w, data, port, push } = await boot(
+    undefined,
+    (data) => {
+      data.hasMore = true;
+    },
+    undefined,
+    {},
+    (port) => {
+      const act = port.action;
+      port.action = (name, args, element) =>
+        name === 'older' ? new Promise<boolean>((resolve) => complete.push(resolve)) : act(name, args, element);
+    },
+  );
+  try {
+    w.eval('window.oldPage=[];window.newPage=[];STREAM_OLDER.load(function(v){window.oldPage.push(v)})');
+    await vi.waitFor(() => expect(complete).toHaveLength(1));
+    data.threadId = port.threadId = 'next-thread';
+    data.threads.push({ ...data.threads[0], id: 'next-thread' });
+    push();
+    await w.__settled();
+    expect(w.oldPage).toEqual([false]);
+    w.eval('STREAM_OLDER.load(function(v){window.newPage.push(v)})');
+    await vi.waitFor(() => expect(complete).toHaveLength(2));
+    complete[0](false);
+    await w.__settled();
+    expect(w.newPage).toEqual([]);
+    complete[1](true);
+    await vi.waitFor(() => expect(w.newPage).toEqual([true]));
+  } finally {
+    dom.window.close();
+  }
+});
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn(), API_URL: 'https://api.test' }));
 type EngineData = Window['clowderChat'];
 type FixtureApi = {
@@ -422,7 +560,11 @@ async function boot(
                                         },
                                         errorHints: [],
                                       }
-                                    : undefined,
+                                    : path === '/api/accounts'
+                                      ? { providers: [] }
+                                      : path.startsWith('/api/accounts/')
+                                        ? { selection: { members: [] } }
+                                        : undefined,
     ),
     post: vi.fn(async () => undefined),
     file: (s: string) => (s ? new URL(s, 'https://api.test').href : ''),

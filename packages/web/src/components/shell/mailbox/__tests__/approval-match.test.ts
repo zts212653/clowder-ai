@@ -94,6 +94,34 @@ const withDetail = (item: ApprovalHubItem, detail: Record<string, unknown>): App
 });
 
 describe('matchHostedApproval', () => {
+  it.each([
+    'F128',
+    'F193',
+    'F221',
+    'F225',
+    'F231',
+    'F260',
+    'F321',
+  ] as const)('keeps a stale open %s decision actionable without relaxing its content check', (sourceFeatureId) => {
+    const stale: ApprovalHubItem = {
+      ...(sourceFeatureId === 'F260' ? ENTITY : VERSIONED),
+      sourceFeatureId,
+      expiresAt: NOW - 1,
+    };
+    expect(match(stale, [stale])).toEqual({ kind: 'matched', item: stale });
+    const changed =
+      sourceFeatureId === 'F260'
+        ? { conflict: { ...CONFLICT, fingerprint: 'b'.repeat(64) } }
+        : { content: 'changed proposal' };
+    expect(match(stale, [withDetail(stale, changed)])).toMatchObject({
+      kind: 'unmatched',
+      reason: 'credentials',
+    });
+    expect(match(stale, [{ ...stale, expiresAt: NOW - 2 }])).toMatchObject({
+      kind: 'unmatched',
+      reason: 'version',
+    });
+  });
   describe('the same decision, whichever producer owns it', () => {
     it.each([
       GENERIC,
@@ -159,7 +187,7 @@ describe('matchHostedApproval', () => {
   });
 
   describe('expiry is judged at the moment asked, not when the card was drawn', () => {
-    const expiring = { ...GENERIC, expiresAt: 1_500_000 };
+    const expiring: ApprovalHubItem = { ...GENERIC, sourceFeatureId: 'F139', expiresAt: 1_500_000 };
 
     it('matches while it has not expired, including the instant it expires (the card itself says expired only after)', () => {
       expect(match(expiring, [expiring], { now: 1_499_999 }).kind).toBe('matched');

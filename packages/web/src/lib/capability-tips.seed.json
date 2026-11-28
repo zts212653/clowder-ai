@@ -1643,12 +1643,12 @@
       "anchor": "AC-A3"
     },
     "bodySource": {
-      "path": "docs/features/F246-approval-hub.md",
-      "anchor": "统一审批中心底座"
+      "path": "docs/bug-report/pending-decisions-host/verification.md",
+      "anchor": "会话内的待决入口"
     },
     "contexts": ["thinking", "feature_dev"],
     "audience": ["cvo"],
-    "body": "有提案等你拍板？点左侧铃铛打开审批中心——待审项一目了然。",
+    "body": "侧栏提示「等你决定」时，点该提示或输入框上方的「去决定」可查看事项并定位原卡；多项会先列出摘要，较早的卡片会继续读取历史。批准或拒绝后提醒随确认结果更新，输入草稿保留。",
     "action": {
       "type": "open_concierge_draft",
       "label": "了解更多"

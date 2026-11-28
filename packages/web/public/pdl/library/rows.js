@@ -234,6 +234,7 @@ function threadRow(v, rn, root, movable) {
   const one = function (m) { const tn = TROW_TONE[m.tone]; const c = m.who ? whoInfo(m.who).color : '', st = c ? '--c:' + c : '';
     /* 状态圆点是唯一的 .dot（run 色调：身份色 + 状态表的颜色和节奏；warn：琥珀点），不再用伪元素画 */
     const dt = tn && tn.dot ? '<span class="dot" data-tone="' + tn.dot + '"' + (m.who ? ' data-live="' + h(m.who) + '" data-status="' + h(m.status || '') + '"' : m.status ? ' data-status="' + h(m.status) + '"' : '') + (st ? ' style="' + st + '"' : '') + '></span>' : '';
+    if (m.act) return '<button type="button" class="shell-focusable ' + (tn ? tn.cls : '') + '" style="border:0;background:transparent;padding:0;text-align:left;font:inherit"' + actAttrs(m.act, m.args) + '>' + dt + h(m.text) + '</button>';
     return tn ? '<span class="' + tn.cls + '"' + (m.who ? ' data-k="' + h(m.who) + '"' : '') + '>' + dt + h(m.text) + '</span>' : '<span>' + h(m.text) + '</span>'; };   /* data-k：这一项是谁（树键的一段）——轮换里换了顺序，节拍也按成员认，不按位置 */
   const state = [];
   if (v.hub) state.push({ text: tc('threadRow.meta.hub') });
@@ -241,14 +242,14 @@ function threadRow(v, rn, root, movable) {
   if (v.runs && v.runs.length) state.push({ runs: v.runs.map(function (r) { return { who: r.who, status: r.status, tone: 'run', text: tc('threadRow.meta.run', whoInfo(r.who).name, Math.max(1, Math.round((r.secs || 0) / 60))) }; }) });
   else if (v.failed) state.push({ text: tc('common.status.error'), tone: 'err' });
   else if (v.running && v.who) state.push({ text: tc('threadRow.meta.running', whoInfo(v.who).name) });
-  else if (v.pending) state.push({ text: tc('threadRow.meta.pending'), tone: 'warn' });
   else if (v.note || v.restored) state.push({ text: rn && rn.note ? pv(rn.note, v, root) : v.note });
   else if (v.lastWho) state.push({ text: tc('threadRow.meta.replied', whoInfo(v.lastWho).name) });
   else if (v.replied) state.push({ text: tc('threadRow.meta.repliedGeneric') });
+  if (v.pending) state.push({ text: v.pendingLabel || tc('threadRow.pending', v.pending), tone: 'warn', act: 'pendingDecisions', args: { t: v.id } });
   const meta = (v.fav ? ['<span class="cafe-star" data-tip="' + h(tc('threadRow.starred')) + '">' + icon('star', 12) + '</span>'] : []).concat(state.map(function (m) {
     if (!m.runs || m.runs.length < 2) return one(m.runs ? m.runs[0] : m);
     return rotHtml('span', 'trow-rot', m.runs.map(function (r) { return one(r); })); }));
-  const n = (v.unread || 0) + (v.pending || 0), tip = [v.unread ? tc('threadRow.unread', v.unread) : '', v.pending ? tc('threadRow.pending', v.pending) : '', v.at ? tc('threadRow.mention', v.mention) : ''].filter(Boolean).join(' · ');
+  const n = v.unread || 0, tip = [v.unread ? tc('threadRow.unread', v.unread) : '', v.pending ? tc('threadRow.pending', v.pending) : '', v.at ? tc('threadRow.mention', v.mention) : ''].filter(Boolean).join(' · ');
   const bdg = n || v.at ? badge(n || true, { at: v.at, tip: tip }) : '';
   /* 时间和草稿是同一格的状态（有草稿时显示“草稿”，主题色）：悬停时一起让位给操作 */
   const stamp = v.draft && !bdg ? '<span class="trow-draft">' + h(tc('common.status.draft')) + '</span>' : h(rn && rn.time ? pv(rn.time, v, root) : v.time || '');

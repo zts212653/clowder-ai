@@ -160,6 +160,7 @@ import {
   proposalFromBody,
   proposalPath,
   proposalView,
+  readProposal,
   recheckProposal,
   requestProposalRevision,
 } from './proposal-models';
@@ -2739,13 +2740,19 @@ export function ProposalRecordBinding({
   const source = useApprovalResult(
     target.feature,
     target.id,
-    'native',
-    (signal) =>
-      fetchApprovalProducerBody(
-        { owner: apiSessionIdentity.getSnapshot().ownerUserId ?? '', producer: target.feature, proposalId: target.id },
-        proposalPath(target),
-        signal,
-      ),
+    target.feature === 'F231' ? 'message-native' : 'native',
+    (signal, fresh) =>
+      target.feature === 'F231'
+        ? readProposal(target, signal, fresh)
+        : fetchApprovalProducerBody(
+            {
+              owner: apiSessionIdentity.getSnapshot().ownerUserId ?? '',
+              producer: target.feature,
+              proposalId: target.id,
+            },
+            proposalPath(target),
+            signal,
+          ),
     undefined,
     false,
   );

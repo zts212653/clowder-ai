@@ -174,9 +174,15 @@ const versionCheck: Check = (read, store) => {
   return store.summary === read.summary ? null : { reason: 'version', field: 'summary' };
 };
 
-// The card itself says "expired" only strictly after expiresAt; the instant of expiry is still decidable.
+// These adapters publish expiresAt as a stale reminder, not as a producer decision deadline.
+// The canonical resolution and the producer's fresh status still determine whether a decision is open.
+const staleReminderProducers = new Set(['F128', 'F193', 'F221', 'F225', 'F231', 'F260', 'F321']);
 const expiryCheck: Check = (_read, store, { now }) =>
-  store.expiresAt !== undefined && store.expiresAt < now ? { reason: 'expired' } : null;
+  store.expiresAt !== undefined &&
+  store.expiresAt < now &&
+  !(store.resolution === 'open' && staleReminderProducers.has(store.sourceFeatureId))
+    ? { reason: 'expired' }
+    : null;
 
 // The card reads its detail whatever the producer, so a copy without a detail object is not one it can be shown.
 const credentialsCheck: Check = (read, store) => {
