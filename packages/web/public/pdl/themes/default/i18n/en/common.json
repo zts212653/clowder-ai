@@ -1,4 +1,5 @@
 {
+  "archiveReplacement": {"title": "Replace installed plugin", "version": "{0}: {1} → {2}. ", "retention": "Plugin settings and data are kept.", "confirm": "Replace plugin"},
  "common": {
   "viewError": "Failed to load. Reopen or refresh to try again.",
   "viewMode": {

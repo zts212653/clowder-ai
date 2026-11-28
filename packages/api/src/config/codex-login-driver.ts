@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import type { CodexAccountIdentity } from '@cat-cafe/shared';
+import { agentAccessCodexLoginArgsSchema, codexManagedLoginArgs } from '@clowder-ai/agent-contract';
 import { resolveCliCommand } from '../utils/cli-resolve.js';
 import { finalizeCodexAccountEnvironment } from './codex-account-environment.js';
 import { readCodexAccountIdentity } from './codex-account-identity.js';
@@ -56,6 +57,7 @@ export function createCodexTerminalLoginDriver(
     command?: string;
     assertSupport?: (home: string, command?: string) => void | Promise<void>;
     openTerminal?: typeof openCodexLoginTerminal;
+    planLogin?: (signal: AbortSignal) => Promise<{ args: unknown; signal: AbortSignal }>;
   } = {},
 ): CodexLoginDriver {
   return {
@@ -63,9 +65,15 @@ export function createCodexTerminalLoginDriver(
       input.signal.throwIfAborted();
       const command = options.command ?? resolveCliCommand('codex');
       if (!command) throw new Error('codex_cli_unavailable');
+      const login = options.planLogin
+        ? await options.planLogin(input.signal)
+        : { args: codexManagedLoginArgs, signal: input.signal };
+      const signal = login.signal;
+      signal.throwIfAborted();
+      const args = agentAccessCodexLoginArgsSchema.parse(login.args);
       mkdirSync(input.home, { recursive: true, mode: 0o700 });
       await (options.assertSupport ?? assertCodexManagedPlatformSupport)(input.home, command);
-      const args = ['-c', 'cli_auth_credentials_store="file"', 'login'];
+      signal.throwIfAborted();
       const env = finalizeCodexAccountEnvironment(
         {
           accountRef: 'login-attempt',
@@ -84,7 +92,7 @@ export function createCodexTerminalLoginDriver(
       const ready = join(dirname(input.home), 'terminal-ready');
       writeFileSync(
         request,
-        JSON.stringify({ command, cwd: input.cwd, home: input.home, env, ownerPid: process.pid }),
+        JSON.stringify({ command, args, cwd: input.cwd, home: input.home, env, ownerPid: process.pid }),
         { mode: 0o600, flag: 'wx' },
       );
       const source = import.meta.url.endsWith('.ts');
@@ -96,21 +104,22 @@ export function createCodexTerminalLoginDriver(
       let finished = false;
       try {
         // OAuth output stays in the native console; only an explicit fallback exposes it on Windows.
+        signal.throwIfAborted();
         await (options.openTerminal ?? openCodexLoginTerminal)(shellCommand, input.terminal);
         const startupDeadline = Date.now() + 15_000;
         while (!existsSync(ready) && !existsSync(result)) {
           if (Date.now() >= startupDeadline) throw new Error('codex_terminal_open_failed');
-          await delay(100, undefined, { signal: input.signal });
+          await delay(100, undefined, { signal });
         }
-        input.signal.throwIfAborted();
+        signal.throwIfAborted();
         input.onReady();
         const deadline = Date.now() + 15 * 60_000;
         while (!existsSync(result)) {
           if (Date.now() >= deadline) throw new Error('codex_login_timeout');
-          await delay(100, undefined, { signal: input.signal });
+          await delay(100, undefined, { signal });
         }
         const completion: { exitCode: unknown } = JSON.parse(readFileSync(result, 'utf8'));
-        input.signal.throwIfAborted();
+        signal.throwIfAborted();
         if (completion.exitCode !== 0) throw new Error('codex_login_failed');
         const identity = readCodexAccountIdentity(input.home);
         if (!identity) throw new Error('codex_login_identity_unavailable');

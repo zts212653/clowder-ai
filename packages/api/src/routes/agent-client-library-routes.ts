@@ -16,6 +16,11 @@ import {
   readAgentProviderConfiguration,
 } from '../domains/cats/services/agents/session-contract/plugin-agent-provider.js';
 import {
+  createAgentAccessModelCatalogDiscovery,
+  createAgentAccessModelCatalogGeneration,
+} from '../domains/plugin/agent-access/model-catalog.js';
+import type { PluginRuntimeCarrierRouter } from '../domains/plugin/carrier/runtime-carrier.js';
+import {
   readAgentClientLibraryConfiguration,
   resolveAgentClientLibrary,
 } from '../domains/plugin/declared/agent-client-library.js';
@@ -26,8 +31,9 @@ import type { PluginInventoryStore } from '../domains/plugin/host-inventory/port
 import type { PluginRuntimeConfigurationPort } from '../domains/plugin/manifest-configuration-projection.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { pluginAccessError, requirePluginOwnerLocalAccess } from './plugin-access-guards.js';
-import { probeRuntimeCatalog } from './runtime-catalog-probe.js';
+import type { CatalogTarget } from './runtime-catalog-probe.js';
 import { createCatalogCache } from './runtime-catalog-route.js';
+import type { RuntimeModelCatalog } from './runtime-model-catalog.js';
 
 const modelRequest = z
   .object({
@@ -51,10 +57,19 @@ export function registerAgentClientLibraryRoutes(
     configuration: Pick<PluginRuntimeConfigurationPort, 'readConfig'>;
     registry: SessionImplementationRegistry;
     projectRoot?: () => string;
-    probe?: typeof probeRuntimeCatalog;
+    runtime?: Pick<PluginRuntimeCarrierRouter, 'invoke'>;
+    probe?: (target: CatalogTarget) => Promise<RuntimeModelCatalog>;
   },
 ): void {
-  const cached = createCatalogCache(input.probe);
+  const discover = input.runtime && createAgentAccessModelCatalogDiscovery(input.inventory, input.runtime);
+  const readGeneration = input.runtime && createAgentAccessModelCatalogGeneration(input.inventory);
+  const cached = discover
+    ? createCatalogCache(async (target) => {
+        const result = await discover(target);
+        if (!result) throw new Error('model_catalog_unavailable');
+        return result;
+      })
+    : input.probe && createCatalogCache(input.probe);
   app.post('/api/agent-providers/models', async (request, reply) => {
     const access = requirePluginOwnerLocalAccess(request, 'read');
     if ('error' in access) return pluginAccessError(reply, access);
@@ -86,6 +101,14 @@ export function registerAgentClientLibraryRoutes(
         contextDelivery: 'prompt_compatibility',
       };
     }
+    const packageUnavailable = {
+      status: 'configured' as const,
+      models: [],
+      message: 'plugin_unavailable',
+      contextDelivery: 'prompt_compatibility' as const,
+    };
+    const generation = await readGeneration?.();
+    if (!cached || (readGeneration && !generation)) return packageUnavailable;
     let located: Awaited<ReturnType<VerifiedPluginPackageLocator['resolveInstalledPackage']>> | undefined;
     try {
       located = await input.packages.resolveInstalledPackage(record.packageDigest);
@@ -105,11 +128,12 @@ export function registerAgentClientLibraryRoutes(
       });
       const profile = profiles.find((item) => item.id === ref.contributionId);
       if (!profile) return reply.code(409).send({ error: '插件客户端不存在，请重新读取工具列表' });
-      const target = {
+      const target: CatalogTarget = {
         kind: 'acp' as const,
         command: profile.acp.command,
         args: profile.acp.startupArgs,
         cwd: root,
+        ...(generation ? { generation } : {}),
         ...(model ? { model } : {}),
       };
       const key = JSON.stringify([
@@ -121,6 +145,18 @@ export function registerAgentClientLibraryRoutes(
         target,
       ]);
       const result = await cached(key, target, refresh);
+      if ((await readGeneration?.()) !== generation) return packageUnavailable;
+      const current = (await input.inventory.snapshot()).instances.find(
+        (item) => item.pluginInstanceId === instance.pluginInstanceId && item.lifecycleState === 'installed',
+      );
+      if (
+        !current ||
+        current.activationState !== 'enabled' ||
+        current.lifecycleRevision !== instance.lifecycleRevision ||
+        current.packageDigest !== instance.packageDigest ||
+        !input.registry.has(ref)
+      )
+        return packageUnavailable;
       return { ...result, contextDelivery: 'prompt_compatibility' as const };
     } catch {
       return reply.code(409).send({ error: '插件程序包或连接配置不可用，请修正后重新读取模型' });

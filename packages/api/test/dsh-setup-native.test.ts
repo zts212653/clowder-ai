@@ -4,9 +4,10 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { validateManifest } from '@clowder-ai/plugin-contract';
 import Fastify from 'fastify';
 import { stringify } from 'yaml';
-import { AcpClient } from '../src/domains/cats/services/agents/providers/acp/AcpClient.js';
 import { dshSetupBootstrap, resolveDshSetupLaunch } from '../src/routes/dsh-setup-launch.js';
 import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
 import { prepareDshSetup, readDshSetup } from '../src/routes/dsh-setup-service.js';
@@ -105,7 +106,43 @@ test(
     const app = Fastify();
     const audit: string[] = [];
     app.decorateRequest('sessionUserId', 'fixture-owner');
+    const [
+      { MessageStore },
+      { createAgentAccessDshConnectionTest },
+      { createAgentAccessAcpProcess },
+      { AgentAccessAcpRuntimeClient },
+      { createDormantPluginRuntimeComposition, createPluginManagerRuntimeComposition },
+    ] = await Promise.all([
+      import('../dist/domains/cats/services/stores/ports/MessageStore.js'),
+      import('../dist/domains/plugin/agent-access/dsh.js'),
+      import('../dist/domains/plugin/agent-access/acp-process.js'),
+      import('../dist/domains/plugin/agent-access/acp-runtime-client.js'),
+      import('../dist/domains/plugin/index.js'),
+    ]);
+    const runtime = createDormantPluginRuntimeComposition({
+      projectRoot: host,
+      messageStore: new MessageStore(),
+      contract: { manifestContractRange: '0.4.0-candidate.0', validateManifest },
+    });
+    t.after(() => runtime.shutdown());
+    const { manager } = createPluginManagerRuntimeComposition({
+      runtime,
+      catalogManifests: [],
+      catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 0 }) },
+    });
+    await manager.install({
+      source: {
+        kind: 'local-archive',
+        path: fileURLToPath(new URL('../../agent-access-plugin/dist/plugin/package.tgz', import.meta.url)),
+      },
+    });
+    const pluginId = 'official.agent-access';
+    await manager.setEnabled(pluginId, {
+      enabled: true,
+      expectedRevision: (await manager.get(pluginId)).plugin.lifecycleRevision,
+    });
     registerDshSetupRoutes(app, {
+      runConnection: createAgentAccessDshConnectionTest(runtime.inventoryStore, runtime.supervisor),
       resolveLaunch: (id) => {
         assert.equal(id, 'dsh');
         return launch;
@@ -144,12 +181,15 @@ test(
     assert.equal(verified.statusCode, 200, verified.body);
     assert.deepEqual(audit, ['dsh-acp-preparation', 'dsh-acp-connection-test']);
     const target = dshSetupBootstrap({ ...launch, args: prepared.startupArgs });
-    const client = new AcpClient({
-      command: target.command,
-      args: target.args,
-      cwd: target.verifyCwd(),
-      permissionHandler: (_req, respond) => respond({ cancelled: true }),
-    });
+    const client = new AgentAccessAcpRuntimeClient(
+      {
+        command: target.command,
+        args: target.args,
+        cwd: target.verifyCwd(),
+        permissionHandler: (_req, respond) => respond({ cancelled: true }),
+      },
+      createAgentAccessAcpProcess(runtime.inventoryStore, runtime.supervisor),
+    );
     try {
       await client.initialize();
       const session = await client.newSession(target.cwd, []);
@@ -157,9 +197,15 @@ test(
         'Remember REMEMBER_NATIVE_1668; reply NATIVE_1668_OK without tools.',
         'Repeat the earlier marker reply without tools.',
       ]) {
-        const result = await client.promptCollect(session.sessionId, prompt);
-        assert.equal(result.stopReason, 'end_turn');
-        assert.ok(JSON.stringify(result.events).includes('NATIVE_1668_OK'));
+        const stream = client.promptStream(session.sessionId, prompt);
+        const events = [];
+        let result = await stream.next();
+        while (!result.done) {
+          events.push(result.value);
+          result = await stream.next();
+        }
+        assert.equal(result.value, 'end_turn');
+        assert.ok(JSON.stringify(events).includes('NATIVE_1668_OK'));
       }
       assert.equal(requests.length, 3);
       assert.ok(requests[2]?.includes('REMEMBER_NATIVE_1668'), 'native continuation contains the first turn');

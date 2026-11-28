@@ -6,7 +6,8 @@ import type { AgentMessage, AgentServiceOptions, MessageMetadata } from '../../.
 import { providerProfileAccountSnapshot } from '../../../invocation/execution-account-binding.js';
 import { captureScopedMemberLaunch } from '../../../invocation/scoped-member-launch.js';
 import { compileL0ViaSubprocess } from '../../l0-compiler.js';
-import { AcpClient } from '../AcpClient.js';
+import type { CreateAcpMemberClient } from '../AcpAgentService.js';
+import { AcpClient, type AcpClientConfig } from '../AcpClient.js';
 import { createAcpSessionState, flushAcpThinking, transformAcpEvent } from '../acp-event-transformer.js';
 import { prepareKimiMemberLaunch } from './kimi-member-launch.js';
 
@@ -15,6 +16,7 @@ export async function* invokeKimiMember(input: {
   readonly catId: string;
   readonly modelSelection: string;
   readonly native: KimiNativeLaunch;
+  readonly createClient?: CreateAcpMemberClient;
   readonly prompt: string;
   readonly options?: AgentServiceOptions;
   readonly compile?: typeof compileL0ViaSubprocess;
@@ -22,7 +24,7 @@ export async function* invokeKimiMember(input: {
   const catId = createCatId(input.catId),
     options = input.options,
     signal = options?.signal;
-  let client: AcpClient | undefined, dispose: (() => Promise<void>) | undefined;
+  let client: ReturnType<CreateAcpMemberClient> | undefined, dispose: (() => Promise<void>) | undefined;
   let removeAbort: (() => void) | undefined, stopWatching: (() => void) | undefined;
   let sessionId: string | undefined;
   let changed = false,
@@ -89,7 +91,7 @@ export async function* invokeKimiMember(input: {
     const launch = await prepareKimiMemberLaunch({ native: input.native, account, identity, member, callbackEnv });
     dispose = launch.dispose;
     await assertSource();
-    client = new AcpClient({
+    const config: AcpClientConfig = {
       ...launch,
       inheritParentEnv: false,
       defaultPermissionDecision: 'reject',
@@ -111,7 +113,8 @@ export async function* invokeKimiMember(input: {
           respond({ cancelled: true });
         }
       },
-    });
+    };
+    client = input.createClient?.(config) ?? new AcpClient(config);
     const active = client,
       abort = () => {
         if (sessionId) active.cancelSession(sessionId);

@@ -11,7 +11,7 @@ import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 import { dshLauncherProfileState, dshProfileState } from './native-dsh-profile.js';
 import { discoverNativeRuntimes } from './native-runtimes.js';
-import { type CatalogTarget, probeRuntimeCatalog } from './runtime-catalog-probe.js';
+import type { CatalogTarget } from './runtime-catalog-probe.js';
 import type { RuntimeModelCatalog } from './runtime-model-catalog.js';
 
 const inputSchema = z
@@ -25,7 +25,15 @@ const inputSchema = z
   })
   .strict();
 const ttl = 5 * 60_000;
-export function createCatalogCache(probe: typeof probeRuntimeCatalog = probeRuntimeCatalog, now = Date.now) {
+export interface RuntimeCatalogRouteOptions {
+  /** Active package generation; undefined means the package is not available. */
+  modelCatalogGeneration?: () => Promise<string | undefined>;
+  /** Active-package discovery; Host still executes the trusted command. */
+  discoverModelCatalog?: (target: CatalogTarget) => Promise<RuntimeModelCatalog | undefined>;
+  /** Test seam; production keeps the existing native discovery. */
+  discoverRuntimes?: typeof discoverNativeRuntimes;
+}
+export function createCatalogCache(probe: (target: CatalogTarget) => Promise<RuntimeModelCatalog>, now = Date.now) {
   const values = new Map<string, { at: number; value: RuntimeModelCatalog }>();
   const inflight = new Map<string, Promise<RuntimeModelCatalog>>();
   return async (key: string, target: CatalogTarget, refresh = false): Promise<RuntimeModelCatalog> => {
@@ -76,15 +84,24 @@ function modified(path: string) {
     return 0;
   }
 }
-export function registerRuntimeCatalogRoute(app: FastifyInstance) {
-  const cached = createCatalogCache();
+export function registerRuntimeCatalogRoute(app: FastifyInstance, options: RuntimeCatalogRouteOptions = {}) {
+  const { discoverModelCatalog, modelCatalogGeneration } = options;
+  const cached = discoverModelCatalog
+    ? createCatalogCache(async (target) => {
+        const value = await discoverModelCatalog(target);
+        if (!value) throw new Error('model_catalog_unavailable');
+        return value;
+      })
+    : undefined;
   app.post('/api/cats/runtime-models', async (request, reply) => {
     if (!resolveHeaderUserId(request)) return reply.code(401).send({ error: '需要登录后读取工具模型' });
     const parsed = inputSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: '模型查询参数无效' });
     const data = parsed.data,
       root = resolveActiveProjectRoot();
-    const runtime = (await discoverNativeRuntimes(root)).runtimes.find((item) => item.id === data.runtimeId);
+    const runtime = (await (options.discoverRuntimes ?? discoverNativeRuntimes)(root)).runtimes.find(
+      (item) => item.id === data.runtimeId,
+    );
     if (!runtime) return reply.code(404).send({ error: '运行工具不存在，请重新探测' });
     const fallback: RuntimeModelCatalog = {
       status: 'configured',
@@ -210,8 +227,7 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
       modified(join(root, '.claude/settings.json')),
       modified(join(root, '.claude/settings.local.json')),
     ]);
-    const result = await cached(key, target, data.refresh);
-    return {
+    const configured = {
       ...fallback,
       ...('configuredModel' in runtime
         ? {
@@ -221,7 +237,17 @@ export function registerRuntimeCatalogRoute(app: FastifyInstance) {
             defaultEffortSource: 'tool_config' as const,
           }
         : {}),
+    };
+    const generation = await modelCatalogGeneration?.();
+    if (!generation || !cached) return { ...configured, message: 'plugin_unavailable' };
+    const result = await cached(`${key}:${generation}`, { ...target, generation }, data.refresh);
+    if ((await modelCatalogGeneration?.()) !== generation) return { ...configured, message: 'plugin_unavailable' };
+    return {
+      ...configured,
       ...result,
+      ...(result.status === 'unavailable' && target.kind === 'codex'
+        ? { status: 'configured' as const, message: 'plugin_discovery_unavailable' }
+        : {}),
       models: result.models.length ? result.models : fallback.models,
     };
   });

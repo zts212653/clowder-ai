@@ -52,15 +52,33 @@ export function extractCommandExecutionLifecycle(event: unknown): CommandExecuti
 }
 
 /**
- * Redacts known callback token keys within object graphs.
+ * Redacts known credential keys within object graphs.
  * We intentionally bound recursion depth for M1 to keep this best-effort and predictable.
  */
-export function sanitizeRawEvent(event: unknown): unknown {
+export function sanitizeRawEvent(event: unknown, knownCredentials?: readonly string[]): unknown {
   try {
-    return redactSensitiveFields(inspectSecretValue(event).value, 0);
+    const scan = inspectSecretValue(event).value;
+    const safe = knownCredentials?.length ? inspectSecretValue(scan, { knownCredentials }).value : scan;
+    return redactSensitiveFields(safe, 0);
   } catch {
     return { type: 'redacted_event', reason: 'secret_result_uninspectable' };
   }
+}
+
+/** Retain a possible credential prefix until the next contiguous provider delta. */
+export function sanitizeStreamingDelta(value: string, knownCredentials: readonly string[]) {
+  const cleaned = sanitizeRawEvent(value, knownCredentials);
+  const safe = typeof cleaned === 'string' ? cleaned : '[redacted]';
+  let pending = 0;
+  for (const credential of knownCredentials) {
+    for (let length = Math.min(credential.length - 1, safe.length); length > pending; length -= 1) {
+      if (!safe.endsWith(credential.slice(0, length))) continue;
+      pending = length;
+      break;
+    }
+  }
+  const end = safe.length - pending;
+  return { text: safe.slice(0, end), tail: safe.slice(end) };
 }
 
 function redactSensitiveFields(value: unknown, depth: number): unknown {
@@ -89,7 +107,8 @@ function redactSensitiveFields(value: unknown, depth: number): unknown {
 
 function isSensitiveTokenKey(key: string): boolean {
   const lowered = key.toLowerCase();
-  if (lowered === 'callbacktoken') return true;
+  if (lowered === 'callbacktoken' || lowered === 'apikey' || lowered === 'api_key' || lowered === 'authorization')
+    return true;
   if (lowered.endsWith('_token')) return true;
   return lowered.includes('callback_token');
 }

@@ -1192,6 +1192,16 @@ export interface AgentServiceOptions {
   agyAccount?: { readonly credentialHome: string; readonly storage: 'cli_file' };
   /** F320: immutable selected account launch snapshot; independent of displayName/token refresh. */
   codexAccountLaunch?: CodexAccountLaunchDescriptor;
+  /** Frozen gateway identity for the Host's standalone Codex exec grant. */
+  codexGatewayCredentialVersion?: string;
+  /** Host-side catalog root used to revalidate the selected account before a native launch. */
+  executionAccountProjectRoot?: string;
+  /** Saved, Host-only launch descriptor for an explicitly selected session adapter. */
+  registeredAcpLaunch?: Readonly<{
+    projectRoot: string;
+    config: import('../../../config/cat-config-loader.js').AcpVariantConfig;
+    environment?: Readonly<Record<string, string>>;
+  }>;
   /** Rich content blocks (e.g. images) to pass to the CLI agent */
   contentBlocks?: readonly MessageContent[];
   /** Upload directory for resolving image paths */
@@ -1310,6 +1320,8 @@ export interface ProviderRequestGenerationCommitV1 {
  * Interface that all agent services must implement
  */
 export interface AgentService {
+  /** This session implementation receives Host instructions separately from the user prompt. */
+  readonly usesSessionInstructions?: boolean;
   prepareWatcherSession?(): Promise<void>;
   boundedWatcherSessionCapability?(): import('@cat-cafe/shared').WatcherCapability;
   /** The adapter handles AbortSignal and owns teardown; Host must drain it before terminalizing. */

@@ -285,3 +285,20 @@ for (const provider of providers)
       });
     }
   });
+
+test('a detected Kimi member can freeze the approved default workspace from an ordinary new conversation', async () => {
+  const { freezeExecutionWorkspace } = await import(
+    '../dist/domains/cats/services/agents/invocation/execution-workspace.js'
+  );
+  const store = new ThreadStore();
+  const thread = store.create('user-1');
+  const binding = await freezeExecutionWorkspace({
+    threadStore: store,
+    threadId: thread.id,
+    userId: 'user-1',
+    provider: 'kimi',
+  });
+  assert.equal(binding.workingDirectory, workspace);
+  assert.equal(binding.usesDefaultWorkspace, true);
+  assert.equal(store.get(thread.id).projectPath, thread.projectPath);
+});

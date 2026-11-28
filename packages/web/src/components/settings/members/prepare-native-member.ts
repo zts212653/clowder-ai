@@ -1,9 +1,9 @@
 import { isDshLauncher } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
 import { useMemberModelCatalogs } from '@/lib/member-model-display';
-import { apiFetch } from '@/utils/api-client';
 import { serializeCommandArgs } from '../../hub-cat-editor.acp';
 import { type HubCatEditorFormState, initialState, splitCommandArgs } from '../../hub-cat-editor.model';
+import { readAgentAccessDetection } from './agent-access-discovery';
 import { type DshInspection, dshSetupError, dshSetupRequest, type PreparedDshConnection } from './dsh-setup-client';
 import type { RuntimeChoice } from './member-runtime-draft';
 
@@ -28,7 +28,7 @@ export function needsDshPreparation(form: HubCatEditorFormState, baseline?: CatD
   return (
     usesDshDesktopSetup(form, Boolean(baseline), runtime ? [runtime] : undefined) &&
     (!baseline ||
-      (['acpCommand', 'acpStartupArgs', 'defaultModel'] as const).some(
+      (['acpAgentProvider', 'acpCommand', 'acpStartupArgs', 'defaultModel'] as const).some(
         (key) => form[key] !== initialState(baseline)[key],
       ))
   );
@@ -44,15 +44,20 @@ export async function prepareNativeMember(
   return (async () => {
     const runtimeRevision = useMemberModelCatalogs.getState().runtimeRevision + 1;
     useMemberModelCatalogs.setState({ runtimeRevision });
-    const response = await apiFetch('/api/cats/native-runtimes');
-    if (!response.ok) throw Error('dsh_setup_custom_startup');
-    const { runtimes } = (await response.json()) as { runtimes: RuntimeChoice[] };
+    const { readiness, candidates: runtimes } = await readAgentAccessDetection(false);
+    if (readiness.state !== 'ready') throw Error('dsh_setup_custom_startup');
     useMemberModelCatalogs.setState((state) =>
       state.runtimeConfirmedRevision <= runtimeRevision
         ? { runtimes, runtimeConfirmedRevision: runtimeRevision }
         : state,
     );
-    const sources = runtimes.filter((runtime) => runtime.installed && runtime.dshDesktop && runtime.acp);
+    const sources = runtimes.filter(
+      (runtime) =>
+        runtime.installed &&
+        runtime.dshDesktop &&
+        runtime.acp &&
+        (runtime.acp.agentProvider ?? null) === (form.acpAgentProvider ?? null),
+    );
     const source =
       sources.find((runtime) => runtime.acp?.command === form.acpCommand) ??
       (form.acpCommand === 'dsh' && sources.length === 1 ? sources[0] : undefined);

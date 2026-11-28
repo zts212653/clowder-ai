@@ -1,5 +1,6 @@
 import { once } from 'node:events';
 import { createServer } from 'node:http';
+import { zstdDecompressSync } from 'node:zlib';
 
 export async function startLayoutModel(options = {}) {
   const requests = [];
@@ -11,12 +12,17 @@ export async function startLayoutModel(options = {}) {
       res.end('{"data":[]}');
       return;
     }
-    const body = JSON.parse(Buffer.concat(chunks).toString());
+    const bytes = Buffer.concat(chunks);
+    const body = JSON.parse(
+      (req.headers['content-encoding'] === 'zstd' ? zstdDecompressSync(bytes) : bytes).toString(),
+    );
     requests.push({
       authorization: Boolean(req.headers.authorization),
       model: body.model,
       nativeMemory: JSON.stringify(body).includes('F320_NATIVE_MEMORY'),
     });
+    await options.onRequest?.(body);
+    if (res.destroyed) return;
     const id = `fixture-${requests.length}`;
     const item = {
       type: 'message',

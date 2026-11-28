@@ -72,7 +72,7 @@ export function hasNativeIdentityConflict(
 
 /** Registry-generated ACP ids change after creation; the launch descriptor does not. */
 function partnerKey(runtime: RuntimeChoice): string {
-  if (!runtime.acp) return runtime.id;
+  if (!runtime.acp || runtime.acp.agentProvider === runtime.id) return runtime.id;
   const descriptor = JSON.stringify([runtime.acp.command, runtime.acp.startupArgs, runtime.acp.transport ?? 'stdio']);
   let hash = 2166136261;
   for (const char of descriptor) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
@@ -98,9 +98,10 @@ export function recommendNativePartners(
       runtime.acp?.startupArgs,
       runtime.acp?.transport ?? 'stdio',
     ]);
-    // Full descriptor equality prevents short-hash collisions in the local partner index.
-    const key = runtime.acp ? `acp:${encodeURIComponent(descriptor)}` : runtime.id;
-    const discoveryIdentity = runtime.dshDesktop ? 'dsh' : runtime.acp ? descriptor : runtime.id;
+    // Plugin adapters share the same launcher placeholder. Direct ACP keeps its descriptor identity.
+    const sharedLaunch = runtime.acp && runtime.acp.agentProvider !== runtime.id;
+    const key = sharedLaunch ? `acp:${encodeURIComponent(descriptor)}` : runtime.id;
+    const discoveryIdentity = runtime.dshDesktop && sharedLaunch ? 'dsh' : sharedLaunch ? descriptor : runtime.id;
     if (seen.has(discoveryIdentity)) return [];
     seen.add(discoveryIdentity);
     const form = nativePartnerIdentity(runtime, templates, cats);
@@ -110,11 +111,13 @@ export function recommendNativePartners(
     for (let n = 2; reservedAliases.has(uniqueAlias); n++) uniqueAlias = `${alias}-${n}`;
     reservedAliases.add(uniqueAlias);
     const legacyId = stableOnboardingMemberId(journeyId, 'partner', partnerKey(runtime));
-    const existing = cats.find(
-      (cat) =>
-        (cat.id === legacyId || cat.configurationSource === 'native_tool') &&
-        matchesRuntime(initialState(cat), runtime),
-    );
+    const existing = cats.find((cat) => {
+      if (cat.id !== legacyId && cat.configurationSource !== 'native_tool') return false;
+      const saved = initialState(cat);
+      return runtime.dshDesktop && runtime.acp?.agentProvider
+        ? saved.acpAgentProvider === runtime.acp.agentProvider && saved.acpCommand === runtime.acp.command
+        : matchesRuntime(saved, runtime);
+    });
     const baseId = autoSlug(runtime.label);
     let catId = baseId;
     for (let n = 2; reservedIds.has(catId.toLowerCase()); n++) {

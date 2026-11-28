@@ -6,6 +6,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./dsh-launcher": {
+      "import": "./dist/dsh-launcher.js",
+      "types": "./dist/dsh-launcher.d.ts"
+    },
     "./l0-input-capture": {
       "import": "./dist/l0-input-capture.js",
       "types": "./dist/l0-input-capture.d.ts"

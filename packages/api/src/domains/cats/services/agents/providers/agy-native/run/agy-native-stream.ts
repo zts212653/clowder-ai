@@ -1,14 +1,18 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { CliDiagnostics } from '@cat-cafe/shared';
 import { isCliError, isCliTimeout, isLivenessWarning } from '../../../../../../../utils/cli-spawn.js';
 import type { LivenessWarningEvent } from '../../../../../../../utils/ProcessLivenessProbe.js';
+import type { AgentAccessAgyOutput } from '../../../../../../plugin/agent-access/agy.js';
 import {
   type AgyStreamJsonEvent,
   type AgyStreamJsonTurn,
+  agyTerminalPolicyRejected,
   parseAgyStreamJsonLine,
   summarizeAgyStreamJsonTurn,
 } from '../../agy-stream-json-parser.js';
 import { agyNativePolicyDiagnostics, missingAgyNativeInitError } from '../agy-native-errors.js';
 import {
+  asRecord,
   type ExpectedNativeInit,
   extractUnrecognizedInitTools,
   readAgyNativeEnvelope,
@@ -35,21 +39,14 @@ export type AgyNativeStreamObservation =
   | { readonly kind: 'complete'; readonly observed: AgyNativeObservedTurn };
 
 const MAX_AGY_NATIVE_STREAM_CHARS = 8 * 1024 * 1024;
-function verifiedNativeTerminal(lines: readonly string[], sessionId: string, resultCount: number): AgyStreamJsonTurn {
-  if (resultCount > 1) throw new Error('AGY native one-turn process emitted multiple terminal results');
-  const turn = summarizeAgyStreamJsonTurn(lines);
-  if (turn.conversationId && turn.conversationId !== sessionId) {
-    throw new Error('AGY native terminal conversation ID disagrees with init');
-  }
-  return turn;
-}
-
 /** Treat init as a claim that must match the launch plan, never as proof that L0 reached the model. */
 export async function* observeAgyNativeTurn(
   stream: AsyncIterable<unknown>,
   expected: ExpectedNativeInit,
   signal?: AbortSignal,
   multiTurn = false,
+  adapter?: AgentAccessAgyOutput,
+  credentials: readonly string[] = [],
 ): AsyncGenerator<AgyNativeStreamObservation> {
   const lines: string[] = [];
   let sessionId: string | null = null;
@@ -59,14 +56,76 @@ export async function* observeAgyNativeTurn(
   let transportExit: AgyNativeObservedTurn['transportExit'];
   let resultCount = 0;
   let resultSeenBeforeCancellation = false;
+  let terminalPolicyRejected = false;
+  let nativeStatus: string | null = null;
+  let nativeHasResponse = false;
+  let nativeHasResultError = false;
+  let nativeHasTool = false;
+  let nativeHasDenials = false;
   let streamChars = 0;
+  const terminal = async (verifiedSessionId: string): Promise<AgyStreamJsonTurn> => {
+    const turn = adapter ? await adapter.summarize(lines, terminalPolicyRejected) : summarizeAgyStreamJsonTurn(lines);
+    if (turn.conversationId && turn.conversationId !== verifiedSessionId)
+      throw new Error('AGY native terminal conversation ID disagrees with init');
+    if (!adapter) return turn;
+    if (
+      turn.upstreamStatus !== nativeStatus ||
+      (turn.outcome === 'ok' && (nativeStatus !== 'SUCCESS' || !nativeHasResponse || nativeHasResultError)) ||
+      (turn.outcome === 'unconfirmed' && !nativeHasResponse) ||
+      (nativeStatus === null && turn.outcome !== 'incomplete' && turn.outcome !== 'protocol_error')
+    )
+      throw new Error('invalid_agy_native_terminal_evidence');
+    if (
+      nativeStatus !== 'SUCCESS' ||
+      nativeHasResultError ||
+      nativeHasTool ||
+      nativeHasDenials ||
+      turn.toolCalls.length ||
+      turn.completedCompactionStep !== null
+    ) {
+      // These fields can admit native recovery or publication. Verify them against the original carrier evidence.
+      const native = summarizeAgyStreamJsonTurn(lines, terminalPolicyRejected);
+      const evidence = (result: AgyStreamJsonTurn) => ({
+        deniedActions: result.deniedActions.map(({ action }) => action),
+        tools: result.toolCalls.map((call) => ({
+          stepIndex: call.stepIndex,
+          toolName: call.toolName,
+          state: call.state,
+          completedOnce: call.completedOnce,
+          failure: call.errorMessage,
+          failedWithOutput: call.errorMessage !== null && call.output !== '',
+          imageName: call.toolName === 'generate_image' ? call.parameters.ImageName : undefined,
+        })),
+        completedResponseStep: result.completedResponseStep,
+        completedCompactionStep: result.completedCompactionStep,
+        recoveredErrorSteps: result.recoveredErrorSteps,
+        stepsComplete: result.stepsComplete,
+        sessionTurnCount: result.sessionTurnCount,
+        unknownEvents: result.unknownEvents.length,
+        authoritativeOutcome:
+          result.outcome === 'denied' ||
+          result.outcome === 'protocol_error' ||
+          nativeStatus !== 'SUCCESS' ||
+          nativeHasResultError
+            ? result.outcome
+            : undefined,
+      });
+      if (!isDeepStrictEqual(evidence(turn), evidence(native))) throw new Error('invalid_agy_native_terminal_evidence');
+    }
+    return turn;
+  };
   const debugRef = (): CliDiagnostics['debugRef'] => ({
     command: expected.command ?? 'agy',
     signal: transportExit?.signal ?? null,
     ...(transportExit ? { exitCode: transportExit.code } : {}),
     ...(expected.invocationId ? { invocationId: expected.invocationId } : {}),
   });
-  for await (const raw of stream) {
+  const input = adapter
+    ? adapter.project(stream, credentials)
+    : (async function* () {
+        for await (const raw of stream) yield { raw, line: undefined, step: undefined };
+      })();
+  for await (const { raw, line: projectedLine, step } of input) {
     if (isCliError(raw) || isCliTimeout(raw)) {
       cliDiagnostics = raw.cliDiagnostics;
       transportExit = !transportError && isCliError(raw) ? { code: raw.exitCode, signal: raw.signal } : undefined;
@@ -84,8 +143,8 @@ export async function* observeAgyNativeTurn(
       unrecognizedAdvertisedTools = extractUnrecognizedInitTools(record);
       yield { kind: 'init', sessionId };
     }
-    const line = JSON.stringify(raw);
-    const event = parseAgyStreamJsonLine(line);
+    const line = projectedLine ?? JSON.stringify(raw);
+    const event = adapter ? step : parseAgyStreamJsonLine(line);
     if (resultCount > 0 && record.event !== 'init') {
       if (
         !multiTurn ||
@@ -103,7 +162,7 @@ export async function* observeAgyNativeTurn(
         kind: 'turn_complete',
         observed: {
           sessionId,
-          turn: verifiedNativeTerminal(lines, sessionId, resultCount),
+          turn: await terminal(sessionId),
           transportError,
           ...(unrecognizedAdvertisedTools.length ? { unrecognizedAdvertisedTools } : {}),
           ...(cliDiagnostics ? { cliDiagnostics } : {}),
@@ -113,12 +172,29 @@ export async function* observeAgyNativeTurn(
       };
       lines.length = 0;
       resultCount = 0;
+      terminalPolicyRejected = false;
+      nativeStatus = null;
+      nativeHasResponse = false;
+      nativeHasResultError = false;
+      nativeHasTool = false;
+      nativeHasDenials = false;
       resultSeenBeforeCancellation = false;
     }
     if (record.event === 'result') {
       if (sessionId) verifyAgyNativeResult(record, sessionId);
+      const result = asRecord(record.result);
+      const error = result?.error;
+      nativeStatus = typeof result?.status === 'string' ? result.status : 'UNKNOWN';
+      nativeHasResponse = typeof result?.response === 'string' && result.response.trim().length > 0;
+      nativeHasResultError = error != null && error !== '';
+      nativeHasDenials = result?.denied_actions !== undefined;
+      terminalPolicyRejected = typeof error === 'string' && agyTerminalPolicyRejected(error);
       resultCount++;
       if (!signal?.aborted) resultSeenBeforeCancellation = true;
+    }
+    if (record.event === 'step_update') {
+      const rawStep = asRecord(record.step_update);
+      nativeHasTool ||= Boolean(rawStep?.tool_name || rawStep?.step_type === 'tool' || rawStep?.step_type === 'finish');
     }
     streamChars += line.length;
     if (streamChars > MAX_AGY_NATIVE_STREAM_CHARS)
@@ -131,7 +207,7 @@ export async function* observeAgyNativeTurn(
       yield { kind: 'step', event };
     }
     if (record.event === 'result' && sessionId) {
-      const turn = verifiedNativeTerminal(lines, sessionId, resultCount);
+      const turn = await terminal(sessionId);
       // An internal consumer can stop on this result, before process teardown.
       // Preserve stdout policy diagnostics without inventing exit/auth evidence.
       const resultDiagnostics = agyNativePolicyDiagnostics(turn, cliDiagnostics, debugRef());
@@ -149,7 +225,7 @@ export async function* observeAgyNativeTurn(
     }
   }
   if (!sessionId) throw missingAgyNativeInitError(lines, transportError, cliDiagnostics, debugRef());
-  const turn = verifiedNativeTerminal(lines, sessionId, resultCount);
+  const turn = await terminal(sessionId);
   cliDiagnostics = agyNativePolicyDiagnostics(turn, cliDiagnostics, debugRef());
   yield {
     kind: 'complete',

@@ -105,6 +105,43 @@ function mockFetchRpcError(code, message) {
 }
 
 describe('A2AAgentService', () => {
+  it('rejects a plugin request that changes the recorded prompt or remote task', async () => {
+    let dispatched = false;
+    let fetched = false;
+    const service = new A2AAgentService({
+      config: { url: 'http://127.0.0.1:4200/fixture-a2a' },
+      fetchFn: async () => {
+        fetched = true;
+        return new Response(null, { status: 422 });
+      },
+      async runTurn(input, submit) {
+        await submit(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 'unbound-task',
+            method: 'tasks/send',
+            params: {
+              id: 'unbound-task',
+              message: { role: 'user', parts: [{ type: 'text', text: input.prompt + ' unintended modification' }] },
+            },
+          }),
+        );
+        return [];
+      },
+    });
+    const result = [];
+    for await (const event of service.invoke('approved request', {
+      beforeProviderLaunch: (prepared) => assert.equal(prepared.message.body, 'approved request'),
+      onRemoteExecutionDispatched: () => {
+        dispatched = true;
+      },
+    }))
+      result.push(event);
+    assert.equal(fetched, false);
+    assert.equal(dispatched, false);
+    assert.match(result.at(-1).error, /A2A request does not match the admitted turn/);
+  });
+
   it('does not register a remote execution or send after pre-launch cancellation', async () => {
     const controller = new AbortController();
     const dispatched = [];

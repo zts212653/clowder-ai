@@ -21,7 +21,8 @@ export function nativeOpeningCapsuleRevision(
     (instruction) =>
       (instruction.injectionDecision === 'native_l0_compiled' ||
         instruction.injectionDecision === 'native_l0_compiled_with_signature_boundary' ||
-        instruction.injectionDecision === 'native_agent_file_compiled') &&
+        instruction.injectionDecision === 'native_agent_file_compiled' ||
+        instruction.injectionDecision === 'dsh_native_system_persona_prefix') &&
       instruction.body.includes(rendered),
   );
   if (inNativeInstruction) return capsule.revision;

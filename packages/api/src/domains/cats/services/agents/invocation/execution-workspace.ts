@@ -79,7 +79,7 @@ export async function freezeExecutionWorkspace(input: {
     workingDirectory = workspace.projectPath;
   } else if (
     thread &&
-    (input.provider === 'opencode' || input.requiresAgyWorkspace) &&
+    (input.provider === 'opencode' || input.provider === 'kimi' || input.requiresAgyWorkspace) &&
     canUseDefaultThreadWorkspace(thread, input.threadId, input.userId)
   ) {
     const workspace = await resolveDefaultThreadWorkspace();

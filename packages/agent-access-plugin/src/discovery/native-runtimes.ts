@@ -1,0 +1,166 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { isAbsolute, join, resolve } from 'node:path';
+import { getCliEffortOptionsForProvider, inferGoogleModelEffort } from '@cat-cafe/shared';
+import { isDshLauncher } from '@cat-cafe/shared/dsh-launcher';
+import type { AgentAccessDetectionContext } from '@clowder-ai/agent-contract';
+import { parse } from 'smol-toml';
+import { AGY_NATIVE_KNOWN_MODELS } from '../roles/agy-gemini-models.js';
+import { resolveCliCommand } from '../workstation/cli-resolve.js';
+import { resolveDshSetupLaunch } from './dsh-setup-launch.js';
+import { discoverAdditionalRuntimes } from './native-additional-runtimes.js';
+import { discoverDshRuntimes } from './native-dsh-discovery.js';
+import { dshLauncherProfileState } from './native-dsh-profile.js';
+
+function text(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+function metadata(path: string, toml = false): Record<string, unknown> {
+  try {
+    const source = readFileSync(path, 'utf8');
+    const parsed: unknown = toml ? parse(source) : JSON.parse(source);
+    return parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+/** Display evidence only: reuse setup's existing package/argument/profile checks without launching. */
+function supportsDshSetup(command: string, args: string[], cwd: string): boolean {
+  try {
+    resolveDshSetupLaunch(command, args, cwd);
+    return true;
+  } catch {
+    return false;
+  }
+}
+/** Startup descriptors containing credentials or service URLs stay in the existing editor. */
+export function safeNativeStartup(command: string, startupArgs: readonly string[]): boolean {
+  return ![command, ...startupArgs].some((arg) =>
+    /(?:api[_-]?key|token|password|secret|authorization|https?:\/\/)/i.test(arg),
+  );
+}
+/** Discovery is read-only. No auth files, full agent launches, prompts or login probes. */
+export async function discoverNativeRuntimes(
+  { projectRoot, members, piBridgeEntry }: AgentAccessDetectionContext,
+  commandFor = resolveCliCommand,
+) {
+  const home = homedir();
+  const codex = metadata(join(process.env.CODEX_HOME || join(home, '.codex'), 'config.toml'), true);
+  const claude = metadata(join(process.env.CLAUDE_CONFIG_DIR || join(home, '.claude'), 'settings.json'));
+  const claudeEnv =
+    claude.env !== null && typeof claude.env === 'object' ? (claude.env as Record<string, unknown>) : {};
+  const builtins = (
+    [
+      ['codex', 'Codex', 'openai'],
+      ['claude', 'Claude Code', 'anthropic'],
+    ] as const
+  ).map(([id, label, clientId]) => {
+    const command = commandFor(id);
+    const configuredModel = text(id === 'codex' ? codex.model : (claudeEnv.ANTHROPIC_MODEL ?? claude.model));
+    const configuredEffort = text(
+      id === 'codex' ? codex.model_reasoning_effort : (claudeEnv.CLAUDE_CODE_EFFORT_LEVEL ?? claude.effortLevel),
+    );
+    const models = new Set<string>();
+    if (configuredModel) models.add(configuredModel);
+    for (const entry of members) {
+      if (entry.clientId === clientId && entry.defaultModel) models.add(entry.defaultModel);
+    }
+    return {
+      id,
+      label,
+      clientId,
+      installed: Boolean(command),
+      command: command ?? undefined,
+      configuredModel,
+      configuredEffort,
+      models: [...models],
+      defaultsStatus: 'configured_only',
+      transport: id === 'codex' ? 'app_server' : 'stream_json',
+    };
+  });
+  const acp = members.flatMap((cat) => {
+    const config = cat.acp;
+    if (!config || (cat.agentProvider !== undefined ? cat.agentProvider : config.agentProvider)) return [];
+    const command = isAbsolute(config.command) ? config.command : commandFor(config.command);
+    const agy = cat.clientId === 'google' && cat.agyProfile?.carrier === 'acp';
+    const entry = config.startupArgs.find((arg) => /(?:\.m?js|\.cjs)$/.test(arg));
+    const installed = Boolean(command && existsSync(command) && (!entry || existsSync(resolve(projectRoot, entry))));
+    const profileState = dshLauncherProfileState(config.command, config.startupArgs, projectRoot, cat.env?.DSH_HOME);
+    const dshSetupSupported =
+      installed &&
+      config.transport !== 'httpstream' &&
+      supportsDshSetup(config.command, config.startupArgs, projectRoot);
+    const dsh =
+      isDshLauncher(config.command, config.startupArgs) ||
+      dshSetupSupported ||
+      (profileState !== undefined && profileState !== 'custom_startup');
+    const selectable = safeNativeStartup(config.command, config.startupArgs) && profileState !== 'acp_profile_invalid';
+    return [
+      {
+        id: `acp:${cat.id}`,
+        label: agy ? 'AGY 官方 ACP' : dsh ? 'DSH' : cat.displayName,
+        ...(dsh ? { onboardingEligible: false } : {}),
+        ...(cat.env?.DSH_HOME ? { env: { DSH_HOME: cat.env.DSH_HOME } } : {}),
+        clientId: agy ? 'google' : 'acp',
+        ...(agy ? { agyCarrier: 'acp' as const } : {}),
+        installed,
+        ...(dshSetupSupported ? { dshSetupSupported: true } : {}),
+        ...(profileState && profileState !== 'custom_startup'
+          ? { discoveryStatus: installed ? profileState : 'not_installed' }
+          : {}),
+        ...(selectable
+          ? {
+              command: config.command,
+              startupArgs: config.startupArgs,
+              acp: { command: config.command, startupArgs: config.startupArgs, transport: config.transport },
+            }
+          : {}),
+        models: [],
+        defaultsStatus: 'session_only',
+        transport: 'acp',
+      },
+    ];
+  });
+  const dsh = await discoverDshRuntimes();
+  const configuredAgyModels = members
+    .filter((cat) => cat.clientId === 'google' && cat.agyProfile?.enabled)
+    .flatMap((cat) => (cat.agyProfile?.model ? [cat.agyProfile.model] : []));
+  const agyKnownLabels = new Map(AGY_NATIVE_KNOWN_MODELS.map((entry) => [entry.id, entry.label]));
+  const agyModelIds = [...new Set([...configuredAgyModels, ...AGY_NATIVE_KNOWN_MODELS.map((entry) => entry.id)])];
+  const agyModelCatalog = agyModelIds.map((value) => {
+    const efforts = getCliEffortOptionsForProvider('google', value);
+    const defaultEffort = inferGoogleModelEffort(value) ?? undefined;
+    return {
+      value,
+      label: agyKnownLabels.get(value) ?? value,
+      ...(defaultEffort ? { defaultEffort } : {}),
+      ...(efforts ? { efforts: efforts.map((effort) => ({ value: effort, label: effort })) } : {}),
+    };
+  });
+  const agy = (
+    [
+      ['agy-native', 'AGY Native', 'agy', 'native'],
+      ...(!acp.some((runtime) => 'agyCarrier' in runtime)
+        ? [['agy-acp', 'AGY 官方 ACP', 'agy_acp_server.par', 'acp'] as const]
+        : []),
+    ] as const
+  ).map(([id, label, executable, agyCarrier]) => {
+    const command = commandFor(executable);
+    return {
+      id,
+      label,
+      clientId: 'google',
+      agyCarrier,
+      command: command ?? undefined,
+      installed: Boolean(command),
+      modelCatalog: agyModelCatalog,
+      models: agyModelIds,
+      defaultsStatus: 'configured_only',
+      ...(agyCarrier === 'acp' ? { acp: { command: executable, startupArgs: [], transport: 'stdio' as const } } : {}),
+    };
+  });
+  return {
+    runtimes: [...builtins, ...acp, ...dsh, ...agy, ...discoverAdditionalRuntimes(home, commandFor, { piBridgeEntry })],
+    authenticationStatus: 'not_checked',
+  };
+}

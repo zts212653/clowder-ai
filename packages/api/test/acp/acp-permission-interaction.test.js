@@ -53,7 +53,8 @@ for (const Client of [AcpClient, AcpHttpStreamClient]) {
       });
       const client = new Client({ command: 'unused', args: [], cwd: process.cwd() });
       const replies = [];
-      if (Client === AcpClient) client.child = { stdin: { write: (line) => replies.push(JSON.parse(line)) } };
+      if (Client === AcpClient)
+        client.child = { isWritable: () => true, write: (line) => replies.push(JSON.parse(line)) };
       else
         client.sendAgentResponse = async (value) => {
           replies.push(value);

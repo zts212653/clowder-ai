@@ -305,3 +305,74 @@ test('a configuration failure after admission retries setup without reinstalling
   assert.deepEqual(f.installed, ['first', 'second']);
   assert.equal(f.activated.length, 2);
 });
+
+test('bundled defaults activate before remote selection and downloads start', async () => {
+  const f = await fixture();
+  const online = await f.options.catalog.snapshot();
+  f.options.bundledDefaults = [{ ...online.entries[0], distribution: 'bundled' }];
+  const load = f.options.loadSelection;
+  f.options.loadSelection = async () => {
+    assert.deepEqual(
+      f.activated.map(([id]) => id),
+      ['test.first'],
+    );
+    assert.equal(JSON.parse(await readFile(f.options.statePath, 'utf8')).remoteSelectionPending, true);
+    return load();
+  };
+  const ready = await prepareInitialPluginInstallation(f.options);
+  assert.deepEqual(f.installed, ['first']);
+  assert.equal(f.activated.length, 0);
+  await ready.activate();
+  await ready.activate();
+  await (await prepareInitialPluginInstallation(f.options)).activate();
+  assert.deepEqual(f.errors, []);
+  assert.deepEqual(f.installed, ['first', 'second']);
+  assert.deepEqual(
+    f.activated.map(([id]) => id),
+    ['test.first', 'test.second'],
+  );
+});
+
+test('distribution defaults activate offline and an offline startup leaves remote selection retryable', async () => {
+  const f = await fixture();
+  const online = await f.options.catalog.snapshot();
+  f.options.bundledDefaults = [{ ...online.entries[0], distribution: 'bundled' }];
+  const load = f.options.loadSelection;
+  f.options.loadSelection = async () => {
+    throw new Error('offline');
+  };
+  await (await prepareInitialPluginInstallation(f.options)).activate();
+  assert.deepEqual(f.installed, ['first']);
+  assert.deepEqual(
+    f.activated.map(([id]) => id),
+    ['test.first'],
+  );
+  assert.equal(JSON.parse(await readFile(f.options.statePath, 'utf8')).remoteSelectionPending, true);
+  f.options.loadSelection = load;
+  await (await prepareInitialPluginInstallation(f.options)).activate();
+  assert.deepEqual(f.installed, ['first', 'second']);
+  assert.deepEqual(
+    f.activated.map(([id]) => id),
+    ['test.first', 'test.second'],
+  );
+});
+
+test('distribution defaults are appended to an old journal and an uninstall still wins', async () => {
+  const f = await fixture();
+  const online = await f.options.catalog.snapshot();
+  f.options.loadSelection = async () => ({ schemaVersion: 1, plugins: [] });
+  await (await prepareInitialPluginInstallation(f.options)).activate();
+  f.options.bundledDefaults = [{ ...online.entries[0], distribution: 'bundled' }];
+  f.options.catalog.snapshot = async () => {
+    throw new Error('offline');
+  };
+  await (await prepareInitialPluginInstallation(f.options)).activate();
+  assert.deepEqual(f.installed, ['first']);
+  await f.inventory.transaction((tx) => {
+    for (const instance of tx.instances.list())
+      tx.instances.put({ ...instance, lifecycleState: 'retired', retiredAt: 100 });
+  });
+  await (await prepareInitialPluginInstallation(f.options)).activate();
+  assert.deepEqual(f.installed, ['first']);
+  assert.equal(f.activated.length, 1);
+});

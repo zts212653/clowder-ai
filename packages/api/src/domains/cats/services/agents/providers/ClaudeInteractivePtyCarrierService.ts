@@ -30,6 +30,7 @@ import { getCatModel } from '../../../../../config/cat-models.js';
 import { applyClaudeTokenAccountEnv } from '../../../../../config/claude-token-account.js';
 import { composeClaudeTokenSettingsDocument } from '../../../../../config/claude-token-settings.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import type { AgentAccessClaudeBatch } from '../../../../plugin/agent-access/claude-batch.js';
 import type {
   AgentMessage,
   AgentService,
@@ -74,6 +75,7 @@ const log = createModuleLogger('interactive-pty-carrier');
 
 export interface ClaudeInteractivePtyCarrierServiceOptions {
   catId?: CatId;
+  projectBatch?: AgentAccessClaudeBatch;
   /** Test seam: polling interval for TranscriptTailer (ms). Default 500. */
   pollIntervalMs?: number;
   /** Test seam: working directory for PtyDriver (default to resolved cwd). */
@@ -110,10 +112,12 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
   private readonly mcpServerPath: string | undefined;
   private readonly claudeBinary: string | undefined;
   private readonly hookSidecarPathOverride: string | undefined;
+  private readonly projectBatch?: AgentAccessClaudeBatch;
   /** Cached MCP config file path (created once per instance, reused across invocations). */
 
   constructor(options?: ClaudeInteractivePtyCarrierServiceOptions) {
     this.catId = options?.catId ?? createCatId('opus');
+    this.projectBatch = options?.projectBatch;
     this.model = getCatModel(this.catId) ?? 'claude-opus-4-8';
     this.pollIntervalMs = options?.pollIntervalMs ?? 500;
     this.cwd = options?.cwd ?? process.cwd();
@@ -169,6 +173,16 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: async generator with cancellation, multiple error paths, and inline polling loop — extracting would worsen readability
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     const { catId, model, pollIntervalMs } = this;
+    const batch = await this.projectBatch?.('hook', catId, {
+      ...options?.callbackEnv,
+      ...options?.accountEnv,
+    });
+    if (batch) {
+      options = {
+        ...options,
+        signal: options?.signal ? AbortSignal.any([options.signal, batch.signal]) : batch.signal,
+      };
+    }
     const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
 
     // ─── Env construction (F230 D3 + KD-7: reuse buildClaudeEnvOverrides) ─────
@@ -372,6 +386,7 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
           providerNativeVisibility: 'unknown' as const,
         });
         await options?.beforeProviderLaunch?.(preparedRequest);
+        options?.signal?.throwIfAborted();
         if (!('body' in preparedRequest.message)) throw new Error('claude_pty_prepared_message_not_exact');
         // F230 R10 root-cause fix (2026-06-11): PtyDriver uses watchForTranscriptFile to
         // discover the transcript — Claude generates its own UUID per session. For resume
@@ -431,6 +446,7 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
           entries = await tailer.readNew({ includeTrailingPartial: true });
         }
         if (entries.length > 0) {
+          batch?.signal.throwIfAborted();
           // Extract hook session_id and propagate to session_init (R2 P1-3)
           if (!hookSessionId) {
             hookSessionId = extractSessionIdFromHookEntries(entries);
@@ -449,8 +465,11 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
           }
 
           // Emit AgentMessages from hook events (Stop→text, PostToolUse→tool_use)
-          const messages = hookEntriesToAgentMessages(entries, { catId });
+          const messages = batch
+            ? (await batch.project(entries)).messages
+            : hookEntriesToAgentMessages(entries, { catId });
           for (const msg of messages) {
+            batch?.signal.throwIfAborted();
             yield msg;
           }
 
@@ -474,6 +493,7 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
 
       // F236 Phase E: final drain — catch eval events from the last hook call
       if (evalTailer) await ingestEvalEntries(evalTailer, { includeTrailingPartial: true });
+      batch?.signal.throwIfAborted();
 
       // Fallback: yield session_init if loop ended without finding hookSessionId
       if (!sessionInitYielded) {
@@ -482,6 +502,7 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
 
       // ─── done + usage (degraded: hooks carry no token data) ──────────────────
       const usage: TokenUsage = {};
+      batch?.signal.throwIfAborted();
       yield {
         type: 'done',
         catId,

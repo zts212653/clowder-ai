@@ -16,7 +16,7 @@ export function shutdownAcpChild(child: ChildProcess, graceMs: number, endStdin:
     };
     const exited = () =>
       finish(
-        endStdin && forced ? new Error('Pi bridge was forcibly killed; native retirement is unconfirmed') : undefined,
+        endStdin && forced ? new Error('ACP process was forcibly killed; native retirement is unconfirmed') : undefined,
       );
     const failed = () => finish(new Error('ACP process shutdown failed; retirement is not confirmed'));
     child.once('exit', exited);
@@ -30,7 +30,7 @@ export function shutdownAcpChild(child: ChildProcess, graceMs: number, endStdin:
         failed();
       }
     }, graceMs);
-    // The builtin Pi bridge closes its native children on EOF, including on Windows.
+    // EOF-aware clients can retire their native work before exiting, including on Windows.
     try {
       if (endStdin && child.stdin) child.stdin.end();
       else child.kill('SIGTERM');

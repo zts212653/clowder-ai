@@ -7,7 +7,7 @@ import { resolveDshSetupLaunch } from '../src/routes/dsh-setup-launch.js';
 import { discoverDshRuntimes } from '../src/routes/native-dsh-discovery.js';
 import { invalidateCliCommand } from '../src/utils/cli-resolve.js';
 import { resolveWindowsSpawnPlan } from '../src/utils/cli-spawn-win.js';
-import { resolveDshDesktopLaunch } from '../src/utils/dsh-desktop-launch.js';
+import { dshDesktopL0Compatibility, resolveDshDesktopLaunch } from '../src/utils/dsh-desktop-launch.js';
 
 test('the installed Desktop launcher preserves its Electron CLI and environment through setup and spawning', async (t) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-desktop-launch-')));
@@ -79,7 +79,17 @@ test('the installed Desktop launcher preserves its Electron CLI and environment 
     writeFileSync(manifest, JSON.stringify({ desktopVersion }));
     assert.equal(resolveDshDesktopLaunch(command, args)?.command, join(root, 'DeepSeek Harness.exe'));
   }
+  if (process.platform === 'win32') {
+    for (const desktopVersion of ['0.2.2-rc.5', '0.2.3-alpha.2']) {
+      writeFileSync(manifest, JSON.stringify({ desktopVersion }));
+      assert.deepEqual(dshDesktopL0Compatibility(command, args), { desktopVersion, supported: true });
+    }
+    assert.equal(dshDesktopL0Compatibility(command, ['--profile', 'shell']), undefined);
+  }
   writeFileSync(manifest, JSON.stringify({ desktopVersion: 'unreviewed' }));
+  if (process.platform === 'win32') {
+    assert.deepEqual(dshDesktopL0Compatibility(command, args), { desktopVersion: 'unreviewed', supported: false });
+  }
   assert.equal(resolveDshDesktopLaunch(command, args)?.command, join(root, 'DeepSeek Harness.exe'));
   writeFileSync(command, script.replace('@echo off', '  @ECHO   off  \r\nREM current Desktop launcher'));
   assert.equal(resolveDshDesktopLaunch(command, args)?.command, join(root, 'DeepSeek Harness.exe'));

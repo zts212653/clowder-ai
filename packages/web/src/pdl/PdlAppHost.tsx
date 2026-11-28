@@ -5,6 +5,8 @@ import {
   type ContextAttachment,
   ContextAttachmentsSchema,
   type MessageContent,
+  PluginArchiveReplacementConfirmationSchema,
+  PluginArchiveReplacementOfferSchema,
   RichCardBlock,
   RuntimeInteractionRecord,
   RuntimeInteractionResponse,
@@ -116,13 +118,13 @@ import { readThreadExportAddress } from './export-route';
 import { submitInteractiveGroup } from './interactive-actions';
 import {
   createNativeMember,
+  detectNativeMembers,
   pickMemberTemplate,
   prepareNativePartner,
   readMemberCanon,
   readMemberClientSettings,
   readMemberRuntimeModels,
   readMemberSettings,
-  readNativeMembers,
   readVoiceChoices,
   removeMember,
   runMemberProviderSetup,
@@ -794,6 +796,7 @@ function ChatBinding({
   const runtimeAnswerContext = useRef<string | null>(null);
   const interactiveAttempts = useRef(new Map<string, { signature: string; operationId: string }>());
   const runtimeAttempts = useRef(new Map<string, { signature: string; operationId: string }>());
+  const archiveFilesByInput = useRef(new WeakMap<HTMLInputElement, File>());
   const questionIds = useMemo(
     () => [...new Set(messageCards(surfaceMessages, threadId, 'ask').map((card) => card.interactionId))],
     [surfaceMessages, threadId],
@@ -1197,13 +1200,8 @@ function ChatBinding({
         admissionRef.current!.updateTitle(args.title);
         admissionRef.current!.updatePinned(args.pinned === 'true');
         return admissionRef.current!.importSession(JSON.parse(args.value));
-      case 'membersRead': {
-        const meta = await readMemberSettings();
-        return {
-          ...meta,
-          dshMembers: current.current.cats.filter((cat) => isDshMember(cat, meta.runtimes)).map((cat) => cat.id),
-        };
-      }
+      case 'membersRead':
+        return readMemberSettings();
       case 'memberVoicesRead':
         return readVoiceChoices();
       case 'memberCanonRead':
@@ -1211,7 +1209,7 @@ function ChatBinding({
       case 'memberCanonSave':
         return saveMemberCanon(args.id, threadId, args.value, (element as unknown as File | null) ?? undefined);
       case 'nativeDetect':
-        return readNativeMembers(args.journeyId, args.refresh === 'true');
+        return detectNativeMembers(args.journeyId, args.refresh === 'true');
       case 'nativePrepare':
         return prepareNativePartner(JSON.parse(args.value));
       case 'nativeCreate':
@@ -1304,11 +1302,37 @@ function ChatBinding({
       case 'appearanceDeleteImage':
         return request(`/api/config/chat-background/images/${encodeURIComponent(args.id)}`, { method: 'DELETE' });
       case 'pluginArchive': {
-        const file = (element as HTMLInputElement).files?.[0];
+        const input = element as HTMLInputElement | undefined;
+        const file = input && (args.replacement ? archiveFilesByInput.current.get(input) : input.files?.[0]);
         if (!file) throw new Error('common.required');
         const form = new FormData();
         form.append('file', file);
-        return request('/api/plugin-manager/plugins/install/upload', { method: 'POST', body: form });
+        if (args.replacement) {
+          const confirmation = PluginArchiveReplacementConfirmationSchema.parse(JSON.parse(args.replacement));
+          form.append('replacement', JSON.stringify(confirmation));
+        }
+        const path = '/api/plugin-manager/plugins/install/upload';
+        const response = await apiFetch(path, { method: 'POST', body: form }, mutationRequestOptions(path));
+        const payload: unknown = await response.json();
+        if (response.ok) {
+          archiveFilesByInput.current.delete(input);
+          return payload;
+        }
+        if (payload && typeof payload === 'object') {
+          if (
+            response.status === 409 &&
+            !args.replacement &&
+            'code' in payload &&
+            payload.code === 'ARCHIVE_REPLACEMENT_CONFIRMATION_REQUIRED' &&
+            'replacement' in payload
+          ) {
+            const replacement = PluginArchiveReplacementOfferSchema.parse(payload.replacement);
+            archiveFilesByInput.current.set(input, file);
+            return { replacement };
+          }
+          if ('error' in payload && typeof payload.error === 'string') throw new Error(payload.error);
+        }
+        throw new Error(`请求失败 (${response.status})`);
       }
       case 'pluginOperation':
         return callPluginOperation(

@@ -1,5 +1,33 @@
 [
   {
+    "id": "feature-f241-agent-access",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F241-agent-provider-plugin.md",
+      "anchor": "User Journey"
+    },
+    "structureSource": {
+      "path": "packages/web/public/pdl-app/members.js",
+      "anchor": "nativeDetect"
+    },
+    "bodySource": {
+      "path": "docs/features/F241-agent-provider-plugin.md",
+      "anchor": "User Journey"
+    },
+    "contexts": ["concierge_open"],
+    "audience": ["cvo"],
+    "body": "在成员设置点「一键检测并添加伙伴」，查看可用客户端与登录状态。选中客户端并保存后，回到对话用 @ 名称调用该角色。",
+    "action": {
+      "type": "open_source",
+      "label": "查看伙伴接入说明",
+      "sourceRef": {
+        "path": "docs/features/F241-agent-provider-plugin.md",
+        "anchor": "User Journey"
+      }
+    },
+    "owner": "codex"
+  },
+  {
     "id": "feature-f051-sidebar-quota-ring",
     "kind": "feature",
     "sourceRef": {

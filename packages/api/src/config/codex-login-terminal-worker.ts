@@ -2,6 +2,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { agentAccessCodexLoginArgsSchema, codexManagedLoginArgs } from '@clowder-ai/agent-contract';
 import { closeCatalogProcess } from '../routes/runtime-catalog-process.js';
 import { CliTerminationController } from '../utils/CliTerminationController.js';
 import { resolveWindowsSpawnPlan } from '../utils/cli-spawn-win.js';
@@ -10,6 +11,7 @@ import { withoutUnreviewedCodexEnvironment } from './codex-env-namespace.js';
 const requestPath = process.argv[2];
 const request = JSON.parse(readFileSync(requestPath, 'utf8')) as {
   command: string;
+  args?: unknown;
   cwd: string;
   home: string;
   env: Record<string, string | null>;
@@ -33,7 +35,7 @@ function ownerGone(): boolean {
 }
 let exitCode = 1;
 if (!existsSync(cancelPath) && !ownerGone()) {
-  const args = ['-c', 'cli_auth_credentials_store="file"', 'login'];
+  const args = agentAccessCodexLoginArgsSchema.parse(request.args ?? codexManagedLoginArgs);
   const plan =
     process.platform === 'win32' ? resolveWindowsSpawnPlan(request.command, args) : { command: request.command, args };
   const child = spawn(plan.command, plan.args, {

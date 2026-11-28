@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clowder AI · Agent 插件化架构</title>
+<style>
+:root{color-scheme:light;--canvas:#faf6ef;--paper:#fffdf9;--ink:#26221e;--body:#45403b;--dim:#645d55;--line:#e0d8cb;--accent:#9b4d35;--accent-soft:#f3e4dc;--violet:#534567;--violet-soft:#eee8f3;--green:#3d624f;--green-soft:#edf3eb;--info:#405d71;--info-soft:#eaf0f4;--mono:Consolas,"Microsoft YaHei",monospace;--sans:"Segoe UI","Microsoft YaHei","PingFang SC",system-ui,sans-serif;--serif:Georgia,"Songti SC","SimSun",serif}
+*,*::before,*::after{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:86px}body{margin:0;background:var(--canvas);color:var(--body);font:16px/1.65 var(--sans)}
+a{color:var(--accent);text-underline-offset:4px}a:focus-visible,button:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+.wrap{width:min(1320px,calc(100% - 72px));margin-inline:auto}
+.mast{border-bottom:1px solid var(--line);background:var(--paper)}.mast .wrap{display:flex;flex-wrap:wrap;gap:6px 18px;justify-content:space-between;align-items:center;padding-block:12px;font-size:14px}.brand{font-weight:700;color:var(--ink)}.stamp{display:flex;gap:12px;align-items:center;flex-wrap:wrap;color:var(--dim)}.stamp code{font-size:13px}
+.hero{padding-block:44px 28px}.hero h1{font:500 clamp(36px,5.5vw,70px)/1.14 var(--serif);letter-spacing:-.045em;margin:0 0 15px;color:var(--ink)}.hero p{font-size:clamp(16px,1.8vw,21px);max-width:930px;margin:0}.accent{color:var(--accent)}.hero .scope{font-size:14px;color:var(--dim);margin-top:13px}
+nav{position:sticky;top:0;z-index:5;background:var(--paper);border-block:1px solid var(--line)}nav .wrap{display:flex;flex-wrap:wrap;align-items:center;gap:0 22px;min-height:52px}nav a{display:block;padding:9px 0;color:var(--body);text-decoration:none;font-weight:650;font-size:14px}nav a:hover,nav a:focus-visible{color:var(--accent);text-decoration:underline}
+main section{padding-block:42px;border-bottom:1px solid var(--line)}h2{color:var(--ink);font:500 clamp(26px,3vw,40px)/1.25 var(--serif);margin:0 0 11px;letter-spacing:-.025em}h3{color:var(--ink);font-size:16px;line-height:1.3;margin:0 0 7px}.intro{max-width:930px;margin:0 0 20px}.diagram,.tablebox,.ports,.callout,.flow{background:var(--paper);border:1px solid var(--line);border-radius:14px}.diagram{margin:0;overflow:auto}.diagram svg{display:block;width:100%;min-width:900px;height:auto}.diagram figcaption{padding:11px 18px;border-top:1px solid var(--line);color:var(--dim);font-size:13px}
+.diagram svg text{font-family:var(--sans)}.diagram svg [data-detail=context]>text{font-size:11px}.diagram svg .t-primary{fill:var(--ink)}.diagram svg .t-muted{fill:var(--dim)}.diagram svg .t-backend{fill:var(--violet)}.diagram svg .t-security{fill:var(--accent)}.diagram svg .c-grid{stroke:#eee7db;fill:none}.diagram svg .c-mask{fill:var(--paper)}
+.diagram svg .c-frontend{fill:var(--info-soft);stroke:#a8b9c4}.diagram svg .c-security{fill:var(--accent-soft);stroke:#c99d8c}.diagram svg .c-backend{fill:var(--violet-soft);stroke:#b7aac4}.diagram svg .c-external{fill:var(--green-soft);stroke:#a5baa8}.diagram svg .c-database{fill:#f5eddf;stroke:#c6ae89}
+.diagram svg .s-frontend{color:var(--info)}.diagram svg .s-security{color:var(--accent)}.diagram svg .s-backend{color:var(--violet)}.diagram svg .s-external{color:var(--green)}.diagram svg .s-database{color:#765b37}.diagram svg .semantic-sigil{stroke:currentColor;fill:none}.diagram svg .sigil-fill{fill:currentColor}
+.diagram svg .a-default{stroke:#777166;fill:none}.diagram svg .m-default{fill:#777166}.diagram svg .a-emphasis{stroke:#775865;fill:none}.diagram svg .m-emphasis{fill:#775865}.diagram svg .a-dashed{stroke:var(--green);stroke-dasharray:6 4;fill:none}.diagram svg .m-dashed{fill:var(--green)}.diagram svg .a-security{stroke:var(--accent);fill:none}.diagram svg .m-security{fill:var(--accent)}
+.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px;margin-top:14px}.card{padding:16px 17px;background:var(--paper);border:1px solid var(--line);border-radius:12px}.card p{margin:0;font-size:14px}.card p+p{margin-top:7px}.card.plugin{border-top:3px solid var(--violet)}.card.host{border-top:3px solid var(--accent)}.card.runtime{border-top:3px solid var(--green)}
+.portrow{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(120px,.55fr) minmax(0,1.25fr);gap:14px;align-items:center;padding:15px 20px}.portrow+.portrow{border-top:1px solid var(--line)}.porthead{color:var(--dim);font-size:13px;font-weight:750;background:#f6f0e8;border-radius:14px 14px 0 0}.port-label{color:var(--ink);font-weight:700;display:block}.portrow p{margin:3px 0 0;font-size:14px}.rail{color:var(--accent);font-size:13px;font-weight:700}.rail span{font-size:19px;margin-right:4px}.src{font:600 13px/1.5 var(--sans);white-space:nowrap}.snug{margin:12px 0 0;color:var(--dim);font-size:14px}
+code{font: .88em/1.5 var(--mono);overflow-wrap:anywhere}.filters{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 12px}.filters button{background:var(--paper);border:1px solid var(--line);border-radius:999px;padding:6px 13px;font:600 14px/1.45 var(--sans);color:var(--body);cursor:pointer}.filters button[aria-pressed=true]{background:var(--accent-soft);border-color:#c99d8c;color:#773822}#client-count{font-size:13px;color:var(--dim);margin-left:5px}
+table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:14px;line-height:1.58}thead th{background:#f6f0e8;color:var(--ink);text-align:left;font-weight:700}thead th:first-child{border-radius:13px 0 0 0}thead th:last-child{border-radius:0 13px 0 0}th,td{text-align:left;vertical-align:top;padding:13px 14px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}tbody tr:last-child>*{border-bottom:0}thead th:nth-child(1){width:16%}thead th:nth-child(2){width:22%}thead th:nth-child(3){width:28%}thead th:nth-child(4){width:34%}tbody th strong{display:block;color:var(--ink);font-size:15px}tbody th code{display:block;color:var(--dim);margin-top:3px}td small{display:block;margin-top:7px}tbody tr:hover{background:#fcf8f1}
+.callout{padding:16px 18px;margin-top:16px;border-left:4px solid var(--accent)}.callout p{margin:0}.callout p+p{margin-top:8px}.flow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin-top:14px}.flow>div{padding:14px 16px}.flow>div+div{border-left:1px solid var(--line)}.flow span{display:block;color:var(--ink);font-weight:700}.flow p{font-size:14px;margin:5px 0 0}
+details{padding:12px 0;border-bottom:1px solid var(--line)}details summary{cursor:pointer;color:var(--ink);font-weight:650}details p,details ul{margin:9px 0 4px}footer{padding:18px 0 34px;color:var(--dim);font-size:13px}.skip{position:absolute;top:-150px}.skip:focus{top:0;background:var(--paper);z-index:10;padding:10px}
+@media(max-width:880px){.wrap{width:calc(100% - 34px)}.hero{padding-block:35px 23px}main section{padding-block:31px}.cards{grid-template-columns:1fr}.flow{grid-template-columns:repeat(2,minmax(0,1fr))}.flow>div:nth-child(3){border-left:0}.flow>div:nth-child(n+3){border-top:1px solid var(--line)}.portrow{grid-template-columns:minmax(0,1fr) 110px minmax(0,1.05fr);padding:13px 12px;gap:9px}}
+@media(max-width:650px){html{scroll-padding-top:106px}nav .wrap{column-gap:16px}nav a{padding:6px 0}.portrow{display:block}.porthead{display:none}.rail{margin:6px 0}.portrow>div:last-child{padding-left:9px;border-left:2px solid var(--line)}table,tbody,tr,td,tbody th{display:block}thead{position:absolute;width:1px;height:1px;clip-path:inset(50%);overflow:hidden}tr[hidden]{display:none}tr+tr{border-top:1px solid var(--line)}td,tbody th{padding:7px 13px;border:0}tbody th{background:#f6f0e8;padding-top:10px}td::before{content:attr(data-label);font-weight:700;color:var(--ink);display:block;margin-bottom:2px}.flow{display:block}.flow>div+div{border-left:0;border-top:1px solid var(--line)}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}@media print{nav,.filters,.skip{display:none}.wrap{width:100%}.hero,main section{padding-block:17px}.diagram svg{min-width:0}figure,.portrow,tr,.card{break-inside:avoid}}
+.execution-map .card{position:relative}.execution-map{margin-top:22px}.example{margin-top:29px}.example h3{font-size:18px}.steps{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px;padding:0;margin:12px 0 0;list-style:none;counter-reset:steps}.steps li{counter-increment:steps;position:relative;min-width:0;padding:14px 10px 12px;background:var(--paper);border-top:2px solid var(--accent);border-radius:5px;font-size:13px}.steps li::before{content:counter(steps);display:block;font-size:12px;font-weight:800;color:var(--accent)}.steps li:not(:last-child)::after{content:'→';position:absolute;top:11px;right:-12px;z-index:2;color:var(--accent);font-size:16px}.steps b{display:block;margin-bottom:4px;color:var(--ink)}.fallback{padding:2px 6px;border:1px dashed var(--accent);border-radius:4px;color:var(--accent);margin-right:5px}.client-detail{margin-top:8px;padding:4px 0;border:0}.client-detail summary{font-size:13px;color:var(--accent)}.client-detail p{margin:4px 0;font-size:13px}.client-detail p+p{margin-top:6px}@media(max-width:880px){.steps{grid-template-columns:repeat(2,minmax(0,1fr))}.steps li:not(:last-child)::after{content:none}}@media print{details::details-content {display:block}}.diagram svg text[data-node-label]{font-size:14px}.diagram svg [role=link]{cursor:pointer}.diagram svg [role=link]:is(:hover,:focus-visible) > rect:nth-of-type(2){stroke-width:2.5;stroke:var(--accent)}.pan-hint{display:none;margin:0 0 7px;color:var(--dim);font-size:13px}@media(max-width:960px){.pan-hint{display:block}.diagram svg{min-width:1080px}}@media print{.pan-hint{display:none}.diagram svg{min-width:0}}.dsh-versions{display:grid;grid-template-columns:180px minmax(0,1fr) minmax(0,1fr);gap:13px;margin-top:16px;align-items:stretch}.dsh-versions>div{padding:12px 15px;background:var(--paper);border:1px solid var(--line);border-radius:9px}.dsh-versions .dsh-root{display:grid;align-content:center;background:var(--accent-soft);color:var(--ink);font-weight:700}.dsh-versions p{margin:5px 0 0;font-size:14px}@media(max-width:820px){.dsh-versions{grid-template-columns:1fr;gap:7px}}.contract-flow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:15px 0}.contract-flow>div{position:relative;padding:14px 13px;border:1px solid var(--line);border-radius:9px;background:var(--paper);min-width:0}.contract-flow>div:not(:last-child)::after{content:'→';position:absolute;right:-13px;top:27px;z-index:2;color:var(--accent);font-weight:700}.contract-flow strong{display:block;color:var(--ink);margin-bottom:4px}.contract-flow small{display:block;color:var(--dim);font-size:13px}.contract-flow .translate{background:var(--violet-soft);border-color:#c7bad3}.contract-flow .approved{background:var(--accent-soft);border-color:#d3aca0}.example-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:18px}.example-grid article{border:1px solid var(--line);border-radius:12px;padding:15px 17px;background:var(--paper);min-width:0}.example-grid p{font-size:14px;margin:7px 0}.schema{margin:9px 0;padding:11px 13px;border-radius:7px;border:1px solid var(--line);background:#f7f2ea;white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.52 var(--mono);color:var(--ink)}.schema code{font:inherit}.label-real,.label-proposal{display:inline-block;margin-bottom:8px;padding:2px 7px;border-radius:4px;background:var(--green-soft);color:#305a43;font-size:12px;font-weight:700}.label-proposal{background:var(--accent-soft);color:#813d2a}.contract-grid{margin-top:16px}.contract-grid th:first-child{width:20%}.contract-grid th:nth-child(2){width:29%}.contract-grid th:nth-child(3){width:26%}.contract-grid th:nth-child(4){width:25%}.steps-short{padding-left:1.3em;margin:10px 0 0}.steps-short li{padding-left:4px;margin-bottom:5px}.ext-grid .card{font-size:14px}.ext-grid ol{padding-left:1.25em;margin:8px 0}.ext-grid li+li{margin-top:6px}.fact-source{margin:8px 0 0!important}.contract-status{margin:11px 0 0;color:var(--dim);font-size:14px}@media(max-width:880px){.contract-flow{grid-template-columns:1fr;gap:8px}.contract-flow>div:not(:last-child)::after{content:'↓';right:16px;top:auto;bottom:-14px}.example-grid{grid-template-columns:1fr}}</style></head>
+<body>
+<a class="skip" href="#contract">跳到正文</a>
+<header>
+<div class="mast"><div class="wrap"><span class="brand">Clowder AI / 技术方案</span><div class="stamp"><a href="https://github.com/zts212653/clowder-ai/pull/2030">草稿 PR #2030 ↗</a><code>30cb5de51</code><span>2026-11-26</span></div></div></div>
+<div class="hero wrap"><h1>Agent 插件化架构</h1><p><strong class="accent">Host 定义会话、能力和渲染数据。</strong> 各 client 的 adapter 翻译原生协议，界面读同一套 Host 数据。</p><p class="scope">本页描述 PR #2030 的候选实现。已有旧版 Host 需要一次接入切换，才能加载和调用这份 Agent Access。</p></div>
+</header>
+<nav aria-label="章节"><div class="wrap"><a href="#contract">Host 统一契约</a><a href="#extend">新 client 接入</a><a href="#overview">接入总图</a><a href="#host">Host 承载接口</a><a href="#clients">各 client 接入</a><a href="#split">内置 Agent 拆分</a><a href="#model">模型调用</a><a href="#delivery">安装与验收</a></div></nav>
+<main class="wrap">
+<section id="contract"><h2>Host 怎样定义一个 Agent</h2>
+<p class="intro">先选定一个 Agent 的<strong>会话实现</strong>，再拿到<strong>能力描述</strong>和<strong>结构化事件</strong>。适配层位于原生协议和 Host 之间，负责把不同 client 的语义翻成 Host 能理解的输入、能力和输出。产品界面消费 Host 的数据投影。</p>
+<div class="contract-flow" role="group" aria-label="原生 Agent 到 Host 和前端的数据契约">
+<div><strong>原生 client</strong><small>ACP 握手和通知、SDK 回调、CLI 事件、远端 A2A。</small></div>
+<div class="translate"><strong>Client adapter</strong><small>解析原生能力，翻译命令和事件。实践中分布在 Agent Access Worker 和 Host 的承载适配器。</small></div>
+<div class="approved"><strong>Host 会话契约</strong><small>注册实现，调用会话/回合操作，读取能力和有序事件。Host 核对身份与权限。</small></div>
+<div><strong>Host 数据投影</strong><small>配置面生成目录/选项；执行面生成 AgentMessage 及其他 UI DTO。</small></div>
+<div><strong>成员设置与聊天</strong><small>按选项和状态渲染配置，按事件类型渲染文本、工具卡、错误和终态。</small></div>
+</div><p class="contract-status"><strong>Host 先选实现。</strong> 成员用 <code>catId</code> 标识角色，<code>clientId</code> 标识内置类目，声明客户端用 <code>agentProvider</code> 指定已注册实现。模型和账号随该成员的本轮执行绑定解析。<a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/index.ts#L2258">成员绑定解析 ↗</a></p>
+<div class="tablebox contract-grid"><table><thead><tr><th scope="col">契约层</th><th scope="col">谁实现</th><th scope="col">一致的数据</th><th scope="col">用在何处</th></tr></thead><tbody>
+<tr><th scope="row"><strong>会话实现</strong><code>AgentSessionProvider</code></th><td data-label="谁实现">注册式会话适配用 <code>openSession</code>、<code>startTurn</code>、<code>input</code>、<code>cancelTurn</code>、<code>release</code>，另有可选 <code>inspectInput</code>、<code>compact</code>。</td><td data-label="一致的数据">打开返回 <code>NativeBinding</code> 或明确错误。开轮成功返回 <code>TurnRef</code> 和 <code>AsyncIterable&lt;AgentSessionEvent&gt;</code>。</td><td data-label="用在何处">这是 Host 内部会话接口。现有承载还共同实现 <code>AgentService.invoke(prompt, options)</code>，返回 <code>AsyncIterable&lt;AgentMessage&gt;</code>。注册式只是其中一路。<small><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/session-contract/types.ts#L14">会话接口 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/types.ts#L1312">AgentService ↗</a></small></td></tr>
+<tr><th scope="row"><strong>能力与可执行值</strong><code>capabilities()</code></th><td data-label="谁实现">具体会话实现报告 <code>input</code>、<code>inputReadReceipt</code>、<code>inspectInput</code>、<code>cancelTurn</code>、<code>compact</code> 是否支持。</td><td data-label="一致的数据">会话接口用 <code>supported | unsupported</code>。例如 <code>input</code> 支持时，Host 可在绑定 <code>TurnRef</code> 的回合提交 <code>{text, images?, messageIds, deliveryId}</code>，结果返回接受、拒绝、回合已结束等状态。模型及档位的数据经独立目录响应提供。</td><td data-label="用在何处">会话桥按当前能力开放适用操作。成员编辑器读取目录投影。能力与数据目前分布在多个类型。<small><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/session-contract/AgentSessionBridgeService.ts#L115">回合能力判定 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/agent-contract/src/index.ts#L238">模型目录 schema ↗</a></small></td></tr>
+<tr><th scope="row"><strong>事件与渲染</strong><code>AgentSessionEvent → AgentMessage</code></th><td data-label="谁实现">注册式 bridge 使用 <code>projectSessionEvent</code>。直连和 CLI 等服务在各自 adapter 路径输出同样的 <code>AgentMessage</code>。</td><td data-label="一致的数据">会话事件有 <code>scope / sessionId / seq</code>，轮次事件还有 <code>turn</code>。<code>output → text</code>、<code>tool_call → tool_use</code>、<code>tool_result → tool_result</code>，错误和终态有明确字段。</td><td data-label="用在何处">Host 归属到线程/消息并广播 <code>agent_message</code>。聊天按 <code>type</code> 更新文字、工具调用、结果、错误或完成状态。<small><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/session-contract/event-projection.ts#L5">投影规则 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/web/src/hooks/agent-messages/active-handler.ts#L25">聊天渲染入口 ↗</a></small></td></tr>
+</tbody></table></div>
+<div class="example-grid">
+<article><span class="label-real">现有接口示例</span><h3>有能力时，给界面可用数据</h3><pre class="schema"><code>{
+  "status": "live",
+  "models": [
+    {
+      "value": "acme/default",
+      "label": "Acme Default"
+    }
+  ],
+  "selectedModel": "acme/default",
+  "effortOptions": [
+    {
+      "value": "low",
+      "label": "低"
+    },
+    {
+      "value": "high",
+      "label": "高"
+    }
+  ]
+}</code></pre><p>这是模型目录响应的最小示例。成员页用 <code>value</code> 保存选项，用 <code>label</code> 展示。当前实现从 <code>effortOptions</code> 或型号自身的 <code>efforts</code> 取值。有列表用下拉，缺列表走现有兼容输入。<code>configured</code> 表示配置回退，<code>unavailable</code> 表示目录不可用。缺字段本身不代表 client 明确拒绝这项能力。</p><p><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/web/public/pdl-app/members.js#L415">选项投影 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/web/public/pdl/themes/default/theme.yaml#L344">下拉与兼容输入 ↗</a></p></article>
+<article><span class="label-real">现有接口示例</span><h3>事件语义相同，工具卡就能共用</h3><pre class="schema"><code>{
+  "type": "tool_use",
+  "catId": "acme",
+  "toolUseId": "tool-7",
+  "toolName": "read_file",
+  "toolInput": {
+    "path": "README.md"
+  },
+  "timestamp": 1795680736690
+}</code></pre><p>例子省略了发送时的线程及消息归属。ACP 工具通知和其他 client 的工具事件在 adapter 出口使用同一组字段。匹配的 <code>tool_result</code> 用同一 <code>toolUseId</code>，并可携带 <code>toolResultStatus</code> 与结果正文。</p><p><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/types.ts#L315">AgentMessage 字段 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/infrastructure/websocket/SocketManager.ts#L475">事件广播 ↗</a></p></article>
+</div>
+<div class="callout"><p><strong>真实能力从 client 到 Host DTO。</strong> 通用 ACP 的 <code>contextCapability()</code> 报 <code>observesCompression: false</code>。成员使用 <code>hybrid</code> 策略时，Host 的策略响应将它投影为 <code>executionStatus: { status: "degraded", missingCapabilities: ["compression_signal"] }</code>。成员编辑模型接收状态和原因。上面的模型档位例子展示界面如何实际据数据切换控件。</p><p><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/providers/acp/AcpAgentService.ts#L410">ACP 能力 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/routes/session-strategy-config.ts#L54">Host 策略投影 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/context-lifecycle-capability.ts#L50">状态分支 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/web/src/components/hub-cat-editor.model.ts#L466">成员表单模型 ↗</a></p></div><div class="callout"><p><strong>现状差距。</strong> 已有一致的会话操作和消息形状，也有部分结构化能力数据。当前没有一个面向所有 client 和第三方包的、可独立注册并版本化的「能力 + payload」适配器接口。</p></div>
+</section><section id="extend"><h2>新 client 用什么契约接进来</h2>
+<p class="intro">先看新 client 能否提供现有 Host 能承载的 ACP 会话。插件的包类型要与 Host 的接入点匹配。</p>
+<div class="cards ext-grid">
+<div class="card plugin"><h3>已有标准 ACP client</h3><p><strong>接入包可以只放声明。</strong> 前提是 client 已可在本机由 Host 启动，能说现有宣告路径支持的 ACP stdio。手动配置通用 ACP 时也可直接指向这个 client。</p><ol><li>用兼容 <code>manifest.json</code>，在包根放 <code>agent-provider.json</code>。</li><li>声明稳定的 <code>id</code>、<code>transport: "acp"</code> 和 <code>acp.command/startupArgs</code>，可加 <code>configurationKey</code> 让 owner 保存连接配置。</li><li>安装启用后，成员绑定 <code>plugin:&lt;pluginId&gt;/&lt;id&gt;</code>。Host 注册到 <code>SessionImplementationRegistry</code>，用通用 ACP adapter 转成 Host 的会话与事件。</li></ol><p class="fact-source"><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/session-contract/plugin-agent-provider.ts#L28">声明解析 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/declared/declared-agent-session-providers.ts#L105">激活注册 ↗</a></p></div>
+<div class="card runtime"><h3>只有 SDK，外面包一层 ACP</h3><p><strong>用现有扩展点。</strong> 单独安装一个可执行 bridge。bridge 用 SDK 访问 client，并在外侧实现 ACP 握手、会话和提示请求，在确实支持时报告恢复、图片或配置能力，输出标准 ACP 通知。</p><ol><li>bridge 翻译 SDK 回调为 ACP 更新，保留可证明的会话身份和终态。</li><li>用同一声明包指向这个已安装的 bridge。Host 继续复用 ACP adapter 和现有界面。</li><li>核打开、流式、取消、重启续接，以及模型与设置是否端到端生效。</li></ol><p class="fact-source"><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/agent-access-plugin/src/runtime/acp/AcpClient.ts#L423">ACP 能力协商 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/test/agent-session-contract/fixed-client-package.test.js#L24">现有安装回归 ↗</a></p></div>
+<div class="card host"><h3>只有 SDK，直接接 Host</h3><p><strong>需要开发 Host 适配。</strong> 现有声明只接受 <code>transport: "acp"</code>。通用插件运行时可以执行模块动作。Agent 注册表的现有插件入口仍按 ACP 声明创建 Host 实现，模块启动端口没有提供注册表。</p><ol><li>按 Host 的 <code>AgentService</code> 或内部 <code>AgentSessionProvider</code> 写 SDK 承载，接入 Host 的构造路径或注册表。</li><li>将 SDK 的调用、能力和事件翻译成 Host 数据，保留原生事实与取消语义。</li><li>如果要支持「安装原生 SDK 包即可注册」，还需公开版本化 adapter 契约、注册/卸载和授权挂点。</li></ol><p class="fact-source"><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/index.ts#L2340">现有 SDK 构造 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/session-contract/implementation-registry.ts#L7">Host 注册表 ↗</a></p></div>
+</div>
+<div class="example-grid">
+<article><span class="label-real">声明包示例</span><h3><code>agent-provider.json</code></h3><pre class="schema"><code>{
+  "id": "acme",
+  "transport": "acp",
+  "acp": {
+    "command": "acme-agent",
+    "startupArgs": [
+      "--acp"
+    ],
+    "mcpWhitelist": [],
+    "permissionPolicy": "deny"
+  }
+}</code></pre><p>示例中的 <code>acme-agent</code> 由用户先安装，包由兼容 manifest 标识。Host 校验受信任的启动入口，声明不能指向包内脚本，也不能借声明擅自获取自动审批。<code>agent-access.json</code> 是官方 Worker 的动作协议，跟这个第三方声明入口用途不同。</p><p><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/session-contract/plugin-agent-provider.ts#L48">传输与命令准入 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/package-capability-admission.ts#L22">官方动作准入 ↗</a></p></article>
+<article><span class="label-proposal">拟议接口，当前未实现</span><h3>统一的能力与 payload</h3><pre class="schema"><code>{
+  "schemaVersion": 1,
+  "capabilities": {
+    "modelCatalog": {
+      "state": "supported",
+      "data": {
+        "models": [
+          {
+            "value": "acme/default",
+            "label": "Acme Default"
+          }
+        ]
+      }
+    },
+    "resume": {
+      "state": "supported",
+      "data": {
+        "mode": "native"
+      }
+    },
+    "turnInput": {
+      "state": "unsupported"
+    },
+    "compact": {
+      "state": "unknown",
+      "reason": "client_not_probed"
+    }
+  }
+}</code></pre><p>若将来开放原生 adapter，Host 可定义固定能力键。各能力按 <code>supported / unsupported / unknown</code> 返回。只有支持时携带该能力的固定 schema。运行时能力由当前实例与会话复核，动态不可用要给原因。UI 按能力和 payload 选通用控件，原生特例留在 adapter。</p><p>公开时还需要约束注册标识、契约版本和卸载。Host 绑定当前包实例及授权，adapter 只交标准事件与声明的数据。Host 校验后再产出 UI 数据。</p></article>
+</div>
+</section><section id="overview"><h2>接入总图</h2>
+<p class="intro">成员控制台通过版本化 API 获取候选和检测结果。聊天进 Host 的成员路由后，Host 解析角色并冻结本轮执行绑定，再按所选 client 调用活动包动作或 Host 兼容实现。图中主链描绘需要 Worker 动作与 Host 承载协作的典型请求。</p>
+<p class="pan-hint">横向滑动查看整张图 →</p><figure class="diagram" aria-label="接入总图，可横向查看" tabindex="0"><svg viewBox="0 0 1296 410" role="img" lang="zh-CN" aria-labelledby="system-archify-diagram-title system-archify-diagram-description" data-preset="classic" data-quality-profile="showcase">
+        <title id="system-archify-diagram-title">Agent Access 接入架构</title>
+        <desc id="system-archify-diagram-description">由 Archify 生成的架构图。</desc>
+        <!-- Definitions -->
+        <defs>
+          <marker id="system-arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-default" />
+          </marker>
+          <marker id="system-arrowhead-emphasis" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-emphasis" />
+          </marker>
+          <marker id="system-arrowhead-security" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-security" />
+          </marker>
+          <marker id="system-arrowhead-dashed" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-dashed" />
+          </marker>
+          <pattern id="system-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" class="c-grid" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <!-- Background Grid -->
+        <rect width="100%" height="100%" fill="url(#system-grid)" />
+
+        <!-- Boundaries (behind everything) -->
+
+
+        <!-- Connection paths (before components for correct z-order) -->
+        <path data-edge-from="entry" data-edge-to="host" data-edge-label="配置 / @调用" data-edge-key="0" data-composition-points="200,130;296,130" d="M 200 130 L 296 130" class="a-emphasis" stroke-width="1.8" marker-end="url(#system-arrowhead-emphasis)"/>
+        <path data-edge-from="host" data-edge-to="plugin" data-edge-label="Agent v1" data-edge-key="1" data-composition-points="464,130;560,130" d="M 464 130 L 560 130" class="a-emphasis" stroke-width="1.8" marker-end="url(#system-arrowhead-emphasis)"/>
+        <path data-edge-from="plugin" data-edge-to="carrier" data-edge-label="受限端口" data-edge-key="2" data-composition-points="728,130;824,130" d="M 728 130 L 824 130" class="a-emphasis" stroke-width="1.8" marker-end="url(#system-arrowhead-emphasis)"/>
+        <path data-edge-from="carrier" data-edge-to="runtime" data-edge-label="原生协议" data-edge-key="3" data-composition-points="992,130;1088,130" d="M 992 130 L 1088 130" class="a-emphasis" stroke-width="1.8" marker-end="url(#system-arrowhead-emphasis)"/>
+        <path data-edge-from="host" data-edge-to="durable" data-edge-label="状态读写" data-edge-key="4" data-composition-points="380,163;380,275" d="M 380 163 L 380 275" class="a-default" stroke-width="1.5" marker-end="url(#system-arrowhead)"/>
+        <path data-edge-from="manager" data-edge-to="plugin" data-edge-label="激活代际" data-edge-key="5" data-composition-points="644,275;644,163" d="M 644 275 L 644 163" class="a-default" stroke-width="1.5" marker-end="url(#system-arrowhead)"/>
+
+        <!-- Components -->
+        <g id="system-node-entry" data-node-id="entry" data-node-label="产品入口" tabindex="0" role="button" aria-label="聚焦产品入口，成员控制台 · 聊天, 架构组件" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="成员控制台 · 聊天" data-node-context="架构组件">
+          <title>产品入口 · 成员控制台 · 聊天 · 架构组件</title>
+          <rect x="32" y="97" width="168" height="66" rx="6" class="c-mask"/>
+          <rect x="32" y="97" width="168" height="66" rx="6" class="c-frontend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(38 103) scale(0.6875)">
+            <rect x="2" y="3" width="12" height="10" rx="2"/>
+            <path d="M2 6.5h12"/>
+            <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
+            <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="116" y="128" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">产品入口</text>
+        <text data-detail="context" x="116" y="144" class="t-muted" font-size="9" text-anchor="middle">成员控制台 · 聊天</text>
+        </g>
+
+        <g id="system-node-host" data-node-id="host" data-node-label="Clowder Host" tabindex="0" role="button" aria-label="聚焦Clowder Host，身份 · 调度 · 准入, 架构组件" aria-pressed="false" data-node-kind="security" data-node-sublabel="身份 · 调度 · 准入" data-node-context="架构组件">
+          <title>Clowder Host · 身份 · 调度 · 准入 · 架构组件</title>
+          <rect x="296" y="97" width="168" height="66" rx="6" class="c-mask"/>
+          <rect x="296" y="97" width="168" height="66" rx="6" class="c-security" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(302 103) scale(0.6875)">
+            <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
+            <path d="m5.8 8 1.5 1.5 3-3"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="380" y="128" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Clowder Host</text>
+        <text data-detail="context" x="380" y="144" class="t-muted" font-size="9" text-anchor="middle">身份 · 调度 · 准入</text>
+        </g>
+
+        <g id="system-node-plugin" data-node-id="plugin" data-node-label="Agent Access" tabindex="0" role="button" aria-label="聚焦Agent Access，协议动作 · 事件投影, 架构组件" aria-pressed="false" data-node-kind="backend" data-node-sublabel="协议动作 · 事件投影" data-node-tag="执行 Worker" data-node-context="架构组件">
+          <title>Agent Access · 协议动作 · 事件投影 · 架构组件 · 执行 Worker</title>
+          <rect x="560" y="97" width="168" height="66" rx="6" class="c-mask"/>
+          <rect x="560" y="97" width="168" height="66" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(566 103) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="644" y="128" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Agent Access</text>
+        <text data-detail="context" x="644" y="144" class="t-muted" font-size="9" text-anchor="middle">协议动作 · 事件投影</text>
+        <text data-detail="fine" x="644" y="155" class="t-backend" font-size="7" text-anchor="middle">执行 Worker</text>
+        </g>
+
+        <g id="system-node-carrier" data-node-id="carrier" data-node-label="Host 执行承载" tabindex="0" role="button" aria-label="聚焦Host 执行承载，进程 · SDK · HTTP, 架构组件" aria-pressed="false" data-node-kind="backend" data-node-sublabel="进程 · SDK · HTTP" data-node-context="架构组件">
+          <title>Host 执行承载 · 进程 · SDK · HTTP · 架构组件</title>
+          <rect x="824" y="97" width="168" height="66" rx="6" class="c-mask"/>
+          <rect x="824" y="97" width="168" height="66" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(830 103) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="908" y="128" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Host 执行承载</text>
+        <text data-detail="context" x="908" y="144" class="t-muted" font-size="9" text-anchor="middle">进程 · SDK · HTTP</text>
+        </g>
+
+        <g id="system-node-runtime" data-node-id="runtime" data-node-label="Agent client" tabindex="0" role="button" aria-label="聚焦Agent client，CLI · Desktop · 远端, 架构组件" aria-pressed="false" data-node-kind="external" data-node-sublabel="CLI · Desktop · 远端" data-node-context="架构组件">
+          <title>Agent client · CLI · Desktop · 远端 · 架构组件</title>
+          <rect x="1088" y="97" width="168" height="66" rx="6" class="c-mask"/>
+          <rect x="1088" y="97" width="168" height="66" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(1094 103) scale(0.6875)">
+            <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
+            <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="1172" y="128" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Agent client</text>
+        <text data-detail="context" x="1172" y="144" class="t-muted" font-size="9" text-anchor="middle">CLI · Desktop · 远端</text>
+        </g>
+
+        <g id="system-node-durable" data-node-id="durable" data-node-label="Host 持久状态" tabindex="0" role="button" aria-label="聚焦Host 持久状态，成员 · 消息 · 会话, 架构组件" aria-pressed="false" data-node-kind="database" data-node-sublabel="成员 · 消息 · 会话" data-node-context="架构组件">
+          <title>Host 持久状态 · 成员 · 消息 · 会话 · 架构组件</title>
+          <rect x="296" y="275" width="168" height="66" rx="6" class="c-mask"/>
+          <rect x="296" y="275" width="168" height="66" rx="6" class="c-database" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(302 281) scale(0.6875)">
+            <ellipse cx="8" cy="4" rx="5" ry="2"/>
+            <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="380" y="306" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Host 持久状态</text>
+        <text data-detail="context" x="380" y="322" class="t-muted" font-size="9" text-anchor="middle">成员 · 消息 · 会话</text>
+        </g>
+
+        <g id="system-node-manager" data-node-id="manager" data-node-label="插件管理器" tabindex="0" role="button" aria-label="聚焦插件管理器，包校验 · 安装 · 激活, 架构组件" aria-pressed="false" data-node-kind="backend" data-node-sublabel="包校验 · 安装 · 激活" data-node-context="架构组件">
+          <title>插件管理器 · 包校验 · 安装 · 激活 · 架构组件</title>
+          <rect x="560" y="275" width="168" height="66" rx="6" class="c-mask"/>
+          <rect x="560" y="275" width="168" height="66" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(566 281) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="644" y="306" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">插件管理器</text>
+        <text data-detail="context" x="644" y="322" class="t-muted" font-size="9" text-anchor="middle">包校验 · 安装 · 激活</text>
+        </g>
+
+        <!-- Connection labels -->
+        <g data-detail="context" data-edge-from="entry" data-edge-to="host" data-edge-label="配置 / @调用" data-edge-key="0">
+          <rect x="214.2" y="110" width="67.6" height="14" rx="3" class="c-mask"/>
+          <text x="248" y="120" class="t-backend" font-size="8" text-anchor="middle">配置 / @调用</text>
+        </g>
+        <g data-detail="context" data-edge-from="host" data-edge-to="plugin" data-edge-label="Agent v1" data-edge-key="1">
+          <rect x="487.8" y="110" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="512" y="120" class="t-backend" font-size="8" text-anchor="middle">Agent v1</text>
+        </g>
+        <g data-detail="context" data-edge-from="plugin" data-edge-to="carrier" data-edge-label="受限端口" data-edge-key="2">
+          <rect x="751.8" y="110" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="776" y="120" class="t-backend" font-size="8" text-anchor="middle">受限端口</text>
+        </g>
+        <g data-detail="context" data-edge-from="carrier" data-edge-to="runtime" data-edge-label="原生协议" data-edge-key="3">
+          <rect x="1015.8" y="110" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="1040" y="120" class="t-backend" font-size="8" text-anchor="middle">原生协议</text>
+        </g>
+        <g data-detail="context" data-edge-from="host" data-edge-to="durable" data-edge-label="状态读写" data-edge-key="4">
+          <rect x="355.8" y="207" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="380" y="217" class="t-muted" font-size="8" text-anchor="middle">状态读写</text>
+        </g>
+        <g data-detail="context" data-edge-from="manager" data-edge-to="plugin" data-edge-label="激活代际" data-edge-key="5">
+          <rect x="619.8" y="255" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="644" y="265" class="t-muted" font-size="8" text-anchor="middle">激活代际</text>
+        </g>
+
+        <!-- Boundary labels (foreground masks keep routes out of titles) -->
+
+
+        <!-- Legend -->
+        <g data-legend="" data-legend-bridge="">
+          <text x="40" y="374" class="t-primary" font-size="12" font-weight="650">图例</text>
+          <g data-legend-semantic-kind="frontend" data-legend-kind="frontend" data-legend-label="前端" data-legend-x="40" data-legend-baseline="394" data-legend-width="63">
+            <rect x="40" y="385" width="16" height="10" rx="2.5" class="c-frontend" stroke-width="1"/>
+            <text x="62" y="394" class="t-muted" font-size="10" font-weight="500">前端</text>
+          </g>
+          <g data-legend-semantic-kind="backend" data-legend-kind="backend" data-legend-label="后端" data-legend-x="125" data-legend-baseline="394" data-legend-width="63">
+            <rect x="125" y="385" width="16" height="10" rx="2.5" class="c-backend" stroke-width="1"/>
+            <text x="147" y="394" class="t-muted" font-size="10" font-weight="500">后端</text>
+          </g>
+          <g data-legend-semantic-kind="database" data-legend-kind="database" data-legend-label="数据库" data-legend-x="210" data-legend-baseline="394" data-legend-width="73">
+            <rect x="210" y="385" width="16" height="10" rx="2.5" class="c-database" stroke-width="1"/>
+            <text x="232" y="394" class="t-muted" font-size="10" font-weight="500">数据库</text>
+          </g>
+          <g data-legend-semantic-kind="security" data-legend-kind="security" data-legend-label="安全" data-legend-x="305" data-legend-baseline="394" data-legend-width="63">
+            <rect x="305" y="385" width="16" height="10" rx="2.5" class="c-security" stroke-width="1"/>
+            <text x="327" y="394" class="t-muted" font-size="10" font-weight="500">安全</text>
+          </g>
+          <g data-legend-semantic-kind="external" data-legend-kind="external" data-legend-label="外部系统" data-legend-x="390" data-legend-baseline="394" data-legend-width="83">
+            <rect x="390" y="385" width="16" height="10" rx="2.5" class="c-external" stroke-width="1"/>
+            <text x="412" y="394" class="t-muted" font-size="10" font-weight="500">外部系统</text>
+          </g>
+        </g>
+      </svg><figcaption>主链从左到右。下方的持久存储和插件管理器分别支撑会话连续性和包生命周期。</figcaption></figure>
+<div class="cards"><div class="card plugin"><h3>Agent Access</h3><p>一个默认发行包负责客户端发现、角色业务、启动计划、协议动作和事件投影。共享公开协议在 <code>@clowder-ai/agent-contract</code>，活动包的动态动作通过插件 Worker 调用。</p><p><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/agent-access-plugin/src/entrypoint.ts#L53">插件动作 ↗</a></p></div>
+<div class="card host"><h3>Clowder Host</h3><p>成员和工作区身份、线程路由、队列、授权、进程资源、原生会话绑定、审计和消息持久化都由 Host 管理。</p><p><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/index.ts#L6041">Host 组合入口 ↗</a></p></div>
+<div class="card runtime"><h3>Agent client</h3><p>Claude、Codex、DSH 等继续运转各自的原生 agent loop。远程 A2A 把工作提交给目标 Agent。CatAgent 的 API 循环由 Host 承载。</p><p><a class="src" href="#clients">查看 client 接入 ↓</a></p></div></div>
+<div id="execution-locations" class="cards execution-map" aria-label="按执行位置查看接入能力">
+<div class="card host"><h3>Host 内的静态引用</h3><p>少量函数随 <code>@clowder-ai/agent-access</code> 构建进 Host，例如角色目录投影、ACP 工作目录身份、权限响应形状。更新运行时归档会切换动态动作；这类内嵌代码随 Host 构建更新。</p><p><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/agent-access/role-store.ts#L3">静态引用示例 ↗</a></p></div>
+<div class="card plugin"><h3>活动包 Worker 的动态动作</h3><p>调用 <code>runtime.invoke</code> 进入当前激活实例。ACP 协议、发现、模型目录投影、角色读写业务及部分 client 的计划和事件投影在这里执行。</p><p><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/agent-access-plugin/src/entrypoint.ts#L52">动作表 ↗</a></p></div>
+<div class="card host"><h3>Host 内的执行资源</h3><p>Host 可以把受限回调交给 Worker，例如启动指定程序、读取 SDK 快照或发送约定的 HTTP 请求。每个 client 也可保留自己的 Host 承载路径。</p><p><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/agent-access/model-catalog.ts#L57">承载回调示例 ↗</a></p></div></div></section>
+
+<section id="host"><h2>Host 默认提供的承载接口</h2>
+<p class="intro">这里有三道接口。模块启动有通用的 Host 能力，官方 Agent Access 另获两个领域端口。CLI、SDK、ACP 和出站 HTTP 由 Host 承载。需要 Worker 协作时，Host 按本次调用提供受限回调。</p>
+<div class="ports" aria-label="Host 接口方向图">
+<div class="portrow porthead"><div>Clowder Host</div><div>授权时点</div><div>Agent Access 执行面</div></div>
+<div class="portrow"><div><span class="port-label">插件模块的通用端口</span><p><code>config</code> · <code>secrets</code> · <code>storage</code> · <code>tasks</code> · <code>threads</code> · <code>messaging</code> · <code>streams</code> · <code>external</code> · <code>dataPath</code> · <code>log</code>，另有按能力附加的 neutral 端口，如 <code>members</code>、<code>memberSessions</code> 与 Collective 产物接口。</p></div><div class="rail"><span>→</span>启动时注入</div><div><span class="port-label">模块实例上下文</span><p>按插件实例及已准入范围访问，<code>secrets</code> 是插件作用域端口。<a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/builtin-runtime/carriers/module-plugin-runtime.ts#L98">看源码 ↗</a></p></div></div>
+<div class="portrow"><div><span class="port-label">Agent Access 专用端口</span><p><code>agentAccess</code> · <code>agentRoleStore</code></p></div><div class="rail"><span>→</span>官方包激活时注入</div><div><span class="port-label">发现与角色存储</span><p>读取检测上下文、探测原生登录；按 revision 读取和提交角色目录，校验别名及墓碑。<a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/agent-contract/src/index.ts#L521">发现契约 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/agent-contract/src/index.ts#L638">角色契约 ↗</a></p></div></div>
+<div class="portrow"><div><span class="port-label">每次执行的受限回调</span><p>由 Host 确认可执行文件、argv、cwd、env、账号以及工作区权限，并绑定当前包代际。</p></div><div class="rail"><span>↔</span>逐次授权与执行</div><div><span class="port-label">用窄能力完成原生动作</span><p>可获指定探测或命令的回调、已批准的 ACP 子进程读写/终止句柄、Claude SDK 目录快照读取、ACP 探测会话或 A2A 提交。<a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/agent-access/model-catalog.ts#L57">模型探测回调 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/agent-access/acp-process.ts#L45">子进程承载 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/agent-access/a2a.ts#L13">出站回调 ↗</a></p></div></div>
+</div>
+<p class="snug">进程与会话的资源由 Host 管理。角色目录和历史由 Host 持久化，Agent Access 经受约束的端口提交变更。</p><div class="example"><h3>一轮 DSH 对话如何跨过三层</h3><p class="snug">以支持原生 L0 的 Windows DSH 为例。</p><ol class="steps" aria-label="DSH 调用时序">
+<li><b>Host</b><span>解析 @成员，准入，冻结本轮角色、账号和工作区</span></li>
+<li><b>Host</b><span>用冻结输入编译 L0，计算本轮启动配置代际</span></li>
+<li><b>Host</b><span>按代际复用进程。需要冷启动时先写入并核验私有 L0 补丁，再启动子进程</span></li>
+<li><b>Worker</b><span>冷启动先 initialize。首轮新建会话，续聊按原 ID 执行 session/resume</span></li>
+<li><b>Host → Worker</b><span>Host 提交本轮 user 输入，Worker 发 ACP prompt。合格版本的当前 user 无额外 L0 前缀</span></li>
+<li><b>DSH → Worker</b><span>DSH 组装模型请求，personaPrefix 进入 system。Worker 读取 ACP 事件</span></li>
+<li><b>Host</b><span>校验并归一化 AgentMessage，回传与持久化。角色变更按新代际启动，原会话 ID 可续接</span></li>
+</ol><p class="snug"><span class="fallback">兼容分支</span> 未验证原生 L0 的 Desktop 版本告警并沿通用 ACP 的 user 前缀。通用 ACP 的 load / resume 按客户端能力判断。角色 A 的旧 user 历史保留，新一轮用角色 B 的 system。</p><div class="dsh-versions" aria-label="DSH Desktop 启动补丁的版本分支">
+<div class="dsh-root">DSH Desktop 版本</div>
+<div><span class="port-label">→ 0.2.2-rc.1</span><p>启用回合内输入补丁，走 <code>acpDshTurn</code>。L0 继续走通用 ACP 的 user 前缀。<a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/providers/acp/dsh/dsh-turn-patch.ts#L51">回合内输入门控 ↗</a></p></div>
+<div><span class="port-label">→ 0.2.2-rc.5 / 0.2.3-alpha.2</span><p>启用原生 L0 补丁，私有启动目录里的 personaPrefix 进入 system。这两版不启用 rc.1 的回合内输入补丁。<a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/agent-access-plugin/src/workstation/dsh-desktop-launch.ts#L68">原生 L0 门控 ↗</a></p></div>
+</div></div>
+</section>
+
+<section id="split"><h2>内置 Agent 怎么拆</h2>
+<p class="intro"><strong>当前是一份默认发行的 Agent Access 包，包内按 client 拆模块。</strong> Claude、Codex、AGY、Kimi、OpenCode、CatAgent 有各自的动作与 Host 接线。ACP 是通用承载，DSH 在其上附加专用会话与启动处理。各内置 client 当前还没有按这一迁移方案成为一 client 一可独立替换包。<a class="src" href="#clients">查看每个 client 的实装拆分 ↓</a></p>
+<div class="cards">
+<div class="card plugin"><h3>现在进包的部分</h3><p>发现、角色、目录归一化、输出投影、若干启动/请求形状和 ACP 协议动作。已有单独发行的声明 client 仍走 ACP 扩展点。</p><p><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/agent-access-plugin/src/entrypoint.ts#L53">包内动作表 ↗</a></p></div>
+<div class="card host"><h3>现在留在 Host 的部分</h3><p>原生承载构造、权限和凭据、资源/进程/网络、真实会话和终态核对，以及公共数据投影。少量由包提供的静态函数随 Host 构建。</p><p><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/index.ts#L2340">Host client 构造 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/index.ts#L6041">Host 接 Worker 动作 ↗</a></p></div>
+<div class="card runtime"><h3>如果要拆成独立包</h3><p>标准 ACP client 先走现有声明模式。原生 SDK/CLI client 要独立发行，需先把专用组装改接统一 adapter 注册口，再抽出各自包。用同一套能力、事件、停止及续接验收保护存量成员。</p><p><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/official-catalog.ts#L80">当前默认发行和分发单位 ↗</a></p></div>
+</div></section><section id="clients"><h2>各 Agent client 怎么接入</h2>
+<p class="intro">接入目录使用 client ID。DSH、Pi 和声明客户端复用 ACP 路径。远程 HTTP A2A 是独立的角色传输路径。</p>
+<div class="filters" aria-label="筛选 client"><button type="button" data-filter="all" aria-pressed="true">全部</button><button type="button" data-filter="native" aria-pressed="false">原生 / 直连</button><button type="button" data-filter="acp" aria-pressed="false">ACP / 声明</button><button type="button" data-filter="remote" aria-pressed="false">远程 A2A</button><span id="client-count" aria-live="polite">10 条接入路径</span></div>
+<div class="tablebox"><table><thead><tr><th scope="col">Agent client</th><th scope="col">接入路径</th><th scope="col">插件负责</th><th scope="col">Host 与实际执行</th></tr></thead><tbody>
+<tr data-group="native"><th scope="row"><strong>Claude</strong><code>anthropic</code></th><td data-label="接入路径">CLI / Agent SDK，另有 PTY / 后台承载。</td><td data-label="Agent Access"><code>projectClaudeOutput</code>、<code>projectClaudeBatch</code> 处理已接收的输出；模型目录读取 SDK 快照后投影。</td><td data-label="Host 与实际执行">Host 选 carrier、账户和模型，构造 CLI / SDK 参数与授权，掌握运行、取消和会话。模型请求走 Claude 客户端或 SDK。<small><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/agent-access/claude.ts#L1">看源码 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/providers/claude-carrier-factory.ts#L8">承载选择 ↗</a></small><details class="client-detail"><summary>L0、续接与 MCP</summary><p>CLI <code>--system-prompt-file</code>；SDK 用原生 system 配置。</p><p>用 CLI / SDK 原生会话恢复。Host 为各 carrier 准备核准后的 MCP。</p></details></td></tr>
+<tr data-group="native"><th scope="row"><strong>Codex</strong><code>openai</code></th><td data-label="接入路径"><code>codex exec</code> 或持久化 App Server。</td><td data-label="Agent Access">生成 exec 参数、App Server 的 thread/turn 请求参数及通知展示表；解释 <code>debug models</code> 结果。</td><td data-label="Host 与实际执行">Host 校验参数、启动或复用 App Server，负责审批、原生终态、usage、身份及取消；bounded watcher 沿 Host 专用路径。<small><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/index.ts#L6076">看源码 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/providers/CodexAppServerClient.ts#L921">终态处理 ↗</a></small><details class="client-detail"><summary>L0、续接与 MCP</summary><p>exec 用开发者指令；App Server 使用 thread 配置。</p><p>用原生 exec session 或 thread ID。MCP / 动态工具按 carrier 能力。</p></details></td></tr>
+<tr data-group="native"><th scope="row"><strong>Google / AGY Native</strong><code>google</code></th><td data-label="接入路径">AGY Native CLI；历史 AGY IDE 路径有独立退役限制，AGY ACP 变体使用 ACP 承载。</td><td data-label="Agent Access"><code>projectAgyOutput</code>、<code>summarizeAgyTurn</code> 投影输出和轮次摘要。</td><td data-label="Host 与实际执行">Host 持有隔离账户与原生会话绑定，管进程和原生运行证据；AGY 自己应用模型及 profile。<small><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/agent-access/agy.ts#L1">看源码 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/providers/agy-native/AgyNativeAgentService.ts#L54">原生启动路径 ↗</a></small><details class="client-detail"><summary>L0、续接与 MCP</summary><p>按 Native 方式传递 agent 指令。</p><p>历史绑定校验账户、模型、workspace 等。Host 准备允许的 MCP/profile。</p></details></td></tr>
+<tr data-group="native"><th scope="row"><strong>Kimi</strong><code>kimi</code></th><td data-label="接入路径">Kimi CLI。</td><td data-label="Agent Access"><code>configure</code> 规划参数，<code>parseNativeEvent</code> 解出展示事件。</td><td data-label="Host 与实际执行">Host 核准 agent 文件、账号、工作区和实际 argv；按原生会话规则续聊，模型由 Kimi CLI 发起。<small><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/agent-access/kimi.ts#L20">看源码 ↗</a></small><details class="client-detail"><summary>L0、续接与 MCP</summary><p>新会话可用 <code>--agent-file</code>。</p><p><code>--session</code> 续接沿用会话首次绑定的 L0，新的 L0 在新会话生效。Host 准备原生 MCP 配置和 env。</p></details></td></tr>
+<tr data-group="native"><th scope="row"><strong>OpenCode</strong><code>opencode</code></th><td data-label="接入路径">OpenCode CLI 或其通用 ACP 接入。</td><td data-label="Agent Access">原生 CLI 分支构建参数、解析事件，规划受限 finalizer。ACP 变体使用通用 ACP 能力。</td><td data-label="Host 与实际执行">Host 核对启动计划、权限和凭据，保管进程与历史会话。CLI 和 ACP 各自消费对应配置。<small><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/agent-access/opencode.ts#L24">看源码 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/docs/architecture/provider-effective-configuration.md#L67">CLI / ACP 边界 ↗</a></small><details class="client-detail"><summary>L0、续接与 MCP</summary><p>原生 CLI 通过运行时配置 <code>instructions</code> 应用 L0，ACP 跟随所选客户端。</p><p>CLI 续接遵从原生会话，ACP 按能力判断；Host 准备允许的 MCP 配置。</p></details></td></tr>
+<tr id="catagent-client" data-group="native"><th scope="row"><strong>CatAgent</strong><code>catagent</code></th><td data-label="接入路径">Clowder 直接访问模型端点。</td><td data-label="Agent Access"><code>projectCatAgentOutput</code> 投影输出。</td><td data-label="Host 与实际执行"><code>CatAgentService</code> 在 Host 里解析账号、构造 Anthropic Messages 请求、消费 SSE、运转工具循环。这是直接调用模型的一条路径。<small><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/providers/catagent/CatAgentService.ts#L349">看源码 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/agent-access/catagent.ts#L1">输出投影 ↗</a></small><details class="client-detail"><summary>L0、续接与 MCP</summary><p>Host 将本轮 system 指令放入 Anthropic Messages 的 <code>system</code> 字段。</p><p>由 Host 内的 API 循环处理，工具入口单独受控。无独立的 ACP 会话级 MCP 接口。</p></details></td></tr>
+<tr data-group="acp"><th scope="row"><strong>通用 ACP / Pi 等</strong><code>acp</code></th><td data-label="接入路径">ACP stdio；已支持的 HTTP stream 使用对应承载。Pi 等用各自的 ACP bridge。</td><td data-label="Agent Access"><code>acpProcessV2</code>、<code>acpSessionV2</code>、<code>selectAcpModel</code> 管协议会话和模型选项；stdio worker 通过 Host 签发的子进程句柄读写。</td><td data-label="Host 与实际执行">Host 核验 executable、cwd、env、审批和本地资源；进程池与续接准入仍在 Host，ACP 客户端自己的模型请求走原生配置。<small><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/agent-access/acp-runtime-client.ts#L103">看源码 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/agent-access-plugin/src/runtime/acp/process-connection.ts#L1">Worker ACP ↗</a></small><details class="client-detail"><summary>L0、续接与 MCP</summary><p>通用兼容是 user 前缀；专用适配可提供原生注入。</p><p>按能力新建 / load / resume，已开会话可安全复用。MCP 受客户端能力／白名单约束。</p></details></td></tr>
+<tr data-group="acp"><th scope="row"><strong>DeepSeek Harness</strong><code>ACP 客户端变体</code></th><td data-label="接入路径">DSH Desktop/CLI 检测；已验证的 Windows Desktop 可走原生 L0。</td><td data-label="Agent Access"><code>testDshConnection</code> 做连接自检，<code>acpDshTurn</code> 承接 rc.1 的回合内输入操作。原生 L0 由另一条启动补丁送入 system。</td><td data-label="Host 与实际执行">Host 编译 L0、批准启动与私有补丁、处理会话/进程代际；未验证版本走通用 ACP 并告警。<small><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/agent-access-plugin/src/workstation/dsh-desktop-launch.ts#L1">看源码 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/providers/acp/AcpServiceFactory.ts#L1">启动适配 ↗</a></small><details class="client-detail"><summary>L0、续接与 MCP</summary><p>合格 Desktop 通过 personaPrefix 投影到 system。</p><p>按原生会话 ID 续接。MCP 仍受 ACP 与 Host 准入控制。</p></details></td></tr>
+<tr data-group="acp"><th scope="row"><strong>第三方声明客户端</strong><code>agent-provider.json</code></th><td data-label="接入路径">安装声明包，在成员侧绑定 <code>agentProvider</code>。</td><td data-label="Agent Access">Agent Client Library 读取描述；激活时按声明生成 ACP 会话实现，复用 Agent Access 的通用协议动作。</td><td data-label="Host 与实际执行">Host 通过 <code>SessionImplementationRegistry</code> 注册并验启动、账户、工作区及许可。新增合规 ACP client 可复用此路径，第三方工具经声明或普通 ACP 配置接入。<small><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/declared/declared-agent-session-providers.ts#L45">看源码 ↗</a></small><details class="client-detail"><summary>L0、续接与 MCP</summary><p>随兼容 ACP 客户端和声明配置。</p><p>注册后使用通用 ACP 会话及 MCP 能力。</p></details></td></tr>
+<tr data-group="remote"><th scope="row"><strong>远程 HTTP A2A</strong><code>独立角色路径</code></th><td data-label="接入路径">对远端 Agent 使用 A2A JSON-RPC <code>tasks/send</code>。</td><td data-label="Agent Access"><code>startTurn</code> 组装和映射输出；当前接口报告远端原生 resume / cancel 能力受限。</td><td data-label="Host 与实际执行">Host 绑定已批准的目标、提交 HTTP 请求、处理本地中止并持久化。目标 Agent 选择模型。产品内 @路由与 Collective、Dot 另有路由。<small><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/agent-access/a2a.ts#L13">看源码 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/providers/A2AAgentService.ts#L30">远端承载 ↗</a></small><details class="client-detail"><summary>L0、续接与 MCP</summary><p>走 A2A 文本请求，工具由远端负责，没有本地会话级 MCP。</p><p>此 HTTP 路径没有原生续接；取消本地等待时，远端停止仍需独立确认。</p></details></td></tr>
+</tbody></table></div>
+<p class="snug"><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/agent-access-plugin/src/discovery/agent-client-catalog.ts#L5">默认 client 目录 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/index.ts#L6041">运行适配接线 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/declared/declared-agent-session-providers.ts#L105">声明注册 ↗</a></p>
+</section>
+
+<section id="model"><h2>模型请求怎样执行</h2>
+<p class="intro"><strong>统一的是目录、执行绑定和 Agent 调用接口。</strong> 提交时把成员选择与账号引用解析成一份本轮执行绑定。各 client adapter 再把它翻成自己的 CLI 参数、SDK 配置或 ACP 会话选项。CatAgent 直连在 Host 发 Anthropic Messages 请求，A2A 由远端 Agent 自行选模型。</p>
+<p class="pan-hint">横向滑动查看整张图 →</p><figure class="diagram" aria-label="模型配置与请求路径，可横向查看" tabindex="0"><svg viewBox="0 0 1296 410" role="img" lang="zh-CN" aria-labelledby="model-archify-diagram-title model-archify-diagram-description" data-preset="classic" data-quality-profile="showcase">
+        <title id="model-archify-diagram-title">模型配置与调用路径</title>
+        <desc id="model-archify-diagram-description">由 Archify 生成的架构图。</desc>
+        <!-- Definitions -->
+        <defs>
+          <marker id="model-arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-default" />
+          </marker>
+          <marker id="model-arrowhead-emphasis" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-emphasis" />
+          </marker>
+          <marker id="model-arrowhead-security" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-security" />
+          </marker>
+          <marker id="model-arrowhead-dashed" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-dashed" />
+          </marker>
+          <pattern id="model-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" class="c-grid" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <!-- Background Grid -->
+        <rect width="100%" height="100%" fill="url(#model-grid)" />
+
+        <!-- Boundaries (behind everything) -->
+
+
+        <!-- Connection paths (before components for correct z-order) -->
+        <path data-edge-from="catalog" data-edge-to="settings" data-edge-label="目录供选择" data-edge-key="0" data-composition-points="200,123;296,123" d="M 200 123 L 296 123" class="a-emphasis" stroke-width="1.8" marker-end="url(#model-arrowhead-emphasis)"/>
+        <path data-edge-from="settings" data-edge-to="freeze" data-edge-label="保存配置" data-edge-key="1" data-composition-points="464,123;560,123" d="M 464 123 L 560 123" class="a-emphasis" stroke-width="1.8" marker-end="url(#model-arrowhead-emphasis)"/>
+        <path data-edge-from="freeze" data-edge-to="translate" data-edge-label="每次调用" data-edge-key="2" data-composition-points="728,123;824,123" d="M 728 123 L 824 123" class="a-emphasis" stroke-width="1.8" marker-end="url(#model-arrowhead-emphasis)"/>
+        <path data-edge-from="translate" data-edge-to="service" data-edge-label="原生执行" data-edge-key="3" data-composition-points="992,123;1088,123" d="M 992 123 L 1088 123" class="a-emphasis" stroke-width="1.8" marker-end="url(#model-arrowhead-emphasis)"/>
+        <path data-edge-from="freeze" data-edge-to="catagent" data-edge-label="直连路径" data-edge-key="4" data-composition-points="644,156;644,267" d="M 644 156 L 644 267" class="a-dashed" stroke-width="1.5" marker-end="url(#model-arrowhead-dashed)"/>
+        <path data-edge-from="catagent" data-edge-to="provider" data-edge-label="模型请求" data-edge-key="5" data-composition-points="728,300;824,300" d="M 728 300 L 824 300" class="a-dashed" stroke-width="1.5" marker-end="url(#model-arrowhead-dashed)"/>
+
+        <!-- Components -->
+        <g id="model-node-catalog" data-node-id="catalog" data-node-label="模型目录" tabindex="0" role="button" aria-label="聚焦模型目录，模型 ID · 可见性 · 档位, 架构组件" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="模型 ID · 可见性 · 档位" data-node-context="架构组件">
+          <title>模型目录 · 模型 ID · 可见性 · 档位 · 架构组件</title>
+          <rect x="32" y="90" width="168" height="66" rx="6" class="c-mask"/>
+          <rect x="32" y="90" width="168" height="66" rx="6" class="c-frontend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(38 96) scale(0.6875)">
+            <rect x="2" y="3" width="12" height="10" rx="2"/>
+            <path d="M2 6.5h12"/>
+            <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
+            <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="116" y="121" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">模型目录</text>
+        <text data-detail="context" x="116" y="137" class="t-muted" font-size="9" text-anchor="middle">模型 ID · 可见性 · 档位</text>
+        </g>
+
+        <g id="model-node-settings" data-node-id="settings" data-node-label="成员模型配置" tabindex="0" role="button" aria-label="聚焦成员模型配置，模型 · 账号引用 · effort, 架构组件" aria-pressed="false" data-node-kind="backend" data-node-sublabel="模型 · 账号引用 · effort" data-node-context="架构组件">
+          <title>成员模型配置 · 模型 · 账号引用 · effort · 架构组件</title>
+          <rect x="296" y="90" width="168" height="66" rx="6" class="c-mask"/>
+          <rect x="296" y="90" width="168" height="66" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(302 96) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="380" y="121" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">成员模型配置</text>
+        <text data-detail="context" x="380" y="137" class="t-muted" font-size="9" text-anchor="middle">模型 · 账号引用 · effort</text>
+        </g>
+
+        <g id="model-node-freeze" data-node-id="freeze" data-node-label="Host 执行绑定" tabindex="0" role="button" aria-label="聚焦Host 执行绑定，冻结有效配置与权限, 架构组件" aria-pressed="false" data-node-kind="security" data-node-sublabel="冻结有效配置与权限" data-node-context="架构组件">
+          <title>Host 执行绑定 · 冻结有效配置与权限 · 架构组件</title>
+          <rect x="560" y="90" width="168" height="66" rx="6" class="c-mask"/>
+          <rect x="560" y="90" width="168" height="66" rx="6" class="c-security" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(566 96) scale(0.6875)">
+            <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
+            <path d="m5.8 8 1.5 1.5 3-3"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="644" y="121" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Host 执行绑定</text>
+        <text data-detail="context" x="644" y="137" class="t-muted" font-size="9" text-anchor="middle">冻结有效配置与权限</text>
+        </g>
+
+        <g id="model-node-translate" data-node-id="translate" data-node-label="按客户端映射" tabindex="0" role="button" aria-label="聚焦按客户端映射，CLI 参数 · SDK · ACP, 架构组件" aria-pressed="false" data-node-kind="backend" data-node-sublabel="CLI 参数 · SDK · ACP" data-node-context="架构组件">
+          <title>按客户端映射 · CLI 参数 · SDK · ACP · 架构组件</title>
+          <rect x="824" y="90" width="168" height="66" rx="6" class="c-mask"/>
+          <rect x="824" y="90" width="168" height="66" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(830 96) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="908" y="121" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">按客户端映射</text>
+        <text data-detail="context" x="908" y="137" class="t-muted" font-size="9" text-anchor="middle">CLI 参数 · SDK · ACP</text>
+        </g>
+
+        <g id="model-node-service" data-node-id="service" data-node-label="运行时与模型" tabindex="0" role="button" aria-label="聚焦运行时与模型，客户端原生请求, 架构组件" aria-pressed="false" data-node-kind="external" data-node-sublabel="客户端原生请求" data-node-context="架构组件">
+          <title>运行时与模型 · 客户端原生请求 · 架构组件</title>
+          <rect x="1088" y="90" width="168" height="66" rx="6" class="c-mask"/>
+          <rect x="1088" y="90" width="168" height="66" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(1094 96) scale(0.6875)">
+            <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
+            <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="1172" y="121" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">运行时与模型</text>
+        <text data-detail="context" x="1172" y="137" class="t-muted" font-size="9" text-anchor="middle">客户端原生请求</text>
+        </g>
+
+        <g id="model-node-catagent" data-node-id="catagent" data-node-label="CatAgent 直连" tabindex="0" role="button" aria-label="聚焦CatAgent 直连，Provider / Model 配置, 架构组件" aria-pressed="false" data-node-kind="backend" data-node-sublabel="Provider / Model 配置" data-node-context="架构组件">
+          <title>CatAgent 直连 · Provider / Model 配置 · 架构组件</title>
+          <rect x="560" y="267" width="168" height="66" rx="6" class="c-mask"/>
+          <rect x="560" y="267" width="168" height="66" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(566 273) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="644" y="298" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">CatAgent 直连</text>
+        <text data-detail="context" x="644" y="314" class="t-muted" font-size="9" text-anchor="middle">Provider / Model 配置</text>
+        </g>
+
+        <g id="model-node-provider" data-node-id="provider" data-node-label="模型端点" tabindex="0" role="button" aria-label="聚焦模型端点，Anthropic Messages / SSE, 架构组件" aria-pressed="false" data-node-kind="external" data-node-sublabel="Anthropic Messages / SSE" data-node-context="架构组件">
+          <title>模型端点 · Anthropic Messages / SSE · 架构组件</title>
+          <rect x="824" y="267" width="168" height="66" rx="6" class="c-mask"/>
+          <rect x="824" y="267" width="168" height="66" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(830 273) scale(0.6875)">
+            <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
+            <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="908" y="298" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">模型端点</text>
+        <text data-detail="context" x="908" y="314" class="t-muted" font-size="9" text-anchor="middle">Anthropic Messages / SSE</text>
+        </g>
+
+        <!-- Connection labels -->
+        <g data-detail="context" data-edge-from="catalog" data-edge-to="settings" data-edge-label="目录供选择" data-edge-key="0">
+          <rect x="219" y="103" width="58" height="14" rx="3" class="c-mask"/>
+          <text x="248" y="113" class="t-backend" font-size="8" text-anchor="middle">目录供选择</text>
+        </g>
+        <g data-detail="context" data-edge-from="settings" data-edge-to="freeze" data-edge-label="保存配置" data-edge-key="1">
+          <rect x="487.8" y="103" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="512" y="113" class="t-backend" font-size="8" text-anchor="middle">保存配置</text>
+        </g>
+        <g data-detail="context" data-edge-from="freeze" data-edge-to="translate" data-edge-label="每次调用" data-edge-key="2">
+          <rect x="751.8" y="103" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="776" y="113" class="t-backend" font-size="8" text-anchor="middle">每次调用</text>
+        </g>
+        <g data-detail="context" data-edge-from="translate" data-edge-to="service" data-edge-label="原生执行" data-edge-key="3">
+          <rect x="1015.8" y="103" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="1040" y="113" class="t-backend" font-size="8" text-anchor="middle">原生执行</text>
+        </g>
+        <g data-detail="context" data-edge-from="freeze" data-edge-to="catagent" data-edge-label="直连路径" data-edge-key="4">
+          <rect x="619.8" y="200" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="644" y="210" class="t-messagebus" font-size="8" text-anchor="middle">直连路径</text>
+        </g>
+        <g data-detail="context" data-edge-from="catagent" data-edge-to="provider" data-edge-label="模型请求" data-edge-key="5">
+          <rect x="751.8" y="280" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="776" y="290" class="t-messagebus" font-size="8" text-anchor="middle">模型请求</text>
+        </g>
+
+        <!-- Boundary labels (foreground masks keep routes out of titles) -->
+
+
+        <!-- Legend -->
+        <g data-legend="" data-legend-bridge="">
+          <text x="40" y="374" class="t-primary" font-size="12" font-weight="650">图例</text>
+          <g data-legend-semantic-kind="frontend" data-legend-kind="frontend" data-legend-label="前端" data-legend-x="40" data-legend-baseline="394" data-legend-width="63">
+            <rect x="40" y="385" width="16" height="10" rx="2.5" class="c-frontend" stroke-width="1"/>
+            <text x="62" y="394" class="t-muted" font-size="10" font-weight="500">前端</text>
+          </g>
+          <g data-legend-semantic-kind="backend" data-legend-kind="backend" data-legend-label="后端" data-legend-x="125" data-legend-baseline="394" data-legend-width="63">
+            <rect x="125" y="385" width="16" height="10" rx="2.5" class="c-backend" stroke-width="1"/>
+            <text x="147" y="394" class="t-muted" font-size="10" font-weight="500">后端</text>
+          </g>
+          <g data-legend-semantic-kind="security" data-legend-kind="security" data-legend-label="安全" data-legend-x="210" data-legend-baseline="394" data-legend-width="63">
+            <rect x="210" y="385" width="16" height="10" rx="2.5" class="c-security" stroke-width="1"/>
+            <text x="232" y="394" class="t-muted" font-size="10" font-weight="500">安全</text>
+          </g>
+          <g data-legend-semantic-kind="external" data-legend-kind="external" data-legend-label="外部系统" data-legend-x="295" data-legend-baseline="394" data-legend-width="83">
+            <rect x="295" y="385" width="16" height="10" rx="2.5" class="c-external" stroke-width="1"/>
+            <text x="317" y="394" class="t-muted" font-size="10" font-weight="500">外部系统</text>
+          </g>
+        </g>
+      </svg><figcaption>上方是成员选型到 client 原生执行的路径。下方虚线是 CatAgent 的模型直连分支。模型目录负责供选择，远程 A2A 的选模与推理在目标 Agent 侧。</figcaption></figure>
+<div class="cards">
+<div id="model-catalog" class="card plugin"><h3>目录与选型</h3><p>成员编辑 <code>/api/cats/runtime-models</code> 和声明客户端 <code>/api/agent-providers/models</code> 是两个入口。适用运行时由 Agent Access 的 <code>discoverModelCatalog</code> 返回候选、默认值或档位。Codex 用 <code>debug models</code>，Claude 读 SDK 快照，ACP 读临时会话；DSH Desktop 的这条读取路径使用配置目录。</p><p><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/routes/runtime-catalog-route.ts#L96">成员目录 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/routes/agent-client-library-routes.ts#L73">声明目录 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/agent-access-plugin/src/runtime/discover-model-catalog.ts#L13">目录适配器 ↗</a></p></div>
+<div id="model-binding" class="card host"><h3>统一调用与事件</h3><p>Host 在调用前生成 <code>FrozenExecutionBinding</code>，承载层消费同一份账号、模型和运行偏好。各服务在 Host 侧实现 <code>AgentService</code>，向上回传统一的 <code>AgentMessage</code> 流。Worker 与 Host 的动作格式由 <code>agent-contract</code> 约定。</p><p><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/invocation/execution-account-binding.ts#L48">执行绑定 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/types.ts#L1312">AgentService ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/types.ts#L315">AgentMessage ↗</a></p></div>
+<div id="model-wire" class="card runtime"><h3>各自的协议映射</h3><p>CLI 的模型参数、Claude SDK 的模型与配置、Codex App Server 的 thread/turn 参数、ACP 的模型选项都有独立映射。共享 Agent 接口位于这些映射之上。各 client 的模型网络请求各走自身协议。当前实现没有承接所有推理流量的共享模型网关。</p><p><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/agent-access-plugin/src/entrypoint.ts#L68">客户端映射入口 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/providers/catagent/CatAgentService.ts#L349">CatAgent 直连 ↗</a></p></div>
+</div>
+</section>
+
+<section id="delivery"><h2>安装、升级与验收边界</h2>
+<p class="intro">首次切换随兼容 Host 一起交付 Agent Access 1.1.0 归档。兼容 Host 的插件管理器识别包的 Agent 能力声明，完成校验、安装和启动。后续独立升级或回退由管理器针对该插件实例执行。</p>
+<div class="flow" aria-label="插件安装及版本切换">
+<div><span>兼容 Host →</span><p>提供 v1 接线和首装归档。</p></div><div><span>实例激活 →</span><p>解析 <code>agent-access.json</code> 的协议版本、操作和传输能力，启动 Worker。</p></div><div><span>新请求解析 →</span><p>绑定已启用且就绪的包代际。</p></div><div><span>实例级替换</span><p>目标暂停、准入校验、启动；维护失败按原事务恢复。</p></div>
+</div>
+<div class="callout"><p><strong>交付状态。</strong> PR 仍是 <code>next</code> 的草稿。Windows DSH 两版完成隔离原生 L0 验证，旧会话 ID 和历史保留，56 项定向回归通过。完整桌面安装、全量门禁与插件独立升级回退仍待验收。</p><p><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/docs/plans/2026-11-18-agent-plugin-cutover-validation.md#L67">验收记录 ↗</a> · <a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/index.ts#L6016">默认安装入口 ↗</a></p></div>
+</section>
+
+<section aria-label="源码索引"><h2>源码与方案索引</h2>
+<details><summary>公开契约与 Host 安装</summary><ul><li><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/agent-contract/src/index.ts#L32">Agent v1 操作与模型目录 schema ↗</a></li><li><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/routes/agent-access-routes.ts#L38">产品接入 API ↗</a></li><li><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/plugin/official-catalog.ts#L86">官方发行目录 ↗</a></li><li><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/docs/plans/2026-11-18-agent-plugin-cutover.md#L23">原方案与接口职责 ↗</a></li></ul></details>
+<details><summary>执行配置与历史会话</summary><ul><li><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/docs/architecture/provider-effective-configuration.md#L15">账户、模型与执行配置绑定 ↗</a></li><li><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/session-contract/implementation-registry.ts#L19">会话实现注册表 ↗</a></li><li><a class="src" href="https://github.com/zts212653/clowder-ai/blob/30cb5de51f0282893f4726cb04dae522abce6c44/packages/api/src/domains/cats/services/agents/session-contract/registered-session-agent-service.ts#L28">注册式 AgentService 承载 ↗</a></li></ul></details>
+</section></main>
+<footer class="wrap">Clowder AI · 架构说明 · 按 PR #2030 的 <a href="https://github.com/zts212653/clowder-ai/commit/30cb5de51f0282893f4726cb04dae522abce6c44">30cb5de51</a> 编写</footer>
+<script>
+const filters = Array.from(document.querySelectorAll("[data-filter]"));
+const clientRows = Array.from(document.querySelectorAll("tbody tr[data-group]"));
+const count = document.getElementById("client-count");
+filters.forEach(button => button.addEventListener("click", () => {
+  const filter = button.dataset.filter;
+  filters.forEach(candidate => candidate.setAttribute("aria-pressed", String(candidate === button)));
+  clientRows.forEach(row => { row.hidden = filter !== "all" && filter !== row.dataset.group; });
+  count.textContent = clientRows.filter(row => !row.hidden).length + " 条接入路径";
+}));
+const nodeTargets = {
+  entry:"clients",host:"host",plugin:"execution-locations",carrier:"host",runtime:"clients",durable:"host",manager:"delivery",
+  catalog:"model-catalog",settings:"model-catalog",freeze:"model-binding",translate:"model-wire",service:"model-wire",catagent:"catagent-client",provider:"model-wire"
+};
+document.querySelectorAll('svg g[data-node-id]').forEach(node => {
+  const target = nodeTargets[node.dataset.nodeId];
+  if (!target) return;
+  node.setAttribute("role","link");
+  node.removeAttribute("aria-pressed");
+  node.setAttribute("aria-label",node.dataset.nodeLabel+"（查看说明）");
+  const navigate = () => {
+    const element = document.getElementById(target);
+    element.setAttribute("tabindex","-1");
+    location.hash = target;
+    element.focus({preventScroll:true});
+  };
+  node.addEventListener("click",navigate);
+  node.addEventListener("keydown",event => {
+    if (event.key === "Enter") { event.preventDefault(); navigate(); }
+  });
+});
+</script></body></html>

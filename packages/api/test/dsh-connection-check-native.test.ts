@@ -5,13 +5,22 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { validateManifest } from '@clowder-ai/plugin-contract';
 import Fastify from 'fastify';
 import { stringify } from 'yaml';
 import { z } from 'zod';
 import { AcpClient } from '../src/domains/cats/services/agents/providers/acp/AcpClient.js';
 import { applySessionConfiguration } from '../src/domains/cats/services/agents/providers/acp/session-configuration.js';
+import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { RedisDshMemberConnectionCheckStore } from '../src/domains/cats/services/stores/redis/RedisDshMemberConnectionCheckStore.js';
+import { createAgentAccessAcpProcess } from '../src/domains/plugin/agent-access/acp-process.js';
+import { AgentAccessAcpRuntimeClient } from '../src/domains/plugin/agent-access/acp-runtime-client.js';
+import {
+  createDormantPluginRuntimeComposition,
+  createPluginManagerRuntimeComposition,
+} from '../src/domains/plugin/index.js';
 import { createDshCheckLaunch, readDshCheckBinding } from '../src/routes/dsh-check-launch.js';
 import { prepareDshDesktopSetup, readDshDesktopSetup } from '../src/routes/dsh-desktop-setup.js';
 import { dshDefinitionOnlyServers } from '../src/routes/dsh-tool-manifest.js';
@@ -285,7 +294,40 @@ test(
       } as unknown as RedisClient);
       const app = Fastify();
       app.decorateRequest('sessionUserId', 'fixture-owner');
-      registerDshMemberConnectionChecks(app, { store });
+      const runtime = createDormantPluginRuntimeComposition({
+        projectRoot: cwd,
+        messageStore: new MessageStore(),
+        contract: { manifestContractRange: '0.4.0-candidate.0', validateManifest },
+      });
+      t.after(() => runtime.shutdown());
+      const { manager } = createPluginManagerRuntimeComposition({
+        runtime,
+        catalogManifests: [],
+        catalogProvider: { snapshot: async () => ({ entries: [], status: 'fresh', checkedAt: 0 }) },
+      });
+      await manager.install({
+        source: {
+          kind: 'local-archive',
+          path: fileURLToPath(new URL('../../agent-access-plugin/dist/plugin/package.tgz', import.meta.url)),
+        },
+      });
+      const pluginId = 'official.agent-access';
+      const setEnabled = async (enabled: boolean) =>
+        manager.setEnabled(pluginId, {
+          enabled,
+          expectedRevision: (await manager.get(pluginId))!.plugin.lifecycleRevision,
+        });
+      await setEnabled(true);
+      const open = createAgentAccessAcpProcess(runtime.inventoryStore, runtime.supervisor);
+      registerDshMemberConnectionChecks(app, {
+        store,
+        async resolveClient() {
+          const instance = (await runtime.inventoryStore.readCurrentAuthority(pluginId))?.instance;
+          if (instance?.activationState === 'enabled' && instance.runtimeState === 'healthy') {
+            return (config) => new AgentAccessAcpRuntimeClient(config, open);
+          }
+        },
+      });
       const { loadResolvedCatConfig, getRegisteredAcpConfig } = await import('../src/config/cat-config-loader.js');
       loadResolvedCatConfig(join(cwd, 'cat-template.json'));
       assert.ok(getRegisteredAcpConfig('check-member', cwd), 'saved member exposes its actual launch');
@@ -305,6 +347,10 @@ test(
         assert.equal((await app.inject({ method: 'POST', url, payload })).json().state, 'passed');
         assert.equal(requests.length, count, 'replaying the saved attempt sends no prompt');
         assert.equal(businessCalls, 0);
+        await setEnabled(false);
+        const disabled = (await app.inject({ method: 'POST', url, payload: { attemptId: randomUUID() } })).json();
+        assert.deepEqual(disabled, { state: 'unknown', reasonCode: 'dsh_setup_unavailable' });
+        assert.equal(requests.length, count, 'a disabled plugin must never launch the saved member check');
       } finally {
         await app.close();
         Object.entries(previousRoots).forEach(([key, value]) => {

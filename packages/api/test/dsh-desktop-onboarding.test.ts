@@ -6,10 +6,11 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
-import { stringify } from 'yaml';
+import { parse, stringify } from 'yaml';
 import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
 
-(['stored', 'project', 'home', 'record', 'official', 'missing', 'invalid'] as const).forEach((authentication) =>
+const fixtures = ['stored', 'project', 'home', 'record', 'official', 'missing', 'invalid', 'modalities'] as const;
+fixtures.forEach((authentication) =>
   test(
     authentication === 'official'
       ? 'Desktop prefers official credentials in its native store without an environment key'
@@ -17,7 +18,9 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
         ? 'Desktop refuses a missing explicit custom reference without borrowing another key'
         : authentication === 'invalid'
           ? 'Desktop distinguishes an unreadable credential document from missing authentication'
-          : `Desktop onboarding uses ${authentication} custom authentication without an official key across a cold restart`,
+          : authentication === 'modalities'
+            ? 'Desktop prepares a custom model using input when inputModalities is also present'
+            : `Desktop onboarding uses ${authentication} custom authentication without an official key across a cold restart`,
     { skip: !process.env.DSH_DESKTOP_TEST_COMMAND, timeout: 180_000 },
     async (t) => {
       const command = process.env.DSH_DESKTOP_TEST_COMMAND!;
@@ -56,7 +59,12 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
         rmSync(root, { recursive: true, force: true });
       });
       let officialRequests = 0;
-      const customRequests: { model: string; auth: string | undefined }[] = [];
+      const customRequests: {
+        model: string;
+        auth: string | undefined;
+        system: string;
+        user: string;
+      }[] = [];
       const server = createServer(async (request, response) => {
         if (request.url?.startsWith('/official')) {
           officialRequests += 1;
@@ -65,8 +73,20 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
         }
         let body = '';
         for await (const chunk of request) body += chunk;
-        const data = JSON.parse(body) as { model: string };
-        customRequests.push({ model: data.model, auth: request.headers.authorization });
+        const data = JSON.parse(body) as {
+          model: string;
+          system?: unknown;
+          messages?: { role: string; content: unknown }[];
+        };
+        customRequests.push({
+          model: data.model,
+          auth: request.headers.authorization,
+          system: JSON.stringify([
+            data.system,
+            ...(data.messages ?? []).filter((message) => message.role === 'system'),
+          ]),
+          user: JSON.stringify(data.messages?.filter((message) => message.role === 'user').at(-1) ?? null),
+        });
         response.writeHead(200, { 'Content-Type': 'text/event-stream' });
         response.write(
           `data: ${JSON.stringify({
@@ -99,7 +119,14 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
                   baseURL: `${origin}/custom/v1`,
                   ...(authentication === 'record' ? {} : { apiKeyEnv: 'ISSUE1925_CUSTOM_KEY' }),
                   models: [
-                    { id: 'only-custom-model', contextWindow: 131072, maxTokens: 1024 },
+                    {
+                      id: 'only-custom-model',
+                      contextWindow: 131072,
+                      maxTokens: 1024,
+                      ...(authentication === 'modalities'
+                        ? { input: ['text', 'image'], inputModalities: ['text'] }
+                        : {}),
+                    },
                     { id: 'other-model', contextWindow: 131072, maxTokens: 1024 },
                   ],
                 },
@@ -116,21 +143,28 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
               ? 'OTHER_API_KEY: fixture-other-key\n'
               : authentication === 'invalid'
                 ? 'version: 1\nrefs: [invalid]\n'
-                : authentication === 'stored'
+                : authentication === 'stored' || authentication === 'modalities'
                   ? 'ISSUE1925_CUSTOM_KEY: fixture-custom-key\n'
                   : authentication === 'record'
                     ? 'version: 1\nrecords:\n  llm-pi-ai/custom:\n    kind: api-key\n    key: fixture-custom-key\n'
                     : '',
         ...(authentication === 'home' || authentication === 'project'
-          ? { [join(authentication === 'home' ? home : desktop, '.env')]: 'ISSUE1925_CUSTOM_KEY=fixture-custom-key\n' }
+          ? {
+              [join(authentication === 'home' ? home : desktop, '.env')]: 'ISSUE1925_CUSTOM_KEY=fixture-custom-key\n',
+            }
           : {}),
       };
       Object.entries(files).forEach(([path, text]) => writeFileSync(path, text, { mode: 0o600 }));
       const app = Fastify();
       app.decorateRequest('sessionUserId', 'fixture-owner');
+      let available = true;
+      const auditEvents: string[] = [];
       registerDshSetupRoutes(app, {
         resolveDesktopLaunch: () => ({ command, cwd, nativeHome: home, nativeCwd: desktop }),
-        audit: async () => {},
+        isAvailable: async () => available,
+        audit: async (target) => {
+          auditEvents.push(target);
+        },
       });
       t.after(() => app.close());
       const inspection = await app.inject({
@@ -179,6 +213,29 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
       assert.ok(prepared.env.DSH_HOME);
       assert.notEqual(prepared.env.DSH_HOME, home);
       assert.equal(JSON.stringify(prepared).includes('fixture-custom-key'), false, 'no secret enters the member draft');
+      if (authentication === 'stored') {
+        available = false;
+        const disabled = await app.inject({
+          method: 'POST',
+          url: '/api/cats/dsh-setup/test',
+          payload: { id: prepared.id },
+        });
+        assert.equal(disabled.statusCode, 422);
+        assert.deepEqual(disabled.json(), { error: 'dsh_setup_unavailable' });
+        assert.deepEqual(auditEvents, ['dsh-acp-preparation'], 'the receipt is rejected before Desktop inspection');
+        assert.equal(customRequests.length, 0);
+        assert.equal(officialRequests, 0);
+        available = true;
+      }
+      if (authentication === 'modalities') {
+        const patch = parse(readFileSync(prepared.startupArgs.at(-1), 'utf8'));
+        const model = patch.find((entry: { id?: string }) => entry.id === 'llm-pi-ai').config.providers.custom
+          .models[0];
+        assert.deepEqual(model.input, ['text', 'image']);
+        assert.equal(Object.hasOwn(model, 'inputModalities'), false);
+        Object.entries(files).forEach(([path, bytes]) => assert.equal(readFileSync(path, 'utf8'), bytes));
+        return;
+      }
       const verified = await app.inject({
         method: 'POST',
         url: '/api/cats/dsh-setup/test',
@@ -192,8 +249,36 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
       const { createAcpServiceForConfig } = await import(
         '../src/domains/cats/services/agents/providers/acp/AcpServiceFactory.js'
       );
+      const { captureInvocationL0Input } = await import(
+        '../src/domains/cats/services/agents/providers/l0-input-capture.js'
+      );
       const members = Fastify();
-      await members.register(catsRoutes);
+      const { discoverModelCatalog } = await import('@clowder-ai/agent-access/runtime/discover-model-catalog');
+      const { prepareAcpModelCatalogProbe } = await import('../src/routes/runtime-catalog-probe.js');
+      await members.register(catsRoutes, {
+        runtimeCatalog: {
+          modelCatalogGeneration: async () => 'desktop-onboarding-fixture',
+          async discoverModelCatalog(target) {
+            assert.equal(target.kind, 'acp');
+            const probe = prepareAcpModelCatalogProbe(target);
+            try {
+              return await discoverModelCatalog({
+                input: { operation: 'discover_model_catalog', client: 'acp', input: { model: target.model } },
+                describeAcp: probe.describe,
+                selectAcpModel: probe.select,
+                launch: async () => {
+                  throw new Error('Not a Codex fixture');
+                },
+                readClaude: async () => {
+                  throw new Error('Not a Claude fixture');
+                },
+              });
+            } finally {
+              await probe.close();
+            }
+          },
+        },
+      });
       t.after(() => members.close());
       const created = await members.inject({
         method: 'POST',
@@ -261,6 +346,7 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
             payload: {
               expectedRevision: saved.configurationRevision,
               defaultModel: '["custom","other-model"]',
+              roleDescription: 'Edited desktop member identity fixture',
               acp: { command: binding.command, startupArgs: binding.startupArgs, transport: 'stdio' },
               env: binding.env,
             },
@@ -293,13 +379,22 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
             : ['Reply DSH_CONNECTION_OK again.']) {
             const events = [];
             const previousSession = sessionId;
-            for await (const event of service.invoke(prompt, sessionId ? { sessionId } : undefined)) events.push(event);
+            const frozenL0Input = service.injectsL0Natively()
+              ? captureInvocationL0Input({ catId: saved.id, catConfig: config, userId: 'fixture-owner' })
+              : undefined;
+            for await (const event of service.invoke(prompt, { sessionId, frozenL0Input })) events.push(event);
             assert.equal(
               events.some((event) => event.type === 'error'),
               false,
               JSON.stringify(events),
             );
             assert.ok(JSON.stringify(events).includes('DSH_CONNECTION_OK'));
+            if (frozenL0Input) {
+              const request = customRequests.at(-1);
+              assert.ok(request?.system.includes(config.roleDescription), 'L0 reaches the provider as system');
+              assert.ok(!request?.user.includes(config.roleDescription), 'L0 is absent from the current user message');
+              if (restart === 1) assert.ok(!request?.system.includes('Isolated acceptance fixture'));
+            }
             const initializedSession = events.find((event) => event.type === 'session_init')?.sessionId;
             if (restart === 1)
               assert.equal(initializedSession, previousSession, 'the model edit resumes the same ACP session');

@@ -7,6 +7,7 @@ import {
   type PluginManagerDetail,
   type PluginManagerDetailResponse,
 } from '@cat-cafe/shared';
+import type { AgentAccessClientDirectory, AgentAccessReadiness } from '@clowder-ai/agent-contract';
 import type { CoCreatorConfig, ConfigData } from '@/components/config-viewer-types';
 import { buildNativeCreationPayload } from '@/components/first-run-quest/native-creation-payload';
 import {
@@ -21,7 +22,6 @@ import { uploadAvatarAsset } from '@/components/hub-cat-editor.client';
 import {
   autoSlug,
   buildStrategyPayload,
-  CLIENT_OPTIONS,
   type CodexRuntimeSettings,
   carrierOptionsForClient,
   filterAccounts,
@@ -32,6 +32,7 @@ import {
   toStrategyForm,
 } from '@/components/hub-cat-editor.model';
 import type { CatStrategyEntry } from '@/components/hub-strategy-types';
+import { readAgentAccessDetection } from '@/components/settings/members/agent-access-discovery';
 import { type DshInspection, dshSetupRequest } from '@/components/settings/members/dsh-setup-client';
 import {
   type MemberDraft,
@@ -42,7 +43,7 @@ import {
 import { type RuntimeChoice, runtimeDefaults } from '@/components/settings/members/member-runtime-draft';
 import { memberRuntimeTools } from '@/components/settings/members/member-runtime-tools';
 import { saveMemberExtras } from '@/components/settings/members/member-save-extras';
-import { saveMemberRecord } from '@/components/settings/members/member-save-record';
+import { MEMBER_WRITE_TIMEOUT_MS, saveMemberRecord } from '@/components/settings/members/member-save-record';
 import { prepareNativeMember } from '@/components/settings/members/prepare-native-member';
 import type { MemberCatalog } from '@/components/settings/members/useRuntimeCatalog';
 import { agentClientConfigurationError } from '@/components/settings/plugin-manager/PluginAgentClientsField';
@@ -50,6 +51,7 @@ import { configurationRequest } from '@/components/settings/plugin-manager/plugi
 import type { AgentClientLibrary, AgentClientProfile } from '@/hooks/useAgentClientLibraries';
 import { type CatData, refreshCatsNow, saveCatOrder } from '@/hooks/useCatData';
 import { primeCoCreatorConfigCache } from '@/hooks/useCoCreatorConfig';
+import { isDshMember } from '@/lib/member-model-display';
 import { API_URL, apiFetch } from '@/utils/api-client';
 import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { beginMemberSave } from '@/utils/member-save-trace';
@@ -165,18 +167,34 @@ export async function readVoiceChoices() {
 }
 
 export async function readMemberSettings() {
-  const [accounts, templates, snapshot, strategies, discovered, libraries, l0] = await Promise.all([
-    request<AccountsResponse>('/api/accounts'),
-    request<{ templates: TemplateCard[] }>('/api/cat-templates'),
-    request<{ config: ConfigData }>('/api/config'),
-    request<{ cats: CatStrategyEntry[] }>('/api/config/session-strategy'),
-    request<{ runtimes: RuntimeChoice[] }>('/api/cats/native-runtimes'),
-    request<{ libraries: AgentClientLibrary[] }>('/api/agent-providers'),
-    // The fixed-prompt (L0) estimate may be unavailable (503): the page then shows no estimate.
-    request<{ referenceTokens: number; members: { catId: string; tokens: number }[] }>('/api/cats/l0-budget').catch(
-      () => null,
-    ),
-  ]);
+  const [accounts, templates, snapshot, strategies, discovered, directory, libraries, l0, { cats }] = await Promise.all(
+    [
+      request<AccountsResponse>('/api/accounts'),
+      request<{ templates: TemplateCard[] }>('/api/cat-templates'),
+      request<{ config: ConfigData }>('/api/config'),
+      request<{ cats: CatStrategyEntry[] }>('/api/config/session-strategy'),
+      readAgentAccessDetection(false),
+      request<AgentAccessClientDirectory>('/api/agent-access/v1/clients'),
+      request<{ libraries: AgentClientLibrary[] }>('/api/agent-providers'),
+      // The fixed-prompt (L0) estimate may be unavailable (503): the page then shows no estimate.
+      request<{ referenceTokens: number; members: { catId: string; tokens: number }[] }>('/api/cats/l0-budget').catch(
+        () => null,
+      ),
+      refreshCatsNow(),
+    ],
+  );
+  const runtimes = memberRuntimeTools(discovered.candidates, libraries.libraries).map((runtime) => ({
+    ...runtime,
+    ...(runtime.dshDesktop
+      ? {
+          discoveredId:
+            runtime.acp?.agentProvider ??
+            discovered.candidates.find((item) => item.dshDesktop && !item.acp?.agentProvider)?.id,
+        }
+      : {}),
+    acpMaxDefault: defaultAcpPoolMaxProcesses(runtime.clientId),
+    form: runtimeDefaults(runtime),
+  }));
   return {
     accounts: accounts.providers,
     l0,
@@ -185,18 +203,14 @@ export async function readMemberSettings() {
     codex: toCodexRuntimeSettings(snapshot.config),
     strategies: strategies.cats.map((entry) => ({ id: entry.catId, form: toStrategyForm(entry) })),
     libraries: libraries.libraries,
-    runtimes: memberRuntimeTools(discovered.runtimes, libraries.libraries).map((runtime) => ({
-      ...runtime,
-      ...(runtime.dshDesktop ? { discoveredId: discovered.runtimes.find((item) => item.dshDesktop)?.id } : {}),
-      acpMaxDefault: defaultAcpPoolMaxProcesses(runtime.clientId),
-      form: runtimeDefaults(runtime),
-    })),
-    clients: CLIENT_OPTIONS.map((client) => ({
-      id: client.value,
-      acpMaxDefault: defaultAcpPoolMaxProcesses(client.value),
+    runtimes,
+    dshMembers: cats.filter((cat) => isDshMember(cat, runtimes)).map((cat) => cat.id),
+    clients: directory.clients.map((client) => ({
+      id: client.id,
+      acpMaxDefault: defaultAcpPoolMaxProcesses(client.id),
       label: client.label,
-      carriers: carrierOptionsForClient(client.value).map((mode) => [mode.value, mode.label]),
-      accounts: filterAccounts(client.value, accounts.providers).map((account) => account.id),
+      carriers: carrierOptionsForClient(client.id).map((mode) => [mode.value, mode.label]),
+      accounts: filterAccounts(client.id, accounts.providers).map((account) => account.id),
     })),
   };
 }
@@ -269,22 +283,51 @@ export async function readMemberRuntimeModels(body: string): Promise<MemberCatal
   });
 }
 
-export async function readNativeMembers(journeyId: string, refresh: boolean) {
-  const [discovered, templates, roster, accounts] = await Promise.all([
-    request<{ runtimes: RuntimeChoice[] }>(`/api/cats/native-runtimes${refresh ? '?refresh=1' : ''}`),
+async function readNativeContext() {
+  const [templates, roster, accounts] = await Promise.all([
     request<{ templates: TemplateCard[] }>('/api/cat-templates'),
     request<{ cats: CatData[] }>('/api/cats'),
     request<AccountsResponse>('/api/accounts'),
   ]);
-  return recommendNativePartners(discovered.runtimes, templates.templates, roster.cats, journeyId).map((partner) => ({
+  return { templates: templates.templates, cats: roster.cats, accounts };
+}
+
+function nativePartnersFrom(
+  runtimes: RuntimeChoice[],
+  context: Awaited<ReturnType<typeof readNativeContext>>,
+  journeyId: string,
+) {
+  return recommendNativePartners(runtimes, context.templates, context.cats, journeyId).map((partner) => ({
     ...partner,
     runtime: { ...partner.runtime, acpMaxDefault: defaultAcpPoolMaxProcesses(partner.runtime.clientId) },
     form:
       !partner.existingId && partner.runtime.agyCarrier
-        ? { ...partner.form, agyTrustedWorkspaces: accounts.projectPath }
+        ? { ...partner.form, agyTrustedWorkspaces: context.accounts.projectPath }
         : partner.form,
     selectable: nativeRuntimeSelectable(partner.runtime, partner.form),
   }));
+}
+
+/** The v1 readiness is closed; the web adds a display-only reason when the HTTP call itself fails. */
+export type AgentAccessReadinessView = AgentAccessReadiness & { reason?: string };
+
+export interface AgentAccessDetectionResult {
+  readiness: AgentAccessReadinessView;
+  candidates: ReturnType<typeof nativePartnersFrom>;
+  partialFailures: string[];
+}
+
+/** One detect entry for the member page and the first-run guide. */
+export async function detectNativeMembers(journeyId: string, refresh: boolean): Promise<AgentAccessDetectionResult> {
+  const detected = await readAgentAccessDetection(refresh);
+  if (detected.readiness.state !== 'ready')
+    return { readiness: detected.readiness, candidates: [], partialFailures: [] };
+  const context = await readNativeContext();
+  return {
+    readiness: detected.readiness,
+    candidates: nativePartnersFrom(detected.candidates, context, journeyId),
+    partialFailures: (detected.partialFailures ?? []).map((failure) => failure.id),
+  };
 }
 
 /** A DSH Desktop partner is prepared (private Desktop configuration) before it is created; the prepared form is kept by
@@ -294,15 +337,19 @@ export function prepareNativePartner(partner: NativePartner) {
 }
 
 export async function createNativeMember(partner: NativePartner, journeyId: string) {
-  const receipt = await request<{ cat: CatData }>('/api/cats', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Cat-Cafe-Onboarding-Journey': journeyId,
-      'Idempotency-Key': `onboarding:${journeyId}:cat:${partner.creationRequestKey}`,
+  const receipt = await request<{ cat: CatData }>(
+    '/api/cats',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Cat-Cafe-Onboarding-Journey': journeyId,
+        'Idempotency-Key': `onboarding:${journeyId}:cat:${partner.creationRequestKey}`,
+      },
+      body: JSON.stringify(buildNativeCreationPayload(partner.creationForm ?? partner.form)),
     },
-    body: JSON.stringify(buildNativeCreationPayload(partner.creationForm ?? partner.form)),
-  });
+    { mutationTimeoutMs: MEMBER_WRITE_TIMEOUT_MS },
+  );
   await refreshCatsNow();
   return receipt.cat;
 }

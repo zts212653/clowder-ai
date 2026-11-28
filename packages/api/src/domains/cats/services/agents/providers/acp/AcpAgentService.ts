@@ -19,7 +19,7 @@ import { createAcpPermissionHandler } from './permissions/acp-permission-interac
  *     if the session is gone (process restarted, evicted, etc.).
  *   - 4-window abort coverage (pre-invoke, post-newSession, post-yield, during-prompt)
  *   - Failure classification: init_failure / prompt_failure / model_capacity / mcp_pollution / stream_idle_stall / turn_budget_exceeded
- *   - System prompt: prepended to prompt text (ACP agents have no system prompt flag)
+ *   - L0: native for supported DSH Desktop and AGY, user prefix for generic ACP
  */
 
 import { type CatId, type ClientId, catRegistry } from '@cat-cafe/shared';
@@ -43,16 +43,25 @@ import type {
   PreparedProviderRequestV1,
 } from '../../../types.js';
 import { agentServiceGeneration } from '../../registry/AgentRegistry.js';
+import { compileL0ViaSubprocess } from '../l0-compiler.js';
 import {
   type AcpCapacitySignal,
   type AcpClient,
+  type AcpClientConfig,
   type AcpPermissionHandler,
   AcpProtocolError,
   AcpSessionCancelledError,
   AcpStreamIdleError,
   AcpTimeoutError,
 } from './AcpClient.js';
-import { type AcpLease, type AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS, type PoolKey } from './AcpProcessPool.js';
+import {
+  type AcpLease,
+  type AcpPoolClient,
+  type AcpPoolStartup,
+  type AcpProcessPool,
+  DEFAULT_ACP_IDLE_TTL_MS,
+  type PoolKey,
+} from './AcpProcessPool.js';
 import {
   bindSessionCredentialFile,
   type PreparedCredentialEnv,
@@ -87,7 +96,11 @@ import {
   resolveKimiShareDir,
 } from './kimi/kimi-turn-outcome.js';
 import { captureNativeDefaults, defaultsForNativeResume } from './native-session-defaults.js';
-import { applySessionConfiguration, reportedSessionModel } from './session-configuration.js';
+import {
+  applySessionConfiguration,
+  reportedSessionModel,
+  resolveSessionModelConfigOption,
+} from './session-configuration.js';
 import type {
   AcpInitializeResult,
   AcpMcpServer,
@@ -160,13 +173,23 @@ type PromptPhase =
    */
   | 'busy_backoff';
 
+export type CreateAcpMemberClient = (
+  config: AcpClientConfig,
+  transport?: 'stdio' | 'httpstream',
+) => AcpPoolClient &
+  Pick<AcpClient, 'newSession' | 'promptStream' | 'setSessionModel'> & {
+    cancelSession(sessionId: string): void;
+  };
+
 export interface AcpAgentServiceConfig {
   /** Factory admitted the reviewed Desktop turn bridge for this pooled carrier. */
   dshTurnInput?: boolean;
+  dshL0Startup?: (body: string) => AcpPoolStartup;
   executionApproval?: 'auto' | 'ask_user';
   defaultPermissionDecision?: 'allow' | 'reject';
   /** Factory-verified installed native DSH, separate from ordinary pooled sessions. */
   nativeDsh?: DshNativeLaunch;
+  createStdioClient?: CreateAcpMemberClient;
   nativeKimi?: KimiNativeLaunch;
   antigravity?: AgyAcpConfig;
   catId: CatId;
@@ -190,6 +213,10 @@ export interface AcpAgentServiceConfig {
   modelName?: string;
   /** ACP session model override sent via session/set_config_option when the agent exposes model selection. */
   sessionModel?: string;
+  selectSessionModel?: (
+    session: { configOptions?: unknown },
+    model: string,
+  ) => { configId: string } | null | Promise<{ configId: string } | null>;
   /**
    * Protocol adapter selection. 'icode' switches the service onto iCode's ACP
    * dialect: model selection via standard session/set_model (fail-loud), no
@@ -230,7 +257,9 @@ export class AcpAgentService implements AgentService {
    */
   readonly windowsProviderHosts = false;
   private readonly nativeDsh?: DshNativeLaunch;
+  private readonly createStdioClient?: CreateAcpMemberClient;
   private readonly dshTurnInput: boolean;
+  private readonly dshL0Startup?: AcpAgentServiceConfig['dshL0Startup'];
   private readonly nativeKimi?: KimiNativeLaunch;
   private readonly antigravity?: AgyAcpConfig;
   readonly catId: CatId;
@@ -251,6 +280,7 @@ export class AcpAgentService implements AgentService {
    */
   private modelName: string;
   private readonly sessionModel?: string;
+  private readonly selectSessionModel: NonNullable<AcpAgentServiceConfig['selectSessionModel']>;
   readonly protocolAdapter: 'icode' | undefined;
   private readonly executionApproval: 'auto' | 'ask_user';
   private readonly defaultPermissionDecision?: 'allow' | 'reject';
@@ -273,7 +303,9 @@ export class AcpAgentService implements AgentService {
 
   constructor(config: AcpAgentServiceConfig) {
     this.dshTurnInput = config.dshTurnInput === true;
+    this.dshL0Startup = config.dshL0Startup;
     this.nativeDsh = config.nativeDsh;
+    this.createStdioClient = config.createStdioClient;
     this.nativeKimi = config.nativeKimi;
     this.antigravity = config.antigravity;
     this.catId = config.catId;
@@ -286,6 +318,7 @@ export class AcpAgentService implements AgentService {
     this.providerName = config.providerName ?? 'acp';
     this.modelName = config.modelName ?? config.sessionModel ?? 'acp';
     this.sessionModel = config.sessionModel?.trim() || undefined;
+    this.selectSessionModel = config.selectSessionModel ?? resolveSessionModelConfigOption;
     this.protocolAdapter = config.protocolAdapter;
     this.executionApproval = config.executionApproval ?? 'auto';
     this.defaultPermissionDecision = config.defaultPermissionDecision;
@@ -344,7 +377,7 @@ export class AcpAgentService implements AgentService {
   }
 
   injectsL0Natively(): boolean {
-    return Boolean(this.antigravity);
+    return Boolean(this.antigravity || this.dshL0Startup);
   }
 
   supportsToolExecutionPolicy(policy: import('../../../types.js').ToolExecutionPolicy): boolean {
@@ -434,6 +467,7 @@ export class AcpAgentService implements AgentService {
     for (let attempt = 0; ; attempt++) {
       let yieldedEvents = 0;
       await hooks?.beforeAttempt?.(attempt);
+      signal?.throwIfAborted();
       hooks?.onAttemptStart?.();
       try {
         const stream = client.promptStream(sessionId, prompt, opts);
@@ -522,6 +556,7 @@ export class AcpAgentService implements AgentService {
         catId: this.catId,
         modelSelection: this.sessionModel ?? this.modelName,
         native: this.nativeKimi,
+        createClient: this.createStdioClient,
         prompt,
         options,
       });
@@ -532,6 +567,7 @@ export class AcpAgentService implements AgentService {
         catId: this.catId,
         modelSelection: this.sessionModel ?? this.modelName,
         native: this.nativeDsh,
+        createClient: this.createStdioClient,
         prompt,
         options,
       });
@@ -591,6 +627,8 @@ export class AcpAgentService implements AgentService {
         : undefined,
     };
     let lease: AcpLease | null = null;
+    let dshL0: string | undefined;
+    let startup: AcpPoolStartup | undefined;
     let invokeServers: AcpMcpServer[];
     let pluginMcpCurrentness: AgentServiceOptions['frozenAcpMcpCurrentness'];
     let preparingMcp = true;
@@ -612,7 +650,21 @@ export class AcpAgentService implements AgentService {
       }
       options?.signal?.throwIfAborted();
       preparingMcp = false;
-      lease = await this.pool.acquire(this.poolKey, { sessionId: options?.sessionId });
+      if (this.dshL0Startup) {
+        dshL0 = await compileL0ViaSubprocess({
+          catId: this.catId,
+          userId: options?.callbackEnv?.CAT_CAFE_USER_ID ?? options?.auditContext?.userId,
+          frozenInput: options?.frozenL0Input,
+          requireFrozenInput: true,
+        });
+        if (!dshL0.trim()) throw new Error('DSH Desktop canonical L0 is empty');
+        options?.signal?.throwIfAborted();
+        startup = this.dshL0Startup(dshL0);
+      }
+      lease = await this.pool.acquire(this.poolKey, {
+        sessionId: options?.sessionId,
+        ...(startup ? { startup } : {}),
+      });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       const errorCode = options?.signal?.aborted ? 'prompt_failure' : preparingMcp ? 'mcp_pollution' : 'init_failure';
@@ -670,6 +722,8 @@ export class AcpAgentService implements AgentService {
       close?(): Promise<void>;
       /** True when the latest prompt received a final RPC response, including a provider error. */
       hasPromptFinalResponse?(sessionId: string): boolean;
+      /** Agent Access Host-side evidence of a prompt that can still reach the native client. */
+      hasUnconfirmedPrompt?(sessionId: string): boolean;
       readonly promptCapabilities?: AcpPromptCapabilities;
     };
     const cwd = options?.workingDirectory ?? this.projectRoot;
@@ -716,14 +770,16 @@ export class AcpAgentService implements AgentService {
     const requiresProviderShutdown = () => promptPhase === 'locally_terminated_unacknowledged';
 
     const sealActivePromptSession = (activeSessionId: string): boolean => {
-      if (promptPhase !== 'active_unacknowledged') return false;
+      if (promptPhase !== 'active_unacknowledged' || client.hasUnconfirmedPrompt?.(activeSessionId) === false)
+        return false;
       promptPhase = 'locally_terminated_unacknowledged';
       const sessionIds = new Set([activeSessionId, options?.sessionId].filter((id): id is string => Boolean(id)));
       for (const id of sessionIds) this.pool.sealSession?.(this.poolKey, id);
       return true;
     };
     const cancelActivePromptSession = (activeSessionId: string): boolean => {
-      if (!sealActivePromptSession(activeSessionId)) return false;
+      if (promptPhase !== 'active_unacknowledged') return false;
+      sealActivePromptSession(activeSessionId);
       client.cancelSession(activeSessionId);
       return true;
     };
@@ -735,7 +791,8 @@ export class AcpAgentService implements AgentService {
     // notification; lease release and iterator return are not stop receipts), so the Host must
     // keep the physical stop unknown. A prompt that never left the Host owns no writer.
     const promptStopUnconfirmed = () =>
-      promptPhase === 'active_unacknowledged' || promptPhase === 'locally_terminated_unacknowledged';
+      promptPhase === 'locally_terminated_unacknowledged' ||
+      (promptPhase === 'active_unacknowledged' && !!sessionId && client.hasUnconfirmedPrompt?.(sessionId) !== false);
 
     // Per-invoke capacity listener — covers the entire invoke lifecycle (newSession + prompt + grace).
     // This is intentionally invoke-level, not prompt-level: capacity is a provider-level property
@@ -931,7 +988,7 @@ export class AcpAgentService implements AgentService {
             }
           }
         } catch (err) {
-          if (agy || err instanceof AcpSessionBindingError || options?.signal?.aborted) throw err;
+          if (agy || dshL0 || err instanceof AcpSessionBindingError || options?.signal?.aborted) throw err;
           // The existing resume -> fresh fallback uses the same one-shot budget.
           initializationRecoveryUsed = true;
           const unavailable = removeUnavailablePluginMcp();
@@ -995,8 +1052,9 @@ export class AcpAgentService implements AgentService {
             return;
           }
         } else {
-          const modelConfig = !agy && sessionModel ? resolveSessionModelConfigOption(session, sessionModel) : null;
-          if (!nativeTool && modelConfig && sessionModel) {
+          const modelConfig =
+            !agy && !nativeTool && sessionModel ? await this.selectSessionModel(session, sessionModel) : null;
+          if (modelConfig && sessionModel && !options?.signal?.aborted) {
             try {
               await client.setSessionConfigOption(sessionId, modelConfig.configId, sessionModel);
               log.info({ ...ctx, sessionId, model: this.sessionModel }, 'ACP session model selected');
@@ -1113,19 +1171,20 @@ export class AcpAgentService implements AgentService {
         return;
       }
 
-      // Prepend system prompt (ACP agents have no system prompt flag).
+      // Generic ACP uses the user prefix; native adapters already supply L0.
       // Any resumed turn that had to create a fresh session lost the identity it
       // expected session memory to carry, so restore the fallback exactly once.
       const restoresResumeIdentity = resumeDisposition === 'load_failed_fresh' || resumeDisposition === 'sealed_fresh';
       const fallbackSystemPrompt =
         restoresResumeIdentity && options?.resumeFallbackSystemPrompt ? options.resumeFallbackSystemPrompt : undefined;
-      const effectivePrompt = agy
-        ? prompt
-        : options?.systemPrompt
-          ? `${options.systemPrompt}\n\n${prompt}`
-          : fallbackSystemPrompt
-            ? `${fallbackSystemPrompt}\n\n${prompt}`
-            : prompt;
+      const effectivePrompt =
+        agy || dshL0
+          ? prompt
+          : options?.systemPrompt
+            ? `${options.systemPrompt}\n\n${prompt}`
+            : fallbackSystemPrompt
+              ? `${fallbackSystemPrompt}\n\n${prompt}`
+              : prompt;
 
       // Window 4: onAbort listener covers the duration of promptStream
       // Kimi's cause must be a record appended after this boundary, not a clock guess.
@@ -1149,7 +1208,11 @@ export class AcpAgentService implements AgentService {
             ...(busyAttempt > 0 ? { boundaryReason: 'provider_busy' as const } : {}),
             message: Object.freeze({ body: effectivePrompt }),
             nativeInstructions: Object.freeze(
-              agy ? [{ body: agy.body, injectionDecision: 'antigravity_native_system_append' }] : [],
+              agy
+                ? [{ body: agy.body, injectionDecision: 'antigravity_native_system_append' }]
+                : dshL0
+                  ? [{ body: dshL0, injectionDecision: 'dsh_native_system_persona_prefix' }]
+                  : [],
             ),
             runtime: Object.freeze({
               provider: this.providerName,
@@ -1186,7 +1249,6 @@ export class AcpAgentService implements AgentService {
         if (bridgeSteerAvailable && options?.activeRunDispatch)
           dshTurn = new DshTurnInput(dshClient, sessionId, options);
       }
-      promptPhase = 'active_unacknowledged';
       for await (const event of this.promptStreamWithBusyRetry(
         client,
         sessionId,
@@ -1293,7 +1355,8 @@ export class AcpAgentService implements AgentService {
       // Detect this and retry with a fresh session so the cat isn't silently dead.
       const promptElapsedMs = Date.now() - promptStreamStartedAt;
       const RESUME_EMPTY_THRESHOLD_MS = 3_000;
-      if (agy && eventCount === 0) throw new Error('AGY ACP returned an empty turn; no automatic replay was attempted');
+      if ((agy || dshL0) && eventCount === 0)
+        throw new Error(`${agy ? 'AGY' : 'DSH Desktop'} ACP returned an empty turn; no automatic replay was attempted`);
       if (resumeDisposition === 'resumed' && eventCount === 0 && promptElapsedMs < RESUME_EMPTY_THRESHOLD_MS) {
         log.warn(
           { ...ctx, sessionId, promptElapsedMs },
@@ -1373,8 +1436,9 @@ export class AcpAgentService implements AgentService {
               return;
             }
           } else {
-            const modelConfig = sessionModel ? resolveSessionModelConfigOption(freshSession, sessionModel) : null;
-            if (!nativeTool && modelConfig && sessionModel) {
+            const modelConfig =
+              !nativeTool && sessionModel ? await this.selectSessionModel(freshSession, sessionModel) : null;
+            if (modelConfig && sessionModel && !options?.signal?.aborted) {
               try {
                 await client.setSessionConfigOption(freshSessionId, modelConfig.configId, sessionModel);
               } catch {
@@ -1612,7 +1676,7 @@ export class AcpAgentService implements AgentService {
         }
       }
       try {
-        if (isInvocationBoundMcpLaunch(options?.callbackEnv) && sessionId) {
+        if ((dshL0 || isInvocationBoundMcpLaunch(options?.callbackEnv)) && sessionId) {
           try {
             await lease.closeTurn(sessionId);
           } catch (err) {
@@ -1620,7 +1684,7 @@ export class AcpAgentService implements AgentService {
             // any active peers drain. Cleanup must not rewrite the turn result.
             log.warn(
               { ...ctx, sessionId, err: err instanceof Error ? err.message : String(err) },
-              'ACP turn-bound session cleanup failed; carrier draining',
+              'ACP session cleanup failed; carrier draining',
             );
           }
         } else if (this.protocolAdapter === 'icode' && sessionId) {
@@ -1691,32 +1755,6 @@ export class AcpAgentService implements AgentService {
 export const GeminiAcpAdapter = AcpAgentService;
 /** @deprecated Use AcpAgentServiceConfig. */
 export type { AcpAgentServiceConfig as GeminiAcpAdapterConfig_Deprecated };
-
-function resolveSessionModelConfigOption(
-  session: { configOptions?: unknown },
-  modelId: string,
-): { configId: string } | null {
-  const configOptions = session.configOptions;
-  if (!Array.isArray(configOptions)) return null;
-  const modelOption = configOptions.find(
-    (option) => isRecord(option) && (option.id === 'model' || option.category === 'model'),
-  );
-  if (!isRecord(modelOption)) return null;
-  const configId = typeof modelOption.id === 'string' ? modelOption.id.trim() : '';
-  if (!configId) return null;
-  if (modelOption.currentValue === modelId) return null;
-  const optionValues = Array.isArray(modelOption.options)
-    ? modelOption.options
-        .map((option) => (isRecord(option) && typeof option.value === 'string' ? option.value.trim() : ''))
-        .filter(Boolean)
-    : [];
-  if (optionValues.length > 0 && !optionValues.includes(modelId)) return null;
-  return { configId };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
 
 /** F149: Build a provider_signal warning for realtime capacity display. */
 function makeCapacityWarning(

@@ -1,4 +1,12 @@
 import {
+  AGENT_ACCESS_PLUGIN_ID,
+  type AgentAccessDiscoveryHost,
+  type AgentAccessRoleStore,
+  type AgentAdapterDeclaration,
+  OFFICIAL_AGENT_ACCESS_OPERATIONS,
+  parseAgentAdapterDeclaration,
+} from '@clowder-ai/agent-contract';
+import {
   isPluginDeliveryInput,
   isPluginDeliveryReceipt,
   type PluginDeliveryInput,
@@ -11,6 +19,8 @@ import type { IThreadStore } from '../../../cats/services/stores/ports/ThreadSto
 import type { EntrustedWorkChangeReason } from '../../../growing/EntrustedWorkLifecycleService.js';
 import type { MessagingService } from '../../../messaging/messaging-service.js';
 import type { SubscriptionDelivery } from '../../../messaging/subscription-delivery.js';
+import { createAgentAccessDiscoveryHost } from '../../agent-access/discovery-host.js';
+import { createAgentAccessRoleStore, type DeclaredAgentProviderAvailability } from '../../agent-access/role-store.js';
 import { type PluginInvocationOutcome, settlePluginInvocation } from '../../carrier/host-invocation.js';
 import type { SharedMcpFactory } from '../../declared/shared-mcp-factory.js';
 import { type ModuleExecutionLease, ModuleExecutionWorker } from '../../execution-worker/client.js';
@@ -55,9 +65,15 @@ import {
   type ResolvedConfigurationField,
   resolveManifestConfiguration,
 } from '../../manifest-configuration-projection.js';
+import { readPackageAgentAdapterDeclaration } from '../../read-package-capabilities.js';
 import type { BundledPluginRuntime } from './bundled-runtime-carrier.js';
 import { snapshotModuleAuthority } from './module-authority-snapshot.js';
-import { createModuleHostInvocation, exposesModuleAction, projectOwnerHttpContext } from './module-host-invocation.js';
+import {
+  createModuleHostInvocation,
+  exposesModuleAction,
+  type ModuleActionControl,
+  projectOwnerHttpContext,
+} from './module-host-invocation.js';
 import {
   assertModuleSettingsDeclaration,
   createModuleSettingsHost,
@@ -88,6 +104,8 @@ export interface PluginModuleEntrypointShape {
 export type ModulePluginLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface ModulePluginHostShape {
+  readonly agentAccess?: AgentAccessDiscoveryHost;
+  readonly agentRoleStore?: AgentAccessRoleStore;
   /** Installation identity for attribution; Host operations retain their own identity and lifecycle checks. */
   readonly pluginInstanceId: string;
   readonly config: { get(key: string): Promise<unknown> };
@@ -132,6 +150,7 @@ export interface PluginModuleDefinitionShape extends ModulePluginSettingsFactory
 }
 
 export interface ModulePluginRuntimeOptions {
+  readonly isDeclaredAgentProviderAvailable?: DeclaredAgentProviderAvailability;
   readonly taskArtifactReader?: import('../../../growing/ports/PreparedArtifactReader.js').PreparedArtifactReader;
   readonly onTaskDataChanged?: (task: import('@cat-cafe/shared').TaskItem, reason?: EntrustedWorkChangeReason) => void;
   readonly packages: VerifiedPluginPackageLocator;
@@ -177,6 +196,7 @@ export interface ModulePluginRuntimeOptions {
 }
 
 interface LoadedModule {
+  readonly agentAdapter?: AgentAdapterDeclaration;
   readonly packageRecord: ExecutablePluginPackageRecord;
   readonly packageDigest: string;
   readonly manifest: PluginManifest;
@@ -314,8 +334,12 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
     let subscriptions: PluginMessagingSubscriptionSession | undefined;
     try {
       const { entrypoint } = await verifyPackageEntrypoint(packageRecord, located);
-      // Keep executable admission adjacent to sending the verified private path to the worker.
+      // Validate the private package tree before reading its activation metadata.
       await located.verifyIntegrity();
+      const rawAdapter = await readPackageAgentAdapterDeclaration(located.rootDir);
+      const adapter = rawAdapter === undefined ? undefined : parseAgentAdapterDeclaration(rawAdapter);
+      if (adapter?.success === false)
+        throw new ExternalPluginRuntimeError('INVALID_ENTRYPOINT', 'Invalid Agent adapter declaration');
       const loadedExecution = await loadExecutionDefinition<PluginModuleDefinitionShape>(
         this.#execution,
         pluginInstanceId,
@@ -400,7 +424,16 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
         assertActivation,
       );
       assertActivation();
+      const agentAccess = createAgentAccessDiscoveryHost(packageRecord.pluginId, pluginInstanceId, assertActivation);
+      const agentRoleStore = createAgentAccessRoleStore(
+        packageRecord.pluginId,
+        pluginInstanceId,
+        assertActivation,
+        this.options.isDeclaredAgentProviderAvailable,
+      );
       const host: ModulePluginHostShape = {
+        ...(agentRoleStore ? { agentRoleStore } : {}),
+        ...(agentAccess ? { agentAccess } : {}),
         ...neutral,
         pluginInstanceId,
         config: settingsHost.config,
@@ -451,6 +484,7 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
           `${packageRecord.pluginId} start() must return an actions table and stop()`,
         );
       }
+      activation = candidate;
       if (packageRecord.manifest.call !== undefined && typeof deliver !== 'function') {
         throw new ExternalPluginRuntimeError(
           'INVALID_ENTRYPOINT',
@@ -472,11 +506,30 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
           `${packageRecord.pluginId} exposes webhook without a fixed webhook declaration`,
         );
       }
-      activation = candidate;
+      if (
+        packageRecord.pluginId === AGENT_ACCESS_PLUGIN_ID &&
+        OFFICIAL_AGENT_ACCESS_OPERATIONS.some(
+          (operation) => !Object.hasOwn(actions, operation) || typeof actions[operation] !== 'function',
+        )
+      ) {
+        throw new ExternalPluginRuntimeError(
+          'INVALID_ENTRYPOINT',
+          'Agent access package lacks a required protocol operation',
+        );
+      }
+      const missingAdapterOperation = adapter?.data.operations.find(
+        (operation) => !Object.hasOwn(actions, operation) || typeof actions[operation] !== 'function',
+      );
+      if (missingAdapterOperation)
+        throw new ExternalPluginRuntimeError(
+          'INVALID_ENTRYPOINT',
+          `Agent adapter package lacks declared operation ${missingAdapterOperation}`,
+        );
       assertActivation();
       this.#loaded.set(pluginInstanceId, {
         packageRecord,
         located,
+        ...(adapter === undefined ? {} : { agentAdapter: adapter.data }),
         definition: plugin,
         activation,
         publicActions: actions,
@@ -729,13 +782,18 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
     });
   };
 
-  invoke(pluginInstanceId: string, method: string, params: unknown): Promise<unknown> {
-    return this.attemptInvoke(pluginInstanceId, method, params).then(settlePluginInvocation);
+  invoke(pluginInstanceId: string, method: string, params: unknown, control?: ModuleActionControl): Promise<unknown> {
+    return this.attemptInvoke(pluginInstanceId, method, params, control).then(settlePluginInvocation);
   }
 
   /** Invoke, also saying whether the module's action was entered when it fails (F202 W2-3 h3b). */
-  attemptInvoke(pluginInstanceId: string, method: string, params: unknown): Promise<PluginInvocationOutcome> {
-    return createModuleHostInvocation({ runtime: this }).attempt(pluginInstanceId, method, params);
+  attemptInvoke(
+    pluginInstanceId: string,
+    method: string,
+    params: unknown,
+    control?: ModuleActionControl,
+  ): Promise<PluginInvocationOutcome> {
+    return createModuleHostInvocation({ runtime: this }).attempt(pluginInstanceId, method, params, control);
   }
 
   exposesAction(pluginInstanceId: string, method: string): boolean {
@@ -746,6 +804,17 @@ export class ModulePluginRuntime implements BundledPluginRuntime {
     const loaded = this.#loaded.get(pluginInstanceId);
     return loaded?.execution.exited ? undefined : loaded?.publicActions;
   }
+  agentAdapter(pluginInstanceId: string, packageDigest: string): AgentAdapterDeclaration | undefined {
+    const loaded = this.#loaded.get(pluginInstanceId);
+    if (loaded?.packageDigest === packageDigest && !loaded.execution.exited) return loaded.agentAdapter;
+  }
+
+  agentAdapterPackageRoot(pluginInstanceId: string, packageDigest: string): string | undefined {
+    const loaded = this.#loaded.get(pluginInstanceId);
+    if (loaded?.agentAdapter && loaded.packageDigest === packageDigest && !loaded.execution.exited)
+      return loaded.located.rootDir;
+  }
+
   completion(pluginInstanceId: string): Promise<Error | undefined> | undefined {
     return this.#loaded.get(pluginInstanceId)?.execution.completion;
   }

@@ -53,7 +53,7 @@ function dispatchResult(
 /** Internal / unstable. No provider-specific policy or Host invocation machinery crosses this boundary. */
 export class AgentSessionBridgeService implements Service.AgentService {
   readonly cancellationMode = 'drain' as const;
-  private readonly sessions = new Map<string, Promise<Contract.OpenSessionResult>>();
+  private readonly sessions = new Map<string, { instructions: string; opened: Promise<Contract.OpenSessionResult> }>();
   private readonly active = new Set<string>();
   constructor(private readonly input: BridgeInput) {}
   invoke(prompt: string, options?: InvokeOptions): AsyncIterable<AgentMessage> {
@@ -69,7 +69,7 @@ export class AgentSessionBridgeService implements Service.AgentService {
     const sessions = [...this.sessions];
     this.sessions.clear();
     await Promise.all(
-      sessions.map(async ([id, opened]) => {
+      sessions.map(async ([id, { opened }]) => {
         try {
           if (!(await opened).ok) return;
           const result = await this.input.provider.release(id, reason);
@@ -85,24 +85,51 @@ export class AgentSessionBridgeService implements Service.AgentService {
     options: InvokeOptions,
     signal: AbortSignal,
   ): Promise<Contract.OpenSessionResult> {
+    const instructions = options.systemPrompt ?? '';
+    const { provider } = this.input;
     const cached = this.sessions.get(host.sessionId);
-    if (cached) return cached;
-    const opened = Promise.resolve().then(() =>
-      this.input.provider.openSession(
+    if (cached && (!provider.revalidateInstructions || cached.instructions === instructions)) return cached.opened;
+    const opened = Promise.resolve().then(async () => {
+      let previousSessionId = host.resumeNativeSessionId;
+      if (cached) {
+        const previous = await cached.opened;
+        if (this.active.has(host.sessionId)) throw new SessionFailure('session_busy');
+        if (previous.ok) {
+          if (previous.binding.state === 'bound') previousSessionId = previous.binding.nativeSessionId;
+          const released = await provider.release(host.sessionId, 'instructions_changed');
+          if (!released.ok) throw new SessionFailure('session_release_failed', released.reason);
+        }
+      }
+      return provider.openSession(
         {
           sessionId: host.sessionId,
-          instructions: options.systemPrompt ?? '',
+          instructions,
           cwd: options.workingDirectory ?? process.cwd(),
-          ...(host.resumeNativeSessionId
-            ? { resume: { nativeSessionId: host.resumeNativeSessionId, onUnavailable: 'start_new' as const } }
+          ...(this.input.passHostOptions
+            ? {
+                hostOptions: options,
+                ...(options.executionAccount ? { executionAccount: options.executionAccount } : {}),
+              }
+            : {}),
+          ...(previousSessionId
+            ? {
+                resume: {
+                  nativeSessionId: previousSessionId,
+                  onUnavailable:
+                    provider.revalidateInstructions && options.requireExactResume
+                      ? ('fail' as const)
+                      : ('start_new' as const),
+                },
+              }
             : {}),
         },
         signal,
-      ),
-    );
-    this.sessions.set(host.sessionId, opened);
+      );
+    });
+    const entry = { instructions, opened };
+    this.sessions.set(host.sessionId, entry);
     const forget = () => {
-      if (this.sessions.get(host.sessionId) === opened) this.sessions.delete(host.sessionId);
+      if (this.sessions.get(host.sessionId) === entry) this.sessions.delete(host.sessionId);
     };
     void opened.then((result) => {
       if (!result.ok) forget();
@@ -234,6 +261,13 @@ export class AgentSessionBridgeService implements Service.AgentService {
     const host = this.input.resolveHostSession(options);
     const session = await this.open(host, options, signal);
     if (!session.ok) throw new SessionFailure(session.code, session.reason);
+    if (
+      this.input.provider.revalidateInstructions &&
+      options.requireExactResume &&
+      host.resumeNativeSessionId &&
+      (session.binding.state !== 'bound' || session.binding.nativeSessionId !== host.resumeNativeSessionId)
+    )
+      throw new SessionFailure('resume_unavailable', 'Exact native session is unavailable');
     const invocation = {
       invocationId: options.invocationId,
       callbackEnv: options.callbackEnv ?? {},
@@ -274,6 +308,16 @@ export class AgentSessionBridgeService implements Service.AgentService {
       const prepared = await this.prepare(options, signal, prompt, metadata);
       live = prepared.live;
       const { host, session, invocation } = prepared;
+      const fallback = session.resumeFallback;
+      if (fallback) {
+        delete session.resumeFallback;
+        yield this.message('system_info', metadata, {
+          content: JSON.stringify({
+            type: fallback.reason === 'unavailable' ? 'session_resume_fresh_start' : 'l0_resume_fresh_start',
+            ...fallback,
+          }),
+        });
+      }
       startMayHaveAccepted = true;
       const started = await this.input.provider.startTurn(
         host.sessionId,

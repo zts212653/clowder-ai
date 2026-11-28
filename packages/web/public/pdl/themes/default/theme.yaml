@@ -149,7 +149,6 @@ pdl:
             - esc
           drag: true
           focus: true
-          close: guideEntryDismiss
       views:
         members.setup.window:
           bare: true
@@ -171,10 +170,61 @@ pdl:
                   act: nativeCreate
                   disabled: $.createDisabled
                 - type: button
+                  label: t:nativeSetup.readiness.install
+                  act: nativeReadinessAction
+                  args:
+                    action: install
+                  when: $.readiness.canInstall
+                - type: button
+                  label: t:nativeSetup.readiness.enable
+                  act: nativeReadinessAction
+                  args:
+                    action: enable
+                  when: $.readiness.canEnable
+                - type: button
+                  label: t:nativeSetup.readiness.retry
+                  act: nativeReadinessAction
+                  args:
+                    action: retry
+                  when: $.readiness.canRetry
+                - type: button
+                  label: t:nativeSetup.readiness.repair
+                  act: nativeReadinessAction
+                  args:
+                    action: repair
+                  when: $.readiness.canRepair
+                - type: button
                   label: t:common.done
-                  act: guideEntryComplete
+                  act: nativeSetupDone
                   when: $.hasMembers
               blocks:
+                - type: notice
+                  tone: warn
+                  parts:
+                    - text:
+                        of: $.readiness.state
+                        map:
+                          missing: t:nativeSetup.readiness.missing
+                          disabled: t:nativeSetup.readiness.disabled
+                          starting: t:nativeSetup.readiness.starting
+                          failed: t:nativeSetup.readiness.failed
+                          incompatible: t:nativeSetup.readiness.incompatible
+                  when: $.readiness
+                - type: notice
+                  tone: danger
+                  parts:
+                    - text:
+                        t: nativeSetup.partialFailureCount
+                        args:
+                          - $.partialFailureCount
+                  when: $.partialFailureCount
+                - type: notice
+                  tone: danger
+                  parts:
+                    - text: $.readiness.reason
+                  when:
+                    - $.readiness
+                    - $.readiness.reason
                 - type: list
                   id: native-partners
                   from: $.items
@@ -203,8 +253,20 @@ pdl:
                               dshAuto: t:nativeSetup.dshAuto
                               unavailable: t:common.status.notInstalled
                               conflict: t:nativeSetup.conflict
+                              loginRequired: t:nativeSetup.loginRequired
+                              unsupported: t:nativeSetup.unsupported
+                              needsConfig: t:nativeSetup.needsConfig
+                              partialFailure: t:nativeSetup.partialFailure
                               _: "@state"
                         w: auto
+                      - w: ctl
+                        control:
+                          type: button
+                          label: t:nativeSetup.copyLogin
+                          act: nativeCopyLogin
+                          args:
+                            id: "@id"
+                          when: "@loginCommand"
                       - w: ctl
                         control:
                           type: button
@@ -6155,6 +6217,20 @@ pdl:
                       label: t:memberForm.fields.addOrLoginAccount
                       items:
                         $frag: ADD_ACCOUNT_ITEMS
+              - kind: field
+                label: t:memberForm.fields.pluginClient
+                id: f-runtime
+                control:
+                  type: select
+                  id: f-runtime
+                  value: $.form.runtimeChoice
+                  change: memberRuntime
+                  options:
+                    - from: $.form.pluginRuntimes
+                      item:
+                        v: "@id"
+                        label: "@label"
+                when: $.form.hasPluginRuntimes
               - kind: field
                 label: t:common.source
                 control:
@@ -26036,6 +26112,16 @@ pdl:
           foot: $.error
           footTone: err
       ok: t:guide.next
+    dlg.pluginArchiveReplace:
+      title: t:archiveReplacement.title
+      text:
+        - t: archiveReplacement.version
+          args:
+            - $.displayName
+            - $.currentVersion
+            - $.candidateVersion
+        - t: archiveReplacement.retention
+      ok: t:archiveReplacement.confirm
     dlg.pluginFileInspect:
       bare: true
       title:

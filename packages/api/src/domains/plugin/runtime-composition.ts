@@ -12,6 +12,7 @@ import type { IConnectorThreadBindingStore } from '../../infrastructure/connecto
 import { WhisperSttProvider } from '../../infrastructure/connectors/media/WhisperSttProvider.js';
 import { createModuleLogger } from '../../infrastructure/logger.js';
 import type { AgentKeyRegistry } from '../cats/services/agents/agent-key/AgentKeyRegistry.js';
+import type { SessionImplementationRegistry } from '../cats/services/agents/session-contract/implementation-registry.js';
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
@@ -49,6 +50,8 @@ import { StaticPluginRuntime } from './builtin-runtime/carriers/static-plugin-ru
 import { PluginRuntimeCarrierRouter } from './carrier/runtime-carrier.js';
 import { ContentEditorPluginRuntime } from './content-editor-runtime/runtime.js';
 import { ContentEditorSemanticWorker } from './content-editor-runtime/semantic-worker.js';
+import { type AgentAdapterRuntimeGrant, createAgentAdapterAccess } from './declared/agent-adapter-access.js';
+import { grantAgentAdapterNativeRuntime } from './declared/agent-adapter-native/agent-adapter-native-grant.js';
 import { recoverAgentClientMetadata } from './declared/agent-client-metadata.js';
 import type { CloudConversationHostRegistry } from './declared/cloud-conversation-host-registry.js';
 import type { AgentSessionProviderLifecycle } from './declared/declared-agent-session-providers.js';
@@ -203,6 +206,9 @@ export interface DormantPluginRuntimeCompositionOptions {
   /** Live Host registries consumed by package-declared runtime contributions. */
   readonly limbRegistry?: LimbRegistry;
   readonly cloudConversationHosts?: CloudConversationHostRegistry;
+  readonly isDeclaredAgentProviderAvailable?: import('./agent-access/role-store.js').DeclaredAgentProviderAvailability;
+  readonly agentSessionImplementations?: SessionImplementationRegistry;
+  readonly grantAgentAdapterNativeRuntime?: AgentAdapterRuntimeGrant;
   readonly agentSessionProviders?: (
     packages: VerifiedPluginPackageLocator,
     configuration: PluginRuntimeConfigurationPort,
@@ -262,6 +268,7 @@ export interface DormantPluginRuntimeComposition {
   readonly inventory: HostInventoryControlPlane;
   readonly broker: HostBrokerControlPlane;
   readonly supervisor: PluginRuntimeCarrierRouter;
+  readonly agentAdapters: ReturnType<typeof createAgentAdapterAccess>;
   readonly externalAccess: PluginExternalAccessService;
   readonly sharedExtension?: PluginSharedExtensionService;
   /** The child-process carrier itself. Exposed so the Host's one pre-active budget
@@ -531,7 +538,10 @@ export function createDormantPluginRuntimeComposition(
     options.threadStore && options.threadOwnerUserId
       ? { threads: options.threadStore, ownerUserId: options.threadOwnerUserId }
       : undefined;
+  const registry = options.agentSessionImplementations;
   const moduleRuntime = new ModulePluginRuntime({
+    isDeclaredAgentProviderAvailable:
+      options.isDeclaredAgentProviderAvailable ?? (registry ? (reference) => registry.has(reference) : undefined),
     ...(options.taskArtifactReader ? { taskArtifactReader: options.taskArtifactReader } : {}),
     ...(options.onTaskDataChanged ? { onTaskDataChanged: options.onTaskDataChanged } : {}),
     taskAdmission: (pluginInstanceId, packageDigest, assertActivation) =>
@@ -641,6 +651,11 @@ export function createDormantPluginRuntimeComposition(
     ...(options.lifecycleTriggerMessageId === undefined ? {} : { triggerMessageId: options.lifecycleTriggerMessageId }),
     onError: (fields) => moduleLogger.error(fields, 'lifecycle delivery failed'),
   });
+  const agentAdapters = createAgentAdapterAccess(
+    inventoryStore,
+    moduleRuntime,
+    options.grantAgentAdapterNativeRuntime ?? grantAgentAdapterNativeRuntime,
+  );
   const supervisor = new PluginRuntimeCarrierRouter(
     inventoryStore,
     {
@@ -659,6 +674,9 @@ export function createDormantPluginRuntimeComposition(
       packages,
       configuration,
       agentSessionProviders: options.agentSessionProviders?.(packages, configuration),
+      registerAgentAdapterSession: registry
+        ? (admission) => agentAdapters.registerSession(admission, registry)
+        : undefined,
       ...(options.cloudConversationHosts === undefined
         ? {}
         : { cloudConversationHosts: options.cloudConversationHosts }),
@@ -731,6 +749,7 @@ export function createDormantPluginRuntimeComposition(
     configuration,
     broker,
     supervisor,
+    agentAdapters,
     externalAccess,
     ...(sharedExtension ? { sharedExtension } : {}),
     settingsInvocation: moduleRuntime.invokeSettings,

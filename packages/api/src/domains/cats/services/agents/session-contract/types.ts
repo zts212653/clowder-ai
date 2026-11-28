@@ -23,6 +23,8 @@ export interface AgentSessionCapabilities {
 }
 
 export interface AgentSessionProvider {
+  readonly revalidateInstructions?: boolean;
+  readonly usesSessionInstructions?: boolean;
   openSession(input: OpenSessionInput, signal: AbortSignal): Promise<OpenSessionResult>;
   startTurn(sessionId: HostSessionId, input: TurnInput, signal: AbortSignal): Promise<StartTurnResult>;
   input(sessionId: HostSessionId, expected: TurnRef, message: SupplementInput): Promise<InputResult>;
@@ -47,10 +49,18 @@ export interface OpenSessionInput {
   model?: string;
   config?: Record<string, unknown>;
   cwd: string;
+  /** Selected by Host invocation admission. Never serialize to a plugin. */
+  executionAccount?: Service.AgentServiceOptions['executionAccount'];
+  /** Host-only launch policy and account options. */
+  hostOptions?: Service.AgentServiceOptions;
 }
 
 export type OpenSessionResult =
-  | { ok: true; binding: NativeBinding }
+  | {
+      ok: true;
+      binding: NativeBinding;
+      resumeFallback?: { previousSessionId: string; reason: 'stale' | 'unverifiable' | 'unavailable' };
+    }
   | { ok: false; code: 'resume_unavailable' | 'failed'; reason: string };
 
 export type NativeBinding = { state: 'bound'; nativeSessionId: string } | { state: 'pending_first_input' };

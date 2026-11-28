@@ -1,0 +1,413 @@
+/**
+ * Claude CLI NDJSON event parser — 从 ClaudeAgentService 拆出的纯函数
+ *
+ * F23: 拆分以满足 350 行硬上限
+ */
+
+import type { CatId } from '@cat-cafe/shared';
+import type { AgentAccessClaudeMessage, AgentAccessClaudeUsage } from '@clowder-ai/agent-contract/claude';
+import { extractClaudeMcpStatusSnapshot } from './claude-mcp-status.js';
+import { claudeRateLimitMessage } from './claude-quota-event.js';
+import { type ClaudeTextBoundaryState, withClaudeMessageBoundary } from './claude-text-boundaries.js';
+
+/**
+ * Transform a raw Claude CLI NDJSON event into AgentAccessClaudeMessage(s).
+ * Returns null to skip events we don't care about (system/hook, result/success).
+ */
+export function transformClaudeEvent(
+  event: unknown,
+  catId: CatId,
+  streamState: {
+    currentMessageId: string | undefined;
+    partialTextMessageIds: Set<string>;
+    /** F24-fix: Track last message_start's input tokens for context health */
+    lastTurnInputTokens: number | undefined;
+    /** F045: Accumulate thinking_delta chunks until content_block_stop */
+    thinkingBuffer: string;
+    textBoundaryState?: ClaudeTextBoundaryState;
+  },
+): AgentAccessClaudeMessage | AgentAccessClaudeMessage[] | null {
+  if (typeof event !== 'object' || event === null) return null;
+  const e = event as Record<string, unknown>;
+
+  // stream_event/* (enabled by --include-partial-messages) → incremental text
+  if (e.type === 'stream_event') {
+    const streamEvent = e.event;
+    if (typeof streamEvent !== 'object' || streamEvent === null) return null;
+    const s = streamEvent as Record<string, unknown>;
+
+    if (s.type === 'message_start') {
+      const message = s.message as Record<string, unknown> | undefined;
+      const messageId = message?.id;
+      if (typeof messageId === 'string') {
+        streamState.currentMessageId = messageId;
+      }
+      // F24-fix: Reset per-turn tracker on every message_start to prevent
+      // stale carryover when the final turn's message_start lacks usage.
+      streamState.lastTurnInputTokens = undefined;
+      // Extract per-call input tokens from message_start.usage
+      // Anthropic API: input_tokens = new only, cache_read/create are subsets
+      // Total context fill = input_tokens + cache_read + cache_creation
+      const msgUsage = message?.usage as Record<string, unknown> | undefined;
+      if (msgUsage) {
+        const raw = typeof msgUsage.input_tokens === 'number' ? msgUsage.input_tokens : 0;
+        const cacheRead = typeof msgUsage.cache_read_input_tokens === 'number' ? msgUsage.cache_read_input_tokens : 0;
+        const cacheCreate =
+          typeof msgUsage.cache_creation_input_tokens === 'number' ? msgUsage.cache_creation_input_tokens : 0;
+        const total = raw + cacheRead + cacheCreate;
+        if (total > 0) {
+          streamState.lastTurnInputTokens = total;
+        }
+      }
+      return null;
+    }
+
+    // Fallback: some gateways report input_tokens:0 in message_start but
+    // include the real value in message_delta.usage. If lastTurnInputTokens
+    // is still unset, pick it up from the delta event.
+    if (s.type === 'message_delta') {
+      if (streamState.lastTurnInputTokens == null) {
+        const deltaUsage = (s.usage ?? (s.delta as Record<string, unknown> | undefined)?.usage) as
+          | Record<string, unknown>
+          | undefined;
+        if (deltaUsage) {
+          const raw = typeof deltaUsage.input_tokens === 'number' ? deltaUsage.input_tokens : 0;
+          const cacheRead =
+            typeof deltaUsage.cache_read_input_tokens === 'number' ? deltaUsage.cache_read_input_tokens : 0;
+          const cacheCreate =
+            typeof deltaUsage.cache_creation_input_tokens === 'number' ? deltaUsage.cache_creation_input_tokens : 0;
+          const total = raw + cacheRead + cacheCreate;
+          if (total > 0) {
+            streamState.lastTurnInputTokens = total;
+          }
+        }
+      }
+      return null;
+    }
+
+    if (s.type === 'message_stop') {
+      streamState.currentMessageId = undefined;
+      // F153 Phase I: emit telemetry-only agent_loop marker (provider-agnostic anchor at LLM call boundary,
+      // per KD-31/KD-33). invoke-single-cat consumes this to increment recordAgentLoop; never reaches outputs.
+      return { type: 'agent_loop' as const, catId, timestamp: Date.now() };
+    }
+
+    // F045: Reset thinking buffer when a thinking block starts
+    if (s.type === 'content_block_start') {
+      const contentBlock = s.content_block as Record<string, unknown> | undefined;
+      if (contentBlock?.type === 'thinking') {
+        streamState.thinkingBuffer = '';
+      }
+      return null;
+    }
+
+    if (s.type === 'content_block_delta') {
+      const delta = s.delta;
+      if (typeof delta !== 'object' || delta === null) return null;
+      const d = delta as Record<string, unknown>;
+
+      // F045: Accumulate thinking_delta
+      if (d.type === 'thinking_delta') {
+        if (typeof d.thinking === 'string') {
+          streamState.thinkingBuffer += d.thinking;
+        }
+        return null;
+      }
+
+      // F045: Ignore signature_delta
+      if (d.type === 'signature_delta') {
+        return null;
+      }
+
+      if (d.type !== 'text_delta' || typeof d.text !== 'string' || d.text.length === 0) {
+        return null;
+      }
+      if (streamState.currentMessageId) {
+        streamState.partialTextMessageIds.add(streamState.currentMessageId);
+      }
+      streamState.textBoundaryState ??= {};
+      return {
+        type: 'text',
+        catId,
+        content: withClaudeMessageBoundary(d.text, streamState.currentMessageId, streamState.textBoundaryState),
+        timestamp: Date.now(),
+      };
+    }
+
+    // F045: Emit accumulated thinking as system_info when block ends
+    if (s.type === 'content_block_stop') {
+      if (streamState.thinkingBuffer.length > 0) {
+        const text = streamState.thinkingBuffer;
+        streamState.thinkingBuffer = '';
+        return {
+          type: 'system_info',
+          catId,
+          content: JSON.stringify({ type: 'thinking', catId, text }),
+          timestamp: Date.now(),
+        };
+      }
+      return null;
+    }
+
+    return null;
+  }
+
+  // system/init → session_init
+  if (e.type === 'system' && e.subtype === 'init') {
+    const sessionId = e.session_id;
+    if (typeof sessionId === 'string') {
+      const sessionInit = {
+        type: 'session_init',
+        catId,
+        sessionId,
+        timestamp: Date.now(),
+      } satisfies AgentAccessClaudeMessage;
+      const mcpStatus = extractClaudeMcpStatusSnapshot(e.mcp_servers);
+      if (!mcpStatus) return sessionInit;
+      return [
+        sessionInit,
+        {
+          type: 'system_info',
+          catId,
+          content: JSON.stringify({
+            type: 'mcp_server_status',
+            provider: 'claude',
+            catId,
+            sessionId,
+            pendingMeaning: 'deferred_tool_loading',
+            ...mcpStatus,
+          }),
+          timestamp: Date.now(),
+        },
+      ];
+    }
+    return null;
+  }
+
+  // F296 B3b-3: system/compact_boundary → typed provider signal. The JSON
+  // content stays for UI diagnostics, but epoch consumers use the structural
+  // field below and never parse a marker substring.
+  if (e.type === 'system' && e.subtype === 'compact_boundary') {
+    const preTokens = typeof e.pre_tokens === 'number' ? e.pre_tokens : undefined;
+    return {
+      type: 'provider_signal',
+      catId,
+      content: JSON.stringify({ type: 'compact_boundary', catId, preTokens }),
+      contextCompaction: {
+        eventSource: 'claude_compact_boundary',
+        ...(preTokens !== undefined ? { preTokens } : {}),
+      },
+      timestamp: Date.now(),
+    };
+  }
+
+  // assistant → text / tool_use (multiple content blocks possible)
+  if (e.type === 'assistant') {
+    const message = e.message as Record<string, unknown> | undefined;
+    const messageId = typeof message?.id === 'string' ? message.id : undefined;
+    const skipFinalText = Boolean(messageId && streamState.partialTextMessageIds.has(messageId));
+    const content = message?.content;
+    if (!Array.isArray(content)) return null;
+    const hasTextBlock = content.some((block) => {
+      if (typeof block !== 'object' || block === null) return false;
+      const candidate = block as Record<string, unknown>;
+      return candidate.type === 'text' && typeof candidate.text === 'string' && candidate.text.length > 0;
+    });
+
+    // F230: Claude CLI can synthesize local assistant entries without an LLM
+    // response. Keep that provider provenance structured here, before ordinary
+    // assistant text is emitted:
+    //   - API/Error payloads become error events;
+    //   - "No response requested." and future synthetic variants produce no cat
+    //     output.
+    // Consumers must not infer this boundary from punctuation inside raw text.
+    if (message?.model === '<synthetic>') {
+      const syntheticText = content.find(
+        (block) =>
+          typeof block === 'object' &&
+          block !== null &&
+          (block as Record<string, unknown>).type === 'text' &&
+          typeof (block as Record<string, unknown>).text === 'string',
+      ) as { text?: string } | undefined;
+      const text = syntheticText?.text ?? '';
+      if (text.startsWith('API Error:') || text.startsWith('Error:')) {
+        return {
+          type: 'error',
+          catId,
+          error: text,
+          errorDisposition: 'transient',
+          timestamp: Date.now(),
+        };
+      }
+      return null;
+    }
+
+    const messages: AgentAccessClaudeMessage[] = [];
+    for (const [blockIndex, block] of content.entries()) {
+      if (typeof block !== 'object' || block === null) continue;
+      const b = block as Record<string, unknown>;
+
+      // Claude tags summaries of user-facing prose as thinking blocks. Only
+      // indexes in this frame's provider annotation are public narration;
+      // unlisted thinking and opaque signatures keep their existing treatment.
+      const text =
+        b.type === 'text'
+          ? b.text
+          : b.type === 'thinking' &&
+              Array.isArray(e.narration_block_indexes) &&
+              e.narration_block_indexes.includes(blockIndex)
+            ? b.thinking
+            : undefined;
+      if (typeof text === 'string' && text.length > 0) {
+        // Ordinary text deltas do not cover a separate narration block.
+        if (b.type === 'text' && skipFinalText) continue;
+        streamState.textBoundaryState ??= {};
+        messages.push({
+          type: 'text',
+          catId,
+          content: withClaudeMessageBoundary(text, messageId, streamState.textBoundaryState),
+          ...(b.type === 'thinking' ? { textSource: 'provider_summary' as const } : {}),
+          timestamp: Date.now(),
+        });
+      } else if (b.type === 'tool_use' && typeof b.name === 'string') {
+        const msg: AgentAccessClaudeMessage = {
+          type: 'tool_use',
+          catId,
+          toolName: b.name,
+          toolInput:
+            b.input && typeof b.input === 'object' && !Array.isArray(b.input)
+              ? (b.input as Record<string, unknown>)
+              : {},
+          timestamp: Date.now(),
+        };
+        if (typeof b.id === 'string') msg.toolUseId = b.id;
+        messages.push(msg);
+      }
+    }
+    // #1272: Claude can split one message ID across thinking/text/tool assistant
+    // envelopes. A thinking-only or tool-only envelope is not proof that the
+    // text-bearing final snapshot has arrived; clearing here makes that later
+    // snapshot look new and re-emits text already delivered by text_delta.
+    if (messageId && skipFinalText && hasTextBlock) {
+      streamState.partialTextMessageIds.delete(messageId);
+    }
+    // #778: thinking-only final message — emit thinking as system_info so the
+    // frontend can attach it to a message bubble. Streaming thinking_delta
+    // normally captures content; this is a safety net for edge cases
+    // (network loss, non-streaming mode, lost deltas).
+    if (messages.length === 0) {
+      const thinkingBlock = content.find(
+        (b) => typeof b === 'object' && b !== null && (b as Record<string, unknown>).type === 'thinking',
+      ) as { thinking?: string; text?: string } | undefined;
+      if (thinkingBlock) {
+        // Claude thinking blocks use `thinking` field; fall back to `text` for safety
+        const thinkingText = thinkingBlock.thinking ?? thinkingBlock.text ?? '';
+        return {
+          type: 'system_info' as AgentAccessClaudeMessage['type'],
+          catId,
+          content: JSON.stringify({ type: 'thinking', catId, text: thinkingText }),
+          timestamp: Date.now(),
+        };
+      }
+    }
+    return messages.length > 0 ? messages : null;
+  }
+
+  // Official CLI and SDK share this complete, model-scoped quota observation.
+  if (e.type === 'rate_limit_event') {
+    return {
+      type: 'system_info',
+      catId,
+      content: claudeRateLimitMessage(e, catId),
+      timestamp: Date.now(),
+    };
+  }
+
+  // #1272: result is the invocation terminal boundary. Clear any IDs that had
+  // partial text but no later text-bearing assistant envelope so state cannot
+  // leak into a subsequent invocation/session.
+  if (e.type === 'result') {
+    streamState.partialTextMessageIds.clear();
+  }
+
+  // result/error → error message (F045: include errorSubtype)
+  // Issue #24: Use subtype as fallback when errors array is empty
+  if (isResultErrorEvent(e)) {
+    const rawErrors = Array.isArray(e.errors) ? e.errors : [];
+    const errors = rawErrors.filter((item): item is string => typeof item === 'string').join('; ');
+    const resultText = typeof e.result === 'string' ? e.result : '';
+    const subtype = typeof e.subtype === 'string' ? e.subtype : undefined;
+    const subtypeLabels: Record<string, string> = {
+      error_max_turns: 'Max turns exceeded',
+      error_max_budget_usd: 'Budget limit reached',
+      error_during_execution: 'Execution error',
+      error_max_structured_output_retries: 'Structured output retries exceeded',
+      success: 'Claude result error',
+    };
+    const fallbackError = subtype ? (subtypeLabels[subtype] ?? `Agent error (${subtype})`) : 'Unknown error';
+    return {
+      type: 'error',
+      catId,
+      error: errors || resultText || fallbackError,
+      content: JSON.stringify({ errorSubtype: subtype, isError: e.is_error === true }),
+      timestamp: Date.now(),
+    };
+  }
+
+  // result/success, system/hook, etc. → skip
+  return null;
+}
+
+export function isResultErrorEvent(event: unknown): boolean {
+  if (typeof event !== 'object' || event === null) return false;
+  const e = event as Record<string, unknown>;
+  return e.type === 'result' && (e.is_error === true || e.subtype !== 'success');
+}
+
+/** F8: Extract token usage from Claude result/success event.
+ *  Normalises inputTokens to total input (new + cache_read + cache_creation)
+ *  so that the semantics match Codex/OpenAI where inputTokens = total. */
+export function extractClaudeUsage(e: Record<string, unknown>): AgentAccessClaudeUsage {
+  const usage = (e.usage ?? {}) as Record<string, unknown>;
+  const result: AgentAccessClaudeUsage = {};
+  const rawInput = typeof usage.input_tokens === 'number' ? usage.input_tokens : 0;
+  const cacheRead = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0;
+  const cacheCreate = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0;
+  const totalInput = rawInput + cacheRead + cacheCreate;
+  if (totalInput > 0) result.inputTokens = totalInput;
+  if (typeof usage.output_tokens === 'number') result.outputTokens = usage.output_tokens;
+  if (cacheRead > 0) result.cacheReadTokens = cacheRead;
+  if (cacheCreate > 0) result.cacheCreationTokens = cacheCreate;
+  const creation = usage.cache_creation as Record<string, unknown> | undefined;
+  for (const [raw, normalized] of [
+    ['ephemeral_5m_input_tokens', 'cacheCreation5mTokens'],
+    ['ephemeral_1h_input_tokens', 'cacheCreation1hTokens'],
+  ] as const) {
+    const value = creation?.[raw];
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) result[normalized] = value;
+  }
+  if (typeof e.total_cost_usd === 'number') result.costUsd = e.total_cost_usd;
+  if (typeof e.duration_ms === 'number') result.durationMs = e.duration_ms;
+  if (typeof e.duration_api_ms === 'number') result.durationApiMs = e.duration_api_ms;
+  if (typeof e.num_turns === 'number') result.numTurns = e.num_turns;
+
+  // F24: Extract context window capacity from modelUsage.
+  // Claude stream-json has emitted both `modelUsage` and `model_usage` in different versions.
+  const modelUsage = (e.modelUsage ?? e.model_usage) as Record<string, Record<string, unknown>> | undefined;
+  if (modelUsage) {
+    for (const data of Object.values(modelUsage)) {
+      const contextWindow =
+        typeof data.contextWindow === 'number'
+          ? data.contextWindow
+          : typeof data.context_window === 'number'
+            ? data.context_window
+            : undefined;
+      if (contextWindow != null) {
+        result.contextWindowSize = contextWindow;
+        break;
+      }
+    }
+  }
+
+  return result;
+}

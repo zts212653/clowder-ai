@@ -172,7 +172,10 @@ for (const transport of [
 }
 
 test('read-only defaults to advertised private transport without injecting approval', async (t) => {
-  const { service, calls, probeCount } = fixture(t);
+  // Help advertises --pure so this pins the supported-CLI branch: where the flag
+  // exists it is still part of the read-only argv. v2.0.28 does not advertise it,
+  // and there the flag is correctly omitted instead of forcing a help screen.
+  const { service, calls, probeCount } = fixture(t, { help: '--auto\n--standalone\n--pure' });
   await collect(service.invoke('fixture', { toolExecutionPolicy: { mode: 'read_only' } }));
   assert.ok(calls[0].args.includes('--standalone'));
   assert.ok(calls[0].args.includes('--pure'));
@@ -181,7 +184,7 @@ test('read-only defaults to advertised private transport without injecting appro
 });
 
 test('read-only preserves private transport but cannot inherit user approval or agent overrides', async (t) => {
-  const { service, calls } = fixture(t);
+  const { service, calls } = fixture(t, { help: '--auto\n--standalone\n--pure' });
   await collect(
     service.invoke('fixture', {
       toolExecutionPolicy: { mode: 'read_only' },
@@ -190,7 +193,10 @@ test('read-only preserves private transport but cannot inherit user approval or 
   );
   const { args, env } = calls[0];
   assert.ok(args.includes('--standalone'));
-  assert.ok(args.includes('--pure'));
+  // User config supplied the transport, so no `run --help` probe ran and `--pure`
+  // support is unknown — unknown must not become an injected flag. The read-only
+  // guarantee asserted below does not depend on it.
+  assert.equal(args.includes('--pure'), false);
   assert.equal(args[args.indexOf('--agent') + 1], 'cat-cafe-read-only');
   assert.equal(args.includes('--auto'), false);
   assert.equal(args.includes('unsafe-user-agent'), false);
@@ -225,7 +231,7 @@ for (const transport of [
   ['--standalone', 'false'],
 ]) {
   test(`no-tool finalizer ${transport.length ? `refuses shared transport ${transport[0]}` : 'preserves default private transport'}`, async (t) => {
-    const { service, calls, probeCount } = fixture(t, { tools: true });
+    const { service, calls, probeCount } = fixture(t, { tools: true, help: '--auto\n--standalone\n--pure' });
     const messages = await collect(service.invoke('fixture', { cliConfigArgs: transport }));
     if (transport.length) {
       assert.equal(calls.length, 1, 'strict continuation must not assume that another server receives permission env');

@@ -36,6 +36,9 @@ export class RegisteredSessionAgentService implements AgentService {
   get implementationKey(): string {
     return sessionImplementationKey(this.input.ref);
   }
+  get usesSessionInstructions(): boolean {
+    return this.input.registry.resolve(this.input.ref, { catId: this.input.catId })?.usesSessionInstructions === true;
+  }
   /** Prepare the concrete carrier before synchronous Host admission/prompt assembly. */
   async prepare(): Promise<void> {
     await this.input.registry.resolve(this.input.ref, { catId: this.input.catId })?.prepareHostService?.();
@@ -135,6 +138,7 @@ export class RegisteredSessionAgentService implements AgentService {
     const { service } = binding;
     const view: AgentService = {
       cancellationMode: this.cancellationMode,
+      usesSessionInstructions: binding.provider?.usesSessionInstructions === true,
       windowsProviderHosts: service?.windowsProviderHosts,
       forInvocation: () => view,
       implementationSnapshot: () => this.snapshot(binding),

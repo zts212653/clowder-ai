@@ -1,165 +1,49 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
-import { catRegistry, getCliEffortOptionsForProvider, inferGoogleModelEffort, isDshLauncher } from '@cat-cafe/shared';
-import { parse } from 'smol-toml';
-import { AGY_NATIVE_KNOWN_MODELS } from '../config/agy-gemini-models.js';
+import { fileURLToPath } from 'node:url';
+import { catRegistry } from '@cat-cafe/shared';
+import {
+  safeNativeStartup,
+  discoverNativeRuntimes as scanNativeRuntimes,
+} from '@clowder-ai/agent-access/discovery/native-runtimes';
+import type { AgentAccessDetectionContext } from '@clowder-ai/agent-contract';
 import { getRegisteredAcpConfig } from '../config/cat-config-loader.js';
 import { resolveCliCommand } from '../utils/cli-resolve.js';
-import { resolveDshSetupLaunch } from './dsh-setup-launch.js';
-import { discoverAdditionalRuntimes } from './native-additional-runtimes.js';
-import { discoverDshRuntimes } from './native-dsh-discovery.js';
-import { dshLauncherProfileState } from './native-dsh-profile.js';
 import { nativeRuntimeReadiness } from './native-runtime-readiness.js';
 
-function text(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
-function metadata(path: string, toml = false): Record<string, unknown> {
-  try {
-    const source = readFileSync(path, 'utf8');
-    const parsed: unknown = toml ? parse(source) : JSON.parse(source);
-    return parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
-}
-/** Display evidence only: reuse setup's existing package/argument/profile checks without launching. */
-function supportsDshSetup(command: string, args: string[], cwd: string): boolean {
-  try {
-    resolveDshSetupLaunch(command, args, cwd);
-    return true;
-  } catch {
-    return false;
-  }
-}
-/** Startup descriptors containing credentials or service URLs stay in the existing editor. */
-export function safeNativeStartup(command: string, startupArgs: readonly string[]): boolean {
-  return ![command, ...startupArgs].some((arg) =>
-    /(?:api[_-]?key|token|password|secret|authorization|https?:\/\/)/i.test(arg),
-  );
-}
-/** Discovery is read-only. No auth files, full agent launches, prompts or login probes. */
-export async function discoverNativeRuntimes(projectRoot: string, commandFor = resolveCliCommand) {
-  const home = homedir();
-  const codex = metadata(join(process.env.CODEX_HOME || join(home, '.codex'), 'config.toml'), true);
-  const claude = metadata(join(process.env.CLAUDE_CONFIG_DIR || join(home, '.claude'), 'settings.json'));
-  const claudeEnv =
-    claude.env !== null && typeof claude.env === 'object' ? (claude.env as Record<string, unknown>) : {};
-  const builtins = (
-    [
-      ['codex', 'Codex', 'openai'],
-      ['claude', 'Claude Code', 'anthropic'],
-    ] as const
-  ).map(([id, label, clientId]) => {
-    const command = commandFor(id);
-    const configuredModel = text(id === 'codex' ? codex.model : (claudeEnv.ANTHROPIC_MODEL ?? claude.model));
-    const configuredEffort = text(
-      id === 'codex' ? codex.model_reasoning_effort : (claudeEnv.CLAUDE_CODE_EFFORT_LEVEL ?? claude.effortLevel),
-    );
-    const models = new Set<string>();
-    if (configuredModel) models.add(configuredModel);
-    for (const entry of Object.values(catRegistry.getAllConfigs())) {
-      if (entry.clientId === clientId && entry.defaultModel) models.add(entry.defaultModel);
-    }
-    return {
-      id,
-      label,
-      clientId,
-      installed: Boolean(command),
-      command: command ?? undefined,
-      configuredModel,
-      configuredEffort,
-      models: [...models],
-      defaultsStatus: 'configured_only',
-      transport: id === 'codex' ? 'app_server' : 'stream_json',
-    };
-  });
-  const acp = Object.values(catRegistry.getAllConfigs()).flatMap((cat) => {
-    const config = getRegisteredAcpConfig(cat.id, projectRoot);
-    if (!config || (cat.agentProvider !== undefined ? cat.agentProvider : config.agentProvider)) return [];
-    const command = isAbsolute(config.command) ? config.command : commandFor(config.command);
-    const agy = cat.clientId === 'google' && cat.agyProfile?.carrier === 'acp';
-    const entry = config.startupArgs.find((arg) => /(?:\.m?js|\.cjs)$/.test(arg));
-    const installed = Boolean(command && existsSync(command) && (!entry || existsSync(resolve(projectRoot, entry))));
-    const profileState = dshLauncherProfileState(config.command, config.startupArgs, projectRoot, cat.env?.DSH_HOME);
-    const dshSetupSupported =
-      installed &&
-      config.transport !== 'httpstream' &&
-      supportsDshSetup(config.command, config.startupArgs, projectRoot);
-    const dsh =
-      isDshLauncher(config.command, config.startupArgs) ||
-      dshSetupSupported ||
-      (profileState !== undefined && profileState !== 'custom_startup');
-    const selectable = safeNativeStartup(config.command, config.startupArgs) && profileState !== 'acp_profile_invalid';
-    return [
-      {
-        id: `acp:${cat.id}`,
-        label: agy ? 'AGY 官方 ACP' : dsh ? 'DSH' : cat.displayName,
-        ...(dsh ? { onboardingEligible: false } : {}),
-        ...(cat.env?.DSH_HOME ? { env: { DSH_HOME: cat.env.DSH_HOME } } : {}),
-        clientId: agy ? 'google' : 'acp',
-        ...(agy ? { agyCarrier: 'acp' as const } : {}),
-        installed,
-        ...(dshSetupSupported ? { dshSetupSupported: true } : {}),
-        ...(profileState && profileState !== 'custom_startup'
-          ? { discoveryStatus: installed ? profileState : 'not_installed' }
-          : {}),
-        ...(selectable
-          ? {
-              command: config.command,
-              startupArgs: config.startupArgs,
-              acp: { command: config.command, startupArgs: config.startupArgs, transport: config.transport },
-            }
-          : {}),
-        models: [],
-        defaultsStatus: 'session_only',
-        transport: 'acp',
-      },
-    ];
-  });
-  const dsh = await discoverDshRuntimes();
-  const configuredAgyModels = Object.values(catRegistry.getAllConfigs())
-    .filter((cat) => cat.clientId === 'google' && cat.agyProfile?.enabled)
-    .flatMap((cat) => (cat.agyProfile?.model ? [cat.agyProfile.model] : []));
-  const agyKnownLabels = new Map(AGY_NATIVE_KNOWN_MODELS.map((entry) => [entry.id, entry.label]));
-  const agyModelIds = [...new Set([...configuredAgyModels, ...AGY_NATIVE_KNOWN_MODELS.map((entry) => entry.id)])];
-  const agyModelCatalog = agyModelIds.map((value) => {
-    const efforts = getCliEffortOptionsForProvider('google', value);
-    const defaultEffort = inferGoogleModelEffort(value) ?? undefined;
-    return {
-      value,
-      label: agyKnownLabels.get(value) ?? value,
-      ...(defaultEffort ? { defaultEffort } : {}),
-      ...(efforts ? { efforts: efforts.map((effort) => ({ value: effort, label: effort })) } : {}),
-    };
-  });
-  const agy = (
-    [
-      ['agy-native', 'AGY Native', 'agy', 'native'],
-      ...(!acp.some((runtime) => 'agyCarrier' in runtime)
-        ? [['agy-acp', 'AGY 官方 ACP', 'agy_acp_server.par', 'acp'] as const]
-        : []),
-    ] as const
-  ).map(([id, label, executable, agyCarrier]) => {
-    const command = commandFor(executable);
-    return {
-      id,
-      label,
-      clientId: 'google',
-      agyCarrier,
-      command: command ?? undefined,
-      installed: Boolean(command),
-      modelCatalog: agyModelCatalog,
-      models: agyModelIds,
-      defaultsStatus: 'configured_only',
-      ...(agyCarrier === 'acp' ? { acp: { command: executable, startupArgs: [], transport: 'stdio' as const } } : {}),
-    };
-  });
+export { safeNativeStartup };
+
+export function nativeRuntimeDetectionContext(projectRoot: string, redactStartup = false): AgentAccessDetectionContext {
   return {
-    runtimes: [...builtins, ...acp, ...dsh, ...agy, ...discoverAdditionalRuntimes(home, commandFor)],
-    authenticationStatus: 'not_checked',
+    projectRoot,
+    piBridgeEntry: fileURLToPath(
+      new URL('../domains/cats/services/agents/providers/pi/pi-acp-bridge.js', import.meta.url),
+    ),
+    members: Object.values(catRegistry.getAllConfigs()).map((cat) => {
+      const acp = getRegisteredAcpConfig(cat.id, projectRoot, { persistMigrations: false });
+      return {
+        id: cat.id,
+        clientId: cat.clientId,
+        displayName: cat.displayName,
+        defaultModel: cat.defaultModel,
+        agentProvider: cat.agentProvider,
+        agyProfile: cat.agyProfile && {
+          carrier: cat.agyProfile.carrier,
+          enabled: cat.agyProfile.enabled,
+          model: cat.agyProfile.model,
+        },
+        env: cat.env?.DSH_HOME ? { DSH_HOME: cat.env.DSH_HOME } : undefined,
+        acp: acp && {
+          command: redactStartup && !safeNativeStartup(acp.command, []) ? '' : acp.command,
+          startupArgs: !redactStartup || safeNativeStartup(acp.command, acp.startupArgs) ? acp.startupArgs : ['token'],
+          agentProvider: acp.agentProvider,
+          transport: acp.transport,
+        },
+      };
+    }),
   };
+}
+
+export function discoverNativeRuntimes(projectRoot: string, commandFor = resolveCliCommand) {
+  return scanNativeRuntimes(nativeRuntimeDetectionContext(projectRoot), commandFor);
 }
 
 /** Bounded native login checks, without prompts, model requests, or refreshing credentials. */

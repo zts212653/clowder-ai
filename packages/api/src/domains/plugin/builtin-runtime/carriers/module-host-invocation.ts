@@ -19,6 +19,8 @@
  * call itself, never an error code: the action can throw anything, a Host error included.
  */
 
+import { Readable } from 'node:stream';
+import type { AgentAdapterNativeRuntime } from '@clowder-ai/agent-contract';
 import {
   attemptPluginAction,
   type HostPluginInvocationPort,
@@ -37,6 +39,7 @@ import {
   withCurrentOwnerOperation,
 } from '../../carrier/plugin-owner-operation-context.js';
 import { snapshotPluginProtocolData } from '../../carrier/plugin-protocol-data.js';
+import { RetainedRemoteValue } from '../../execution-worker/protocol.js';
 import { ExternalPluginRuntimeError } from '../../external-runtime/types.js';
 
 export interface ModuleHostInvocationDeps {
@@ -47,8 +50,18 @@ export interface ModuleHostInvocationDeps {
   };
 }
 
+export interface ModuleActionControl {
+  readonly signal: AbortSignal;
+  readonly nativeRuntime?: AgentAdapterNativeRuntime;
+}
+
 export interface ModuleHostInvocation extends Pick<HostPluginInvocationPort, 'invoke'> {
-  attempt(targetId: string, method: string, params: unknown): Promise<PluginInvocationOutcome>;
+  attempt(
+    targetId: string,
+    method: string,
+    params: unknown,
+    control?: ModuleActionControl,
+  ): Promise<PluginInvocationOutcome>;
 }
 
 /**
@@ -103,7 +116,12 @@ export function projectOwnerHttpContext(instanceId: string) {
 }
 
 export function createModuleHostInvocation(deps: ModuleHostInvocationDeps): ModuleHostInvocation {
-  const attempt = async (targetId: string, method: string, params: unknown): Promise<PluginInvocationOutcome> => {
+  const attempt = async (
+    targetId: string,
+    method: string,
+    params: unknown,
+    control?: ModuleActionControl,
+  ): Promise<PluginInvocationOutcome> => {
     const actions = deps.runtime.actions(targetId);
     if (!actions) {
       return invocationNotStarted(
@@ -118,7 +136,35 @@ export function createModuleHostInvocation(deps: ModuleHostInvocationDeps): Modu
     }
     // The boundary: from here the package's own code runs.
     const caller = currentPluginCallContext(targetId);
-    const publicContext = projectNativeContext(caller);
+    const nativeContext = projectNativeContext(caller);
+    const nativeRuntime = control?.nativeRuntime;
+    const run = nativeRuntime?.run?.bind(nativeRuntime);
+    const acp = nativeRuntime?.acp;
+    // A native stream is consumed over several Worker pulls. Keep its transferred readable
+    // until the consumer closes it or the activation ends, independently of any one pull.
+    const port = nativeRuntime
+      ? {
+          ...nativeRuntime,
+          ...(run
+            ? {
+                run: async (...args: Parameters<typeof run>) =>
+                  new RetainedRemoteValue(Readable.from(await run(...args))),
+              }
+            : {}),
+          ...(acp
+            ? {
+                acp: {
+                  ...acp,
+                  prompt: async (...args: Parameters<typeof acp.prompt>) =>
+                    new RetainedRemoteValue(Readable.from(await acp.prompt(...args))),
+                },
+              }
+            : {}),
+        }
+      : undefined;
+    const publicContext = control
+      ? Object.freeze({ ...nativeContext, signal: control.signal, ...(port ? { nativeRuntime: port } : {}) })
+      : nativeContext;
     const ownerHttpContext = projectOwnerHttpContext(targetId);
     return attemptPluginAction(() =>
       consumeOwnerOperationInvocation(

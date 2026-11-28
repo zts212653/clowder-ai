@@ -446,6 +446,47 @@ function capabilityData() {
   };
 }
 
+it('renders the declared model options and refresh control in a v2 settings input', async () => {
+  const { dom, w } = await boot();
+  try {
+    const source = 'public/pdl/themes/v2/components/v2/v2c.js';
+    runInContext(readFileSync(path.join(process.cwd(), source), 'utf8'), dom.getInternalVMContext(), {
+      filename: source,
+    });
+    const model = { v: '["magpie-devin","devin/swe-2"]', label: 'SWE-2 · magpie-devin' };
+    const props = { id: 'f-model', value: '', listFrom: [model], reload: { act: 'memberCatalogRefresh' } };
+    const field = w.document.createElement('div');
+    field.innerHTML = w.eval(`PDL_COMPONENTS.v2Input(${JSON.stringify(props)}, {}, {})`);
+    expect(field.querySelector('[data-act="comboOpen"][data-for="f-model"]')).not.toBeNull();
+    expect(field.querySelector('[data-act="memberCatalogRefresh"]')).not.toBeNull();
+    expect(w.eval('COMBO["f-model"]')).toMatchObject([model]);
+  } finally {
+    dom.window.close();
+  }
+});
+
+it('shows the v2 member save toolbar when any of its hide conditions is false', async () => {
+  const { dom, w } = await boot();
+  try {
+    const source = 'public/pdl/themes/v2/components/v2/v2c.js';
+    runInContext(readFileSync(path.join(process.cwd(), source), 'utf8'), dom.getInternalVMContext(), {
+      filename: source,
+    });
+    const toolbar = w.document.createElement('div');
+    const render = (isNew: boolean, changes: number) => {
+      toolbar.innerHTML = w.eval(
+        `PDL_COMPONENTS.v2Toolbar({ id: 'savebar', hidden: ['!$.isNew', { of: '$.changes', map: { '0': true, _: false } }] }, {}, { isNew: ${isNew}, changes: ${changes} })`,
+      );
+      return toolbar.querySelector('#savebar')?.hasAttribute('hidden');
+    };
+    expect(render(true, 0)).toBe(false);
+    expect(render(false, 1)).toBe(false);
+    expect(render(false, 0)).toBe(true);
+  } finally {
+    dom.window.close();
+  }
+});
+
 it('projects the inherited member model and its source from the requested catalog without changing native account binding', async () => {
   const { dom, w, action, data, port, errors } = await boot();
   const runtime = {

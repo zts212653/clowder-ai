@@ -23,10 +23,12 @@ import { initial as artworkReviewFixture } from '@/components/content-review/__t
 import { artifactRoundRequestSource } from '@/components/content-review/artifact-modification-source';
 import { CLIENT_OPTIONS, carrierOptionsForClient, initialState } from '@/components/hub-cat-editor.model';
 import { model as teamModel } from '@/components/routing-context/__tests__/team-panel-fixtures';
+import { runtimeDefaults } from '@/components/settings/members/member-runtime-draft';
 import { apiFetch } from '@/utils/api-client';
 import { digest as filmDigest, project as filmDocument } from '../../../../shared/src/__tests__/video-project.fixtures';
 import { screening as filmScreening } from '../../../../shared/src/__tests__/video-project-screening.fixtures';
 import { chatModels, composerTrigger } from '../chat-models';
+import { detectNativeMembers } from '../member-actions';
 import { request } from '../owner-api';
 import { scriptSources } from '../runtime';
 import { opinionComparison } from '../useFilmBindings';
@@ -6701,7 +6703,13 @@ it.each(['sys:1', 'pkg:v2'])('selects DeepSeek Harness and checks the saved bind
     selectable: true,
     creationRequestKey: 'new-dsh',
     runtime: { id: 'dsh', dshDesktop: true, installed: true, label: 'DSH Desktop' },
-    form: { ...initialState(), clientId: 'acp', carrier: 'acp', acpCommand: command },
+    form: {
+      ...initialState(),
+      clientId: 'acp',
+      carrier: 'acp',
+      acpCommand: command,
+      configurationSource: 'native_tool',
+    },
   };
   meta.runtimes = [
     {
@@ -6817,9 +6825,11 @@ it.each(['sys:1', 'pkg:v2'])('selects DeepSeek Harness and checks the saved bind
       button.textContent?.includes('探测可用 Client'),
     );
     expect(detect).toBeDefined();
+    const beforeDetect = calls.mock.calls.length;
     detect?.click();
     await w.__settled();
     expect(calls.mock.calls.some(([name]) => name === 'nativeDetect')).toBe(true);
+    expect(calls.mock.calls.slice(beforeDetect).some(([name]) => name === 'memberRuntimeModels')).toBe(false);
     const create = w.document.querySelector('[data-act="nativeCreate"]') as HTMLButtonElement;
     expect(create).not.toBeNull();
     expect(create.disabled).toBe(false);
@@ -7779,6 +7789,54 @@ it('waits for plugin update receipts and keeps offline installation inside the e
     await w.__settled();
     expect(action).toHaveBeenCalledWith('pluginArchive', {}, input);
     expect(errors).not.toHaveBeenCalled();
+  } finally {
+    dom.window.close();
+  }
+});
+
+it('requires explicit confirmation for archive replacement and resends the selected file and offered revision', async () => {
+  const replacement = {
+    confirmation: {
+      pluginId: 'official.agent-access',
+      pluginInstanceId: 'agent-access-instance',
+      currentPackageDigest: 'selected-digest',
+      candidatePackageDigest: 'replacement-digest',
+      expectedLifecycleRevision: 7,
+    },
+    displayName: 'Agent Access',
+    currentVersion: '1.0.0',
+    candidateVersion: '1.0.1',
+  };
+  const { dom, w, action } = await boot(undefined, undefined, undefined, {}, (port) => {
+    const original = port.action;
+    port.action = async (name, args, input) => {
+      if (name === 'pluginArchive' && !args.replacement) return { replacement };
+      return original(name, args, input);
+    };
+  });
+  try {
+    w.eval('A.installFile()');
+    await w.__settled();
+    const input = w.document.getElementById('cap-file');
+    Object.defineProperty(input, 'files', { value: [new w.File(['archive'], 'agent-access.tgz')] });
+    input.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await w.eval('dialogSubmit()');
+    await w.__settled();
+    expect(w.eval('S.dialog?.kind')).toBe('pluginArchiveReplace');
+    expect(w.document.body.textContent).toContain('1.0.0');
+    expect(w.document.body.textContent).toContain('1.0.1');
+    expect(action).not.toHaveBeenCalledWith(
+      'pluginArchive',
+      { replacement: JSON.stringify(replacement.confirmation) },
+      input,
+    );
+    await w.eval('dialogSubmit()');
+    await w.__settled();
+    expect(action).toHaveBeenCalledWith(
+      'pluginArchive',
+      { replacement: JSON.stringify(replacement.confirmation) },
+      input,
+    );
   } finally {
     dom.window.close();
   }
@@ -8922,6 +8980,596 @@ describe('console sidebar thread drops', () => {
       } finally {
         dom.window.close();
       }
+    }
+  });
+});
+
+describe('member detect entry', () => {
+  it('keeps the built-in members.detect entry visible in the simplified theme', async () => {
+    const { dom, w } = await boot(undefined, undefined, undefined, {}, (port) => {
+      const get = port.get;
+      port.get = async (path, params) => {
+        if (path === '/api/config/console-themes') return { themes: { active: 'pkg:v2', customs: [] } };
+        if (path === '/api/accounts') return { providers: [] };
+        if (path.startsWith('/api/accounts/') && path.endsWith('/members')) return { selection: { members: [] } };
+        return get(path, params);
+      };
+      const action = port.action;
+      port.action = (name, args, element) => {
+        if (name === 'membersRead') return advancedMemberMetadata();
+        if (name === 'nativeDetect') return [];
+        return action(name, args, element);
+      };
+    });
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      expect(w.eval('PACK_LOADED')).toBe('v2');
+      expect(w.document.querySelector('[data-entry="members.detect"]')).not.toBeNull();
+      expect(w.document.body.textContent).toContain('探测可用 Client');
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  async function detectBoot(
+    nativeDetect: (args: { journeyId: string; refresh: string }) => unknown,
+    theme = 'sys:1',
+    emptyRoster = false,
+  ) {
+    return boot(
+      undefined,
+      emptyRoster
+        ? (data) => {
+            data.cats = [];
+          }
+        : undefined,
+      undefined,
+      {},
+      (port) => {
+        const get = port.get;
+        port.get = async (path, params) => {
+          if (path === '/api/config/console-themes') return { themes: { active: theme, customs: [] } };
+          if (path === '/api/accounts') return { providers: [] };
+          if (path.startsWith('/api/accounts/') && path.endsWith('/members')) return { selection: { members: [] } };
+          return get(path, params);
+        };
+        const action = port.action;
+        port.action = (name, args, element) => {
+          if (name === 'membersRead') return advancedMemberMetadata();
+          if (name === 'nativeDetect') return nativeDetect(args as { journeyId: string; refresh: string });
+          return action(name, args, element);
+        };
+      },
+    );
+  }
+
+  it.each(['sys:1', 'pkg:v2'])('keeps legacy DSH when the Kimi adapter is disabled in %s', async (theme) => {
+    const kimi = 'plugin:official.agent-kimi/kimi';
+    const second = 'plugin:test.second/second';
+    const splitCandidate = (ref: string, label: string) => ({
+      id: ref,
+      label,
+      clientId: 'acp',
+      installed: true,
+      models: [],
+      acp: { agentProvider: ref, command: 'plugin-agent', startupArgs: [] },
+    });
+    const desktop = {
+      id: 'dsh-desktop',
+      label: 'DSH Desktop',
+      clientId: 'acp',
+      installed: true,
+      models: [],
+      dshDesktop: true,
+      acp: { command: 'C:/DSH/resources/runtime/cli/bin/dsh.cmd', startupArgs: ['--profile', 'acp'] },
+    };
+    let enabled = true;
+    const payloads: unknown[] = [];
+    const fetchMock = vi.mocked(apiFetch);
+    const previous = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (path, init) => {
+      if (path === '/api/agent-access/v1/detect') {
+        payloads.push(JSON.parse(String(init?.body)));
+        return Response.json({
+          readiness: { state: 'ready' },
+          candidates: [
+            desktop,
+            ...(enabled ? [splitCandidate(kimi, 'Kimi Code')] : []),
+            splitCandidate(second, 'Other split client'),
+          ],
+        });
+      }
+      if (path === '/api/cats') return Response.json({ cats: [] });
+      if (path === '/api/accounts') return Response.json({ providers: [] });
+      if (path === '/api/cat-templates') return Response.json({ templates: [] });
+      throw new Error(String(path));
+    });
+    const { dom, w } = await detectBoot(
+      ({ journeyId, refresh }) => detectNativeMembers(journeyId, refresh === 'true'),
+      theme,
+    );
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      expect(w.eval('PACK_LOADED')).toBe(theme === 'pkg:v2' ? 'v2' : null);
+      const entry = w.document.querySelector('[data-entry="members.detect"]') as HTMLElement;
+      expect(entry).not.toBeNull();
+      entry.click();
+      await w.__settled();
+      expect(payloads).toEqual([{ refresh: false }]);
+      expect(w.document.body.textContent).toContain('Kimi Code');
+      expect(w.document.body.textContent).toContain('Other split client');
+      expect(w.document.body.textContent).toContain('DSH Desktop');
+      expect(w.eval('S.nativeSetup.partners.map(p=>p.form.acpAgentProvider)')).toEqual([null, kimi, second]);
+      expect(w.document.querySelector('[data-act="nativeReadinessAction"]')).toBeNull();
+
+      enabled = false;
+      const refresh = w.document.querySelector('[data-act="nativeDetect"]') as HTMLElement;
+      expect(refresh).not.toBeNull();
+      refresh.click();
+      await w.__settled();
+      expect(payloads).toEqual([{ refresh: false }, { refresh: true }]);
+      expect(w.document.body.textContent).not.toContain('Kimi Code');
+      expect(w.document.body.textContent).toContain('Other split client');
+      expect(w.document.body.textContent).toContain('DSH Desktop');
+      expect(w.eval('S.nativeSetup.partners[0].form.acpCommand')).toBe(desktop.acp.command);
+    } finally {
+      if (previous) fetchMock.mockImplementation(previous);
+      else fetchMock.mockReset();
+      dom.window.close();
+    }
+  });
+
+  it('finishes from the member page without writing the first-run receipt', async () => {
+    const { dom, w, action } = await detectBoot(() => []);
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      w.eval('A.open({ref:"members.detect"})');
+      await w.__settled();
+      const done = w.document.querySelector('[data-act="nativeSetupDone"]');
+      expect(done).not.toBeNull();
+      done!.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+      await w.__settled();
+      expect(action.mock.calls.some(([name]) => name === 'guideEntryComplete')).toBe(false);
+      expect(action.mock.calls.some(([name]) => name === 'guideEntryDismiss')).toBe(false);
+      expect(w.eval('S.popOn.nativeSetup')).toBe(false);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('finishes from the member page on the default theme without writing the receipt', async () => {
+    const { dom, w, action } = await detectBoot(() => [], 'sys:1');
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      expect(w.eval('PACK_LOADED')).toBeNull();
+      w.eval('A.open({ref:"members.detect"})');
+      await w.__settled();
+      const done = w.document.querySelector('[data-act="nativeSetupDone"]');
+      expect(done).not.toBeNull();
+      done!.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+      await w.__settled();
+      expect(action.mock.calls.some(([name]) => name === 'guideEntryComplete')).toBe(false);
+      expect(action.mock.calls.some(([name]) => name === 'guideEntryDismiss')).toBe(false);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('writes the dismissed receipt only when the first-run popup closes', async () => {
+    const { dom, w, action } = await detectBoot(() => []);
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      w.eval(
+        'S.nativeSetupFrom="guide";S.popOn.nativeSetup=true;S.nativeSetup={journeyId:"guide-journey",partners:[],busy:false,submitError:"",failedPartner:null};render(true)',
+      );
+      await w.__settled();
+      w.eval('popClose("nativeSetup")');
+      await w.__settled();
+      expect(action.mock.calls.some(([name]) => name === 'guideEntryDismiss')).toBe(true);
+      expect(action.mock.calls.some(([name]) => name === 'guideEntryComplete')).toBe(false);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('renders the agent-access readiness state and its install action', async () => {
+    const { dom, w } = await detectBoot(() => ({
+      readiness: { state: 'missing', action: 'install' },
+      candidates: [],
+    }));
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      w.eval('A.open({ref:"members.detect"})');
+      await w.__settled();
+      expect(w.document.body.textContent).toContain('还没有安装接入插件');
+      const install = w.document.querySelector('[data-act="nativeReadinessAction"]');
+      expect(install).not.toBeNull();
+      install!.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+      await w.__settled();
+      expect(w.eval('S.route')).toBe('ext');
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('uses the host readiness action for a failed plugin state', async () => {
+    const { dom, w } = await detectBoot(() => ({
+      readiness: { state: 'failed', action: 'repair' },
+      candidates: [],
+    }));
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      w.eval('A.open({ref:"members.detect"})');
+      await w.__settled();
+      const action = w.document.querySelector('[data-act="nativeReadinessAction"]');
+      expect(action?.textContent).toContain('修复');
+      expect(w.document.body.textContent).not.toContain('重试');
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('does not render a readiness warning when the plugin is ready', async () => {
+    const { dom, w } = await detectBoot(() => ({ readiness: { state: 'ready' }, candidates: [] }));
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      w.eval('A.open({ref:"members.detect"})');
+      await w.__settled();
+      expect(w.document.body.textContent).not.toContain('还没有安装接入插件');
+      expect(w.document.querySelector('[data-act="nativeReadinessAction"]')).toBeNull();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('shows partial candidate failures without hiding the ready state', async () => {
+    const { dom, w } = await detectBoot(() => ({
+      readiness: { state: 'ready' },
+      candidates: [],
+      partialFailures: [{ id: 'broken' }],
+    }));
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      w.eval('A.open({ref:"members.detect"})');
+      await w.__settled();
+      expect(w.document.body.textContent).toContain('部分候选探测失败（1）');
+      expect(w.document.body.textContent).not.toContain('还没有安装接入插件');
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('keeps the detect entry on the default theme for an empty and an existing roster', async () => {
+    for (const empty of [true, false]) {
+      const { dom, w } = await detectBoot(() => [], 'sys:1', empty);
+      try {
+        w.eval('go("members")');
+        await w.__settled();
+        expect(w.eval('PACK_LOADED')).toBeNull();
+        expect(w.document.querySelector('[data-entry="members.detect"]')).not.toBeNull();
+        expect(w.document.body.textContent).toContain('探测可用 Client');
+      } finally {
+        dom.window.close();
+      }
+    }
+  });
+
+  it('keeps the detect entry on the simplified theme for an empty roster too', async () => {
+    const { dom, w } = await boot(
+      undefined,
+      (data) => {
+        data.cats = [];
+      },
+      undefined,
+      {},
+      (port) => {
+        const get = port.get;
+        port.get = async (path, params) => {
+          if (path === '/api/config/console-themes') return { themes: { active: 'pkg:v2', customs: [] } };
+          if (path === '/api/accounts') return { providers: [] };
+          if (path.startsWith('/api/accounts/') && path.endsWith('/members')) return { selection: { members: [] } };
+          return get(path, params);
+        };
+        const action = port.action;
+        port.action = (name, args, element) =>
+          name === 'membersRead'
+            ? advancedMemberMetadata()
+            : name === 'nativeDetect'
+              ? []
+              : action(name, args, element);
+      },
+    );
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      expect(w.eval('PACK_LOADED')).toBe('v2');
+      expect(w.document.querySelector('[data-entry="members.detect"]')).not.toBeNull();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('renders the readiness action in the simplified theme too', async () => {
+    const { dom, w } = await detectBoot(
+      () => ({ readiness: { state: 'missing', action: 'install' }, candidates: [], partialFailures: [] }),
+      'pkg:v2',
+    );
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      expect(w.eval('PACK_LOADED')).toBe('v2');
+      w.eval('A.open({ref:"members.detect"})');
+      await w.__settled();
+      expect(w.document.body.textContent).toContain('还没有安装接入插件');
+      expect(w.document.querySelector('[data-act="nativeReadinessAction"]')).not.toBeNull();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('shows sign-in-required and failed candidates instead of a single unavailable state', async () => {
+    const base = initialState();
+    const partner = (id: string, extra: Record<string, unknown>) => ({
+      id,
+      selected: false,
+      selectable: false,
+      form: { ...base, displayName: id },
+      runtime: {
+        id,
+        label: id,
+        clientId: 'openai',
+        installed: true,
+        models: [],
+        readiness: { status: 'login_required', loginCommand: 'codex login' },
+      },
+      ...extra,
+    });
+    const { dom, w } = await detectBoot(() => ({
+      readiness: { state: 'ready' },
+      candidates: [partner('codex', {}), partner('broken', { state: 'failed' })],
+    }));
+    try {
+      w.eval('go("members")');
+      await w.__settled();
+      w.eval('A.open({ref:"members.detect"})');
+      await w.__settled();
+      expect(w.document.body.textContent).toContain('需登录');
+      expect(w.document.body.textContent).toContain('探测失败');
+      w.eval('copyText = function (text) { window.copiedLoginCommand = text; }');
+      const login = w.document.querySelector(
+        '[data-act="nativeCopyLogin"][data-id="codex"]',
+      ) as HTMLButtonElement | null;
+      expect(login).not.toBeNull();
+      login?.click();
+      expect(w.eval('window.copiedLoginCommand')).toBe('codex login');
+    } finally {
+      dom.window.close();
+    }
+  });
+});
+
+describe('declared plugin ACP runtime picker', () => {
+  const pluginRuntime = (ref: string, installed = true) => ({
+    id: ref,
+    label: ref.includes('old') ? 'Old Agent' : 'Acme Agent',
+    clientId: 'acp',
+    installed,
+    models: [],
+    acp: { agentProvider: ref, command: 'plugin-agent', startupArgs: [] },
+  });
+  const withForm = (runtime: ReturnType<typeof pluginRuntime>) => ({
+    ...runtime,
+    form: runtimeDefaults(runtime as never),
+  });
+
+  it('does not show the picker when no declared ACP runtime exists', async () => {
+    const meta = advancedMemberMetadata();
+    const { dom, w } = await boot(undefined, undefined, undefined, {}, (port) => {
+      const previous = port.action;
+      port.action = (name, args, element) => (name === 'membersRead' ? meta : previous(name, args, element));
+    });
+    try {
+      w.eval('go("memberNew")');
+      await w.__settled();
+      expect(w.document.getElementById('f-runtime')).toBeNull();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('does not offer an unavailable declared ACP runtime for a new member', async () => {
+    const meta = advancedMemberMetadata();
+    meta.runtimes = [withForm(pluginRuntime('plugin:new/agent')), withForm(pluginRuntime('plugin:off/agent', false))];
+    const { dom, w } = await boot(undefined, undefined, undefined, {}, (port) => {
+      const previous = port.action;
+      port.action = (name, args, element) => (name === 'membersRead' ? meta : previous(name, args, element));
+    });
+    try {
+      w.eval('go("memberNew")');
+      await w.__settled();
+      const picker = w.document.getElementById('f-runtime') as HTMLSelectElement | null;
+      expect(picker).not.toBeNull();
+      expect(Array.from(picker!.options).map((option) => option.value)).toEqual(['', 'plugin:new/agent']);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('keeps the current unavailable binding visible so it can be switched out', async () => {
+    const meta = advancedMemberMetadata();
+    meta.runtimes = [withForm(pluginRuntime('plugin:old/agent', false)), withForm(pluginRuntime('plugin:new/agent'))];
+    const { dom, w } = await boot(
+      undefined,
+      (data) =>
+        Object.assign(data.cats[0], {
+          clientId: 'acp',
+          carrier: 'acp',
+          agentProvider: 'plugin:old/agent',
+          acp: { agentProvider: 'plugin:old/agent', command: 'plugin-agent', startupArgs: [] },
+          configurationRevision: 'rev-old',
+        }),
+      undefined,
+      {},
+      (port) => {
+        const previous = port.action;
+        port.action = (name, args, element) => (name === 'membersRead' ? meta : previous(name, args, element));
+      },
+    );
+    try {
+      w.eval('go("member-codex")');
+      await w.__settled();
+      const picker = w.document.getElementById('f-runtime') as HTMLSelectElement | null;
+      expect(picker).not.toBeNull();
+      expect(picker!.value).toBe('plugin:old/agent');
+      expect(Array.from(picker!.options).map((option) => option.value)).toEqual([
+        '',
+        'plugin:old/agent',
+        'plugin:new/agent',
+      ]);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('reads the old declared ACP binding and rebinds it through the same picker', async () => {
+    const meta = advancedMemberMetadata();
+    meta.runtimes = [withForm(pluginRuntime('plugin:old/agent')), withForm(pluginRuntime('plugin:new/agent'))];
+    const saves: Record<string, string>[] = [];
+    const { dom, w } = await boot(
+      undefined,
+      (data) =>
+        Object.assign(data.cats[0], {
+          clientId: 'acp',
+          carrier: 'acp',
+          agentProvider: 'plugin:old/agent',
+          acp: { agentProvider: 'plugin:old/agent', command: 'plugin-agent', startupArgs: [] },
+          configurationRevision: 'rev-old',
+        }),
+      undefined,
+      {},
+      (port) => {
+        const previous = port.action;
+        port.action = (name, args, element) => {
+          if (name === 'membersRead') return meta;
+          if (name === 'memberSave') {
+            saves.push(args);
+            return { ...fixtureData().cats[0], configurationRevision: 'rev-new' };
+          }
+          return previous(name, args, element);
+        };
+      },
+    );
+    try {
+      w.eval('go("member-codex")');
+      await w.__settled();
+      const picker = w.document.getElementById('f-runtime') as HTMLSelectElement | null;
+      expect(picker).not.toBeNull();
+      expect(picker!.value).toBe('plugin:old/agent');
+      picker!.value = 'plugin:new/agent';
+      picker!.dispatchEvent(new w.Event('change', { bubbles: true }));
+      await w.__settled();
+      expect(w.eval('VM.member().form.fromPlugin')).toBe('plugin:new/agent');
+      const save = w.document.querySelector('#savebar button[type="submit"]') as HTMLButtonElement | null;
+      expect(save).not.toBeNull();
+      save!.click();
+      await w.__settled();
+      const payload = JSON.parse(saves.at(-1)!.value);
+      expect(payload.acpAgentProvider).toBe('plugin:new/agent');
+      expect(saves.at(-1)!.expectedRevision).toBe('rev-old');
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('offers the same declared ACP runtime picker in the simplified theme', async () => {
+    const meta = advancedMemberMetadata();
+    meta.runtimes = [withForm(pluginRuntime('plugin:acme/agent'))];
+    const { dom, w } = await boot(undefined, undefined, undefined, {}, (port) => {
+      const get = port.get;
+      port.get = async (path, params) => {
+        if (path === '/api/config/console-themes') return { themes: { active: 'pkg:v2', customs: [] } };
+        if (path === '/api/accounts') return { providers: [] };
+        if (path.startsWith('/api/accounts/') && path.endsWith('/members')) return { selection: { members: [] } };
+        return get(path, params);
+      };
+      const previous = port.action;
+      port.action = (name, args, element) => {
+        if (name === 'membersRead') return meta;
+        if (name === 'memberSave') return { id: 'acme', configurationRevision: 'rev-1' };
+        return previous(name, args, element);
+      };
+    });
+    try {
+      w.eval('go("memberNew")');
+      await w.__settled();
+      expect(w.eval('PACK_LOADED')).toBe('v2');
+      const picker = w.document.getElementById('f-runtime') as HTMLSelectElement | null;
+      expect(picker).not.toBeNull();
+      expect(picker!.value).toBe('');
+      picker!.value = 'plugin:acme/agent';
+      picker!.dispatchEvent(new w.Event('change', { bubbles: true }));
+      await w.__settled();
+      expect(w.eval('VM.memberNew().form.fromPlugin')).toBe('plugin:acme/agent');
+      const handleInput = w.document.querySelector('#mc-aliases-in') as HTMLInputElement;
+      handleInput.value = 'declared-agent';
+      const addHandle = w.document.querySelector('[data-for="mc-aliases"] [data-act="fieldGo"]') as HTMLButtonElement;
+      addHandle.click();
+      await w.__settled();
+      expect(w.eval('VM.memberNew().form.d.aliases')).toContain('@declared-agent');
+      expect(w.document.querySelector('#ms-handles')?.textContent).toContain('@declared-agent');
+      const save = w.document.querySelector('#mform #savebar button[type="submit"]') as HTMLButtonElement | null;
+      expect(save).not.toBeNull();
+      expect(Boolean(save!.closest('[hidden]'))).toBe(false);
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('offers a declared ACP runtime and saves its agentProvider', async () => {
+    const meta = advancedMemberMetadata();
+    meta.runtimes = [withForm(pluginRuntime('plugin:acme/agent'))];
+    const saves: Record<string, string>[] = [];
+    const { dom, w } = await boot(undefined, undefined, undefined, {}, (port) => {
+      const previous = port.action;
+      port.action = (name, args, element) => {
+        if (name === 'membersRead') return meta;
+        if (name === 'memberSave') {
+          saves.push(args);
+          return { id: 'acme', configurationRevision: 'rev-1' };
+        }
+        return previous(name, args, element);
+      };
+    });
+    try {
+      w.eval('go("memberNew")');
+      await w.__settled();
+      const picker = w.document.getElementById('f-runtime') as HTMLSelectElement | null;
+      expect(picker).not.toBeNull();
+      expect(picker!.value).toBe('');
+      picker!.value = 'plugin:acme/agent';
+      picker!.dispatchEvent(new w.Event('change', { bubbles: true }));
+      await w.__settled();
+      expect(w.eval('VM.memberNew().form.fromPlugin')).toBe('plugin:acme/agent');
+      const save = w.document.querySelector('#savebar button[type="submit"]') as HTMLButtonElement | null;
+      expect(save).not.toBeNull();
+      save!.click();
+      await w.__settled();
+      const payload = JSON.parse(saves.at(-1)!.value);
+      expect(payload.acpAgentProvider).toBe('plugin:acme/agent');
+      expect(payload.clientId).toBe('acp');
+      expect(payload.carrier).toBe('acp');
+      expect(payload.acpCommand).toBe('plugin-agent');
+    } finally {
+      dom.window.close();
     }
   });
 });

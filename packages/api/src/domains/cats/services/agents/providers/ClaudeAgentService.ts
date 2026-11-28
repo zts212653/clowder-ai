@@ -24,7 +24,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { configuredCredentialValues } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import { type CatId, type CliEffortPreset, catRegistry, createCatId, resolveCliEffortOverride } from '@cat-cafe/shared';
+import { createClaudeOutputProjection } from '@clowder-ai/agent-access/runtime/claude/project-claude-output';
 import {
   resolveBinaryRoot,
   summarizeMcpInjection,
@@ -60,7 +62,7 @@ import { extractTrustedImagePaths } from '../providers/image-paths.js';
 import { findGitBashPath } from './claude-agent-win.js';
 import { composeManagedSettingsDocument } from './claude-compaction-launch-plan.js';
 import { captureClaudeMcpConfig, resolveClaudeMcpConfig } from './claude-mcp-config.js';
-import { extractClaudeUsage, isResultErrorEvent, transformClaudeEvent } from './claude-ndjson-parser.js';
+import { isResultErrorEvent } from './claude-ndjson-parser.js';
 import {
   applyClaudeMemberEnvironment,
   CLAUDE_MEMBER_SETTINGS,
@@ -343,7 +345,7 @@ export function buildClaudeEnvOverrides(
  * Options for constructing ClaudeAgentService (dependency injection)
  * F32-b: catId is now a constructor parameter (defaults to 'opus' for backward compat)
  */
-interface ClaudeAgentServiceOptions {
+export interface ClaudeAgentServiceOptions {
   /** F32-b: catId for this instance (default: 'opus') */
   catId?: CatId;
   /** Inject a custom spawn function (for testing) */
@@ -356,6 +358,7 @@ interface ClaudeAgentServiceOptions {
   l0CompilerFn?: typeof compileL0ViaSubprocess;
   /** #780: Raw NDJSON archive sink (default: CliRawArchive to disk) */
   rawArchive?: RawArchiveSink;
+  projectOutput?: import('../../../../plugin/agent-access/claude.js').AgentAccessClaudeOutput;
 }
 
 /**
@@ -402,11 +405,13 @@ export class ClaudeAgentService implements AgentService {
   /** Windows: cached MCP config file path (created once per instance, reused across invocations) */
   /** #780: Raw NDJSON archive for post-mortem diagnostics */
   private readonly rawArchive: RawArchiveSink;
+  private readonly projectOutput?: ClaudeAgentServiceOptions['projectOutput'];
 
   constructor(options?: ClaudeAgentServiceOptions) {
     this.catId = options?.catId ?? createCatId('opus');
     this.spawnFn = options?.spawnFn;
     this.rawArchive = options?.rawArchive ?? new CliRawArchive();
+    this.projectOutput = options?.projectOutput;
     this.l0CompilerFn = options?.l0CompilerFn ?? compileL0ViaSubprocess;
     // F32-b: model from options > env (getCatModel) > default
     this.model = options?.model ?? getCatModel(this.catId as string);
@@ -617,13 +622,6 @@ export class ClaudeAgentService implements AgentService {
     }
 
     const metadata: MessageMetadata = { provider: 'anthropic', model: effectiveModel };
-    const streamState = {
-      partialTextMessageIds: new Set<string>(),
-      currentMessageId: undefined as string | undefined,
-      lastTurnInputTokens: undefined as number | undefined,
-      thinkingBuffer: '' as string,
-    };
-
     let l0Path: string | undefined;
     let appendPromptPath: string | undefined;
     let preCompactSettingsPath: string | undefined;
@@ -843,7 +841,20 @@ export class ClaudeAgentService implements AgentService {
       await options?.beforeProviderLaunch?.(preparedRequest);
       if (!('body' in preparedRequest.message)) throw new Error('claude_prepared_message_not_exact');
 
+      const providerStop = this.projectOutput ? new AbortController() : undefined;
+      const providerSignal =
+        providerStop && options?.signal
+          ? AbortSignal.any([providerStop.signal, options.signal])
+          : (providerStop?.signal ?? options?.signal);
+      const nativeLaunch = member?.pluginNativeLaunch;
       const cliOpts = {
+        assertLaunchCurrent:
+          nativeLaunch || providerStop
+            ? async () => {
+                await nativeLaunch?.assertCurrent();
+                providerSignal?.throwIfAborted();
+              }
+            : undefined,
         command: claudeCommand,
         args,
         // #840 R2: main prompt moves off argv to stdin (see args comment above).
@@ -851,7 +862,7 @@ export class ClaudeAgentService implements AgentService {
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
         env: envOverrides,
         onSuccessfulExitStderr,
-        ...(options?.signal ? { signal: options.signal } : {}),
+        ...(providerSignal ? { signal: providerSignal } : {}),
         ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
         ...(options?.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
         ...(options?.livenessProbe ? { livenessProbe: options.livenessProbe } : {}),
@@ -861,10 +872,39 @@ export class ClaudeAgentService implements AgentService {
           : {}),
       };
       applyClaudeTokenAccountEnv(envOverrides, options?.claudeTokenAccount);
-      await member?.pluginNativeLaunch?.assertCurrent();
-      const events = options?.spawnCliOverride
-        ? options.spawnCliOverride(cliOpts)
-        : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
+      const overrides = this.spawnFn ? { spawnFn: this.spawnFn } : undefined;
+      const events = (async function* () {
+        if (options?.spawnCliOverride) await cliOpts.assertLaunchCurrent?.();
+        const providerEvents = options?.spawnCliOverride
+          ? options.spawnCliOverride(cliOpts)
+          : spawnCli(cliOpts, overrides);
+        for await (const event of providerEvents) {
+          yield redactClaudeLaunchToken(
+            event,
+            options?.claudeTokenAccount ? options.accountEnv?.CLAUDE_CODE_OAUTH_TOKEN : undefined,
+          );
+        }
+      })();
+      const catId = this.catId;
+      const projectedEvents =
+        this.projectOutput && providerStop && providerSignal
+          ? this.projectOutput(events, {
+              catId: this.catId,
+              signal: providerSignal,
+              stop: () => providerStop.abort(),
+              knownCredentials: configuredCredentialValues({
+                ...process.env,
+                ...Object.fromEntries(
+                  Object.entries(envOverrides).filter(
+                    (entry): entry is [string, string] => typeof entry[1] === 'string',
+                  ),
+                ),
+              }),
+            })
+          : (async function* () {
+              const localProjection = createClaudeOutputProjection(catId);
+              for await (const event of events) yield { event, activation: undefined, ...localProjection(event) };
+            })();
 
       let eventCount = 0;
       let textEventCount = 0;
@@ -887,11 +927,8 @@ export class ClaudeAgentService implements AgentService {
       let hasAssistantEvent = false;
       let lastAssistantHasToolUseBlock = false;
       let lastAssistantHasTextBlock = false;
-      for await (const rawEvent of events) {
-        const event = redactClaudeLaunchToken(
-          rawEvent,
-          options?.claudeTokenAccount ? options.accountEnv?.CLAUDE_CODE_OAUTH_TOKEN : undefined,
-        );
+      for await (const { event, messages, usage, activation } of projectedEvents) {
+        activation?.throwIfAborted();
         eventCount++;
         // #780: Archive raw event for post-mortem diagnostics (fire-and-forget)
         if (options?.invocationId) {
@@ -997,17 +1034,11 @@ export class ClaudeAgentService implements AgentService {
         }
 
         // F8: Capture usage from result/success events before transform drops them
-        const rawEvt = event as Record<string, unknown>;
-        if (rawEvt.type === 'result' && rawEvt.subtype === 'success') {
-          metadata.usage = extractClaudeUsage(rawEvt);
-          // F24-fix: Attach per-turn input from last message_start for context health
-          if (streamState.lastTurnInputTokens != null && metadata.usage) {
-            metadata.usage.lastTurnInputTokens = streamState.lastTurnInputTokens;
-          }
-        }
+        if (usage && typeof event === 'object' && event && 'subtype' in event && event.subtype === 'success')
+          metadata.usage = usage;
 
         const fromResultError = isResultErrorEvent(event);
-        let result = transformClaudeEvent(event, this.catId, streamState);
+        let result = messages;
         if (result === null) {
           log.debug({ catId: this.catId, eventIndex: eventCount, rawType: evtType }, 'Event dropped by transform');
           continue;
@@ -1015,6 +1046,7 @@ export class ClaudeAgentService implements AgentService {
 
         if (Array.isArray(result)) {
           for (const msg of result) {
+            activation?.throwIfAborted();
             if (msg.type === 'text') {
               textEventCount++;
             }

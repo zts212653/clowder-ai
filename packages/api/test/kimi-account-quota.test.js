@@ -45,10 +45,18 @@ describe('Account-scoped Kimi quota route (/api/accounts/:profileId/kimi/quota)'
     writeKimiOAuthHome(customHomeB1, 'oauth/kimi-code', 'token-account-b1');
     writeKimiOAuthHome(customHomeB2, 'oauth/kimi-code', 'token-account-b2');
 
-    const envKeys = ['CAT_CAFE_GLOBAL_CONFIG_ROOT', 'HOME', 'KIMI_CODE_HOME', 'KIMI_SHARE_DIR', 'KIMI_CONFIG_FILE'];
+    const envKeys = [
+      'CAT_CAFE_GLOBAL_CONFIG_ROOT',
+      'HOME',
+      'USERPROFILE',
+      'KIMI_CODE_HOME',
+      'KIMI_SHARE_DIR',
+      'KIMI_CONFIG_FILE',
+    ];
     const savedEnv = Object.fromEntries(envKeys.map((k) => [k, process.env[k]]));
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = configRoot;
     process.env.HOME = hostHomeA;
+    process.env.USERPROFILE = hostHomeA;
     process.env.KIMI_SHARE_DIR = join(hostHomeA, 'ambient-legacy-share');
     process.env.KIMI_CONFIG_FILE = join(hostHomeA, 'ambient-legacy-config.toml');
     delete process.env.KIMI_CODE_HOME;
@@ -81,6 +89,7 @@ describe('Account-scoped Kimi quota route (/api/accounts/:profileId/kimi/quota)'
 
     const seenEnvs = [];
     let pendingGate = null;
+    let onProbeStarted = () => {};
     const app = Fastify();
     t.after(async () => {
       await app.close();
@@ -88,7 +97,10 @@ describe('Account-scoped Kimi quota route (/api/accounts/:profileId/kimi/quota)'
     await app.register(accountsRoutes, {
       kimiQuotaSampler: async (launchEnv) => {
         seenEnvs.push({ ...launchEnv });
-        if (pendingGate) await pendingGate;
+        if (pendingGate) {
+          onProbeStarted();
+          await pendingGate;
+        }
         const observedAt = Date.UTC(2026, 10, 16, 15, 0, 0);
         return {
           observedAt,
@@ -160,13 +172,16 @@ describe('Account-scoped Kimi quota route (/api/accounts/:profileId/kimi/quota)'
     pendingGate = new Promise((resolve) => {
       releaseGate = resolve;
     });
+    const probeStarted = new Promise((resolve) => {
+      onProbeStarted = resolve;
+    });
     const inFlightPromise = app.inject({
       method: 'POST',
       url: '/api/accounts/kimi-b/kimi/quota',
       headers: { 'x-cat-cafe-user': 'dev' },
       payload: { projectPath: configRoot },
     });
-    await new Promise((r) => setTimeout(r, 15));
+    await probeStarted;
     writeCatalogAccount(configRoot, 'kimi-b', {
       authType: 'oauth',
       clientId: 'kimi',

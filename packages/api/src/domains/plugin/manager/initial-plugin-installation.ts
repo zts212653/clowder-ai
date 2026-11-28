@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { PLUGIN_HOST_ENTRIES } from '../host-inventory/plugin-host-layout.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
+import type { OfficialPluginCatalogEntry } from '../official-catalog.js';
 import type { OfficialPluginPackageInstaller } from '../official-package-installer.js';
 import type { DormantPluginRuntimeComposition, PluginManagerRuntimeComposition } from '../runtime-composition.js';
 import { loadMachinePluginCatalog, OFFICIAL_PLUGIN_CATALOG_URL } from './machine-catalog-provider.js';
@@ -18,6 +19,7 @@ export interface InitialPluginInstallationOptions {
   readonly catalog: OfficialPluginCatalogProvider;
   readonly installer: Pick<OfficialPluginPackageInstaller, 'install' | 'installFromSnapshot'>;
   readonly loadSelection: () => Promise<unknown>;
+  readonly bundledDefaults?: readonly OfficialPluginCatalogEntry[];
   readonly reconcile?: (pluginId: string, instanceId: string) => Promise<void>;
   readonly activate: (
     pluginId: string,
@@ -42,9 +44,11 @@ interface InitialPluginRecord {
 interface Journal {
   schemaVersion: 1;
   plugins: InitialPluginRecord[];
+  remoteSelectionPending?: true;
 }
 interface InitialPluginPlan {
   readonly journal: Journal;
+  readonly records: readonly InitialPluginRecord[];
   readonly catalogSnapshot?: OfficialPluginCatalogSnapshot;
 }
 
@@ -111,37 +115,32 @@ async function saveJournal(statePath: string, journal: Journal): Promise<void> {
   await writeFile(temporary, `${JSON.stringify(journal)}\n`, { mode: 0o600 });
   await rename(temporary, statePath);
 }
-async function begin(options: InitialPluginInstallationOptions): Promise<InitialPluginPlan> {
-  options.signal?.throwIfAborted();
-  const existing = await loadJournal(options.statePath);
-  if (existing) return { journal: existing };
-  // Includes uninstall tombstones and unreferenced packages without loading them.
-  if (await options.inventory.hasRecords()) {
-    options.signal?.throwIfAborted();
-    const journal: Journal = { schemaVersion: 1, plugins: [] };
-    await saveJournal(options.statePath, journal);
-    return { journal };
-  }
+async function selectInitialRemotePlugins(
+  options: InitialPluginInstallationOptions,
+  journal: Journal,
+  bundledIds: ReadonlySet<string>,
+): Promise<OfficialPluginCatalogSnapshot> {
   const selection = parseInitialPluginSelection(await initialRead(options.loadSelection, options.signal));
   const catalog = await initialRead(() => options.catalog.snapshot(), options.signal);
   if (catalog.status !== 'fresh') throw new Error('Initial installation requires a current catalog');
-  const plugins = selection.plugins.map((p) => {
-    const e = catalog.entries.find((e) => e.pluginId === p.pluginId);
-    if (!e) throw new Error(`Initial plugin is absent from catalog: ${p.pluginId}`);
-    return {
-      pluginId: p.pluginId,
-      enabled: p.enabled,
-      catalogId: e.catalogId,
-      version: e.version,
-      packageDigest: e.packageDigest,
-      done: false,
-    };
+  const selected = selection.plugins.flatMap((plugin) => {
+    if (bundledIds.has(plugin.pluginId)) return [];
+    const entry = catalog.entries.find((candidate) => candidate.pluginId === plugin.pluginId);
+    if (!entry) throw new Error(`Initial plugin is absent from catalog: ${plugin.pluginId}`);
+    return [initialRelease(entry, plugin.enabled)];
   });
-  const journal: Journal = { schemaVersion: 1, plugins };
-  options.signal?.throwIfAborted();
-  await saveJournal(options.statePath, journal);
-  return { journal, catalogSnapshot: catalog };
+  journal.plugins.push(...selected);
+  delete journal.remoteSelectionPending;
+  return catalog;
 }
+
+function initialRelease(
+  { pluginId, catalogId, version, packageDigest }: OfficialPluginCatalogEntry,
+  enabled: boolean,
+): InitialPluginRecord {
+  return { pluginId, catalogId, version, packageDigest, enabled, done: false };
+}
+
 async function prepareInstance(
   options: InitialPluginInstallationOptions,
   journal: Journal,
@@ -198,13 +197,22 @@ async function installInitialRelease(
   catalogSnapshot?: OfficialPluginCatalogSnapshot,
 ) {
   const release = { version: p.version, packageDigest: p.packageDigest };
+  const bundled = options.bundledDefaults?.find(
+    (entry) => entry.pluginId === p.pluginId && entry.packageDigest === p.packageDigest,
+  );
+  if (bundled)
+    return options.installer.installFromSnapshot(
+      { entries: [bundled], status: 'fresh', checkedAt: null },
+      p.catalogId,
+      release,
+    );
   return catalogSnapshot
     ? options.installer.installFromSnapshot(catalogSnapshot, p.catalogId, release)
     : options.installer.install(p.catalogId, release);
 }
 async function installPending(options: InitialPluginInstallationOptions, plan: InitialPluginPlan): Promise<void> {
-  const { journal, catalogSnapshot } = plan;
-  for (const p of journal.plugins) {
+  const { journal, records, catalogSnapshot } = plan;
+  for (const p of records) {
     if (p.done || p.prepared) continue;
     try {
       await prepareInstance(options, journal, p, catalogSnapshot);
@@ -228,10 +236,10 @@ async function operationCatalogSnapshot(
 }
 async function activateInstalled(options: InitialPluginInstallationOptions, plan: InitialPluginPlan): Promise<void> {
   options.signal?.throwIfAborted();
-  const { journal } = plan;
-  if (!journal.plugins.some((p) => !p.done && p.prepared && p.instanceId && p.revision !== undefined)) return;
+  const { journal, records } = plan;
+  if (!records.some((p) => !p.done && p.prepared && p.instanceId && p.revision !== undefined)) return;
   const catalogSnapshot = await operationCatalogSnapshot(options, plan);
-  for (const p of journal.plugins) {
+  for (const p of records) {
     if (p.done || !p.prepared || !p.instanceId || p.revision === undefined) continue;
     try {
       const instance = await options.inventory.read.instances.get(p.instanceId);
@@ -249,13 +257,59 @@ async function activateInstalled(options: InitialPluginInstallationOptions, plan
 }
 /** Called before recovery; activation is explicitly deferred until the Host has listened. */
 export async function prepareInitialPluginInstallation(options: InitialPluginInstallationOptions) {
-  const initialPlan = await begin(options);
-  const plan =
-    initialPlan.catalogSnapshot || !initialPlan.journal.plugins.some((p) => !p.done)
-      ? initialPlan
-      : { ...initialPlan, catalogSnapshot: await operationCatalogSnapshot(options, initialPlan) };
+  options.signal?.throwIfAborted();
+  const existing = await loadJournal(options.statePath);
+  const journal: Journal = existing ?? { schemaVersion: 1, plugins: [] };
+  const selectRemote = existing ? existing.remoteSelectionPending === true : !(await options.inventory.hasRecords());
+  const bundled = options.bundledDefaults ?? [];
+  const bundledIds = new Set(bundled.map((entry) => entry.pluginId));
+
+  async function prepareRemote() {
+    let catalogSnapshot: OfficialPluginCatalogSnapshot | undefined;
+    if (bundled.length ? journal.remoteSelectionPending : selectRemote) {
+      catalogSnapshot = await selectInitialRemotePlugins(options, journal, bundledIds).catch((error: unknown) => {
+        options.signal?.throwIfAborted();
+        if (!bundled.length) throw error;
+        options.onFailure('initial-plugins', error);
+        return { entries: [], status: 'degraded', checkedAt: null, errorCode: 'CATALOG_FETCH_FAILED' } as const;
+      });
+      options.signal?.throwIfAborted();
+      await saveJournal(options.statePath, journal);
+    }
+    const plan = { journal, records: journal.plugins.filter((p) => !bundledIds.has(p.pluginId)), catalogSnapshot };
+    if (!plan.catalogSnapshot && plan.records.some((p) => !p.done))
+      plan.catalogSnapshot = await operationCatalogSnapshot(options, plan);
+    await installPending(options, plan);
+    return plan;
+  }
+
+  if (!bundled.length) {
+    if (!existing && !selectRemote) await saveJournal(options.statePath, journal);
+    const plan = await prepareRemote();
+    return { activate: () => activateInstalled(options, plan) };
+  }
+
+  for (const entry of bundled) {
+    if (entry.distribution !== 'bundled') throw new Error('Initial distribution defaults require bundled archives');
+    if (!journal.plugins.some((record) => record.pluginId === entry.pluginId))
+      journal.plugins.push(initialRelease(entry, true));
+  }
+  if (selectRemote) journal.remoteSelectionPending = true;
+  await saveJournal(options.statePath, journal);
+  const plan: InitialPluginPlan = {
+    journal,
+    records: journal.plugins.filter((p) => bundledIds.has(p.pluginId)),
+    catalogSnapshot: { entries: bundled, status: 'fresh', checkedAt: null },
+  };
   await installPending(options, plan);
-  return { activate: () => activateInstalled(options, plan) };
+
+  return {
+    async activate() {
+      // Bundled entry points can now serve the first-run UI while optional downloads proceed.
+      await activateInstalled(options, plan);
+      await activateInstalled(options, await prepareRemote());
+    },
+  };
 }
 
 /** The same Manager installation/configuration/lifecycle used by explicit owner operations. */
@@ -266,17 +320,18 @@ export async function prepareHostInitialPlugins(options: {
   readonly managerRuntime: PluginManagerRuntimeComposition;
   readonly catalog: OfficialPluginCatalogProvider;
   readonly loadSelection?: () => Promise<unknown>;
+  readonly bundledDefaults?: readonly OfficialPluginCatalogEntry[];
   readonly onFailure: InitialPluginInstallationOptions['onFailure'];
 }) {
   await initialRead(() => options.hostListening, options.signal);
   const { runtime, managerRuntime } = options;
-  let managerCatalogSnapshot: ReturnType<typeof managerRuntime.officialCatalog.projectSnapshot> | undefined;
   return prepareInitialPluginInstallation({
     signal: options.signal,
     statePath: join(dirname(runtime.paths.inventorySnapshotPath), PLUGIN_HOST_ENTRIES.initialInstallation),
     inventory: runtime.inventoryStore,
     catalog: options.catalog,
     installer: managerRuntime.officialInstaller,
+    bundledDefaults: options.bundledDefaults,
     loadSelection:
       options.loadSelection ??
       (() => loadMachinePluginCatalog(new URL('initial-plugins.json', OFFICIAL_PLUGIN_CATALOG_URL).href)),
@@ -285,7 +340,7 @@ export async function prepareHostInitialPlugins(options: {
       const instance = await runtime.inventoryStore.read.instances.get(instanceId);
       // Configuration requiring user input remains visible and disabled in Settings.
       if (instance?.configReadiness !== 'ready') return;
-      managerCatalogSnapshot ??= managerRuntime.officialCatalog.projectSnapshot(catalogSnapshot);
+      const managerCatalogSnapshot = managerRuntime.officialCatalog.projectSnapshot(catalogSnapshot);
       await managerRuntime.manager.setEnabledFromCatalogSnapshot(managerCatalogSnapshot, pluginId, {
         enabled: true,
         expectedRevision,

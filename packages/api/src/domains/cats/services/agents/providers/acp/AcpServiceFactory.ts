@@ -22,6 +22,7 @@ import { inspectKimiNativeLaunch } from '../../../../../../config/native-account
 import { resolveEffectiveOpenCodeModel } from '../../../../../../config/opencode-model.js';
 import { invalidateCliCommand, resolveCliCommandOrBare } from '../../../../../../utils/cli-resolve.js';
 import { resolveWindowsSpawnPlan, type WindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.js';
+import { dshDesktopL0Compatibility } from '../../../../../../utils/dsh-desktop-launch.js';
 import { saveSpan } from '../../../../../../utils/member-save-diagnostics.js';
 import type { AgentRegistrationFailure } from '../../registry/AgentServiceUnavailableError.js';
 import { ExecutionAdmissionConflict, StaleServiceSourceConflict } from '../../registry/AgentServiceUnavailableError.js';
@@ -29,7 +30,7 @@ import { prepareDshSecretPatch, verifyDshSecretPatch } from '../dsh-secret-patch
 import { ensureKimiSecretHooks } from '../kimi-secret-hooks.js';
 import { prepareOpenCodeAcpSpawnConfig } from '../opencode-acp-spawn-config.js';
 import { piBridgeStorageArgs } from '../pi/pi-bridge-launch.js';
-import { AcpAgentService } from './AcpAgentService.js';
+import { AcpAgentService, type AcpAgentServiceConfig, type CreateAcpMemberClient } from './AcpAgentService.js';
 import { AcpClient, type AcpClientConfig } from './AcpClient.js';
 import { AcpHttpStreamClient } from './AcpHttpStreamClient.js';
 import { AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS } from './AcpProcessPool.js';
@@ -52,15 +53,11 @@ import {
   acpConstructionJson,
   acpLaunchConstructionSource,
 } from './configuration/acp-construction-source.js';
+import { createDshL0Startup, type DshL0Patch } from './dsh/dsh-l0-startup.js';
 import { prepareDshTurnPatch, verifyDshTurnPatch } from './dsh/dsh-turn-patch.js';
 import { skipAcpProfile } from './lifecycle/acp-registration-failure.js';
 import { pendingAcpPoolRetirement, trackAcpPoolRetirement } from './pool/acp-pool-retirement-registry.js';
-import {
-  type AcpServicePoolLease,
-  bindAcpServicePoolLease,
-  retainAcpServicePool,
-  retireAcpServicePool,
-} from './pool/acp-service-pool-lease.js';
+import { bindAcpServicePoolLease, retainAcpServicePool, retireAcpServicePool } from './pool/acp-service-pool-lease.js';
 
 export type AcpPoolRegistry = Map<string, AcpProcessPool>;
 
@@ -73,6 +70,8 @@ export interface CreateAcpServiceForConfigInput {
   acpConfig: AcpVariantConfig;
   /** Catalog construction uses its existing accessor; plugin sources retain their registration fence. */
   resolveCurrentAcpConfig?(): AcpVariantConfig | undefined;
+  selectSessionModel?: AcpAgentServiceConfig['selectSessionModel'];
+  createClient?: CreateAcpMemberClient;
   poolRegistry: AcpPoolRegistry;
   log: Pick<FastifyBaseLogger, 'info' | 'warn'>;
   /** Tests supply an owned throwaway root; production uses the platform default. */
@@ -252,7 +251,7 @@ async function ensureAcpPool(
   preparedEnv: Readonly<Record<string, string>>,
   preparedSpawn: NonNullable<AcpClientConfig['preparedSpawn']>,
   construction: unknown,
-): Promise<{ pool: AcpProcessPool; lease: AcpServicePoolLease }> {
+) {
   const { profileId, acpConfig, poolRegistry } = input;
   const maxLiveProcesses = acpConfig.pool?.maxLiveProcesses ?? defaultAcpPoolMaxProcesses(input.config.clientId);
   const spawnSignature = createAcpPoolSpawnSignature({
@@ -262,7 +261,7 @@ async function ensureAcpPool(
     cwd: bootstrap.cwd,
     bootstrapIsolation: bootstrap.isolation,
     environmentFingerprint: createHmac('sha256', environmentFingerprintKey)
-      .update(acpConstructionJson(construction))
+      .update(acpConstructionJson(input.createClient ? { construction, driver: 'agent-access' } : construction))
       .digest('hex'),
     openCodeRuntimeConfig: spawn.openCodeRuntimeConfig,
     contextPolicy: spawn.contextPolicy,
@@ -282,8 +281,42 @@ async function ensureAcpPool(
     poolRegistry.delete(profileId);
   }
 
+  const createClient = (patch?: DshL0Patch) => {
+    const args = patch ? [...bootstrap.args, '--patch', patch.path] : bootstrap.args;
+    const launch = patch ? { ...preparedSpawn, args: [...preparedSpawn.args, '--patch', patch.path] } : preparedSpawn;
+    const verifyCwd: VerifiedAcpBootstrapContext['verifyCwd'] = patch
+      ? (command = launch.command, argv = [...launch.args], env = preparedEnv) => {
+          patch.verify(argv);
+          return bootstrap.verifyCwd(command, argv.slice(0, -2), env);
+        }
+      : bootstrap.verifyCwd;
+    const clientCfg = {
+      command: bootstrap.command,
+      args,
+      // Cold starts re-create and revalidate the cwd.
+      cwd: verifyCwd(launch.command, [...launch.args], preparedEnv),
+      preparedEnv,
+      preparedSpawn: launch,
+      ...(process.platform === 'win32' ? { verifyBootstrapCwd: verifyCwd } : {}),
+      ...(spawn.env ? { env: spawn.env } : {}),
+      // Flagged native effects must never be auto-approved.
+      defaultPermissionDecision:
+        acpConfig.protocolAdapter === 'icode' || acpConfig.permissionPolicy === 'deny'
+          ? ('reject' as const)
+          : ('allow' as const),
+      ...(spawn.antigravity
+        ? { inheritParentEnv: false, permissionHandler: denyAgyAcpPermission, antigravityDiagnostics: true }
+        : {}),
+    };
+    return (
+      input.createClient?.(clientCfg, acpConfig.transport) ??
+      (acpConfig.transport === 'httpstream' ? new AcpHttpStreamClient(clientCfg) : new AcpClient(clientCfg))
+    );
+  };
+
   const activePool = poolRegistry.get(profileId);
-  if (activePool) return { pool: activePool, lease: retainAcpServicePool(poolRegistry, profileId, activePool, false) };
+  if (activePool)
+    return { pool: activePool, lease: retainAcpServicePool(poolRegistry, profileId, activePool, false), createClient };
 
   const pool = new AcpProcessPool(
     {
@@ -292,34 +325,12 @@ async function ensureAcpPool(
       healthCheckIntervalMs: 30_000,
     },
     spawn.antigravity ? { ...acpConfig, supportsMultiplexing: false, rejectActiveSessionLease: true } : acpConfig,
-    () => {
-      const clientCfg = {
-        command: bootstrap.command,
-        args: bootstrap.args,
-        // Cold starts must recreate a lost cwd and revalidate its permissions.
-        // Existing live processes keep their cwd and drain under pool policy.
-        cwd: bootstrap.verifyCwd(preparedSpawn.command, [...preparedSpawn.args], preparedEnv),
-        preparedEnv,
-        preparedSpawn,
-        ...(process.platform === 'win32' ? { verifyBootstrapCwd: bootstrap.verifyCwd } : {}),
-        ...(spawn.env ? { env: spawn.env } : {}),
-        // iCode fail-closed policy: flagged native effects must never be
-        // auto-approved by the generic default (allow) path.
-        defaultPermissionDecision:
-          acpConfig.protocolAdapter === 'icode' || acpConfig.permissionPolicy === 'deny'
-            ? ('reject' as const)
-            : ('allow' as const),
-        ...(spawn.antigravity
-          ? { inheritParentEnv: false, permissionHandler: denyAgyAcpPermission, antigravityDiagnostics: true }
-          : {}),
-      };
-      return acpConfig.transport === 'httpstream' ? new AcpHttpStreamClient(clientCfg) : new AcpClient(clientCfg);
-    },
+    createClient,
     spawnSignature,
     pendingAcpPoolRetirement(poolRegistry, profileId),
   );
   poolRegistry.set(profileId, pool);
-  return { pool, lease: retainAcpServicePool(poolRegistry, profileId, pool, true) };
+  return { pool, lease: retainAcpServicePool(poolRegistry, profileId, pool, true), createClient };
 }
 
 export async function createAcpServiceForConfig(
@@ -525,15 +536,36 @@ export async function createAcpServiceForConfig(
       throw new StaleServiceSourceConflict('ACP account source changed; refresh this member before admission.');
     environment.assertCurrent();
   };
-  const { pool, lease } = await saveSpan('acp.pool', () =>
+  const { pool, lease, createClient } = await saveSpan('acp.pool', () =>
     ensureAcpPool(effectiveInput, verified, spawn, preparedEnv, preparedSpawn, construction),
   );
 
+  const desktopL0 =
+    acpConfig.transport === 'httpstream' ? undefined : dshDesktopL0Compatibility(selectedCommand, originalArgs);
+  if (desktopL0 && !desktopL0.supported) {
+    input.log.warn(
+      { catId, desktopVersion: desktopL0.desktopVersion },
+      'DSH Desktop version has not been qualified for native L0; using the ACP user-message prefix',
+    );
+  }
   // #712 P1-1: pass whitelist — MCP resolution happens at invoke time in
   // AcpAgentService so capability toggles take effect without registry rebuild.
   const service = new AcpAgentService({
+    createStdioClient: input.createClient,
     ...(turnPatch ? { dshTurnInput: true } : {}),
     ...(nativeDsh ? { nativeDsh } : {}),
+    ...(desktopL0?.supported
+      ? {
+          dshL0Startup: (body) =>
+            createDshL0Startup({
+              body,
+              cwd: () => verified.verifyCwd(preparedSpawn.command, [...preparedSpawn.args], preparedEnv),
+              assertLaunch: () =>
+                dshDesktopL0Compatibility(selectedCommand, originalArgs)?.desktopVersion === desktopL0.desktopVersion,
+              createClient,
+            }),
+        }
+      : {}),
     ...(nativeKimi ? { nativeKimi } : {}),
     ...(spawn.antigravity ? { antigravity: spawn.antigravity, agentBusyRetryDelaysMs: [] } : {}),
     catId,
@@ -548,6 +580,7 @@ export async function createAcpServiceForConfig(
     // configuration id), distinct from defaultModel (display/audit model name).
     // The factory rejects iCode members without it, so this is always defined.
     sessionModel: acpConfig.protocolAdapter === 'icode' ? icodeModelProfileId : spawn.sessionModel,
+    selectSessionModel: input.selectSessionModel,
     protocolAdapter: acpConfig.protocolAdapter,
     executionApproval:
       spawn.antigravity && spawn.antigravity.profile.autoApprove !== true

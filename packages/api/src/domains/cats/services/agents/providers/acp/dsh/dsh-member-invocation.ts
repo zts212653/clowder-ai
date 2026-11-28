@@ -5,6 +5,7 @@ import type { AgentMessage, AgentServiceOptions, MessageMetadata } from '../../.
 import { providerProfileAccountSnapshot } from '../../../invocation/execution-account-binding.js';
 import { captureScopedMemberLaunch } from '../../../invocation/scoped-member-launch.js';
 import { compileL0ViaSubprocess } from '../../l0-compiler.js';
+import type { CreateAcpMemberClient } from '../AcpAgentService.js';
 import { AcpClient } from '../AcpClient.js';
 import { createAcpSessionState, flushAcpThinking, transformAcpEvent } from '../acp-event-transformer.js';
 import { prepareDshMemberLaunch } from './dsh-member-launch.js';
@@ -15,6 +16,7 @@ export async function* invokeDshMember(input: {
   readonly catId: string;
   readonly modelSelection: string;
   readonly native: DshNativeLaunch;
+  readonly createClient?: CreateAcpMemberClient;
   readonly prompt: string;
   readonly options?: AgentServiceOptions;
   readonly compile?: typeof compileL0ViaSubprocess;
@@ -22,7 +24,9 @@ export async function* invokeDshMember(input: {
   const catId = createCatId(input.catId),
     options = input.options,
     signal = options?.signal;
-  let client: AcpClient | undefined, dispose: (() => Promise<void>) | undefined, removeAbort: (() => void) | undefined;
+  let client: ReturnType<CreateAcpMemberClient> | undefined,
+    dispose: (() => Promise<void>) | undefined,
+    removeAbort: (() => void) | undefined;
   let errorCode: string | undefined;
   let metadata: MessageMetadata = { provider: 'acp', model: input.modelSelection };
   try {
@@ -74,7 +78,8 @@ export async function* invokeDshMember(input: {
     const launch = await prepareDshMemberLaunch({ native: input.native, account, identity, member, callbackEnv });
     dispose = launch.dispose;
     await current();
-    client = new AcpClient({ ...launch, inheritParentEnv: false, defaultPermissionDecision: 'reject' });
+    const config = { ...launch, inheritParentEnv: false, defaultPermissionDecision: 'reject' as const };
+    client = input.createClient?.(config) ?? new AcpClient(config);
     const activeClient = client;
     const abort = () => {
       void activeClient.close();

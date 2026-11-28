@@ -1,7 +1,9 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { useMemberModelCatalogs } from '@/lib/member-model-display';
 import { apiFetch } from '@/utils/api-client';
+import { buildNativeCreationPayload } from '../../first-run-quest/native-creation-payload';
 import { initialState } from '../../hub-cat-editor.model';
+import { buildCatPayload } from '../../hub-cat-editor.payload';
 import { needsDshPreparation, prepareNativeMember } from '../members/prepare-native-member';
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
@@ -15,7 +17,8 @@ beforeEach(() => {
   vi.resetAllMocks();
   useMemberModelCatalogs.setState({ runtimes: [{ ...runtime, label: 'DSH Desktop', clientId: 'acp', models: [] }] });
   vi.mocked(apiFetch).mockImplementation(async (url) => {
-    if (url.endsWith('/native-runtimes')) return Response.json({ runtimes: [runtime] });
+    if (url.endsWith('/agent-access/v1/detect'))
+      return Response.json({ readiness: { state: 'ready' }, candidates: [runtime] });
     if (url.endsWith('/inspect'))
       return Response.json({
         revision: 'revision',
@@ -63,6 +66,49 @@ it('prepares the selected route into the final save form without testing the mod
     model: 'selected',
   });
 });
+it('prepares the selected independent DSH binding before the shared Desktop with the same command', async () => {
+  const ref = 'plugin:official.agent-dsh/dsh';
+  const adapter = { ...runtime, id: ref, acp: { ...runtime.acp, agentProvider: ref } };
+  const respond = vi.mocked(apiFetch).getMockImplementation()!;
+  vi.mocked(apiFetch).mockImplementation((url, ...args) =>
+    url.endsWith('/agent-access/v1/detect')
+      ? Promise.resolve(Response.json({ readiness: { state: 'ready' }, candidates: [runtime, adapter] }))
+      : respond(url, ...args),
+  );
+  const result = await prepareNativeMember(
+    {
+      ...initialState(),
+      clientId: 'acp',
+      carrier: 'acp',
+      configurationSource: 'native_tool',
+      acpCommand: runtime.acp.command,
+      acpStartupArgs: '--profile acp',
+      acpAgentProvider: ref,
+      defaultModel: '["custom","selected"]',
+    },
+    undefined,
+    { ...adapter, label: 'Independent DSH', clientId: 'acp', models: [] },
+  );
+  expect(result.acpAgentProvider).toBe(ref);
+  const binding = {
+    agentProvider: ref,
+    acp: {
+      command: '/desktop/dsh.cmd',
+      startupArgs: ['--profile', 'acp', '--patch', '/private/member.yml'],
+    },
+    env: { DSH_HOME: '/private/home' },
+  };
+  expect(buildNativeCreationPayload(result)).toMatchObject(binding);
+  expect(buildCatPayload(result)).toMatchObject(binding);
+  expect(buildCatPayload({ ...result, acpAgentProvider: 'plugin:fixture.acp/agent' })).toMatchObject({
+    acp: { command: 'plugin-agent', startupArgs: [] },
+  });
+  for (const [url, request] of vi.mocked(apiFetch).mock.calls) {
+    if (url.endsWith('/inspect') || url.endsWith('/prepare'))
+      expect(JSON.parse(String(request?.body)).runtimeId).toBe(ref);
+  }
+});
+
 it('does not inspect or prepare an unchanged existing binding', async () => {
   const cat = {
     id: 'old',
@@ -154,8 +200,11 @@ it('does not prepare a Desktop route for effort or pool edits and retains its HO
     ),
   ).toBe(false);
   vi.mocked(apiFetch).mockImplementation(async (url) => {
-    if (url.endsWith('/native-runtimes'))
-      return Response.json({ runtimes: [{ ...runtime, acp: { ...runtime.acp, command: cat.acp.command } }] });
+    if (url.endsWith('/agent-access/v1/detect'))
+      return Response.json({
+        readiness: { state: 'ready' },
+        candidates: [{ ...runtime, acp: { ...runtime.acp, command: cat.acp.command } }],
+      });
     if (url.endsWith('/inspect'))
       return Response.json({
         revision: 'revision',

@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import type { AgyProfileConfig, CatId } from '@cat-cafe/shared';
 import { spawnCli } from '../../../../../../utils/cli-spawn.js';
+import type { PrepareAgyOutput } from '../../../../../plugin/agent-access/agy.js';
 import { CliRawArchive } from '../../../session/CliRawArchive.js';
 import type {
   AgentFreshnessCarrierCapability,
@@ -31,6 +32,7 @@ export interface AgyNativeAgentServiceConfig {
   readonly l0CompilerFn?: typeof compileL0ViaSubprocess;
   readonly rawArchive?: RawArchiveSink;
   readonly spawnCliFn?: typeof spawnCli;
+  readonly prepareOutput?: PrepareAgyOutput;
 }
 
 function hasUnsupportedNativeOverrides(
@@ -57,6 +59,7 @@ export class AgyNativeAgentService implements AgentService {
   private readonly l0CompilerFn: typeof compileL0ViaSubprocess;
   private readonly rawArchive: RawArchiveSink;
   private readonly spawnCliFn: typeof spawnCli;
+  private readonly prepareOutput: PrepareAgyOutput | undefined;
 
   constructor(config: AgyNativeAgentServiceConfig) {
     this.catId = config.catId;
@@ -66,6 +69,7 @@ export class AgyNativeAgentService implements AgentService {
     this.l0CompilerFn = config.l0CompilerFn ?? compileL0ViaSubprocess;
     this.spawnCliFn = config.spawnCliFn ?? spawnCli;
     this.rawArchive = config.rawArchive ?? new CliRawArchive();
+    this.prepareOutput = config.prepareOutput;
   }
 
   injectsL0Natively(): boolean {
@@ -241,6 +245,7 @@ export class AgyNativeAgentService implements AgentService {
       const continuityInput = preflight ? createAgyNativeContinuityInput(launch, preflight, options) : undefined;
       if (!continuityInput) await options?.beforeProviderLaunch?.(launch.preparedRequest);
       await member?.pluginNativeLaunch?.assertCurrent();
+      const adapter = await this.prepareOutput?.();
       yield* runAgyNativeInvocation({
         catId: this.catId,
         model: launch.effectiveModel,
@@ -252,6 +257,7 @@ export class AgyNativeAgentService implements AgentService {
         options,
         continuityInput,
         rawArchivePath,
+        adapter,
         compactionRequested: compactionControl !== undefined,
       });
     } catch (error) {

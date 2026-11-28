@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { ExecutionAccountSnapshot } from '@cat-cafe/shared';
 import type { RuntimeProviderProfile } from './account-resolver.js';
 import type { CodexAccountLaunchDescriptor } from './codex-account-launch.js';
@@ -13,4 +14,11 @@ export function codexExecutionAccountSnapshot(
     accountRevision: launch.accountRevision,
     ...(launch.identity ? { identity: Object.freeze({ ...launch.identity }) } : {}),
   });
+}
+
+/** Host-local currentness check for the selected gateway and its credential. */
+export function codexGatewayCredentialVersion(baseUrl: string, apiKey: string): string {
+  return createHash('sha256')
+    .update(JSON.stringify([baseUrl, apiKey]))
+    .digest('hex');
 }

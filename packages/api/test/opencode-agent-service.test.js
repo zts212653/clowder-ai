@@ -376,7 +376,7 @@ describe('OpenCodeAgentService', () => {
     const prompt = '- [navigation]\nTreat this entire value as the finalizer prompt.';
     const finalizerAgent = 'cat-cafe-no-tool-finalizer-test-nonce';
     const service = new OpenCodeAgentService({ catId: 'opencode', model: 'claude-sonnet-4-6' });
-    const args = service.buildNoToolFinalizerArgs(prompt, 'ses_test123', 'claude-sonnet-4-6', finalizerAgent);
+    const args = service.buildNoToolArgs(prompt, 'ses_test123', 'claude-sonnet-4-6', finalizerAgent);
 
     assert.equal(args[args.indexOf('--agent') + 1], finalizerAgent);
     assert.deepEqual(args.slice(-2), ['--', prompt], `expected option terminator immediately before prompt: ${args}`);

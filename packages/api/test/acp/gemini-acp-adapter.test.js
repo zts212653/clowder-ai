@@ -828,6 +828,32 @@ describe('GeminiAcpAdapter', () => {
     assert.equal(captured[setModelIndex].params.value, 'anthropic/claude-opus-4-6');
   });
 
+  it('does not set an ACP model after cancellation while awaiting the active package', async () => {
+    const { pool: p, captured } = createPoolWithAutoRespond();
+    pool = p;
+    const controller = new AbortController();
+    const selectSessionModel = mock.fn(async () => {
+      controller.abort();
+      return { configId: 'model' };
+    });
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      sessionModel: 'anthropic/claude-opus-4-6',
+      selectSessionModel,
+    });
+    for await (const _ of adapter.invoke('hello', { signal: controller.signal })) {
+      /* drain */
+    }
+    assert.equal(selectSessionModel.mock.callCount(), 1);
+    assert.equal(
+      captured.some(({ method }) => method === 'session/set_config_option'),
+      false,
+    );
+  });
+
   it('does not set ACP session model when the agent model option does not allow it', async () => {
     const { child, clientStdin, agentStdout, ee } = createMockChild();
     const captured = [];

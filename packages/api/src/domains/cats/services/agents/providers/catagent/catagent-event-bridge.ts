@@ -10,30 +10,17 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
+import type { AnthropicContentBlock, AnthropicUsage } from '@clowder-ai/agent-contract/catagent';
 import type { AgentMessage, TokenUsage } from '../../../types.js';
 
 // ── Anthropic API shapes (inline, no SDK dependency) ──
 
-export interface AnthropicUsage {
-  input_tokens?: number;
-  output_tokens?: number;
-  cache_creation_input_tokens?: number;
-  cache_read_input_tokens?: number;
-}
-
-export interface AnthropicTextBlock {
-  type: 'text';
-  text: string;
-}
-
-export interface AnthropicToolUseBlock {
-  type: 'tool_use';
-  id: string;
-  name: string;
-  input: Record<string, unknown>;
-}
-
-export type AnthropicContentBlock = AnthropicTextBlock | AnthropicToolUseBlock;
+export type {
+  AnthropicContentBlock,
+  AnthropicTextBlock,
+  AnthropicToolUseBlock,
+  AnthropicUsage,
+} from '@clowder-ai/agent-contract/catagent';
 
 export interface AnthropicMessageResponse {
   id: string;

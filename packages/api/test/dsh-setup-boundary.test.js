@@ -96,3 +96,42 @@ test('Desktop inspection accepts runtime IDs, never client-supplied executables 
   }
   await app.close();
 });
+
+test('an independent DSH runtime id is verified after the existing owner gate and never falls back to shared detection', async (t) => {
+  const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+  const owner = 'fixture-owner';
+  process.env.DEFAULT_OWNER_USER_ID = owner;
+  const ref = 'plugin:official.agent-dsh/dsh';
+  const requests = [];
+  const app = Fastify();
+  t.after(async () => {
+    await app.close();
+    if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+    else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+  });
+  app.addHook('preHandler', async (request) => {
+    request.sessionUserId = request.headers['x-fixture-session'];
+  });
+  registerDshSetupRoutes(app, {
+    readDshAdapterDesktop: async (_request, _reply, id) => {
+      requests.push(id);
+      return undefined;
+    },
+    readDetection: async () => assert.fail('An explicit plugin runtime id must not look up the shared source'),
+  });
+  const inspect = (session) =>
+    app.inject({
+      method: 'POST',
+      url: '/api/cats/dsh-setup/inspect',
+      remoteAddress: '127.0.0.1',
+      headers: { host: 'localhost:3004', ...(session ? { 'x-fixture-session': session } : {}) },
+      payload: { runtimeId: ref },
+    });
+  assert.equal((await inspect()).statusCode, 401);
+  assert.equal((await inspect('fixture-non-owner')).statusCode, 403);
+  assert.deepEqual(requests, []);
+  const unavailable = await inspect(owner);
+  assert.equal(unavailable.statusCode, 422);
+  assert.deepEqual(unavailable.json(), { error: 'dsh_setup_custom_startup' });
+  assert.deepEqual(requests, [ref]);
+});

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, afterEach, beforeEach, describe, it } from 'node:test';
@@ -486,7 +486,7 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     assert.equal(runtimeCat.roster, null);
   });
 
-  it('GET /api/cats bootstraps an empty runtime catalog before the first read', async (t) => {
+  it('GET /api/cats leaves an empty runtime catalog unpersisted on a cold read', async (t) => {
     const codexTemplate = makeCatalog('codex', 'Codex');
     const antigravityTemplate = makeCatalog('antigravity', 'Antigravity', 'antigravity', 'gemini-bridge');
     const opencodeTemplate = makeCatalog('opencode', 'OpenCode', 'opencode', 'claude-opus-4-6');
@@ -516,12 +516,10 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     const body = JSON.parse(res.body);
     assert.deepEqual(body.cats, [], 'first read must not enroll any project template member');
 
-    const runtimeCatalog = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
-    assert.deepEqual(runtimeCatalog.breeds, [], 'bootstrap must persist an empty member list');
-    assert.equal(runtimeCatalog.memberInitialization, 'user_selected_v1');
     const nextRead = await app.inject({ method: 'GET', url: '/api/cats' });
     assert.equal(nextRead.statusCode, 200);
     assert.deepEqual(nextRead.json().cats, [], 'subsequent reads must not enroll template members either');
+    assert.equal(existsSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json')), false);
   });
 
   it('GET /api/cats falls back to the readable active project root when CAT_TEMPLATE_PATH is stale', async () => {

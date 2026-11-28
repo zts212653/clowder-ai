@@ -39,6 +39,7 @@ export async function generateBundledPluginArtifacts(
     sourceRoot = pluginRoot,
     formatManifest = (text) => text,
     validatePrebuiltArchive = async () => {},
+    builtArchives = new Map(),
   } = {},
 ) {
   const outputRoot = fileURLToPath(new URL('bundled-packages', pluginRoot));
@@ -57,10 +58,12 @@ export async function generateBundledPluginArtifacts(
     assert.ok(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version));
     const relativeRoot = `bundled-packages/${catalogId}/${manifest.version}/`;
     const manifestBytes = Buffer.from(formatManifest(`${JSON.stringify(manifest, null, 2)}\n`));
-    if (prebuilt) {
+    const builtArchive = builtArchives.get(catalogId);
+    if (prebuilt || builtArchive) {
       const archivePath = `${catalogId}/${manifest.version}/package.tgz`;
-      const sourceArchiveUrl = new URL(`bundled-packages/${archivePath}`, sourceRoot);
-      const rootPath = await realpath(sourceRoot);
+      const sourceArchiveUrl = builtArchive ?? new URL(`bundled-packages/${archivePath}`, sourceRoot);
+      const archiveRoot = builtArchive ? new URL('.', builtArchive) : sourceRoot;
+      const rootPath = await realpath(archiveRoot);
       const sourcePath = fileURLToPath(sourceArchiveUrl);
       const actualPath = await realpath(sourceArchiveUrl);
       const inside = relative(rootPath, actualPath);
@@ -68,7 +71,7 @@ export async function generateBundledPluginArtifacts(
         inside && !isAbsolute(inside) && inside !== '..' && !inside.startsWith(`..${sep}`),
         'prebuilt archive must remain inside the source root',
       );
-      const components = relative(fileURLToPath(sourceRoot), sourcePath).split(sep);
+      const components = relative(fileURLToPath(archiveRoot), sourcePath).split(sep);
       let current = rootPath;
       for (const [index, component] of components.entries()) {
         current = join(current, component);
@@ -80,7 +83,12 @@ export async function generateBundledPluginArtifacts(
         );
       }
       const bytes = await readFile(sourceArchiveUrl);
-      assert.equal(createHash('sha256').update(bytes).digest('hex'), prebuilt.sha256, 'prebuilt archive SHA256 drift');
+      if (prebuilt)
+        assert.equal(
+          createHash('sha256').update(bytes).digest('hex'),
+          prebuilt.sha256,
+          'prebuilt archive SHA256 drift',
+        );
       await validatePrebuiltArchive(sourcePath);
       recordFile(new URL(`${relativeRoot}manifest.json`, pluginRoot), manifestBytes);
       recordFile(new URL(`${relativeRoot}package.tgz`, pluginRoot), bytes);

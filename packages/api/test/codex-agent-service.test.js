@@ -12,12 +12,16 @@ import { PassThrough } from 'node:stream';
 import { describe, mock, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
+import { buildCodexExecLaunchArguments } from '../../agent-access-plugin/src/runtime/codex-exec-launch-arguments.ts';
+import { bindWindowsProviderHostScope } from '../dist/utils/windows-provider-host.js';
 import { upstreamMcpServersFromArgs } from './helpers/direct-mcp-contract.js';
 import { assertSelectedApiAccount, installAmbientCodexAccount } from './helpers/f320-auth-environment.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 
 const {
   CodexAgentService: ProductionCodexAgentService,
+  assertCodexExecPlanSafe,
+  assertCodexExecPlanShape,
   buildCodexReasoningArgs,
   codexConfigObjectFromArgs,
   isGitRepositoryPath,
@@ -1897,6 +1901,303 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.ok(args.includes('approval_policy="on-request"'), 'fresh exec should set default approval policy');
     assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
   });
+
+  test('uses the active access planner for exec argv while the Host keeps the stdin prompt', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    let seen;
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+      planLaunch: async (input) => {
+        seen = input;
+        return buildCodexExecLaunchArguments(input);
+      },
+    });
+
+    const promise = collect(service.invoke('hello'));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-planned' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(args[0], 'exec');
+    assert.equal(args.at(-1), '-');
+    assert.ok(args.includes('--model'));
+    assert.equal(proc.stdinData, 'hello', 'prompt still travels over stdin, never argv');
+    assert.equal(seen.sessionId, undefined);
+    assert.equal(seen.readOnly, false);
+    assert.equal(typeof seen.groups.sandbox, 'string');
+    assert.ok(seen.groups.sandbox.startsWith('__CAT_CAFE_CODEX_GROUP_'));
+  });
+
+  test('pins exec/resume identity, stdin marker and read-only sandbox', () => {
+    assert.doesNotThrow(() => assertCodexExecPlanSafe({ readOnly: false }, ['exec', '--json', '--', '-']));
+    assert.doesNotThrow(() =>
+      assertCodexExecPlanSafe({ readOnly: false, sessionId: 's' }, ['exec', 'resume', 's', '--json', '--', '-']),
+    );
+    assert.throws(
+      () =>
+        assertCodexExecPlanSafe({ readOnly: false, sessionId: 's' }, ['exec', 'resume', 'other', '--json', '--', '-']),
+      /codex_exec_plan_policy_violation/,
+    );
+    assert.throws(
+      () => assertCodexExecPlanSafe({ readOnly: false }, ['exec', '--json', '-']),
+      /codex_exec_plan_policy_violation/,
+    );
+    assert.throws(
+      () =>
+        assertCodexExecPlanSafe({ readOnly: true }, ['exec', '--json', '--sandbox', 'danger-full-access', '--', '-']),
+      /codex_exec_plan_policy_violation/,
+    );
+    assert.doesNotThrow(() =>
+      assertCodexExecPlanSafe({ readOnly: true }, ['exec', '--json', '--sandbox', 'read-only', '--', '-']),
+    );
+  });
+
+  test('rejects a missing, reordered or split protected group', () => {
+    const readOnly = '__CAT_CAFE_CODEX_GROUP_readOnly__';
+    const sandbox = '__CAT_CAFE_CODEX_GROUP_sandbox__';
+    const after = '__CAT_CAFE_CODEX_GROUP_afterSandbox__';
+    const expected = [readOnly, sandbox, after];
+
+    assert.doesNotThrow(() =>
+      assertCodexExecPlanShape(['exec', '--json', readOnly, sandbox, after, '--', '-'], expected),
+    );
+    assert.throws(
+      () => assertCodexExecPlanShape(['exec', '--json', sandbox, after, '--', '-'], expected),
+      /codex_exec_plan_policy_violation/,
+    );
+    assert.throws(
+      () => assertCodexExecPlanShape(['exec', '--json', sandbox, readOnly, after, '--', '-'], expected),
+      /codex_exec_plan_policy_violation/,
+    );
+    assert.throws(
+      () =>
+        assertCodexExecPlanShape(
+          ['exec', '--json', readOnly, sandbox, '--config', 'sandbox_mode="danger-full-access"', after, '--', '-'],
+          expected,
+        ),
+      /codex_exec_plan_policy_violation/,
+    );
+    // A config group moved before --json must not pass the two-filter check.
+    assert.throws(
+      () => assertCodexExecPlanShape(['exec', readOnly, '--json', sandbox, after, '--', '-'], expected),
+      /codex_exec_plan_policy_violation/,
+    );
+    assert.doesNotThrow(() =>
+      assertCodexExecPlanShape(['exec', 'resume', 's', '--json', readOnly, sandbox, after, '--', '-'], expected, 's'),
+    );
+    assert.throws(
+      () =>
+        assertCodexExecPlanShape(
+          ['exec', 'resume', 'other', '--json', readOnly, sandbox, after, '--', '-'],
+          expected,
+          's',
+        ),
+      /codex_exec_plan_policy_violation/,
+    );
+  });
+
+  test('redacts L0, MCP and user values from the package planner input', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    let seen;
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+      planLaunch: async (input) => {
+        seen = input;
+        return buildCodexExecLaunchArguments(input);
+      },
+    });
+
+    const promise = collect(service.invoke('hello', { cliConfigArgs: ['--config', 'custom_flag="secret-value"'] }));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-redacted' }]);
+    await promise;
+
+    const serialized = JSON.stringify(seen);
+    assert.ok(!serialized.includes('Clowder AI L0'), 'L0 text must stay in the Host');
+    assert.ok(!serialized.includes('secret-value'), 'user values must stay in the Host');
+    assert.ok(!serialized.includes('mcp_servers'), 'MCP config must stay in the Host');
+    assert.ok(!serialized.includes('developer_instructions='), 'L0 is not passed as a config value');
+    assert.ok(seen.groups.afterSandbox.startsWith('__CAT_CAFE_CODEX_GROUP_'), 'approval/L0 group is opaque');
+    assert.ok(seen.groups.tail.startsWith('__CAT_CAFE_CODEX_GROUP_'), 'MCP/workspace tail is opaque');
+    assert.ok(seen.groups.user.startsWith('__CAT_CAFE_CODEX_GROUP_'), 'user args are opaque');
+  });
+
+  test('read-only plan rejects an extra add-dir before spawn', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+      planLaunch: async () => ({
+        args: ['exec', '--json', '--sandbox', 'read-only', '--add-dir', '/tmp', '--', '-'],
+        managedArgvFlags: [],
+      }),
+    });
+
+    await assert.rejects(
+      () => collect(service.invoke('hello', { toolExecutionPolicy: { mode: 'read_only' } })),
+      /codex_exec_plan_policy_violation/,
+    );
+    assert.equal(spawnFn.mock.calls.length, 0, 'the policy refusal must happen before spawn');
+  });
+
+  test('accepts a normal read-only plan through the package', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+      planLaunch: (input) => buildCodexExecLaunchArguments(input),
+    });
+
+    const promise = collect(service.invoke('hello', { toolExecutionPolicy: { mode: 'read_only' } }));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-read-only-ok' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(args[0], 'exec');
+    assert.equal(args[args.indexOf('--sandbox') + 1], 'read-only');
+    assert.ok(!args.includes('--add-dir'));
+  });
+
+  test('checks the planned generation after beforeProviderLaunch, before spawn', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    let beforeCalled = false;
+    let assertionSawBefore = false;
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+      planLaunch: async (input) => ({
+        ...buildCodexExecLaunchArguments(input),
+        assertCurrent: async () => {
+          assertionSawBefore = beforeCalled;
+          if (!beforeCalled) throw new Error('stale_before_provider_launch');
+        },
+      }),
+    });
+
+    const promise = collect(
+      service.invoke('hello', {
+        beforeProviderLaunch: async () => {
+          beforeCalled = true;
+        },
+      }),
+    );
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-assert-after-hook' }]);
+    await promise;
+    assert.equal(assertionSawBefore, true);
+  });
+
+  test('uses the exec archive display fields on the ordinary carrier without changing session identity', async () => {
+    const proc = createMockProcess();
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn: createMockSpawnFn(proc),
+      model: 'gpt-5.3-codex',
+      planLaunch: async (input) => ({
+        ...buildCodexExecLaunchArguments(input),
+        output: { delta: 'delta', message: 'content', reasoningParts: 'summary', reasoningText: ['text', 'content'] },
+      }),
+    });
+
+    const promise = collect(service.invoke('hello'));
+    emitCodexEvents(proc, [
+      { type: 'thread.started', thread_id: 'native-thread' },
+      {
+        type: 'item.completed',
+        item: { type: 'agent_message', id: 'm1', text: 'old field', content: 'selected field' },
+      },
+      { type: 'turn.completed', usage: { input_tokens: 12, output_tokens: 4 } },
+    ]);
+    const messages = await promise;
+    assert.equal(messages.find((msg) => msg.type === 'session_init')?.sessionId, 'native-thread');
+    assert.equal(messages.find((msg) => msg.type === 'text')?.content, 'selected field');
+    assert.equal(messages.find((msg) => msg.type === 'done')?.metadata?.usage?.outputTokens, 4);
+  });
+
+  test('access planner argv matches the Host fallback for fresh and resume', async () => {
+    async function run(planLaunch, sessionId) {
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({
+        l0CompilerFn: fakeL0Compiler,
+        spawnFn,
+        model: 'gpt-5.3-codex',
+        ...(planLaunch ? { planLaunch } : {}),
+      });
+      const promise = collect(service.invoke('hello', sessionId ? { sessionId } : undefined));
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: sessionId ?? 'fresh' }]);
+      await promise;
+      return spawnFn.mock.calls[0].arguments[1];
+    }
+
+    const planned = (input) => buildCodexExecLaunchArguments(input);
+
+    assert.deepEqual(await run(planned), await run(undefined));
+    assert.deepEqual(await run(planned, 'existing-thread'), await run(undefined, 'existing-thread'));
+  });
+
+  test(
+    'rejects a retired Codex plan after the Windows provider host becomes ready',
+    {
+      skip: process.platform !== 'win32',
+      timeout: 10_000,
+    },
+    async () => {
+      const invocationId = 'codex-fixture-stale-windows-host';
+      const entered = Promise.withResolvers();
+      const available = Promise.withResolvers();
+      let current = true;
+      let launches = 0;
+      let closes = 0;
+      const service = new CodexAgentService({
+        l0CompilerFn: fakeL0Compiler,
+        model: 'gpt-5.3-codex',
+        planLaunch: async (input) => ({
+          ...buildCodexExecLaunchArguments(input),
+          async assertCurrent() {
+            if (!current) throw Error('session_implementation_unavailable');
+          },
+        }),
+      });
+      const bound = bindWindowsProviderHostScope(
+        () => service.invoke('fixture', { invocationId })[Symbol.asyncIterator](),
+        {
+          execution: { invocationId },
+          take() {
+            entered.resolve();
+            return available.promise;
+          },
+        },
+      );
+      const collecting = collect({ [Symbol.asyncIterator]: () => bound });
+      await entered.promise;
+      current = false;
+      available.resolve({
+        launch() {
+          launches++;
+          throw Error('unexpected stale provider launch');
+        },
+        async close() {
+          closes++;
+          return { verdict: 'absent' };
+        },
+      });
+      const events = await collecting;
+      assert.equal(launches, 0);
+      assert.equal(closes, 1);
+      assert.match(events.find((event) => event.type === 'error')?.error ?? '', /session_implementation_unavailable/);
+    },
+  );
 
   test('unavailable approval surface keeps Apps writes gated and injects the audited GitHub route', async () => {
     const proc = createMockProcess();

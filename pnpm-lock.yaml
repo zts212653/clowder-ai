@@ -39,6 +39,47 @@ importers:
         specifier: ^2.8.1
         version: 2.8.2
 
+  packages/agent-access-plugin:
+    dependencies:
+      '@cat-cafe/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@clowder-ai/agent-contract':
+        specifier: workspace:*
+        version: link:../agent-contract
+      smol-toml:
+        specifier: ^1.6.0
+        version: 1.6.0
+      yaml:
+        specifier: ^2.8.1
+        version: 2.8.2
+      zod:
+        specifier: ^3.22.0
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^20.11.0
+        version: 20.19.31
+      esbuild:
+        specifier: 0.27.2
+        version: 0.27.2
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+
+  packages/agent-contract:
+    dependencies:
+      '@cat-cafe/shared':
+        specifier: workspace:*
+        version: link:../shared
+      zod:
+        specifier: ^3.22.4
+        version: 3.25.76
+    devDependencies:
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+
   packages/api:
     dependencies:
       '@anthropic-ai/claude-agent-sdk':
@@ -50,6 +91,12 @@ importers:
       '@cat-cafe/shared':
         specifier: workspace:*
         version: link:../shared
+      '@clowder-ai/agent-access':
+        specifier: workspace:*
+        version: link:../agent-access-plugin
+      '@clowder-ai/agent-contract':
+        specifier: workspace:*
+        version: link:../agent-contract
       '@clowder-ai/plugin-contract':
         specifier: file:vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-a4836266493d.tgz
         version: file:packages/api/vendor/clowder-ai-plugin-contract-0.4.0-candidate.0-a4836266493d.tgz
@@ -439,6 +486,9 @@ importers:
       '@cat-cafe/ui':
         specifier: workspace:*
         version: link:../ui
+      '@clowder-ai/agent-contract':
+        specifier: workspace:*
+        version: link:../agent-contract
       '@clowder-ai/plugin-contract':
         specifier: file:../api/vendor/clowder-ai-plugin-contract-0.3.1-candidate.0-f327-3edd45d1c7ba.tgz
         version: file:packages/api/vendor/clowder-ai-plugin-contract-0.3.1-candidate.0-f327-3edd45d1c7ba.tgz

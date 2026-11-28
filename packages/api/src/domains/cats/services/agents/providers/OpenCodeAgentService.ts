@@ -16,7 +16,9 @@
 
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { configuredCredentialValues } from '@cat-cafe/mcp-server/dist/secret-runtime.js';
 import { type CatId, createCatId } from '@cat-cafe/shared';
+import type { AgentAccessOpenCodeEvent } from '@clowder-ai/agent-contract';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
@@ -45,6 +47,7 @@ import {
   cacheOpenCodeAutoApproveProbe,
   getCliFlagName,
   getOpenCodeTransportArgs,
+  getOpenCodeTransportArgv,
   OPENCODE_AUTO_APPROVE_FLAG,
   OPENCODE_STANDALONE_FLAG,
   type OpenCodeAutoApproveProbeFn,
@@ -73,6 +76,7 @@ import {
   recoverOpenCodeSilentCompletion,
   SessionSingleFlight,
 } from './opencode-recovery.js';
+import { mapOpenCodeWireEvent } from './opencode-wire-mapper.js';
 
 const log = createModuleLogger('opencode-agent');
 
@@ -96,6 +100,43 @@ function readOpenCodeNativeInstructions(
   }
 }
 
+interface OpenCodeLaunchPlanInput {
+  prompt: string;
+  sessionId?: string;
+  model?: string;
+  readOnly?: boolean;
+  cliConfigArgs?: readonly string[];
+  /** Result of the Host's `run --help` probe; the package never runs it itself. */
+  approvalFlag?: string;
+  /** Transport args the Host resolved from user config and the probe. */
+  transportArgs?: readonly string[];
+  /** Whether this CLI advertises `--pure`; unset when no probe answered. */
+  pureSupported?: boolean;
+  /** Host-owned agent name for a read-only run. */
+  readOnlyAgent: string;
+}
+
+type OpenCodeLaunchPlanner = (input: OpenCodeLaunchPlanInput) => Promise<{
+  args: string[];
+  managedArgvFlags: string[];
+  assertCurrent?: () => Promise<void>;
+  lifetime?: AbortSignal;
+  normalizeEvent?: (event: unknown, knownCredentials?: readonly string[]) => Promise<unknown>;
+}>;
+
+type OpenCodeFinalizerPlanner = (
+  input: {
+    prompt: string;
+    model: string;
+    finalizerAgent: string;
+    sessionId?: string;
+    transportArgs?: readonly string[];
+    pureSupported?: boolean;
+  },
+  /** The main run's activation lease; the recovery plan must live under the same one. */
+  lease?: { assertCurrent?: () => Promise<void> },
+) => Promise<{ args: string[]; managedArgvFlags: string[] }>;
+
 interface OpenCodeAgentServiceOptions {
   catId?: CatId;
   /** Model name (e.g. 'claude-sonnet-4-6' or 'openrouter/google/gemini-3-flash-preview') */
@@ -116,6 +157,15 @@ interface OpenCodeAgentServiceOptions {
   opencodeDbPath?: string;
   /** Test seam for managed OpenCode config precedence detection. */
   opencodeManagedConfigPaths?: readonly string[];
+  /**
+   * Plans argv through the active Agent Access package (public protocol). The Host
+   * still owns the binary, credentials, cwd, spawn and the `run --help` probe; its
+   * results are passed in as inputs. When absent, the in-process builder is used —
+   * that path exists only for tests and for a Host built without the integration.
+   */
+  planLaunch?: OpenCodeLaunchPlanner;
+  /** Plans the tool-free recovery run through the same package. */
+  planFinalizer?: OpenCodeFinalizerPlanner;
 }
 
 const OPENCODE_API_KEY_ENV = 'OPENCODE_API_KEY';
@@ -162,6 +212,20 @@ interface OpenCodePostToolFinalizerParams {
   textMode: 'append' | 'replace';
   transportArgs?: readonly string[];
   options?: AgentServiceOptions;
+  /** Package event reader from the launch plan, so both runs read output the same way. */
+  normalizeEvent?: (event: unknown, knownCredentials?: readonly string[]) => Promise<unknown>;
+  /**
+   * `--pure` capability from the launch probe. The finalizer resolves transport args
+   * separately, but this one comes from the same help result, so it is passed rather
+   * than probed twice.
+   */
+  pureSupported?: boolean;
+  /**
+   * Generation check from the main launch plan. The recovery run is a second physical
+   * spawn in the same turn, so it must recheck the package activation it planned
+   * against instead of trusting a plan the Host may already have retired.
+   */
+  assertCurrent?: () => Promise<void>;
 }
 
 function getOpenCodeStepFinishReason(event: unknown): string | undefined {
@@ -189,6 +253,43 @@ function isPermanentOpenCodeProviderFailure(event: unknown, reasonCode: string |
     statusCode === 402 ||
     statusCode === 403 ||
     statusCode === 404
+  );
+}
+
+/**
+ * The plan owns argv shape, but the Host owns the authorization facts behind it: which
+ * agent a read-only run may use, and which server it may talk to. A plan that returns
+ * different values is not a style variation — it would escalate a read-only turn into a
+ * writable one, or reach a server the Host never approved. Returns the reason to refuse,
+ * or null when the plan consumed the Host's facts as given.
+ */
+function findOpenCodePlanAuthorizationViolation(
+  args: readonly string[],
+  approved: { transportArgs: readonly string[]; restrictedArgs?: readonly string[] },
+): string | null {
+  const transport = getOpenCodeTransportArgv(args);
+  if (
+    transport.length !== approved.transportArgs.length ||
+    transport.some((arg, i) => arg !== approved.transportArgs[i])
+  )
+    return 'unapproved_server_transport';
+  // Restricted runs have a closed option surface. An additional file, session
+  // selector or flag changes the scope that the Host reported to the caller.
+  if (
+    approved.restrictedArgs &&
+    (approved.restrictedArgs.length !== args.length || approved.restrictedArgs.some((arg, i) => arg !== args[i]))
+  )
+    return 'restricted_argv_changed';
+  return null;
+}
+
+/**
+ * `callbackEnv` uses `null` to mean "delete this variable", so those entries carry no
+ * value to redact. `configuredCredentialValues` only accepts real strings.
+ */
+function withoutClearedValues(values?: Record<string, string | null>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(values ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
   );
 }
 
@@ -243,6 +344,8 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
   private readonly autoApproveProbeFn: OpenCodeAutoApproveProbeFn | undefined;
   private readonly opencodeDbPath: string | undefined;
   private readonly opencodeManagedConfigPaths: readonly string[] | undefined;
+  private readonly planLaunch: OpenCodeLaunchPlanner | undefined;
+  private readonly planFinalizer: OpenCodeFinalizerPlanner | undefined;
   private readonly sessionSingleFlight = new SessionSingleFlight();
   private autoApproveProbe: Promise<OpenCodeAutoApproveProbeResult> | undefined;
 
@@ -257,6 +360,8 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     this.autoApproveProbeFn = options?.autoApproveProbeFn;
     this.opencodeDbPath = options?.opencodeDbPath;
     this.opencodeManagedConfigPaths = options?.opencodeManagedConfigPaths;
+    this.planLaunch = options?.planLaunch;
+    this.planFinalizer = options?.planFinalizer;
   }
 
   /**
@@ -367,15 +472,71 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         options?.cliConfigArgs,
         readOnly,
       );
-      const args = this.buildArgs(
-        prompt,
-        options?.sessionId,
-        effectiveModel,
-        readOnly ? undefined : options?.cliConfigArgs,
-        runDefaults.approvalFlag,
-        readOnly,
-        runDefaults.transportArgs,
-      );
+      // The package owns argv when the integration is present; its refusal must end
+      // the turn loudly rather than fall back to a second builder here.
+      let args: string[];
+      let plannedManagedFlags: readonly string[] | undefined;
+      let plannedNormalizeEvent:
+        | ((event: unknown, knownCredentials?: readonly string[]) => Promise<unknown>)
+        | undefined;
+      let assertLaunchCurrent: (() => Promise<void>) | undefined;
+      let launchSignal = options?.signal;
+      if (this.planLaunch) {
+        const plan = await this.planLaunch({
+          prompt,
+          ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
+          model: effectiveModel,
+          ...(readOnly ? { readOnly } : {}),
+          ...(readOnly ? {} : options?.cliConfigArgs ? { cliConfigArgs: options.cliConfigArgs } : {}),
+          ...(runDefaults.approvalFlag ? { approvalFlag: runDefaults.approvalFlag } : {}),
+          ...(runDefaults.transportArgs.length > 0 ? { transportArgs: runDefaults.transportArgs } : {}),
+          ...(runDefaults.pure !== undefined ? { pureSupported: runDefaults.pure } : {}),
+          readOnlyAgent: OPENCODE_READ_ONLY_AGENT,
+        });
+        // Judge the plan against the facts this Host already approved before anything
+        // downstream trusts it: the read-only agent identity and the resolved transport.
+        const violation = findOpenCodePlanAuthorizationViolation(plan.args, {
+          transportArgs: runDefaults.transportArgs,
+          ...(readOnly || options?.requireExactResume
+            ? {
+                restrictedArgs: this.buildArgs(
+                  prompt,
+                  options?.sessionId,
+                  effectiveModel,
+                  readOnly ? undefined : options?.cliConfigArgs,
+                  runDefaults.approvalFlag,
+                  readOnly,
+                  runDefaults.transportArgs,
+                  runDefaults.pure === true,
+                ),
+              }
+            : {}),
+        });
+        if (violation) throw new Error(`opencode_plan_authorization_violation:${violation}`);
+        args = plan.args;
+        plannedManagedFlags = plan.managedArgvFlags;
+        plannedNormalizeEvent = plan.normalizeEvent;
+        assertLaunchCurrent = plan.assertCurrent;
+        if (plan.lifetime) launchSignal = launchSignal ? AbortSignal.any([launchSignal, plan.lifetime]) : plan.lifetime;
+      } else {
+        args = this.buildArgs(
+          prompt,
+          options?.sessionId,
+          effectiveModel,
+          readOnly ? undefined : options?.cliConfigArgs,
+          runDefaults.approvalFlag,
+          readOnly,
+          runDefaults.transportArgs,
+          runDefaults.pure === true,
+        );
+      }
+
+      // Which values count as secrets when redacting raw events bound for the package
+      // worker. Kimi derives the same set the same way; shape alone would miss a
+      // provider-issued key nested inside a raw error.
+      const normalizeEventCredentials = plannedNormalizeEvent
+        ? configuredCredentialValues({ ...process.env, ...withoutClearedValues(childEnv) })
+        : undefined;
 
       log.debug(
         {
@@ -422,12 +583,14 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       args[args.length - 1] = preparedRequest.message.body;
 
       const cliOpts = {
+        assertLaunchCurrent,
         command: opencodeCommand,
         args,
         ...(cwd ? { cwd } : {}),
         env: childEnv,
         onSuccessfulExitStderr,
-        ...(options?.signal ? { signal: options.signal } : {}),
+        ...(plannedManagedFlags && plannedManagedFlags.length > 0 ? { managedArgvFlags: plannedManagedFlags } : {}),
+        ...(launchSignal ? { signal: launchSignal } : {}),
         ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
         ...(options?.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
         ...(options?.livenessProbe ? { livenessProbe: options.livenessProbe } : {}),
@@ -436,6 +599,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           ? { rawArchivePath: this.rawArchive.getPath(options.invocationId) }
           : {}),
       };
+      if (options?.spawnCliOverride) await assertLaunchCurrent?.();
       const events = options?.spawnCliOverride
         ? options.spawnCliOverride(cliOpts)
         : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
@@ -470,9 +634,11 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         eventCount++;
         // #780: Archive raw event for post-mortem diagnostics (fire-and-forget)
         if (options?.invocationId) {
-          this.rawArchive.append(options.invocationId, sanitizeRawEvent(event)).catch((err) => {
-            log.warn({ catId: this.catId, invocationId: options.invocationId, err }, 'Raw archive write failed');
-          });
+          this.rawArchive
+            .append(options.invocationId, sanitizeRawEvent(event, normalizeEventCredentials))
+            .catch((err) => {
+              log.warn({ catId: this.catId, invocationId: options.invocationId, err }, 'Raw archive write failed');
+            });
         }
         const evtType =
           typeof event === 'object' && event !== null && 'type' in event
@@ -485,7 +651,11 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           // A contradictory current event must not revive a previously captured recovery anchor.
           lastAssistantMessageId = undefined;
         } else {
-          if (messageRef?.sessionId) metadata.sessionId = messageRef.sessionId;
+          if (messageRef?.sessionId) {
+            if (options?.requireExactResume && messageRef.sessionId !== options.sessionId)
+              throw new Error('opencode_session_mismatch');
+            metadata.sessionId = messageRef.sessionId;
+          }
           if (messageRef?.messageId) lastAssistantMessageId = messageRef.messageId;
         }
         log.debug({ catId: this.catId, eventIndex: eventCount, type: evtType }, 'CLI event received');
@@ -552,28 +722,38 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           continue;
         }
 
-        const result = transformOpenCodeEvent(event, this.catId);
+        if (evtType === 'tool_use') {
+          toolUseEmitted = true;
+          lastToolEventIndex = eventCount;
+          const trace = extractOpenCodeToolTrace(sanitizeRawEvent(event, normalizeEventCredentials));
+          if (trace) {
+            lastToolTrace = trace;
+            if (trace.toolName === 'delegate-task') delegateTaskEmitted = true;
+          }
+        }
+        const reportEvent = evtType === 'error' ? sanitizeRawEvent(event, normalizeEventCredentials) : event;
+        const projected = plannedNormalizeEvent
+          ? mapOpenCodeWireEvent(
+              (await plannedNormalizeEvent(event, normalizeEventCredentials)) as AgentAccessOpenCodeEvent,
+              this.catId,
+            )
+          : transformOpenCodeEvent(reportEvent, this.catId);
+        const result =
+          evtType === 'error' && projected?.type !== 'error'
+            ? transformOpenCodeEvent(reportEvent, this.catId)
+            : projected;
         if (result !== null) {
           let terminateAfterYield = false;
           if (result.type === 'text' && result.content?.trim()) {
             textEventCount++;
             lastTextEventIndex = eventCount;
           }
-          if (result.type === 'tool_use') {
-            toolUseEmitted = true;
-            lastToolEventIndex = eventCount;
-            const toolTrace = extractOpenCodeToolTrace(event);
-            if (toolTrace !== null) {
-              lastToolTrace = toolTrace;
-              if (toolTrace.toolName === 'delegate-task') delegateTaskEmitted = true;
-            }
-          }
           // F212 Phase A AC-A8: enrich stream `error` event yield with cliDiagnostics so
           // frontend folded panel (Phase B) sees reasonCode / safeExcerpt / publicHint
           // even when CLI never exits non-zero (some providers emit error events then exit 0).
           let yieldMetadata: MessageMetadata = metadata;
           if (result.type === 'error') {
-            const rawError = readOpenCodeError(event);
+            const rawError = readOpenCodeError(reportEvent);
             log.warn(
               {
                 catId: this.catId,
@@ -610,9 +790,16 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           // P2-1: Only emit the first session_init; subsequent step_start events
           // in multi-step runs are silently dropped to avoid duplicate session metrics.
           if (result.type === 'session_init') {
-            if (sessionInitEmitted) continue;
+            if (
+              sessionInitEmitted ||
+              evtType !== 'step_start' ||
+              messageRef === OPENCODE_MESSAGE_REF_CONFLICT ||
+              !messageRef?.sessionId
+            )
+              continue;
             sessionInitEmitted = true;
-            if (result.sessionId) metadata.sessionId = result.sessionId;
+            yield { ...result, sessionId: messageRef.sessionId, metadata };
+            continue;
           }
           // clowder#915 R1 P1 (砚砚): transformer may carry `metadata.usage`
           // (from step_finish). The naive `metadata: yieldMetadata` below would
@@ -705,7 +892,10 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           trace: lastToolTrace,
           textMode: 'replace',
           transportArgs: runDefaults.transportArgs,
-          options,
+          ...(runDefaults.pure !== undefined ? { pureSupported: runDefaults.pure } : {}),
+          ...(plannedNormalizeEvent ? { normalizeEvent: plannedNormalizeEvent } : {}),
+          ...(assertLaunchCurrent ? { assertCurrent: assertLaunchCurrent } : {}),
+          options: launchSignal ? { ...options, signal: launchSignal } : options,
         })) {
           if (finalizerMsg.type === 'text') textEventCount++;
           if (finalizerMsg.metadata?.usage != null && resolveCurrentContextUsage(finalizerMsg.metadata.usage) != null) {
@@ -810,17 +1000,71 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       params.transportArgs ??
       (await this.resolveRunDefaults(params.command, params.cwd, params.childEnv, params.options?.cliConfigArgs, true))
         .transportArgs;
-    const finalizerArgs = this.buildNoToolFinalizerArgs(
-      finalizerPrompt,
-      params.sessionId,
-      params.effectiveModel,
-      finalizerAgent,
-      transportArgs,
-    );
+    let plannedFinalizerArgs: string[] | undefined;
+    if (this.planFinalizer) {
+      // The private recovery context is filled after the package has planned argv.
+      const promptSlot = 'host-finalizer-prompt';
+      try {
+        plannedFinalizerArgs = (
+          await this.planFinalizer(
+            {
+              prompt: promptSlot,
+              model: params.effectiveModel,
+              finalizerAgent,
+              ...(params.sessionId ? { sessionId: params.sessionId } : {}),
+              ...(transportArgs.length > 0 ? { transportArgs } : {}),
+              ...(params.pureSupported !== undefined ? { pureSupported: params.pureSupported } : {}),
+            },
+            { assertCurrent: params.assertCurrent },
+          )
+        ).args;
+        const violation = findOpenCodePlanAuthorizationViolation(plannedFinalizerArgs, {
+          transportArgs,
+          restrictedArgs: this.buildNoToolArgs(
+            promptSlot,
+            params.sessionId,
+            params.effectiveModel,
+            finalizerAgent,
+            transportArgs,
+            params.pureSupported === true,
+          ),
+        });
+        if (violation) throw new Error(`opencode_plan_authorization_violation:${violation}`);
+      } catch (err) {
+        // The package could not plan the recovery run (for example an older package
+        // that predates the operation). The turn still has the post-tool fallback
+        // text to end on, so degrade there instead of failing an otherwise complete
+        // turn — the same exit a boundary failure takes just above.
+        log.warn(
+          { catId: this.catId, invocationId: params.options?.invocationId, err },
+          'OpenCode no-tool finalizer could not be planned; using fallback text',
+        );
+        yield {
+          type: 'text',
+          catId: this.catId,
+          content: buildOpenCodePostToolFallbackText(params.trace, 'finalizer_unavailable'),
+          textMode: params.textMode,
+          metadata: params.metadata,
+          timestamp: Date.now(),
+        };
+        return;
+      }
+    }
+    const finalizerArgs =
+      plannedFinalizerArgs ??
+      this.buildNoToolArgs(
+        finalizerPrompt,
+        params.sessionId,
+        params.effectiveModel,
+        finalizerAgent,
+        transportArgs,
+        params.pureSupported === true,
+      );
     const finalizerEnv = this.buildNoToolFinalizerEnv(params.childEnv, finalizerAgent);
     const cliOpts = {
       command: params.command,
       args: finalizerArgs,
+      ...(params.assertCurrent ? { assertLaunchCurrent: params.assertCurrent } : {}),
       ...(params.cwd ? { cwd: params.cwd } : {}),
       env: finalizerEnv,
       ...(params.options?.signal ? { signal: params.options.signal } : {}),
@@ -850,10 +1094,17 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     await params.options?.beforeProviderLaunch?.(preparedRequest);
     if (!('body' in preparedRequest.message)) throw new Error('opencode_finalizer_message_not_exact');
     finalizerArgs[finalizerArgs.length - 1] = preparedRequest.message.body;
+    if (params.options?.spawnCliOverride) await params.assertCurrent?.();
 
     const events = params.options?.spawnCliOverride
       ? params.options.spawnCliOverride(cliOpts)
       : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
+
+    // Same redaction rule as the main run: the recovery run reads the same CLI output
+    // through the same package worker, so it needs the same credential set.
+    const normalizeEventCredentials = params.normalizeEvent
+      ? configuredCredentialValues({ ...process.env, ...withoutClearedValues(params.childEnv) })
+      : undefined;
 
     const finalizerTextBuffer: AgentMessage[] = [];
     let finalizerPoisoned = false;
@@ -862,18 +1113,43 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
 
     for await (const event of events) {
       if (params.options?.invocationId) {
-        this.rawArchive.append(params.options.invocationId, sanitizeRawEvent(event)).catch((err) => {
-          log.warn(
-            { catId: this.catId, invocationId: params.options?.invocationId, err },
-            'Post-tool finalizer raw archive write failed',
-          );
-        });
+        this.rawArchive
+          .append(params.options.invocationId, sanitizeRawEvent(event, normalizeEventCredentials))
+          .catch((err) => {
+            log.warn(
+              { catId: this.catId, invocationId: params.options?.invocationId, err },
+              'Post-tool finalizer raw archive write failed',
+            );
+          });
       }
       const evtType =
         typeof event === 'object' && event !== null && 'type' in event
           ? String((event as Record<string, unknown>).type)
           : '__unknown';
       finalizerEventTypes.add(evtType);
+      const messageRef = extractOpenCodeMessageRef(event);
+      if (
+        messageRef === OPENCODE_MESSAGE_REF_CONFLICT ||
+        (messageRef?.sessionId && params.sessionId && messageRef.sessionId !== params.sessionId)
+      ) {
+        finalizerPoisoned = true;
+        finalizerErrorReason = 'session_mismatch';
+        continue;
+      }
+      if (messageRef?.sessionId) params.metadata.sessionId = messageRef.sessionId;
+      if (evtType === 'error') {
+        finalizerPoisoned = true;
+        finalizerErrorReason = 'provider_error';
+      }
+      if (evtType === 'tool_use') {
+        finalizerPoisoned = true;
+        finalizerErrorReason = 'tool_use_blocked';
+        log.warn(
+          { catId: this.catId, invocationId: params.options?.invocationId },
+          'OpenCode no-tool finalizer attempted to use a tool',
+        );
+        continue;
+      }
 
       if (isCliTimeout(event)) {
         finalizerPoisoned = true;
@@ -897,12 +1173,14 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         continue;
       }
 
-      const result = transformOpenCodeEvent(event, this.catId);
+      const result = params.normalizeEvent
+        ? mapOpenCodeWireEvent(
+            (await params.normalizeEvent(event, normalizeEventCredentials)) as AgentAccessOpenCodeEvent,
+            this.catId,
+          )
+        : transformOpenCodeEvent(event, this.catId);
       if (result === null) continue;
-      if (result.type === 'session_init') {
-        if (result.sessionId) params.metadata.sessionId = result.sessionId;
-        continue;
-      }
+      if (result.type === 'session_init') continue;
       if (result.type === 'tool_use') {
         finalizerPoisoned = true;
         finalizerErrorReason = 'tool_use_blocked';
@@ -949,6 +1227,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     const hasFinalizerText = finalizerTextBuffer.some((message) => message.content?.trim());
     if (!finalizerPoisoned && hasFinalizerText) {
       for (const finalizerText of finalizerTextBuffer) {
+        await params.assertCurrent?.();
         yield finalizerText;
       }
       return;
@@ -997,14 +1276,17 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     return recovered.text;
   }
 
-  private buildNoToolFinalizerArgs(
+  private buildNoToolArgs(
     prompt: string,
     sessionId: string | undefined,
     model: string,
     finalizerAgent = OPENCODE_NO_TOOL_FINALIZER_AGENT,
     transportArgs: readonly string[] = [],
+    pureSupported = false,
   ): string[] {
-    const args = ['run', ...transportArgs, '--pure', '--agent', finalizerAgent];
+    const args = ['run', ...transportArgs];
+    if (pureSupported) args.push('--pure');
+    args.push('--agent', finalizerAgent);
     if (sessionId) args.push('--session', sessionId);
     if (model) args.push('-m', model);
     args.push('--format', 'json', '--', prompt);
@@ -1037,10 +1319,14 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     defaultAutoApproveFlag?: string,
     readOnly = false,
     transportArgs: readonly string[] = [],
+    pureSupported = false,
   ): string[] {
     const args = ['run', ...transportArgs];
 
-    if (readOnly) args.push('--pure', '--agent', OPENCODE_READ_ONLY_AGENT);
+    if (readOnly) {
+      if (pureSupported) args.push('--pure');
+      args.push('--agent', OPENCODE_READ_ONLY_AGENT);
+    }
 
     // Session resume
     if (sessionId) {
@@ -1091,12 +1377,14 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     env?: Record<string, string | null>,
     cliConfigArgs?: readonly string[],
     readOnly = false,
-  ): Promise<{ approvalFlag: string | undefined; transportArgs: string[] }> {
+  ): Promise<{ approvalFlag: string | undefined; transportArgs: string[]; pure: boolean | undefined }> {
     const userParts = parseOpenCodeCliConfigArgs(cliConfigArgs);
     const userFlags = new Set(userParts.map(getCliFlagName).filter((flag): flag is string => flag !== null));
     const transportArgs = getOpenCodeTransportArgs(cliConfigArgs);
     const needsApproval = !readOnly && !userControlsOpenCodeAutoApprove(userFlags);
-    if (!needsApproval && transportArgs.length > 0) return { approvalFlag: undefined, transportArgs };
+    // No probe in this path, so `--pure` support is unknown. Unknown is not support:
+    // the caller leaves it out rather than sending a flag this CLI may reject.
+    if (!needsApproval && transportArgs.length > 0) return { approvalFlag: undefined, transportArgs, pure: undefined };
 
     // One help result supplies both capabilities. A transient failure is retried
     // by the next invocation, never by a second probe in this invocation.
@@ -1110,6 +1398,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     return {
       approvalFlag: needsApproval ? result.approvalFlag : undefined,
       transportArgs: transportArgs.length > 0 ? transportArgs : result.standalone ? [OPENCODE_STANDALONE_FLAG] : [],
+      pure: result.pure,
     };
   }
 

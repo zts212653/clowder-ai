@@ -226,7 +226,7 @@ function captureOwnerHttpRequest(request: FastifyRequest, target: Extract<Resolv
   };
 }
 
-function requestLifetime(request: FastifyRequest, reply: FastifyReply): { signal: AbortSignal; close(): void } {
+export function requestLifetime(request: FastifyRequest, reply: FastifyReply): { signal: AbortSignal; close(): void } {
   const controller = new AbortController();
   const abort = () => controller.abort();
   request.raw.once('aborted', abort);

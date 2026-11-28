@@ -153,7 +153,11 @@ describe('F254 provider-native read-only enforcement', () => {
 
     assert.equal(service.supportsToolExecutionPolicy(POLICY), true);
     const args = captured.args;
-    assert.ok(args.includes('--pure'));
+    // `--pure` is only sent when the installed CLI advertises it: v2.0.28 does not,
+    // and passing it there makes the CLI print help and send nothing. This test runs
+    // against the real installed CLI, so it must not assume either answer — what has
+    // to hold regardless is the no-tool guarantee asserted below, which comes from
+    // the config channels rather than this flag.
     assert.equal(args[args.indexOf('--agent') + 1], 'cat-cafe-read-only');
     assert.equal(args.includes('unsafe'), false);
     assert.equal(args.includes('--auto'), false);
