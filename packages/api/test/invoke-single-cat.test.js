@@ -11646,7 +11646,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(optionsSeen[0]?.cliSessionId, undefined, 'unknown-workspace resume id must not reach diagnostics');
   });
 
-  it('fails loud for OpenCode when thread projectPath is default', async () => {
+  it('rejects the default workspace for OpenCode when the thread record does not match admission', async () => {
     let invokedService = false;
     const service = {
       l0CompilerFn: dummyL0CompilerFn,
@@ -11682,7 +11682,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
   });
 
-  it('fails loud for native AGY when thread projectPath is default', async () => {
+  it('rejects the default workspace for native AGY when the thread record does not match admission', async () => {
     const { AgyNativeAgentService } = await import(
       '../dist/domains/cats/services/agents/providers/agy-native/AgyNativeAgentService.js'
     );

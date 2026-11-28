@@ -1,0 +1,364 @@
+{
+  "base": "http://127.0.0.1:50683",
+  "results": [
+    {
+      "id": "sys-1-zh",
+      "width": 240,
+      "collapsed": false,
+      "label": "未分类",
+      "geometry": {
+        "scroll": 224,
+        "width": 224,
+        "box": {
+          "x": 64,
+          "y": 156,
+          "width": 224,
+          "height": 36,
+          "top": 156,
+          "right": 288,
+          "bottom": 192,
+          "left": 64
+        },
+        "text": "未分类4"
+      },
+      "screenshot": "sys-1-zh-240-expanded.png"
+    },
+    {
+      "id": "sys-1-zh",
+      "width": 240,
+      "collapsed": true,
+      "label": "未分类",
+      "geometry": {
+        "scroll": 224,
+        "width": 224,
+        "box": {
+          "x": 64,
+          "y": 156,
+          "width": 224,
+          "height": 36,
+          "top": 156,
+          "right": 288,
+          "bottom": 192,
+          "left": 64
+        },
+        "text": "未分类4"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "sys-1-zh",
+      "width": 160,
+      "collapsed": false,
+      "label": "未分类",
+      "geometry": {
+        "scroll": 144,
+        "width": 144,
+        "box": {
+          "x": 64,
+          "y": 156,
+          "width": 144,
+          "height": 36,
+          "top": 156,
+          "right": 208,
+          "bottom": 192,
+          "left": 64
+        },
+        "text": "未分类4"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "sys-1-zh",
+      "width": 160,
+      "collapsed": true,
+      "label": "未分类",
+      "geometry": {
+        "scroll": 144,
+        "width": 144,
+        "box": {
+          "x": 64,
+          "y": 156,
+          "width": 144,
+          "height": 36,
+          "top": 156,
+          "right": 208,
+          "bottom": 192,
+          "left": 64
+        },
+        "text": "未分类4"
+      },
+      "screenshot": "sys-1-zh-160-collapsed.png"
+    },
+    {
+      "id": "sys-1-en",
+      "width": 240,
+      "collapsed": false,
+      "label": "Uncategorized",
+      "geometry": {
+        "scroll": 224,
+        "width": 224,
+        "box": {
+          "x": 64,
+          "y": 156,
+          "width": 224,
+          "height": 36,
+          "top": 156,
+          "right": 288,
+          "bottom": 192,
+          "left": 64
+        },
+        "text": "Uncategorized4"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "sys-1-en",
+      "width": 240,
+      "collapsed": true,
+      "label": "Uncategorized",
+      "geometry": {
+        "scroll": 224,
+        "width": 224,
+        "box": {
+          "x": 64,
+          "y": 156,
+          "width": 224,
+          "height": 36,
+          "top": 156,
+          "right": 288,
+          "bottom": 192,
+          "left": 64
+        },
+        "text": "Uncategorized4"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "sys-1-en",
+      "width": 160,
+      "collapsed": false,
+      "label": "Uncategorized",
+      "geometry": {
+        "scroll": 144,
+        "width": 144,
+        "box": {
+          "x": 64,
+          "y": 156,
+          "width": 144,
+          "height": 36,
+          "top": 156,
+          "right": 208,
+          "bottom": 192,
+          "left": 64
+        },
+        "text": "Uncategorized4"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "sys-1-en",
+      "width": 160,
+      "collapsed": true,
+      "label": "Uncategorized",
+      "geometry": {
+        "scroll": 144,
+        "width": 144,
+        "box": {
+          "x": 64,
+          "y": 156,
+          "width": 144,
+          "height": 36,
+          "top": 156,
+          "right": 208,
+          "bottom": 192,
+          "left": 64
+        },
+        "text": "Uncategorized4"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "pkg-v2-zh",
+      "width": 240,
+      "collapsed": false,
+      "label": "未分类",
+      "geometry": {
+        "scroll": 215,
+        "width": 215,
+        "box": {
+          "x": 64,
+          "y": 264,
+          "width": 215,
+          "height": 24,
+          "top": 264,
+          "right": 279,
+          "bottom": 288,
+          "left": 64
+        },
+        "text": "未分类4"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "pkg-v2-zh",
+      "width": 240,
+      "collapsed": true,
+      "label": "未分类",
+      "geometry": {
+        "scroll": 215,
+        "width": 215,
+        "box": {
+          "x": 64,
+          "y": 264,
+          "width": 215,
+          "height": 24,
+          "top": 264,
+          "right": 279,
+          "bottom": 288,
+          "left": 64
+        },
+        "text": "未分类4"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "pkg-v2-zh",
+      "width": 160,
+      "collapsed": false,
+      "label": "未分类",
+      "geometry": {
+        "scroll": 135,
+        "width": 135,
+        "box": {
+          "x": 64,
+          "y": 264,
+          "width": 135,
+          "height": 24,
+          "top": 264,
+          "right": 199,
+          "bottom": 288,
+          "left": 64
+        },
+        "text": "未分类4"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "pkg-v2-zh",
+      "width": 160,
+      "collapsed": true,
+      "label": "未分类",
+      "geometry": {
+        "scroll": 135,
+        "width": 135,
+        "box": {
+          "x": 64,
+          "y": 264,
+          "width": 135,
+          "height": 24,
+          "top": 264,
+          "right": 199,
+          "bottom": 288,
+          "left": 64
+        },
+        "text": "未分类4"
+      },
+      "screenshot": "pkg-v2-zh-160-collapsed.png"
+    },
+    {
+      "id": "pkg-v2-en",
+      "width": 240,
+      "collapsed": false,
+      "label": "Uncategorized",
+      "geometry": {
+        "scroll": 215,
+        "width": 215,
+        "box": {
+          "x": 64,
+          "y": 264,
+          "width": 215,
+          "height": 24,
+          "top": 264,
+          "right": 279,
+          "bottom": 288,
+          "left": 64
+        },
+        "text": "Uncategorized4"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "pkg-v2-en",
+      "width": 240,
+      "collapsed": true,
+      "label": "Uncategorized",
+      "geometry": {
+        "scroll": 215,
+        "width": 215,
+        "box": {
+          "x": 64,
+          "y": 264,
+          "width": 215,
+          "height": 24,
+          "top": 264,
+          "right": 279,
+          "bottom": 288,
+          "left": 64
+        },
+        "text": "Uncategorized4"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "pkg-v2-en",
+      "width": 160,
+      "collapsed": false,
+      "label": "Uncategorized",
+      "geometry": {
+        "scroll": 135,
+        "width": 135,
+        "box": {
+          "x": 64,
+          "y": 264,
+          "width": 135,
+          "height": 24,
+          "top": 264,
+          "right": 199,
+          "bottom": 288,
+          "left": 64
+        },
+        "text": "Uncategorized4"
+      },
+      "screenshot": "pkg-v2-en-160-expanded.png"
+    },
+    {
+      "id": "pkg-v2-en",
+      "width": 160,
+      "collapsed": true,
+      "label": "Uncategorized",
+      "geometry": {
+        "scroll": 135,
+        "width": 135,
+        "box": {
+          "x": 64,
+          "y": 264,
+          "width": 135,
+          "height": 24,
+          "top": 264,
+          "right": 199,
+          "bottom": 288,
+          "left": 64
+        },
+        "text": "Uncategorized4"
+      },
+      "screenshot": null
+    }
+  ],
+  "renameChecks": {
+    "untouchedSaveDispatchedRename": false,
+    "languageSwitchPreservedFallback": true,
+    "explicitRenameDispatched": true,
+    "combinations": ["sys-1-zh", "sys-1-en", "pkg-v2-zh", "pkg-v2-en"]
+  },
+  "screenshotState": "pointer outside header, header blurred, 1100ms after interaction"
+}

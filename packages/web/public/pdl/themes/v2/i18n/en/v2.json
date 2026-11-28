@@ -3389,6 +3389,7 @@
     }
   },
   "threadRow": {
+    "unassigned": "Uncategorized",
     "section": {
       "favorites": "Starred"
     },

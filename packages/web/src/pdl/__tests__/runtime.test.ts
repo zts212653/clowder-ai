@@ -422,7 +422,11 @@ async function boot(
                                         },
                                         errorHints: [],
                                       }
-                                    : undefined,
+                                    : path === '/api/accounts'
+                                      ? { providers: [] }
+                                      : path.startsWith('/api/accounts/')
+                                        ? { selection: { members: [] } }
+                                        : undefined,
     ),
     post: vi.fn(async () => undefined),
     file: (s: string) => (s ? new URL(s, 'https://api.test').href : ''),
@@ -4511,6 +4515,100 @@ describe('unmodified runtime and project chat bindings', () => {
       await w.__settled();
       expect(w.eval('VM.cafeNavShell().byProject')).toBe(false);
       expect(ui.projOpen?.[alpha]).toBe(false);
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      dom.window.close();
+    }
+  });
+  it.each([
+    ['sys:1', 'zh', '未分类'],
+    ['sys:1', 'en', 'Uncategorized'],
+    ['pkg:v2', 'zh', '未分类'],
+    ['pkg:v2', 'en', 'Uncategorized'],
+  ])('labels the default project group in %s / %s and preserves custom names', async (theme, lang, label) => {
+    const { dom, w, data, action, errors } = await boot(
+      undefined,
+      (data, state) => {
+        state.group = 'project';
+        data.threads[0].projectPath = 'default';
+        data.threads.push({ ...data.threads[0], id: 'sibling', projectPath: '/project/sibling' });
+      },
+      undefined,
+      {},
+      (port) => {
+        const get = port.get;
+        port.get = (path, params) =>
+          path === '/api/config/console-themes'
+            ? Promise.resolve({ themes: { active: theme, customs: [] } })
+            : get(path, params);
+      },
+      { lang },
+    );
+    try {
+      const section = () => w.document.querySelector('[data-sec="proj:default"], [data-section="proj:default"]');
+      const toggle = () => section().querySelector('[aria-expanded]');
+      const head = () => w.eval('VM.navThreads().sections.find(s=>s.key==="proj:default").head');
+      expect(head().name).toBe(label);
+      expect(head().unassigned).toBe(true);
+      expect(toggle().textContent).toContain(label);
+      expect(section().querySelector('[data-tip="default"]') === null).toBe(true);
+      expect(section().querySelector('[data-act="homeOpen"]') === null).toBe(true);
+      const sibling = w.document.querySelector(
+        '[data-sec="proj:/project/sibling"], [data-section="proj:/project/sibling"]',
+      );
+      // The classic header renders tooltip / add controls; v2 has its own compact header.
+      if (theme === 'sys:1') {
+        expect(sibling.querySelector('[data-tip="/project/sibling"]') !== null).toBe(true);
+        expect(sibling.querySelector('[data-act="homeOpen"]') !== null).toBe(true);
+      }
+      expect(head().n).toBe(1);
+      expect(toggle().getAttribute('aria-expanded')).toBe('true');
+      expect(w.eval('VM.navThreads().sections.find(s=>s.key==="proj:/project/sibling").head.name')).toBe('sibling');
+      expect(w.eval('VM.navThreads().sections.find(s=>s.key==="proj:/project/sibling").head.tip')).toBe(
+        '/project/sibling',
+      );
+
+      w.eval("A.rename({entity:'proj',id:'default'})");
+      await w.__settled();
+      // A display fallback is not a saved rename draft. Saving untouched must remain a no-op in either language.
+      expect(w.document.querySelector('#dlg-in').value).toBe('');
+      w.document
+        .querySelector('[data-form="dialog"]')
+        .dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+      await w.__settled();
+      expect(action.mock.calls.filter(([name]) => name === 'projectRename')).toHaveLength(0);
+      expect(toggle().textContent).toContain(label);
+      w.eval(`CHANGES.sysPick({target:{dataset:{k:'lang'},value:${JSON.stringify(lang === 'en' ? 'zh' : 'en')}}})`);
+      await w.__settled();
+      expect(toggle().textContent).toContain(lang === 'en' ? '未分类' : 'Uncategorized');
+      w.eval(`CHANGES.sysPick({target:{dataset:{k:'lang'},value:${JSON.stringify(lang)}}})`);
+      await w.__settled();
+
+      toggle().click();
+      await w.__settled();
+      expect(section().hasAttribute('data-collapsed')).toBe(true);
+      expect(toggle().getAttribute('aria-expanded')).toBe('false');
+      expect(toggle().textContent).toContain(label);
+      toggle().click();
+      await w.__settled();
+      section().querySelector('[data-act="thread"][data-id="pdl-test"]').click();
+      await w.__settled();
+      expect(action).toHaveBeenCalledWith('thread', expect.objectContaining({ id: 'pdl-test' }), undefined);
+
+      data.projectNames = new Map([['default', 'My conversations']]);
+      w.clowderChat.pushSidebar(fixtureSidebar(data));
+      await w.__settled();
+      expect(toggle().textContent).toContain('My conversations');
+      expect(head().unassigned).toBe(true);
+      w.eval("A.rename({entity:'proj',id:'default'})");
+      await w.__settled();
+      expect(w.document.querySelector('#dlg-in').value).toBe('My conversations');
+      w.document.querySelector('#dlg-in').value = 'Renamed conversations';
+      w.document
+        .querySelector('[data-form="dialog"]')
+        .dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+      await w.__settled();
+      expect(action).toHaveBeenCalledWith('projectRename', { id: 'default', v: 'Renamed conversations' }, undefined);
       expect(errors).not.toHaveBeenCalled();
     } finally {
       dom.window.close();

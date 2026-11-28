@@ -3389,6 +3389,7 @@
     }
   },
   "threadRow": {
+    "unassigned": "未分类",
     "section": {
       "favorites": "收藏"
     },

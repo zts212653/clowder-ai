@@ -278,7 +278,7 @@ function threadSecHead(hd, dc, root) {
   const d = (dc.heads || {})[hd.kind] || {}, ic = d.icon && typeof d.icon === 'object' ? d.icon[hd.key] || d.icon['*'] : d.icon;
   if (hd.kind === 'sec') return secHead({ act: 'fold', data: ' data-f="sec" data-k="' + h(hd.key) + '"' + (hd.dflt ? ' data-dflt="1"' : ''), open: !hd.collapsed, icon: ic, name: tc('threadRow.section', hd.key), n: hd.n, note: hd.note });
   const more = d.more ? rowMore(d.more.items ? menuLive(pvMenu(d.more.items, hd, root)) : d.more.menu, hd.id, pv(d.more.label, hd, root), 'cafe-hov') : '', add = hd.add && d.add ? btn(pv(d.add.label, hd, root), { iconOnly: true, icon: 'plus', sm: true, act: d.add.act, data: pvArgs(d.add.args, hd, root), cls: 'cafe-hov' }) : '';
-  return secHead({ act: d.act, data: pvArgs(d.args, hd, root), open: hd.open, icon: ic, name: hd.unassigned ? tc('threadRow.unassigned') : hd.name, tip: hd.tip, n: hd.n,
+  return secHead({ act: d.act, data: pvArgs(d.args, hd, root), open: hd.open, icon: ic, name: hd.name || (hd.unassigned ? tc('threadRow.unassigned') : ''), tip: hd.tip, n: hd.n,
     extra: (hd.warn ? lrDot('warn', hd.warn) : '') + (hd.fixed ? '<span class="t-s faint">' + h(tc('threadRow.fixed')) + '</span>' : '') + (hd.kind === 'group' && !hd.open && hd.attention > 0 ? '<span class="t-s faint">' + h(tc('threadRow.groupAttention', hd.attention)) + '</span>' : ''), acts: hd.add ? add + more : more });
 }
 /* dc：threads 块的声明（groups 每种段的默认、heads 段头的绑定、other「其他项目」那一段的开合、rename 行的原地改名）。

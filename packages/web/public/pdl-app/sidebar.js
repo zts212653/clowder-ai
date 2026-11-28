@@ -279,10 +279,15 @@ function bindSidebar() {
         .map(function (entry) {
           const path = entry[0],
             list = entry[1],
-            parts = path.replace(/[\\/]+$/, '').split(/[\\/]/),
+            unassigned = !path || path === 'default',
+            parts = (path || '').replace(/[\\/]+$/, '').split(/[\\/]/),
             name =
               names.get(path) ||
-              (path === 'default' ? '' : /^[a-z]:[\\/]+$/i.test(path) ? path : parts[parts.length - 1] || path);
+              (unassigned
+                ? tc('threadRow.unassigned')
+                : /^[a-z]:[\\/]+$/i.test(path)
+                  ? path
+                  : parts[parts.length - 1] || path);
           return {
             key: 'proj:' + path,
             override: open[path],
@@ -292,8 +297,9 @@ function bindSidebar() {
               id: path,
               path: path,
               name: name,
+              unassigned: unassigned,
               fixed: pins.has(path),
-              tip: path,
+              tip: unassigned ? '' : path,
               open: open[path],
               n: list.length,
               add: { label: 'home' },
