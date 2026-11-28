@@ -301,6 +301,43 @@ describe('OpenCodeAgentService', () => {
     assert.strictEqual(toolMsg.toolName, 'bash');
   });
 
+  test('appends local image path hints for attached images', async () => {
+    const uploadDir = mkdtempSync(join(tmpdir(), 'opencode-image-hint-'));
+    const imagePath = join(uploadDir, 'shot.png');
+    writeFileSync(imagePath, 'not-a-real-png');
+
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });
+    const promise = collect(
+      service.invoke('Look at this', {
+        contentBlocks: [{ type: 'image', url: '/uploads/shot.png' }],
+        uploadDir,
+      }),
+    );
+    emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const submittedPrompt = args.at(-1);
+    assert.ok(
+      submittedPrompt.includes(`[Local image path: ${imagePath}]`),
+      'attached image must be referenced by an absolute local path',
+    );
+  });
+
+  test('does not add image hints when no image is attached', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });
+    const promise = collect(service.invoke('No image here'));
+    emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(args.at(-1).includes('[Local image path:'), false);
+  });
+
   test('drops empty text chunks (prevents blank assistant bubbles)', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
