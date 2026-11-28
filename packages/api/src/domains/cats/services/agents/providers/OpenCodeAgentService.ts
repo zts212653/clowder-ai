@@ -47,6 +47,7 @@ import {
   getOpenCodeTransportArgs,
   OPENCODE_AUTO_APPROVE_FLAG,
   OPENCODE_STANDALONE_FLAG,
+  OPENCODE_THINKING_FLAG,
   type OpenCodeAutoApproveProbeFn,
   type OpenCodeAutoApproveProbeResult,
   parseOpenCodeCliConfigArgs,
@@ -375,6 +376,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         runDefaults.approvalFlag,
         readOnly,
         runDefaults.transportArgs,
+        runDefaults.thinkingArgs,
       );
 
       log.debug(
@@ -1037,6 +1039,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     defaultAutoApproveFlag?: string,
     readOnly = false,
     transportArgs: readonly string[] = [],
+    thinkingArgs: readonly string[] = [],
   ): string[] {
     const args = ['run', ...transportArgs];
 
@@ -1055,6 +1058,9 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
 
     // JSON event stream output
     args.push('--format', 'json');
+    // Reasoning parts are only emitted on the JSON stream when `--thinking` is
+    // present (otherwise instructions/tokens are counted but dropped).
+    args.push(...thinkingArgs);
     // Headless OpenCode has no human approval bridge. Use the best approval
     // flag advertised by this installed CLI; older compatible builds may have
     // no supported flag, in which case we preserve the pre-#1065 behavior.
@@ -1091,15 +1097,15 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     env?: Record<string, string | null>,
     cliConfigArgs?: readonly string[],
     readOnly = false,
-  ): Promise<{ approvalFlag: string | undefined; transportArgs: string[] }> {
+  ): Promise<{ approvalFlag: string | undefined; transportArgs: string[]; thinkingArgs: string[] }> {
     const userParts = parseOpenCodeCliConfigArgs(cliConfigArgs);
     const userFlags = new Set(userParts.map(getCliFlagName).filter((flag): flag is string => flag !== null));
     const transportArgs = getOpenCodeTransportArgs(cliConfigArgs);
     const needsApproval = !readOnly && !userControlsOpenCodeAutoApprove(userFlags);
-    if (!needsApproval && transportArgs.length > 0) return { approvalFlag: undefined, transportArgs };
 
-    // One help result supplies both capabilities. A transient failure is retried
-    // by the next invocation, never by a second probe in this invocation.
+    // One help result supplies every capability (approval, standalone,
+    // thinking). Always probe so `--thinking` is injected even when the user
+    // already controls auto-approval; the result is cached per command.
     const result = await this.getAutoApproveProbe(command, cwd, env);
     if (needsApproval && result.warning) {
       log.warn(
@@ -1109,6 +1115,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     }
     return {
       approvalFlag: needsApproval ? result.approvalFlag : undefined,
+      thinkingArgs: result.thinking ? [OPENCODE_THINKING_FLAG] : [],
       transportArgs: transportArgs.length > 0 ? transportArgs : result.standalone ? [OPENCODE_STANDALONE_FLAG] : [],
     };
   }

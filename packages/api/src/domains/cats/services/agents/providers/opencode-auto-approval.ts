@@ -5,6 +5,12 @@ const log = createModuleLogger('opencode-agent');
 
 export const OPENCODE_AUTO_APPROVE_FLAG = '--auto';
 export const OPENCODE_STANDALONE_FLAG = '--standalone';
+/**
+ * OpenCode only emits `reasoning` parts in `run --format json` when this flag
+ * is present. Without it the provider's `reasoning_content` still arrives and
+ * is counted in `tokens.reasoning`, but it never reaches the event stream.
+ */
+export const OPENCODE_THINKING_FLAG = '--thinking';
 const OPENCODE_DEFAULT_AUTO_APPROVE_FLAGS = [
   OPENCODE_AUTO_APPROVE_FLAG,
   '--dangerously-skip-permissions',
@@ -25,6 +31,7 @@ const OPENCODE_AUTO_APPROVE_PROBE_FAILED_MESSAGE =
 export type OpenCodeAutoApproveProbeResult = {
   approvalFlag?: string;
   standalone?: boolean;
+  thinking?: boolean;
   warning?: string;
   cacheable?: boolean;
 };
@@ -140,15 +147,16 @@ export async function probeOpenCodeAutoApproveSupport(
   }
 
   const standalone = /(?:^|\s)--standalone(?=\s|[=,]|$)/m.test(visibleHelp.helpText);
+  const thinking = /(?:^|\s)--thinking(?=\s|[=,]|$)/m.test(visibleHelp.helpText);
 
   for (const flag of OPENCODE_DEFAULT_AUTO_APPROVE_FLAGS) {
-    if (visibleHelp.helpText.includes(flag)) return { approvalFlag: flag, standalone };
+    if (visibleHelp.helpText.includes(flag)) return { approvalFlag: flag, standalone, thinking };
   }
 
   // Do not probe unadvertised aliases with `run <flag> --help`. Some yargs
   // versions process `--help` before validating unknown flags, so that command
   // exits 0 even when the candidate would make a real invocation exit 1.
-  return { warning: OPENCODE_AUTO_APPROVE_UNAVAILABLE_MESSAGE, cacheable: true, standalone };
+  return { warning: OPENCODE_AUTO_APPROVE_UNAVAILABLE_MESSAGE, cacheable: true, standalone, thinking };
 }
 
 function isOpenCodeAutoApproveProbeCacheable(result: OpenCodeAutoApproveProbeResult): boolean {
