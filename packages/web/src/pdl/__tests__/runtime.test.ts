@@ -8933,12 +8933,6 @@ describe('member detect entry', () => {
       };
     });
     try {
-      // Theme component scripts are appended as inline <script> by pdlPackApply; jsdom's
-      // outside-only context does not run them, so evaluate the v2 package here.
-      const v2 = (await builtinThemes.read('v2')) as { components: Record<string, { js: string[] }> };
-      for (const part of Object.values(v2.components)) {
-        for (const js of part.js) runInContext(js, dom.getInternalVMContext(), { filename: 'v2-component.js' });
-      }
       w.eval('go("members")');
       await w.__settled();
       expect(w.eval('PACK_LOADED')).toBe('v2');
@@ -9027,12 +9021,6 @@ describe('member detect entry', () => {
       theme,
     );
     try {
-      if (theme === 'pkg:v2') {
-        const pack = (await builtinThemes.read('v2')) as { components: Record<string, { js: string[] }> };
-        for (const part of Object.values(pack.components)) {
-          for (const js of part.js) runInContext(js, dom.getInternalVMContext(), { filename: 'v2-component.js' });
-        }
-      }
       w.eval('go("members")');
       await w.__settled();
       expect(w.eval('PACK_LOADED')).toBe(theme === 'pkg:v2' ? 'v2' : null);
@@ -9232,10 +9220,6 @@ describe('member detect entry', () => {
       },
     );
     try {
-      const v2 = (await builtinThemes.read('v2')) as { components: Record<string, { js: string[] }> };
-      for (const part of Object.values(v2.components)) {
-        for (const js of part.js) runInContext(js, dom.getInternalVMContext(), { filename: 'v2-component.js' });
-      }
       w.eval('go("members")');
       await w.__settled();
       expect(w.eval('PACK_LOADED')).toBe('v2');
@@ -9251,10 +9235,6 @@ describe('member detect entry', () => {
       'pkg:v2',
     );
     try {
-      const v2 = (await builtinThemes.read('v2')) as { components: Record<string, { js: string[] }> };
-      for (const part of Object.values(v2.components)) {
-        for (const js of part.js) runInContext(js, dom.getInternalVMContext(), { filename: 'v2-component.js' });
-      }
       w.eval('go("members")');
       await w.__settled();
       expect(w.eval('PACK_LOADED')).toBe('v2');
@@ -9460,10 +9440,6 @@ describe('declared plugin ACP runtime picker', () => {
       };
     });
     try {
-      const v2 = (await builtinThemes.read('v2')) as { components: Record<string, { js: string[] }> };
-      for (const part of Object.values(v2.components)) {
-        for (const js of part.js) runInContext(js, dom.getInternalVMContext(), { filename: 'v2-component.js' });
-      }
       w.eval('go("memberNew")');
       await w.__settled();
       expect(w.eval('PACK_LOADED')).toBe('v2');
