@@ -905,15 +905,16 @@ function ChatBinding({
   useEffect(() => {
     const subscribe = window.desktopBridge?.onPrepareInterfaceReload;
     if (!drafting || !subscribe) return;
-    let composing: EventTarget | null = null;
+    let composing: Element | null = null;
     const start = (event: CompositionEvent) => {
-      composing = event.target;
+      if (event.target instanceof Element) composing = event.target;
     };
-    const end = () => {
-      composing = null;
+    const end = (event: Event) => {
+      if (event.target === composing) composing = null;
     };
     document.addEventListener('compositionstart', start, true);
     document.addEventListener('compositionend', end, true);
+    document.addEventListener('focusout', end, true);
     const locallyHeldFile = () =>
       [...threadImageDrafts].some(([id, files]) => files.some((file) => id === 'default' || !draftFile.has(file)));
     const read = (): ComposerDraft => ({
@@ -923,7 +924,7 @@ function ChatBinding({
       ...(current.current.reply ? { replyTo: current.current.reply.id } : {}),
     });
     const unsubscribe = subscribe(async () => {
-      if (composing || reloadActivity.current) return 'busy';
+      if (composing?.isConnected || reloadActivity.current) return 'busy';
       if (locallyHeldFile()) return 'attachment';
       const threadId = current.current.threadId;
       const draft = read();
@@ -935,7 +936,7 @@ function ChatBinding({
       }
       if (locallyHeldFile()) return 'attachment';
       if (
-        composing ||
+        composing?.isConnected ||
         reloadActivity.current ||
         current.current.threadId !== threadId ||
         JSON.stringify(read()) !== JSON.stringify(draft)
@@ -947,6 +948,7 @@ function ChatBinding({
       unsubscribe();
       document.removeEventListener('compositionstart', start, true);
       document.removeEventListener('compositionend', end, true);
+      document.removeEventListener('focusout', end, true);
     };
   }, [drafting]);
   // A send the server took clears the draft of the conversation it came from, wherever the owner is now.
