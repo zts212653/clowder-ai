@@ -2375,7 +2375,7 @@ async function initializeApi(
                     }
                     case 'google':
                       try {
-                        service = createGoogleAgentService(catId, config.agyProfile, agentAccessAgyOutput);
+                        service = createGoogleAgentService(catId, config.agyProfile, () => agentAccessAgyOutput());
                       } catch (error) {
                         if (!(error instanceof AgentServiceUnavailableError)) throw error;
                         agentRegistry.markUnavailable(id, error.reason);
