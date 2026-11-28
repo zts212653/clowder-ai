@@ -7,7 +7,14 @@ const { apiFetch, addMessage } = vi.hoisted(() => ({ apiFetch: vi.fn(), addMessa
 vi.mock('@/utils/api-client', () => ({ apiFetch }));
 vi.mock('@/hooks/useChatCommands', () => ({ useChatCommands: () => ({ processCommand: async () => false }) }));
 vi.mock('@/stores/chatStore', () => {
-  const state = { currentThreadId: 'other-thread', addMessageToThread: addMessage };
+  const state = {
+    currentThreadId: 'other-thread',
+    addMessageToThread: addMessage,
+    patchThreadMessage: vi.fn(),
+    removeThreadMessage: vi.fn(),
+    clearThreadMessageDeletion: vi.fn(),
+    getThreadState: () => ({ messages: [] }),
+  };
   return {
     useChatStore: Object.assign((select: (s: typeof state) => unknown) => select(state), { getState: () => state }),
   };

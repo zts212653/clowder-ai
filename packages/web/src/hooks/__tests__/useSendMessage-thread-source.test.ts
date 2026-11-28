@@ -6,6 +6,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 const mockApiFetch = vi.fn();
 const mockAddMessageToThread = vi.fn();
+const mockPatchThreadMessage = vi.fn();
+const mockRemoveThreadMessage = vi.fn();
+const mockClearThreadMessageDeletion = vi.fn();
 const mockProcessCommand = vi.fn(async () => false);
 let storeCurrentThreadId = 'thread-stale';
 
@@ -20,6 +23,10 @@ vi.mock('@/hooks/useChatCommands', () => ({
 vi.mock('@/stores/chatStore', () => {
   const state = () => ({
     addMessageToThread: mockAddMessageToThread,
+    patchThreadMessage: mockPatchThreadMessage,
+    removeThreadMessage: mockRemoveThreadMessage,
+    clearThreadMessageDeletion: mockClearThreadMessageDeletion,
+    getThreadState: () => ({ messages: [] }),
     currentThreadId: storeCurrentThreadId,
   });
   return {
