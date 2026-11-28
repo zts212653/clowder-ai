@@ -40,6 +40,7 @@ export interface InvocationOwnerReaperOptions extends ExitedChildRecovery {
   listRunningRecords?: () => InvocationRecord[] | Promise<InvocationRecord[]>;
   /** Queue reservations whose tracker owner was installed but later disappeared. */
   listStaleProcessingLeases?: (now?: number) => StaleProcessingOwnerLease[];
+  hasActiveQueueProducer?: (threadId: string, userId: string, catId: string, executionId: string) => boolean;
   /** Pre-provider reservations are safe to recover without probing provider lifecycle. */
   reapStalePrestartReservations?: (now?: number) => number | Promise<number>;
   ownerLeaseTtlMs?: number;
@@ -205,6 +206,22 @@ export class InvocationOwnerReaper {
           return;
         }
       }
+      await this.recordActiveCandidate(candidate, probe, now, result);
+      return;
+    }
+
+    // The exact Queue producer owns a completed child through parent and reply settlement.
+    const parentStatus = probe.record?.status;
+    if (
+      probe.verdict === 'terminal' &&
+      probe.children.some(
+        ({ status }) =>
+          (status === 'succeeded' || status === 'failed') && (parentStatus === 'running' || parentStatus === status),
+      ) &&
+      [...candidate.targetCats].some((catId) =>
+        this.options.hasActiveQueueProducer?.(candidate.threadId, candidate.userId, catId, candidate.executionId),
+      )
+    ) {
       await this.recordActiveCandidate(candidate, probe, now, result);
       return;
     }
