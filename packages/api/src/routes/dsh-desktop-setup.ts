@@ -10,7 +10,7 @@ import { resolveInvokeCapabilityRoot } from '../config/capabilities/invoke-capab
 import { buildChildEnv } from '../utils/cli-spawn.js';
 import { resolveDshDesktopLaunch } from '../utils/dsh-desktop-launch.js';
 import { DSH_DESKTOP_RUNTIME } from './dsh-desktop-runtime.js';
-import { assertDshCopyPolicy } from './dsh-setup-copy-policy.js';
+import { readDshCopyConfig } from './dsh-setup-copy-policy.js';
 
 export interface DshDesktopSource {
   command: string;
@@ -111,12 +111,12 @@ export async function prepareDshDesktopSetup(
     Object.keys(current.state.officialConfig ?? {}).some((key) => !current.state.officialFields.includes(key))
   )
     throw Error('dsh_config_manual');
-  const llm = {
-    providers: provider === 'deepseek-official' ? {} : { [provider]: current.state.llm.providers?.[provider] },
-  };
-  assertDshCopyPolicy(llm, { provider, model });
+  const llm = readDshCopyConfig(
+    { providers: provider === 'deepseek-official' ? {} : { [provider]: current.state.llm.providers?.[provider] } },
+    { provider, model },
+  );
   if (provider === 'deepseek-official')
-    assertDshCopyPolicy(
+    readDshCopyConfig(
       { providers: { [provider]: { baseURL: current.state.officialConfig?.baseURL } } },
       { provider, model },
     );

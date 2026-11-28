@@ -6,10 +6,11 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
-import { stringify } from 'yaml';
+import { parse, stringify } from 'yaml';
 import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
 
-(['stored', 'project', 'home', 'record', 'official', 'missing', 'invalid'] as const).forEach((authentication) =>
+const fixtures = ['stored', 'project', 'home', 'record', 'official', 'missing', 'invalid', 'modalities'] as const;
+fixtures.forEach((authentication) =>
   test(
     authentication === 'official'
       ? 'Desktop prefers official credentials in its native store without an environment key'
@@ -17,7 +18,9 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
         ? 'Desktop refuses a missing explicit custom reference without borrowing another key'
         : authentication === 'invalid'
           ? 'Desktop distinguishes an unreadable credential document from missing authentication'
-          : `Desktop onboarding uses ${authentication} custom authentication without an official key across a cold restart`,
+          : authentication === 'modalities'
+            ? 'Desktop prepares a custom model using input when inputModalities is also present'
+            : `Desktop onboarding uses ${authentication} custom authentication without an official key across a cold restart`,
     { skip: !process.env.DSH_DESKTOP_TEST_COMMAND, timeout: 180_000 },
     async (t) => {
       const command = process.env.DSH_DESKTOP_TEST_COMMAND!;
@@ -99,7 +102,14 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
                   baseURL: `${origin}/custom/v1`,
                   ...(authentication === 'record' ? {} : { apiKeyEnv: 'ISSUE1925_CUSTOM_KEY' }),
                   models: [
-                    { id: 'only-custom-model', contextWindow: 131072, maxTokens: 1024 },
+                    {
+                      id: 'only-custom-model',
+                      contextWindow: 131072,
+                      maxTokens: 1024,
+                      ...(authentication === 'modalities'
+                        ? { input: ['text', 'image'], inputModalities: ['text'] }
+                        : {}),
+                    },
                     { id: 'other-model', contextWindow: 131072, maxTokens: 1024 },
                   ],
                 },
@@ -116,13 +126,15 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
               ? 'OTHER_API_KEY: fixture-other-key\n'
               : authentication === 'invalid'
                 ? 'version: 1\nrefs: [invalid]\n'
-                : authentication === 'stored'
+                : authentication === 'stored' || authentication === 'modalities'
                   ? 'ISSUE1925_CUSTOM_KEY: fixture-custom-key\n'
                   : authentication === 'record'
                     ? 'version: 1\nrecords:\n  llm-pi-ai/custom:\n    kind: api-key\n    key: fixture-custom-key\n'
                     : '',
         ...(authentication === 'home' || authentication === 'project'
-          ? { [join(authentication === 'home' ? home : desktop, '.env')]: 'ISSUE1925_CUSTOM_KEY=fixture-custom-key\n' }
+          ? {
+              [join(authentication === 'home' ? home : desktop, '.env')]: 'ISSUE1925_CUSTOM_KEY=fixture-custom-key\n',
+            }
           : {}),
       };
       Object.entries(files).forEach(([path, text]) => writeFileSync(path, text, { mode: 0o600 }));
@@ -179,6 +191,15 @@ import { registerDshSetupRoutes } from '../src/routes/dsh-setup-route.js';
       assert.ok(prepared.env.DSH_HOME);
       assert.notEqual(prepared.env.DSH_HOME, home);
       assert.equal(JSON.stringify(prepared).includes('fixture-custom-key'), false, 'no secret enters the member draft');
+      if (authentication === 'modalities') {
+        const patch = parse(readFileSync(prepared.startupArgs.at(-1), 'utf8'));
+        const model = patch.find((entry: { id?: string }) => entry.id === 'llm-pi-ai').config.providers.custom
+          .models[0];
+        assert.deepEqual(model.input, ['text', 'image']);
+        assert.equal(Object.hasOwn(model, 'inputModalities'), false);
+        Object.entries(files).forEach(([path, bytes]) => assert.equal(readFileSync(path, 'utf8'), bytes));
+        return;
+      }
       const verified = await app.inject({
         method: 'POST',
         url: '/api/cats/dsh-setup/test',

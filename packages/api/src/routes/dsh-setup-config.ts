@@ -1,5 +1,5 @@
 import { isAlias, isMap, isSeq, parseDocument, stringify, visit, type YAMLMap } from 'yaml';
-import { assertDshCopyPolicy } from './dsh-setup-copy-policy.js';
+import { readDshCopyConfig } from './dsh-setup-copy-policy.js';
 
 export interface DshSetupInfo {
   providers: { id: string; models: { id: string; label: string }[] }[];
@@ -85,9 +85,8 @@ export function buildDshPatch(active: string, source: string, provider: string, 
   )
     throw Error('dsh_selection_invalid');
   const providers = { ...object(current.llm.providers), [provider]: object(from.llm.providers)[provider] };
-  const llmConfig = { ...current.llm, providers };
   const acpConfig = { ...current.acp, provider, model };
-  assertDshCopyPolicy(llmConfig, acpConfig);
+  const llmConfig = readDshCopyConfig({ ...current.llm, providers }, acpConfig);
   return stringify([
     { id: 'llm-pi-ai', config: llmConfig },
     { id: 'acp', config: acpConfig },

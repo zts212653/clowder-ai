@@ -1197,13 +1197,8 @@ function ChatBinding({
         admissionRef.current!.updateTitle(args.title);
         admissionRef.current!.updatePinned(args.pinned === 'true');
         return admissionRef.current!.importSession(JSON.parse(args.value));
-      case 'membersRead': {
-        const meta = await readMemberSettings();
-        return {
-          ...meta,
-          dshMembers: current.current.cats.filter((cat) => isDshMember(cat, meta.runtimes)).map((cat) => cat.id),
-        };
-      }
+      case 'membersRead':
+        return readMemberSettings();
       case 'memberVoicesRead':
         return readVoiceChoices();
       case 'memberCanonRead':

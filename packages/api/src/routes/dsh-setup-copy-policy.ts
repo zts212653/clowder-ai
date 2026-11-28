@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 // A bounded copy contract, not a replacement for DSH's own configuration schema.
-// Validate without parsing/stripping: unsupported fields require manual setup.
+// Unknown fields require manual setup. The pi-ai adapter derives inputModalities from input.
 const number = z.number().finite();
 const level = z.enum(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 const budgets = z
@@ -54,10 +54,18 @@ const modelFields = {
   contextWindow: number.optional(),
   maxTokens: number.optional(),
   input: z.array(z.enum(['text', 'image'])).optional(),
+  inputModalities: z.unknown().optional(),
   reasoningEfforts: z.union([z.literal(false), z.record(level, z.string().nullable())]).optional(),
   compat: compat.optional(),
 };
-const model = z.object({ id: z.string(), ...modelFields }).strict();
+function omitDerivedInput<T extends { inputModalities?: unknown }>({ inputModalities: _derived, ...config }: T) {
+  return config;
+}
+const model = z
+  .object({ id: z.string(), ...modelFields })
+  .strict()
+  .transform(omitDerivedInput);
+const modelOverride = z.object(modelFields).strict().transform(omitDerivedInput);
 const backoff = z
   .object({ initialDelayMs: number.optional(), maxDelayMs: number.optional(), jitterRatio: number.optional() })
   .strict();
@@ -88,7 +96,7 @@ const provider = z
     api: z.string().optional(),
     baseURL: endpoint.optional(),
     models: z.array(model).optional(),
-    modelOverrides: z.record(z.object(modelFields).strict()).optional(),
+    modelOverrides: z.record(modelOverride).optional(),
     compat: compat.optional(),
     defaultContextWindow: number.optional(),
     defaultMaxTokens: number.optional(),
@@ -114,9 +122,11 @@ const acp = z
   .strict();
 
 /** Check the entire emitted config, including every retained active provider. */
-export function assertDshCopyPolicy(llmConfig: unknown, acpConfig: unknown): void {
-  if (!llm.safeParse(llmConfig).success || !acp.safeParse(acpConfig).success) {
+export function readDshCopyConfig(llmConfig: unknown, acpConfig: unknown) {
+  const llmResult = llm.safeParse(llmConfig);
+  if (!llmResult.success || !acp.safeParse(acpConfig).success) {
     // Do not return Zod issues: they can include private field names or values.
     throw Error('dsh_config_manual');
   }
+  return llmResult.data;
 }

@@ -62,6 +62,24 @@ test('preserves supported metadata and credential references byte-for-value', ()
   assert.deepEqual(result[0].config.providers.custom, supported);
   assert.deepEqual(result[0].config.providers.retained, route);
 });
+test('copies pi-ai input and drops the derived inputModalities field', () => {
+  const profile = {
+    ...route,
+    models: [
+      { id: 'model', input: ['text', 'image'], inputModalities: ['text'] },
+      { id: 'sibling', inputModalities: ['image'] },
+    ],
+    modelOverrides: { model: { input: ['text'], inputModalities: ['text', 'image'] } },
+  };
+  const result = parse(buildDshPatch(active(profile), source(profile), 'custom', 'sibling'));
+  const expected = {
+    ...route,
+    models: [{ id: 'model', input: ['text', 'image'] }, { id: 'sibling' }],
+    modelOverrides: { model: { input: ['text'] } },
+  };
+  assert.deepEqual(result[0].config.providers, { retained: expected, custom: expected });
+  assert.equal(result[1].config.model, 'sibling');
+});
 for (const id of ['llm-pi-ai', 'acp']) {
   test(`rejects unsupported ${id} plugin fields before copying the whole config`, () => {
     const entries = parse(active(route));

@@ -76,6 +76,7 @@ const template = {
 let writes: { path: string; body: Record<string, unknown> }[], rejectWrite: boolean;
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(refreshCatsNow).mockResolvedValue({ cats, fromApi: true });
   sessionStorage.clear();
   writes = [];
   rejectWrite = false;
@@ -182,6 +183,28 @@ it('projects actual strategy capability and native launch choices without turnin
       acpStartupArgs: '--profile "work profile" acp',
     },
   });
+});
+
+it('reads the current member catalog when opening settings, including externally added DSH members', async () => {
+  vi.mocked(refreshCatsNow).mockResolvedValueOnce({
+    fromApi: true,
+    cats: [
+      ...cats,
+      {
+        ...cats[0],
+        id: 'new-dsh',
+        clientId: 'acp',
+        carrier: 'acp',
+        acp: {
+          command: 'G:\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\dsh.cmd',
+          startupArgs: ['--profile', 'acp'],
+        },
+      },
+    ],
+  });
+  const settings = await readMemberSettings();
+  expect(refreshCatsNow).toHaveBeenCalledOnce();
+  expect(settings.dshMembers).toEqual(['new-dsh']);
 });
 
 it('saves strategy intent through its owner, validates thresholds once and returns the confirmed capability', async () => {

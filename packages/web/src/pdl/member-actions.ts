@@ -50,6 +50,7 @@ import { configurationRequest } from '@/components/settings/plugin-manager/plugi
 import type { AgentClientLibrary, AgentClientProfile } from '@/hooks/useAgentClientLibraries';
 import { type CatData, refreshCatsNow, saveCatOrder } from '@/hooks/useCatData';
 import { primeCoCreatorConfigCache } from '@/hooks/useCoCreatorConfig';
+import { isDshMember } from '@/lib/member-model-display';
 import { API_URL, apiFetch } from '@/utils/api-client';
 import { apiSessionIdentity } from '@/utils/api-session-identity';
 import { beginMemberSave } from '@/utils/member-save-trace';
@@ -165,7 +166,7 @@ export async function readVoiceChoices() {
 }
 
 export async function readMemberSettings() {
-  const [accounts, templates, snapshot, strategies, discovered, libraries, l0] = await Promise.all([
+  const [accounts, templates, snapshot, strategies, discovered, libraries, l0, { cats }] = await Promise.all([
     request<AccountsResponse>('/api/accounts'),
     request<{ templates: TemplateCard[] }>('/api/cat-templates'),
     request<{ config: ConfigData }>('/api/config'),
@@ -176,7 +177,14 @@ export async function readMemberSettings() {
     request<{ referenceTokens: number; members: { catId: string; tokens: number }[] }>('/api/cats/l0-budget').catch(
       () => null,
     ),
+    refreshCatsNow(),
   ]);
+  const runtimes = memberRuntimeTools(discovered.runtimes, libraries.libraries).map((runtime) => ({
+    ...runtime,
+    ...(runtime.dshDesktop ? { discoveredId: discovered.runtimes.find((item) => item.dshDesktop)?.id } : {}),
+    acpMaxDefault: defaultAcpPoolMaxProcesses(runtime.clientId),
+    form: runtimeDefaults(runtime),
+  }));
   return {
     accounts: accounts.providers,
     l0,
@@ -185,12 +193,8 @@ export async function readMemberSettings() {
     codex: toCodexRuntimeSettings(snapshot.config),
     strategies: strategies.cats.map((entry) => ({ id: entry.catId, form: toStrategyForm(entry) })),
     libraries: libraries.libraries,
-    runtimes: memberRuntimeTools(discovered.runtimes, libraries.libraries).map((runtime) => ({
-      ...runtime,
-      ...(runtime.dshDesktop ? { discoveredId: discovered.runtimes.find((item) => item.dshDesktop)?.id } : {}),
-      acpMaxDefault: defaultAcpPoolMaxProcesses(runtime.clientId),
-      form: runtimeDefaults(runtime),
-    })),
+    runtimes,
+    dshMembers: cats.filter((cat) => isDshMember(cat, runtimes)).map((cat) => cat.id),
     clients: CLIENT_OPTIONS.map((client) => ({
       id: client.value,
       acpMaxDefault: defaultAcpPoolMaxProcesses(client.value),
