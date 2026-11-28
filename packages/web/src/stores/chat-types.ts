@@ -730,6 +730,8 @@ export interface QueueEntry {
   threadId: string;
   userId: string;
   content: string;
+  /** Owner-private correlation with the browser attempt that produced this entry (#706/ledger). */
+  clientMessageId?: string;
   messageId: string | null;
   mergedMessageIds: string[];
   from: MessageFrom;

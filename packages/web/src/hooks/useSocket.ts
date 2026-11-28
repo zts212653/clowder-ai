@@ -38,6 +38,7 @@ import {
 } from './preview-auto-open-delivery';
 import { hasStaleActiveThreadPresentation } from './queue-active-invocation-reconciliation';
 import { bumpLiveQueueHydrateEpoch, getLiveQueueHydrateEpoch, reconcileThreadWithServer } from './queue-reconciliation';
+import { settleAdmittedSendNotices } from './send-error-notice';
 import { useThreadHistoryReconciliation } from './thread-history-watermark';
 
 export { reconcileThreadWithServer } from './queue-reconciliation';
@@ -888,6 +889,17 @@ export function useSocket(
     // /queue adds rich previews and fenced actions without delaying retirement.
     socket.on('queue_updated', (data: { threadId: string; queue: unknown[]; action: string }) => {
       if (needs('sidebar')) void invalidateSidebarProjection();
+      // A Queue entry the server accepted is proof that attempt is held, even when
+      // the browser had already abandoned its own request (the late-commit clock is
+      // the server's, not the client's). That proof arrives only here: no response
+      // will ever carry it, so this projection is what takes the notice back. Read
+      // messages, not Queue, decides a notice exists; the two gates are independent.
+      if (needs('chat.messages', data.threadId)) {
+        settleAdmittedSendNotices(
+          data.threadId,
+          normalizeQueueEntries(data.queue).map((entry) => entry.clientMessageId),
+        );
+      }
       if (!needs('chat.queue', data.threadId)) return;
       const store = useChatStore.getState();
       const queue = normalizeQueueEntries(data.queue);
@@ -1002,16 +1014,25 @@ export function useSocket(
           replyTo?: string;
           replyPreview?: ReplyPreview;
           mentionsUser?: boolean;
+          /** Owner-private attempt key; delivery is the last proof the send was taken. */
+          clientMessageId?: string;
           // Connector framing must survive the delivery hop: this envelope may be a connector
           // notice that was admitted as queued work, and delivery is its first live appearance.
           source?: import('../stores/chat-types').ConnectorSourceData;
         }>;
       }) => {
         if (needs('sidebar')) void invalidateSidebarProjection();
-        if (needs('chat.messages', data.threadId))
+        if (needs('chat.messages', data.threadId)) {
+          // Delivery is the terminal proof of admission, covering a Queue event this
+          // page missed entirely: the same attempt's notice must not outlive its input.
+          settleAdmittedSendNotices(
+            data.threadId,
+            (data.messages ?? []).map((message) => message.clientMessageId),
+          );
           useChatStore
             .getState()
             .markMessagesDelivered(data.threadId, data.messageIds, data.deliveredAt, data.messages);
+        }
       },
     );
     const onStoredMessageSnapshot = (data: {

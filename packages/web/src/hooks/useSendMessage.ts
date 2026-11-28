@@ -7,6 +7,7 @@ import { useChatCommands } from '@/hooks/useChatCommands';
 import { type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { reconcileThreadWithServer } from './queue-reconciliation';
+import { sendErrorNoticeId, settleSendErrorNotice } from './send-error-notice';
 
 export type UploadStatus = 'idle' | 'uploading' | 'failed';
 
@@ -35,21 +36,9 @@ export type RoutingConfirmation = (
   request: ReturnType<typeof routingConfirmationRequiredSchema.parse>,
 ) => Promise<boolean>;
 
-/**
- * The send notice carries the attempt it belongs to. A retry under the same
- * attempt key (`idempotencyKey`) must be able to take back the notice its own
- * earlier try left, even after that try's request had already reached the
- * server; a different attempt's notice is a separate failure and stays.
- */
-function sendErrorNoticeId(attemptId: string): string {
-  return `err-send-${attemptId}`;
-}
-
 export function useSendMessage(activeThreadId?: string, confirm?: RoutingConfirmation) {
   const addMessageToThread = useChatStore((state) => state.addMessageToThread);
   const patchThreadMessage = useChatStore((state) => state.patchThreadMessage);
-  const removeThreadMessage = useChatStore((state) => state.removeThreadMessage);
-  const clearThreadMessageDeletion = useChatStore((state) => state.clearThreadMessageDeletion);
   const { processCommand } = useChatCommands();
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle');
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -88,24 +77,11 @@ export function useSendMessage(activeThreadId?: string, confirm?: RoutingConfirm
     [addMessageToThread, patchThreadMessage],
   );
 
-  /**
-   * The same attempt was taken after all (a late commit, a retry under the same
-   * key), so its failure notice no longer describes this conversation. Other
-   * attempts' notices stay: their failures are still real.
-   */
-  const settleSendError = useCallback(
-    (threadId: string, attemptId: string) => {
-      const id = sendErrorNoticeId(attemptId);
-      const store = useChatStore.getState();
-      if (!store.getThreadState(threadId).messages.some((row) => row.id === id)) return;
-      removeThreadMessage(threadId, id);
-      // Removing records a tombstone so a late server row cannot resurrect the
-      // id. A client-only notice is never published by the server, and the same
-      // attempt may legitimately fail again later, so the tombstone goes too.
-      clearThreadMessageDeletion(threadId, id);
-    },
-    [clearThreadMessageDeletion, removeThreadMessage],
-  );
+  const settleSendError = useCallback((threadId: string, attemptId: string) => {
+    // Same rule the live projections use (Queue admission, delivery), so a late
+    // commit settles through whichever proof arrives first.
+    settleSendErrorNotice(threadId, attemptId);
+  }, []);
 
   const handleSend = useCallback(
     async (
